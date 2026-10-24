@@ -2,6 +2,7 @@
 // administrators («Propongo no postular», «Necesito que decidan») and the order of their list. Pure: the page and the server
 // (which re-checks every step) share it.
 import { z } from 'zod';
+import { dayInZone } from '@/lib/admin/chile-time';
 import { isOpportunityAdmin, type WorkRecord } from './workspace';
 
 export type WorkState = WorkRecord['state'];
@@ -57,6 +58,12 @@ export const replyBody = (text: string) => `Respuesta a la decisión: ${text.rep
 
 export type ActivityLike = { id: string; kind: string; body: string; actor_id: string | null; created_at: string; data?: Record<string, unknown> | null };
 export type OpenDecision = { id: string; type: DecisionType; body: string; dueAt: string | null; actorId: string | null; at: string };
+
+/** How long something has waited, by the calendar in Chile: «desde hoy», «desde ayer», «hace 3 días». */
+export function waitingSince(at: string, now = new Date()) {
+  const days = Math.round((Date.parse(`${dayInZone(now)}T12:00:00Z`) - Date.parse(`${dayInZone(new Date(at))}T12:00:00Z`)) / 86_400_000);
+  return days <= 0 ? 'desde hoy' : days === 1 ? 'desde ayer' : `hace ${days} días`;
+}
 
 /**
  * The decision still waiting for an answer: the newest line of the activity that puts one (a request or a proposal not to bid) when

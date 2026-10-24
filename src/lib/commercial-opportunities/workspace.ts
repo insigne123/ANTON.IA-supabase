@@ -48,7 +48,7 @@ export type WorkRecord = { opportunity_id: string; revision: number; state: type
   responsible_id: string | null; objective: string; due_at: string | null; assigned_by: string | null; updated_at: string };
 export type WorkspaceMember = { user_id: string; name: string; role: string };
 export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkItem[]; work: WorkRecord[];
-  notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null }>;
+  notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null; /** assignment, report or task (decisions and blocks). */ kind?: string | null }>;
   members: WorkspaceMember[]; groups: Array<{ id: string; name: string }>; context: Record<string, unknown> | null;
   budget: { spent: number; reserved: number; cap: number }; sourceStatus: Record<string, boolean>;
   /** How many there are in each filter of the list, with the words, sources and lines of service of this reading (list-stages.ts). */
@@ -56,7 +56,9 @@ export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkIt
   /** The sources searching right now (DISCOVERY_JOB_KINDS queued or running); admins only. */
   searching?: string[];
   /** The company's documents lapsed or about to (company-documents.ts); admins only. */
-  documentAlerts?: Array<{ id: string; label: string; expiresAt: string; status: 'vencido' | 'por_vencer'; text: string }> };
+  documentAlerts?: Array<{ id: string; label: string; expiresAt: string; status: 'vencido' | 'por_vencer'; text: string }>;
+  /** Decisions asked and opportunities blocked, waiting for an administrator, the oldest first (waiting.ts); admins only. */
+  waiting?: { total: number; lines: Array<{ id: string; title: string; detail: string; urgent: boolean; href: string; kind: 'ask' | 'no_go' | 'blocked' }> } };
 
 /** Pure arithmetic, shared by charts and exports. Missing tax is not silently assumed. */
 export function opportunityFinancialScenario(input: { monthlyCost: number; months: number; overheadPercent: number; marginPercent: number; taxPercent: number | null; paymentDelayMonths: number; guaranteePercent: number }) {

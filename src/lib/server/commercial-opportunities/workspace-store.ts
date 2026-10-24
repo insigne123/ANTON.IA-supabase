@@ -8,7 +8,9 @@ import { marksFromRows, type ReportMarks } from '@/lib/commercial-opportunities/
 import { companyDocumentAlerts } from '@/lib/commercial-opportunities/company-documents';
 import { categoryTerms } from '@/lib/commercial-opportunities/workspace-radar';
 import { adminViewCounts, listViewQuery, memberViewCounts } from '@/lib/commercial-opportunities/list-stages';
+import { waitingLine } from '@/lib/commercial-opportunities/waiting';
 import { assertOpportunityRead, assertOpportunityAdmin, readableOpportunityIds } from './workspace-access';
+import { readWaitingOnAdmins } from './workspace-waiting';
 
 /** One page of the list: 100 opportunities, or the size a stage of the pipeline asks for. */
 export const LIST_PAGE = 100;
@@ -56,11 +58,11 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
   const period = new Date().toISOString().slice(0, 7) + '-01';
   // The reads do not depend on each other, so they go together (one after another they took ~2.7 s of the page's load);
   // only the work records wait for the list.
-  const [ids, items, counts, notifications, groups, context, budget, members, documentAlerts, searching] = await Promise.all([
+  const [ids, items, counts, notifications, groups, context, budget, members, documentAlerts, searching, waiting] = await Promise.all([
     readableOpportunityIds(client, scope),
     readWorkspacePage(client, scope, options),
     readWorkspaceCounts(client, scope, options),
-    client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at')
+    client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at,kind')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).order('created_at', { ascending: false }).limit(100).then(result => opportunityDb(result) || []),
     admin ? client.from('organization_reporting_groups').select('id,name').eq('organization_id', scope.organizationId).eq('is_active', true).then(result => opportunityDb(result) || []) : [],
     admin ? client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle().then(result => opportunityDb(result)) : null,
@@ -73,11 +75,16 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
     // «Buscando en licitaciones…» while «Actualizar oportunidades» or the daily search runs; a failed read just leaves it out.
     admin ? client.from('opportunity_jobs').select('kind').eq('organization_id', scope.organizationId).in('kind', [...DISCOVERY_JOB_KINDS])
       .in('state', ['queued', 'running', 'waiting']).limit(20).then(result => result.error ? [] : [...new Set((result.data || []).map((row: any) => String(row.kind)))]) : [],
+    // «Esperan tu respuesta» in «Novedades»: the decisions and blocks no administrator has answered, until one does. A failed read leaves it out.
+    admin ? readWaitingOnAdmins(client, scope.organizationId).then(found => {
+      const now = new Date();
+      return { total: found.length, lines: found.slice(0, 5).map(item => ({ ...waitingLine(item, now, true), kind: item.kind })) };
+    }).catch(() => null) : null,
   ]);
   const itemIds = items.map(item => item.id);
   const work = itemIds.length ? opportunityDb(await client.from('opportunity_work').select('*').eq('organization_id', scope.organizationId).in('opportunity_id', itemIds)) as WorkRecord[] : [];
   return { mode: admin ? 'management' : 'assigned', items, work: work || [], notifications: notifications.filter(n => ids === null || ids.includes(n.opportunity_id)),
-    members, groups, context, documentAlerts, ...(admin ? { searching } : {}), ...(counts ? { counts: admin ? adminViewCounts(counts) : memberViewCounts(counts) } : {}),
+    members, groups, context, documentAlerts, ...(admin ? { searching } : {}), ...(waiting?.total ? { waiting } : {}), ...(counts ? { counts: admin ? adminViewCounts(counts) : memberViewCounts(counts) } : {}),
     budget: { spent: Number(budget?.spent_micro_usd || 0) / 1e6, reserved: Number(budget?.reserved_micro_usd || 0) / 1e6, cap: OPPORTUNITY_MONTHLY_MICRO_USD / 1e6 },
     sourceStatus: admin ? { claude: Boolean(process.env.ANTHROPIC_API_KEY), linkedin: Boolean(process.env.APIFY_TOKEN), posts: Boolean(process.env.APIFY_TOKEN && process.env.OPPORTUNITIES_POST_USD_PER_ITEM),
       jsearch: Boolean(process.env.JSEARCH_API_KEY), automation: process.env.OPPORTUNITIES_AUTOMATION_ENABLED === 'true' } : {} };

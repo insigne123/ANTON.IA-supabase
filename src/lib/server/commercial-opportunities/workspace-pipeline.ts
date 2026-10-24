@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { automaticMove, automaticUndo, WORK_STATE_LABELS, type WorkEvent } from '@/lib/commercial-opportunities/pipeline';
+import { automaticMove, automaticUndo, WORK_STATE_LABELS, type PipelineWeekItem, type WorkEvent } from '@/lib/commercial-opportunities/pipeline';
 import { parsePrioritySort, type PrioritySort } from '@/lib/commercial-opportunities/priority';
 import { buildProgress } from '@/lib/commercial-opportunities/progress';
 import { reportRoute } from '@/lib/commercial-opportunities/report-marks';
@@ -137,12 +137,14 @@ export async function readOpportunityPipeline(client: SupabaseClient, scope: Wor
     client.from('opportunity_jobs').select('opportunity_id,state,updated_at').eq('organization_id', org).eq('kind', 'research').order('updated_at', { ascending: false }).limit(PROGRESS_ROWS),
     client.from('opportunity_reports').select('opportunity_id,created_at').eq('organization_id', org).order('created_at', { ascending: false }).limit(PROGRESS_ROWS),
   ]).catch(() => null);
-  const [inPlay, recommended, found, excluded, lost, archived, counts] = await Promise.all([
+  const [inPlay, recommended, found, excluded, lost, archived, counts, soonest] = await Promise.all([
     page(IN_PLAY, [], PIPELINE_MAX, 'priority'), page(['open'], ['recommended'], limits.recommended), page(['open'], ['review', 'pending'], limits.found),
     page(['open'], ['excluded'], limits.excluded), page(['lost'], [], limits.lost, 'recent'), page(['archived'], [], limits.archived, 'recent'),
     client.rpc('opportunity_workspace_counts', filters),
+    // «Cierran esta semana»: the recommended ones closing first, whatever the page of their stage shows.
+    page(['open'], ['recommended'], WEEK_ROWS, 'deadline'),
   ]);
-  type Row = { id: string; data?: { evaluation?: string } | null };
+  type Row = { id: string; title?: string; deadline_at?: string | null; data?: { evaluation?: string } | null };
   const rows = (result: unknown) => ((opportunityDb(result as any) || []) as Row[]);
   const worked = [...rows(inPlay), ...rows(lost), ...rows(archived)];
   const work = await readWorkRecords(client, scope, worked.map(row => row.id));
@@ -160,7 +162,30 @@ export async function readOpportunityPipeline(client: SupabaseClient, scope: Wor
     items, work,
     totals: { found: total('open', ['review', 'pending']), recommended: total('open', ['recommended']), excluded: total('open', ['excluded']), lost: total('lost'), archived: total('archived') },
     limits, sort, progress, summaries: { waiting },
+    week: closingThisWeek(rows(inPlay), rows(soonest), work),
   };
+}
+
+/** How many of the recommended ones closing first the pipeline reads for «Cierran esta semana», and how many it shows. */
+const WEEK_ROWS = 20;
+const WEEK_SHOWN = 12;
+
+/**
+ * «Cierran esta semana» over the road (OPP-11): what closes within seven days and someone can still act on (the recommended ones nobody
+ * works yet, and the assigned, in preparation or blocked), across the stages, the soonest first. The stops only said how many of each.
+ */
+export function closingThisWeek(inPlay: Array<{ id: string; title?: string | null; deadline_at?: string | null }>, recommended: Array<{ id: string; title?: string | null; deadline_at?: string | null }>,
+  work: Array<{ opportunity_id: string; state: string }>, now = Date.now()): PipelineWeekItem[] {
+  const stateOf = new Map(work.map(record => [record.opportunity_id, record.state]));
+  const soon = (row: { deadline_at?: string | null }) => { const at = Date.parse(String(row.deadline_at || '')); return Number.isFinite(at) && at > now && at <= now + 7 * 86_400_000; };
+  const found = [
+    ...inPlay.filter(row => ['assigned', 'working', 'blocked'].includes(String(stateOf.get(row.id))) && soon(row)).map(row => ({ row, stage: stateOf.get(row.id) as PipelineWeekItem['stage'] })),
+    ...recommended.filter(row => !stateOf.has(row.id) && soon(row)).map(row => ({ row, stage: 'recommended' as const })),
+  ];
+  return [...new Map(found.map(entry => [entry.row.id, entry])).values()]
+    .sort((a, b) => Date.parse(String(a.row.deadline_at)) - Date.parse(String(b.row.deadline_at)))
+    .slice(0, WEEK_SHOWN)
+    .map(({ row, stage }) => ({ id: row.id, title: String(row.title || 'Oportunidad').replace(/\s+/g, ' ').trim().slice(0, 140), deadlineAt: String(row.deadline_at), stage }));
 }
 
 /** The work records of the opportunities on the board, a hundred ids per request (a long list of ids does not fit in one address). */

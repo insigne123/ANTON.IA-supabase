@@ -6,8 +6,10 @@
  * that nobody works yet. Pure: the route reads (api/home/opportunities), this decides what to say.
  */
 import { dayInZone, shiftDay } from '@/lib/admin/chile-time';
-import type { WaitingItem } from '@/lib/server/commercial-opportunities/workspace-waiting';
+import { cleanTitle as clean, dayLabel, lineSection as section, opportunityHref as href, validDate as valid, waitingFor, waitingLine,
+  type OpportunityLine, type OpportunitySection, type WaitingItem } from '@/lib/commercial-opportunities/waiting';
 
+export type { OpportunityLine, OpportunitySection } from '@/lib/commercial-opportunities/waiting';
 export type TodayOpportunity = { id: string; title: string; kind: string; deadlineAt: string | null; nextActionAt: string | null; state: string };
 export type OpportunitiesTodayInput = {
   now: Date;
@@ -22,8 +24,6 @@ export type OpportunitiesTodayInput = {
   /** Recommended, closing within a week, and nobody works them. Only read for an administrator. */
   closingWithoutTeam: Array<{ id: string; title: string; deadlineAt: string }>;
 };
-export type OpportunityLine = { id: string; title: string; detail: string; urgent: boolean; href: string };
-export type OpportunitySection = { total: number; lines: OpportunityLine[] };
 export type OpportunitiesToday = {
   admin: boolean;
   waiting: OpportunitySection;
@@ -34,56 +34,8 @@ export type OpportunitiesToday = {
   empty: boolean;
 };
 
-/** Rows per section: the rest is one tap away, in Oportunidades. */
-export const TODAY_LINES = 3;
-const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 /** The recommended ones by closing date, the soonest first (lib/commercial-opportunities/workspace-url.ts). */
 export const CLOSING_THIS_WEEK_HREF = '/opportunities?vista=lista&orden=deadline';
-
-const valid = (at: string | null | undefined): at is string => Boolean(at) && Number.isFinite(Date.parse(at!));
-const href = (id: string) => `/opportunities?op=${encodeURIComponent(id)}`;
-const clean = (title: string) => title.replace(/\s+/g, ' ').trim().slice(0, 140) || 'Oportunidad';
-
-/** «hoy», «mañana», «el viernes» within the week, then «el 12 de noviembre», in Chile. */
-export function dayLabel(at: string, now: Date) {
-  const day = dayInZone(new Date(at)), today = dayInZone(now);
-  if (day === today) return 'hoy';
-  if (day === shiftDay(today, 1)) return 'mañana';
-  const [year, month, date] = day.split('-').map(Number);
-  if (day > today && day <= shiftDay(today, 6)) return `el ${WEEKDAYS[new Date(Date.UTC(year, month - 1, date, 12)).getUTCDay()]}`;
-  return `el ${date} de ${MONTHS[month - 1]}`;
-}
-
-/** Whole days between two instants, by the calendar in Chile. */
-function daysSince(at: string, now: Date) {
-  const from = Date.parse(`${dayInZone(new Date(at))}T12:00:00Z`), to = Date.parse(`${dayInZone(now)}T12:00:00Z`);
-  return Math.round((to - from) / 86_400_000);
-}
-
-/** «hace 3 días», «desde ayer», «desde hoy». */
-function waitedFor(at: string, now: Date) {
-  const days = daysSince(at, now);
-  return days <= 0 ? 'desde hoy' : days === 1 ? 'desde ayer' : `hace ${days} días`;
-}
-
-/** The date asked for, when it is close or already gone: «la piden para mañana», «la fecha pedida ya pasó». */
-function askedFor(dueAt: string | null, now: Date) {
-  if (!valid(dueAt)) return null;
-  const due = dayInZone(new Date(dueAt)), today = dayInZone(now);
-  if (due < today) return 'la fecha pedida ya pasó';
-  return due <= shiftDay(today, 1) ? `la piden para ${dayLabel(dueAt, now)}` : null;
-}
-
-/** An administrator reads who asks what; whoever asked reads how long it has waited («Esperando respuesta hace 2 días»). */
-function waitingLine(item: WaitingItem, now: Date, admin: boolean): OpportunityLine {
-  const due = askedFor(item.dueAt, now);
-  const days = daysSince(item.since, now);
-  const what = item.kind === 'blocked' ? 'Bloqueada' : admin ? `${item.who} ${item.kind === 'no_go' ? 'propone no postular' : 'pide una decisión'}`
-    : item.kind === 'no_go' ? 'Propusiste no postular' : 'Pediste una decisión';
-  const tail = due || (admin ? (days >= 1 ? `espera ${waitedFor(item.since, now)}` : '') : `esperando respuesta ${waitedFor(item.since, now)}`);
-  return { id: item.id, title: clean(item.title), detail: tail ? `${what} · ${tail}` : what, urgent: Boolean(due) || item.kind === 'blocked' || days >= 2, href: href(item.id) };
-}
 
 /** What comes first on one of theirs: the closing date, the next action when it is due, or that it is blocked. */
 function mineLine(item: TodayOpportunity, now: Date): OpportunityLine {
@@ -112,15 +64,12 @@ function dueOf(item: TodayOpportunity, now: Date): [number, number] {
   return [closed ? 1 : 0, dates.length ? Math.min(...dates) : Number.POSITIVE_INFINITY];
 }
 
-const section = (lines: OpportunityLine[]): OpportunitySection => ({ total: lines.length, lines: lines.slice(0, TODAY_LINES) });
-
 export function opportunitiesToday(input: OpportunitiesTodayInput): OpportunitiesToday {
   const { now, admin } = input;
-  // For an administrator, everything that waits for them; for anyone else, the decisions they asked (a block is answered by working it).
-  const waitingFor = admin ? input.waiting : input.waiting.filter(item => item.kind !== 'blocked' && item.actorId === input.userId);
-  const waiting = section(waitingFor.map(item => waitingLine(item, now, admin)));
+  const asked = waitingFor(input.waiting, admin, input.userId);
+  const waiting = section(asked.map(item => waitingLine(item, now, admin)));
   // An opportunity already in «waiting» is said there once.
-  const said = new Set(waiting.lines.map(line => line.id));
+  const said = new Set(asked.map(item => item.id));
   const mine = section([...input.mine].filter(item => !said.has(item.id)).map(item => ({ item, due: dueOf(item, now) }))
     .sort((a, b) => a.due[0] - b.due[0] || a.due[1] - b.due[1] || a.item.title.localeCompare(b.item.title, 'es'))
     .map(({ item }) => mineLine(item, now)));

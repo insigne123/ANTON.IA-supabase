@@ -3,12 +3,13 @@
 // The parts of the person's own tender radar the workspace list was missing: what to do with each opportunity, where to
 // start, the excluded ones by why, and what almost every set of bases asks for.
 import { useState } from 'react';
-import { Bell, ChevronDown, ClipboardCheck, Flag } from 'lucide-react';
+import { Bell, Check, ChevronDown, ClipboardCheck, Flag } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { WorkItem } from '@/lib/commercial-opportunities/workspace';
-import { TENDER_PREREQUISITES, closesLabel, exclusionGroups, latestNews, startHere, workAdvice, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
+import type { WorkItem, WorkspaceOverview } from '@/lib/commercial-opportunities/workspace';
+import { NEWS_KINDS, TENDER_PREREQUISITES, closesLabel, exclusionGroups, latestNews, startHere, workAdvice, type NewsKind, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
+import { filterChip } from './OpportunityFilters';
 
 const TONES: Record<WorkAdvice['tone'], string> = {
   go: 'bg-cw-success-soft text-cw-success',
@@ -136,32 +137,66 @@ export function TenderPrerequisites() {
   );
 }
 
-/** «Novedades» in a few quiet lines: one per opportunity, three at first, and a way to clear them. */
-export function NewsList({ notifications, onOpen, onClear, when }: {
-  notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null }>;
-  onOpen: (opportunityId: string) => void; onClear: (ids: string[]) => void; when: (at: string) => string;
+/**
+ * «Novedades» in a few quiet lines. For an administrator, first what waits for their answer: it stays until someone answers, and
+ * «Responder» opens the opportunity on the answer box. Then the unread notices, one per opportunity and three at first, each one
+ * clearable, and by kind when there is more than one kind.
+ */
+export function NewsList({ notifications, waiting, onOpen, onDecision, onClear, when }: {
+  notifications: WorkspaceOverview['notifications'];
+  waiting?: WorkspaceOverview['waiting'] | null;
+  onOpen: (opportunityId: string) => void;
+  /** Opens the opportunity on the box to answer its decision. */
+  onDecision?: (opportunityId: string) => void;
+  onClear: (ids: string[]) => void; when: (at: string) => string;
 }) {
   const [all, setAll] = useState(false);
-  const { items, ids } = latestNews(notifications);
-  if (!items.length) return null;
+  const [kind, setKind] = useState<NewsKind | 'all'>('all');
+  const { kinds } = latestNews(notifications);
+  const shownKind = kind !== 'all' && kinds.includes(kind) ? kind : 'all';
+  const { items, ids, byOpportunity } = latestNews(notifications, shownKind);
+  const waits = waiting?.lines ?? [];
+  if (!items.length && !waits.length) return null;
   const shown = all ? items : items.slice(0, 3);
   return (
     <section aria-labelledby="op-news" className="rounded-2xl border px-4 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <h2 id="op-news" className="flex items-center gap-2 text-sm font-semibold"><Bell className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Novedades<span className="font-normal tabular-nums text-muted-foreground">{items.length}</span></h2>
-        <Button type="button" variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => onClear(ids)}>Marcar como leídas</Button>
+      <div className="flex min-h-8 items-center justify-between gap-2">
+        <h2 id="op-news" className="flex items-center gap-2 text-sm font-semibold"><Bell className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Novedades{items.length ? <span className="font-normal tabular-nums text-muted-foreground">{items.length}</span> : null}</h2>
+        {ids.length ? <Button type="button" variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => onClear(ids)}>Marcar como leídas</Button> : null}
       </div>
-      <ul className="mt-1 divide-y">
+      {waits.length ? <div className="mt-1">
+        <h3 className="pt-1 text-xs font-medium text-muted-foreground">Esperan tu respuesta · <span className="tabular-nums">{waiting!.total}</span></h3>
+        <ul className="divide-y">
+          {waits.map(line => (
+            <li key={line.id}>
+              <button type="button" onClick={() => (line.kind === 'blocked' || !onDecision ? onOpen : onDecision)(line.id)}
+                className="flex w-full items-center justify-between gap-3 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <span className="min-w-0"><span className="block line-clamp-2 sm:line-clamp-1">{line.title}</span>
+                  <span className={cn('block text-xs', line.urgent ? 'text-destructive' : 'text-muted-foreground')}>{line.detail}</span></span>
+                <span className="shrink-0 text-xs font-medium text-primary">{line.kind === 'blocked' ? 'Ver' : 'Responder'}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {waiting!.total > waits.length ? <p className="pb-1 text-xs text-muted-foreground">Y {waiting!.total - waits.length} más esperan tu respuesta.</p> : null}
+      </div> : null}
+      {kinds.length > 1 ? <div role="group" aria-label="Tipo de novedad" className="mt-2 flex flex-wrap gap-1">
+        {([['all', 'Todas'], ...NEWS_KINDS.filter(([id]) => kinds.includes(id))] as Array<readonly [NewsKind | 'all', string]>).map(([id, label]) =>
+          <button key={id} type="button" aria-pressed={shownKind === id} onClick={() => { setKind(id); setAll(false); }} className={filterChip(shownKind === id, 'sm')}>{label}</button>)}
+      </div> : null}
+      {shown.length ? <ul className={cn('divide-y', waits.length && kinds.length < 2 ? 'mt-1 border-t' : 'mt-1')}>
         {shown.map(n => (
-          <li key={n.id}>
+          <li key={n.id} className="flex items-center gap-1">
             {/* On a phone the date goes under the title, so the title reads whole («Informe listo: ADQU…» did not). */}
-            <button type="button" onClick={() => onOpen(n.opportunity_id)} className="flex w-full flex-col gap-0.5 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <button type="button" onClick={() => onOpen(n.opportunity_id)} className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <span className="min-w-0 line-clamp-2 sm:line-clamp-1">{n.title}</span>
               <span className="shrink-0 text-xs text-muted-foreground">{when(n.created_at)}</span>
             </button>
+            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground" title="Marcar como leída" aria-label={`Marcar como leída: ${n.title}`}
+              onClick={() => onClear(byOpportunity.get(n.opportunity_id) ?? [n.id])}><Check className="h-4 w-4" aria-hidden="true" /></Button>
           </li>
         ))}
-      </ul>
+      </ul> : null}
       {items.length > 3 ? <button type="button" onClick={() => setAll(v => !v)} className="mt-1 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{all ? 'Ver menos' : `Ver ${items.length - 3} más`}</button> : null}
     </section>
   );

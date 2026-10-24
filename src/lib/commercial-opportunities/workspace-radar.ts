@@ -205,13 +205,23 @@ export function bySource<T extends Pick<WorkItem, 'kind' | 'deadline_at' | 'scor
   return groups.filter(group => group.items.length > 0);
 }
 
+/** The kinds of «Novedades» a person can filter by: decisions and blocks (task), assignments and reports ready. */
+export type NewsKind = 'task' | 'assignment' | 'report';
+export const NEWS_KINDS: ReadonlyArray<readonly [NewsKind, string]> = [['task', 'Decisiones'], ['assignment', 'Asignaciones'], ['report', 'Informes']];
+export const newsKindOf = (notice: { kind?: string | null }): NewsKind => (notice.kind === 'assignment' || notice.kind === 'report' ? notice.kind : 'task');
+
 /**
- * «Novedades»: the unread notices, the newest first and one per opportunity (three reports of the same tender are one
- * piece of news). The rest stay counted so they can be marked as read together.
+ * «Novedades»: the unread notices of a kind (or all), the newest first and one per opportunity (three reports of the same tender are
+ * one piece of news). `ids` are all of them, to mark as read together; `byOpportunity` the ones behind each line, to mark one line;
+ * `kinds` the kinds there are, so the filter only shows when there is something to choose.
  */
-export function latestNews<T extends { id: string; opportunity_id: string; created_at: string; read_at: string | null }>(notifications: T[]) {
+export function latestNews<T extends { id: string; opportunity_id: string; created_at: string; read_at: string | null; kind?: string | null }>(notifications: T[], kind: NewsKind | 'all' = 'all') {
   const unread = notifications.filter(n => !n.read_at).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const chosen = unread.filter(n => kind === 'all' || newsKindOf(n) === kind);
   const seen = new Set<string>();
-  const items = unread.filter(n => { if (seen.has(n.opportunity_id)) return false; seen.add(n.opportunity_id); return true; });
-  return { items, ids: unread.map(n => n.id) };
+  const byOpportunity = new Map<string, string[]>();
+  for (const n of chosen) byOpportunity.set(n.opportunity_id, [...(byOpportunity.get(n.opportunity_id) || []), n.id]);
+  const items = chosen.filter(n => { if (seen.has(n.opportunity_id)) return false; seen.add(n.opportunity_id); return true; });
+  const kinds = NEWS_KINDS.map(([id]) => id).filter(id => unread.some(n => newsKindOf(n) === id));
+  return { items, ids: chosen.map(n => n.id), byOpportunity, kinds };
 }

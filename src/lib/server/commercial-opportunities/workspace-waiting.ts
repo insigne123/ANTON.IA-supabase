@@ -1,9 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { openDecision, type ActivityLike } from '@/lib/commercial-opportunities/member-work';
+import type { WaitingItem } from '@/lib/commercial-opportunities/waiting';
 
+export type { WaitingItem } from '@/lib/commercial-opportunities/waiting';
 /** How far back a decision without an answer is still read as waiting. */
 const DECISION_WINDOW_DAYS = 60;
-export type WaitingItem = { id: string; title: string; kind: 'ask' | 'no_go' | 'blocked'; who: string; since: string; dueAt: string | null; actorId: string | null };
 
 /**
  * What waits for the administrators of a workspace on Oportunidades: decisions asked (or a proposal not to apply) with no answer yet, and

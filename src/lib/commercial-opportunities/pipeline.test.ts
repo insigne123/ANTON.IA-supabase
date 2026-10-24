@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { automaticMove, automaticUndo, daysToClose, pipelineStage } from './pipeline';
+import { automaticMove, automaticUndo, daysToClose, pipelineStage, weekDay } from './pipeline';
 
 test('each opportunity sits in one stage: the work state once someone works it, the AI evaluation before', () => {
   const item = (evaluation?: string) => ({ kind: 'tender', data: { evaluation } }) as any;
@@ -42,4 +42,12 @@ test('taking back the tick of the step to submit returns the opportunity to prep
   assert.equal(automaticUndo('submitted', submit, null), null);
   assert.equal(automaticUndo('submitted', { routeKind: 'prepare', label: 'Reunir los certificados' }, { kind: 'auto_state', to: 'submitted' }), null, 'another step does not undo it');
   for (const state of ['working', 'won', 'lost', 'archived', 'assigned', null, undefined] as const) assert.equal(automaticUndo(state, submit, { kind: 'auto_state', to: 'submitted' }), null, String(state));
+});
+
+test('the day a chip of «Cierran esta semana» says, in Chile', () => {
+  const now = new Date('2026-10-27T15:00:00Z');
+  assert.equal(weekDay('2026-10-27T23:00:00Z', now), 'Hoy');
+  assert.equal(weekDay('2026-10-28T03:30:00Z', now), 'Mañana', 'half past midnight in Chile is already Wednesday');
+  assert.equal(weekDay('2026-10-30T18:00:00Z', now), 'Vie 30');
+  assert.equal(weekDay('2026-11-01T18:00:00Z', now), 'Dom 1');
 });

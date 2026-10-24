@@ -4,11 +4,11 @@ import Link from 'next/link';
 import { ArrowRight, Briefcase, Clock3, FileText, MessageCircleQuestion, RefreshCw, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import type { OpportunitiesToday, OpportunitySection } from '@/lib/home/opportunities-today';
+import type { OpportunitiesToday as Today, OpportunitySection } from '@/lib/home/opportunities-today';
 import { cn } from '@/lib/utils';
 import { usePersonalHome } from './usePersonalHome';
 
-type Response = { access: false } | ({ access: true } & OpportunitiesToday);
+type Response = { access: false } | ({ access: true } & Today);
 
 /** One kind of thing to do, its rows and, when there are more, the way to all of them. */
 function Section({ id, title, icon: Icon, section, href, more }: { id: string; title: string; icon: LucideIcon; section: OpportunitySection; href: string; more: string }) {
@@ -42,9 +42,14 @@ function Section({ id, title, icon: Icon, section, href, more }: { id: string; t
  */
 export function OpportunitiesTodayCard() {
   const { data, error, load } = usePersonalHome<Response>('/api/home/opportunities');
+  return <OpportunitiesToday data={data} error={error} onRetry={() => void load()} />;
+}
+
+/** The card itself, from what the route answered. */
+export function OpportunitiesToday({ data, error, onRetry }: { data: Response | null; error: boolean; onRetry: () => void }) {
   if (error) return <Card className="rounded-2xl"><CardContent className="flex items-center justify-between gap-3 p-4">
     <p role="alert" className="text-sm text-muted-foreground">No pudimos leer tus oportunidades.</p>
-    <Button variant="ghost" size="sm" onClick={() => void load()}><RefreshCw aria-hidden="true" />Reintentar</Button>
+    <Button variant="ghost" size="sm" onClick={onRetry}><RefreshCw aria-hidden="true" />Reintentar</Button>
   </CardContent></Card>;
   if (!data || !data.access || data.empty) return null;
   return <Card role="region" className="rounded-2xl" aria-labelledby="opportunities-today-title">

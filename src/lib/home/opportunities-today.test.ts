@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLOSING_THIS_WEEK_HREF, dayLabel, opportunitiesToday, type OpportunitiesTodayInput } from './opportunities-today';
+import { dayLabel } from '@/lib/commercial-opportunities/waiting';
+import { CLOSING_THIS_WEEK_HREF, opportunitiesToday, type OpportunitiesTodayInput } from './opportunities-today';
 
 // Tuesday 27 October 2026, noon in Chile.
 const NOW = new Date('2026-10-27T15:00:00.000Z');

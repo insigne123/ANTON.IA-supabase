@@ -24,7 +24,7 @@ import { PRIORITY_SORTS, parsePrioritySort, type PrioritySort } from '@/lib/comm
 import { isResearching, markOpened, openedKey, parseOpened, progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
 import { useAuth } from '@/context/AuthContext';
 import { OpportunityFilters, filterChip } from './OpportunityFilters';
-import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
+import { WORK_STATE_LABELS, type PipelineWeekItem } from '@/lib/commercial-opportunities/pipeline';
 import { opportunityRegion, opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import type { MarkChange } from './ReportMarks';
 import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
@@ -136,7 +136,7 @@ export function OpportunityWorkWorkspace() {
   // A question the assistant hands to one opportunity's chat: asked there once its expediente is open.
   const handoff = useRef<{ id: string; question: string | null } | null>(null);
   const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number; excluded?: number };
-    limits?: Partial<Record<PagedStage, number>>; summaries?: { waiting: number }; progress?: Record<string, CardProgress> } | null>(null);
+    limits?: Partial<Record<PagedStage, number>>; summaries?: { waiting: number }; progress?: Record<string, CardProgress>; week?: PipelineWeekItem[] } | null>(null);
   // How many of each stage nobody works yet the pipeline asks for: «Cargar más» adds a page; a new search, source or order starts over.
   const [sort, setSort] = useState<PrioritySort>('priority');
   const filterKey = `${source}|${search}|${sort}|${categoryKey}`;
@@ -364,7 +364,17 @@ export function OpportunityWorkWorkspace() {
       return saved;
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar la marca.'); return null; }
   };
-  const open = (id: string) => {
+  // «Responder» in «Novedades» opens the opportunity on the box to answer its decision (DecisionCallout), once it is on the page.
+  const focusDecision = useRef<string | null>(null);
+  useEffect(() => {
+    if (!detail || detail.item.id !== focusDecision.current) return;
+    focusDecision.current = null;
+    const box = document.getElementById('decision-reply');
+    box?.scrollIntoView({ block: 'center' });
+    box?.focus({ preventScroll: true });
+  }, [detail]);
+  const open = (id: string, focus?: 'decision') => {
+    focusDecision.current = focus === 'decision' ? id : null;
     setProblem(''); setSelected(id);
     const next = markOpened(openedRef.current, id); setOpened(next);
     try { window.localStorage.setItem(openedKey(user?.id), JSON.stringify(next)); } catch { /* private mode: it is remembered until the page closes */ }
@@ -630,7 +640,8 @@ export function OpportunityWorkWorkspace() {
           {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy || searching.length > 0} onClick={() => void discover()}>{searching.length ? 'Buscando…' : 'Actualizar oportunidades'}</Button> : null}</div></div>}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
         <Button onClick={openContext}>Confirmar oferta</Button></div>}
-      {view !== 'assistant' && <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
+      {view !== 'assistant' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={id => open(id)} onDecision={id => open(id, 'decision')}
+        onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
       {admin && view !== 'assistant' && overview.documentAlerts?.length ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-4 py-3 text-sm">
         <p className="min-w-0"><span className="font-medium">{overview.documentAlerts[0].text}</span>{overview.documentAlerts.length > 1 ? <span className="text-muted-foreground"> · y {overview.documentAlerts.length - 1} más por renovar</span> : null}</p>
         <Button size="sm" variant="outline" onClick={() => setProfileOpen(true)}>Ver documentos</Button></div> : null}
@@ -645,7 +656,8 @@ export function OpportunityWorkWorkspace() {
         {pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} limits={pipeline.limits} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting) && !summariesStalled}
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} onAssign={item => void openQuickAssign(item)}
         onDiscard={item => { setProblem(''); setDiscarding({ ids: [item.id], title: item.title }); }} onReopen={item => void reopen([item.id])}
-        filtered={Boolean(search) || source !== 'all' || categories.length > 0} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} onMore={loadMore} onClearFilters={clearFilters} />
+        filtered={Boolean(search) || source !== 'all' || categories.length > 0} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} week={pipeline.week}
+        onMore={loadMore} onClearFilters={clearFilters} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
       <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} showSources={admin}>
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">

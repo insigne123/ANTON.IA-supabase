@@ -93,9 +93,9 @@ test('the pipeline asks for each stage with the sources, words and lines of serv
   const { readOpportunityPipeline } = await load();
   const { client, pages, calls } = recorder();
   const result = await readOpportunityPipeline(client, scope, { kinds: ['hiring', 'linkedin_post'], query: ' aseo, (hospital)* ', categories: ['seguridad'], limits: { recommended: 120, found: 60 } });
-  assert.deepEqual(pages().map(stageOf), ['assigned+working+blocked+submitted+won', 'open/recommended', 'open/review+pending'],
-    'the stages in play whole, then the two pages of what nobody works yet; what the AI left out, the lost and the archived wait to be opened');
-  assert.deepEqual(pages().map(args => args.p_limit), [600, 120, 60]);
+  assert.deepEqual(pages().map(stageOf), ['assigned+working+blocked+submitted+won', 'open/recommended', 'open/review+pending', 'open/recommended'],
+    'the stages in play whole, then the two pages of what nobody works yet and the recommended closing first; what the AI left out, the lost and the archived wait to be opened');
+  assert.deepEqual(pages().map(args => args.p_limit), [600, 120, 60, 20]);
   for (const args of [...pages(), calls.find(([name]) => name === 'opportunity_workspace_counts')![1]]) {
     assert.deepEqual([args.p_org, args.p_user, args.p_kinds, args.p_query, args.p_biddable], ['org', 'u1', ['hiring', 'linkedin_post'], 'aseo, (hospital)*', true], 'every read keeps the filters');
     assert.ok(args.p_terms.includes('guardia'), 'and the words of the line of service');
@@ -126,12 +126,13 @@ test('each page is the best scored first by default, or the soonest to close, or
     const result = await readOpportunityPipeline(client, scope, { sort: sort as any });
     return { result, sorts: pages().map(args => args.p_sort) };
   };
-  assert.deepEqual((await sorts()).sorts, ['priority', 'priority', 'priority']);
+  // The last read is «Cierran esta semana», always the soonest to close.
+  assert.deepEqual((await sorts()).sorts, ['priority', 'priority', 'priority', 'deadline']);
   const soonest = await sorts('deadline');
-  assert.deepEqual(soonest.sorts, ['priority', 'deadline', 'deadline']);
+  assert.deepEqual(soonest.sorts, ['priority', 'deadline', 'deadline', 'deadline']);
   assert.equal(soonest.result.sort, 'deadline');
-  assert.deepEqual((await sorts('amount')).sorts, ['priority', 'amount', 'amount']);
-  assert.deepEqual((await sorts('cheapest')).sorts, ['priority', 'priority', 'priority'], 'an unknown order is the default one');
+  assert.deepEqual((await sorts('amount')).sorts, ['priority', 'amount', 'amount', 'deadline']);
+  assert.deepEqual((await sorts('cheapest')).sorts, ['priority', 'priority', 'priority', 'deadline'], 'an unknown order is the default one');
 });
 
 test('the work records of the worked cards are read a hundred ids at a time, and only theirs', async () => {
@@ -159,4 +160,21 @@ test('each card of the pipeline comes with what its research and its report are 
   // The read failing leaves the cards as they were.
   const failing = recorder({ pages: () => rows, tables: { opportunity_jobs: { error: { message: 'down' } } } });
   assert.deepEqual((await readOpportunityPipeline(failing.client, scope)).progress, {});
+});
+
+test('«Cierran esta semana»: what closes within seven days and someone can still act on, across the stages, the soonest first', async () => {
+  const { closingThisWeek, readOpportunityPipeline } = await load();
+  const now = Date.parse('2026-10-27T15:00:00Z');
+  const at = (days: number) => new Date(now + days * 86_400_000).toISOString();
+  const inPlay = [{ id: 'w1', title: 'Aseo  Hospital', deadline_at: at(2) }, { id: 'w2', title: 'Ya presentada', deadline_at: at(1) }, { id: 'w3', title: 'Bloqueada', deadline_at: at(0.5) },
+    { id: 'w4', title: 'Lejos', deadline_at: at(9) }, { id: 'w5', title: 'Cerró', deadline_at: at(-1) }];
+  const work = [{ opportunity_id: 'w1', state: 'working' }, { opportunity_id: 'w2', state: 'submitted' }, { opportunity_id: 'w3', state: 'blocked' }, { opportunity_id: 'w4', state: 'assigned' }, { opportunity_id: 'w5', state: 'assigned' }];
+  const recommended = [{ id: 'r1', title: 'Guardias Temuco', deadline_at: at(4) }, { id: 'r2', title: 'Sin fecha', deadline_at: null }, { id: 'w1', title: 'Aseo  Hospital', deadline_at: at(2) }];
+  assert.deepEqual(closingThisWeek(inPlay, recommended, work, now).map((item: any) => [item.id, item.stage, item.title]),
+    [['w3', 'blocked', 'Bloqueada'], ['w1', 'working', 'Aseo Hospital'], ['r1', 'recommended', 'Guardias Temuco']], 'presented, far, closed and dateless ones stay out; each one once');
+  const many = Array.from({ length: 20 }, (_, index) => ({ id: `r${index}`, title: `R${index}`, deadline_at: at(1 + index / 10) }));
+  assert.equal(closingThisWeek([], many, [], now).length, 12);
+  // On the pipeline: from the page of the recommended ones closing first.
+  const { client } = recorder({ pages: args => args.p_sort === 'deadline' && args.p_limit === 20 ? [{ id: 'soon', title: 'Pronto', deadline_at: new Date(Date.now() + 86_400_000).toISOString() }] : [] });
+  assert.deepEqual((await readOpportunityPipeline(client, scope)).week.map((item: any) => [item.id, item.stage]), [['soon', 'recommended']]);
 });
