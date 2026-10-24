@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope } from '@/lib/server/commercial-opportunities/workspace-access';
-import { askOpportunityAssistant, deleteAssistantThread, readOpportunityAssistant } from '@/lib/server/commercial-opportunities/workspace-assistant';
+import { askOpportunityAssistant, deleteAssistantThread, rateAssistantAnswer, readOpportunityAssistant } from '@/lib/server/commercial-opportunities/workspace-assistant';
 import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 
@@ -21,8 +21,10 @@ export async function POST(request: Request) {
     const body = z.discriminatedUnion('action', [
       z.object({ action: z.literal('ask'), question: z.string().trim().min(2).max(2000), requestId: z.string().uuid(), threadId: z.string().uuid().nullable().optional() }).strict(),
       z.object({ action: z.literal('delete'), threadId: z.string().uuid() }).strict(),
+      z.object({ action: z.literal('feedback'), messageId: z.string().uuid(), feedback: z.enum(['up', 'down']).nullable() }).strict(),
     ]).parse(await request.json());
     if (body.action === 'delete') { await deleteAssistantThread(auth.admin, scope, body.threadId); return opportunitiesJson({ deleted: true }); }
+    if (body.action === 'feedback') return opportunitiesJson(await rateAssistantAnswer(auth.admin, scope, body));
     const { threadId, key } = await askOpportunityAssistant(auth.admin, scope, body);
     // Answered now, as a conversation; if a worker took it first (or this fails), the page waits for that answer.
     const done = await runQueuedOpportunityJobNow(auth.admin, scope.organizationId, key, 'assistant').catch(() => null);

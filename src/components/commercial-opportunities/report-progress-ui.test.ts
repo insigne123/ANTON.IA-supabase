@@ -48,29 +48,32 @@ test('while it runs, the progress says what is happening instead of the error', 
 const progress = (extra: Record<string, unknown>) => ({ read: 0, total: null, document: null, since: null, readSince: null, minutes: null, ...extra });
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/<!-- -->/g, '').replace(/\s+/g, ' ');
 
-test('the office says who is doing what, from what the job recorded, and what is done reads as done', () => {
+test('one row of steps says what is being done, from what the job recorded, and what is done reads as done (OPP-46)', () => {
   const reading = render({ state: 'running', tender: true, documents: 6, buyer: 'Corporación Cultural de Puente Alto',
     progress: progress({ stage: 'read', read: 11, total: 40, document: 'Bases Administrativas.pdf' }) });
   assert.match(reading, /role="status" aria-live="polite"/);
-  assert.match(text(reading), /Analista · Lee «Bases Administrativas\.pdf» · parte 12 de 40/);
-  // Each desk: done with what it did, working, or waiting; the ghosts are decoration.
-  assert.match(text(reading), /Mensajero Listo: Reunió 6 documentos/);
-  assert.match(text(reading), /Becario Listo: Revisó fuentes públicas/);
-  assert.match(text(reading), /Analista Parte 12 de 40/);
-  assert.match(text(reading), /Jefe En espera/);
-  assert.equal((reading.match(/<svg[^>]*>/g) || []).length, 4);
-  assert.ok((reading.match(/aria-hidden="true"/g) || []).length >= 4, 'the ghosts are hidden from screen readers');
+  assert.equal(reading.match(/aria-live="polite">([^<]*)</)?.[1], 'Lee «Bases Administrativas.pdf» · parte 12 de 40');
+  // Each step: done with what it did, under way, or waiting; the marks are decoration and the current step is the one marked.
+  assert.match(text(reading), /Documentos Listo: Reunió 6 documentos/);
+  assert.match(text(reading), /Comprador Listo: Revisó fuentes públicas/);
+  assert.match(text(reading), /Lectura Parte 12 de 40/);
+  assert.match(text(reading), /Informe En espera/);
+  assert.equal((reading.match(/<li/g) || []).length, 4);
+  assert.equal((reading.match(/aria-current="step"/g) || []).length, 1);
+  assert.doesNotMatch(reading, /Mensajero|Becario|Analista|Jefe/, 'no characters, only the steps');
   // Only reading is measured: 11 of 40 parts.
   assert.match(reading, /width:27\.5%/);
   assert.doesNotMatch(reading, /width:35%/);
 
   const gathering = text(render({ state: 'running', tender: true, documents: 0, progress: progress({ stage: 'gather' }) }));
-  assert.match(gathering, /Mensajero · Trae los formularios y el foro desde Mercado Público/);
-  assert.match(gathering, /Becario En espera/);
-  assert.match(text(render({ state: 'running', progress: progress({ stage: 'buyer' }), buyer: '' })), /Becario · Busca quién es el comprador en fuentes públicas/);
-  assert.match(text(render({ state: 'queued', progress: progress({ stage: 'queued' }) })), /En cola: la oficina empieza en menos de un minuto/);
+  assert.match(gathering, /Trae los formularios y el foro desde Mercado Público/);
+  assert.match(gathering, /Comprador En espera/);
+  assert.match(text(render({ state: 'running', progress: progress({ stage: 'buyer' }), buyer: '' })), /Busca quién es el comprador en fuentes públicas/);
+  assert.match(text(render({ state: 'queued', progress: progress({ stage: 'queued' }) })), /En cola: empieza en menos de un minuto/);
   // A signal gets its ficha, not a report on whether to bid.
-  assert.match(text(render({ state: 'running', signal: true, progress: progress({ stage: 'write', total: 3, read: 3 }) })), /Jefe · Escribe la ficha comercial/);
+  const signal = text(render({ state: 'running', signal: true, progress: progress({ stage: 'write', total: 3, read: 3 }) }));
+  assert.match(signal, /Escribe la ficha comercial/);
+  assert.match(signal, /Empresa Listo: .* Ficha Escribe la ficha/);
 });
 
 test('writing says how long it has been at it, but not a time from an earlier attempt', () => {
@@ -78,11 +81,11 @@ test('writing says how long it has been at it, but not a time from an earlier at
   const html = render({ state: 'running', progress: progress({ stage: 'write', read: 40, total: 40, since: new Date(now - 83_000).toISOString() }) });
   const writing = text(html);
   // The time ticks every second: a screen reader hears the stage, not a count every second.
-  assert.equal(html.match(/aria-live="polite">([^<]*)</)?.[1], 'Jefe · Escribe el informe y decide si conviene postular');
-  assert.match(writing, /Jefe · Escribe el informe y decide si conviene postular · lleva 1 min 2[34] s/);
-  assert.match(writing, /Analista Listo: Leyó 40 partes/);
+  assert.equal(html.match(/aria-live="polite">([^<]*)</)?.[1], 'Escribe el informe y decide si conviene postular');
+  assert.match(writing, /Escribe el informe y decide si conviene postular · lleva 1 min 2[34] s/);
+  assert.match(writing, /Lectura Listo: Leyó 40 partes/);
   const stale = text(render({ state: 'running', progress: progress({ stage: 'write', read: 40, total: 40, since: new Date(now - 40 * 60_000).toISOString() }) }));
-  assert.match(stale, /Jefe · Escribe el informe y decide si conviene postular /);
+  assert.match(stale, /Escribe el informe y decide si conviene postular /);
   assert.doesNotMatch(stale, /lleva/);
 });
 

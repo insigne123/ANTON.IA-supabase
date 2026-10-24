@@ -209,6 +209,21 @@ test('a conversation shows why a question has no answer yet, and deleting it rem
   assert.equal(tables.opportunity_assistant_threads.length, 0);
 });
 
+test('👍 or 👎 stays with the answer, only from the person who asked, and can be taken back (OPP-33)', async () => {
+  const { askOpportunityAssistant, rateAssistantAnswer, readAssistantThread } = await load();
+  const { tables, client } = memory();
+  const { threadId } = await askOpportunityAssistant(client, member, { question: '¿Qué cierra?', requestId: 'r1' });
+  const id = tables.opportunity_assistant_messages[0].id;
+  await assert.rejects(rateAssistantAnswer(client, member, { messageId: id, feedback: 'up' }), (error: any) => error.status === 404, 'not before it has an answer');
+  tables.opportunity_assistant_messages[0].answer = { answer: 'Cierra la de aseo.', cards: [], handoff: null, followups: [] };
+  assert.deepEqual(await rateAssistantAnswer(client, member, { messageId: id, feedback: 'down' }), { feedback: 'down' });
+  await assert.rejects(rateAssistantAnswer(client, { ...member, userId: 'u2' }, { messageId: id, feedback: 'up' }), (error: any) => error.status === 404);
+  const { messages } = await readAssistantThread(client, member, threadId);
+  assert.deepEqual(messages[0].answer, { answer: 'Cierra la de aseo.', cards: [], handoff: null, followups: [], feedback: 'down' });
+  await rateAssistantAnswer(client, member, { messageId: id, feedback: null });
+  assert.equal(tables.opportunity_assistant_messages[0].answer.feedback, null);
+});
+
 // ─── The assistant as an agent (OPPORTUNITIES_RUNTIME=harness) ────────────────────────────────────────────────────────────
 
 const says = (content: any) => ({ ...reply(content, undefined, usageOf(2000, 400)), model: 'claude-haiku-5-5' });
