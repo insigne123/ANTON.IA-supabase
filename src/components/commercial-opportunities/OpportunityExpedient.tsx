@@ -9,7 +9,7 @@ import { friendlyJobError, statusLabel } from '@/lib/commercial-opportunities/re
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { ReportOffice } from './ReportOffice';
 
-export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html,.htm,.docm,.dotx,.xlsm,.xltx,.xlsb,.odt,.ods,.odp,.pptx,.rtf,.jpg,.jpeg,.png,.webp,.gif,.zip';
+export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html,.htm,.docm,.dotx,.xlsm,.xltx,.xlsb,.odt,.ods,.odp,.pptx,.rtf,.jpg,.jpeg,.png,.webp,.gif,.zip,.eml,.msg';
 export type ExpedientDocument = { id: string; name: string; extraction_status: string; source_kind: string; source_url: string | null; pages_read: number | null; pages_total: number | null; created_at: string };
 export type PublicLinks = { ficha: string; attachments: string | null; forum: string | null; forms: number; code: string | null } | null;
 type Upload = { name: string; state: 'uploading' | 'done' | 'error'; message?: string };
@@ -28,35 +28,46 @@ export function usePublicLinks(id: string | null, kind: string | undefined) {
   return links;
 }
 
-/** Drag the files here, or choose them. Each file shows whether it was added or why not. */
-export function DocumentDrop({ onUpload, disabled, compact }: { onUpload: (files: File[], report: (u: Upload[]) => void) => Promise<void>; disabled?: boolean; compact?: boolean }) {
+/**
+ * Drag the files here, or choose them. Each file shows whether it was added or why not. `incoming` are files dropped or pasted
+ * anywhere on the opportunity (OPP-17): they are sent here once, so their progress shows in the same place.
+ */
+export function DocumentDrop({ onUpload, disabled, compact, incoming, onTaken }: {
+  onUpload: (files: File[], report: (u: Upload[]) => void) => Promise<void>; disabled?: boolean; compact?: boolean; incoming?: File[] | null; onTaken?: () => void;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [uploads, setUploads] = useState<Upload[]>([]);
-  const send = async (list: FileList | null) => { const files = Array.from(list || []); if (!files.length || disabled) return; await onUpload(files, setUploads); if (input.current) input.current.value = ''; };
+  const send = async (files: File[]) => { if (!files.length || disabled) return; await onUpload(files, setUploads); if (input.current) input.current.value = ''; };
+  const taken = useRef<File[] | null>(null);
+  useEffect(() => {
+    if (!incoming?.length || disabled || taken.current === incoming) return;
+    taken.current = incoming; onTaken?.(); void send(incoming);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per batch of files handed over, when nothing else is running.
+  }, [incoming, disabled]);
   return <div>
     <div role="button" tabIndex={0} aria-label="Subir bases y anexos" aria-disabled={disabled}
       onClick={() => !disabled && input.current?.click()} onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !disabled) { e.preventDefault(); input.current?.click(); } }}
-      onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); void send(e.dataTransfer.files); }}
+      onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); void send(Array.from(e.dataTransfer.files || [])); }}
       className={cn('flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring',
         compact ? 'px-4 py-5' : 'px-6 py-8', over ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40', disabled && 'cursor-not-allowed opacity-60')}>
       <UploadCloud className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
       <p className="text-sm font-medium">Arrastra aquí las bases y anexos</p>
-      <p className="text-xs text-muted-foreground">o haz clic para elegirlos · PDF, Word, Excel, fotos o el ZIP de Mercado Público, hasta 20 MB cada documento</p>
+      <p className="text-xs text-muted-foreground">o haz clic para elegirlos · PDF, Word, Excel, fotos, el correo (.eml o .msg) o el ZIP de Mercado Público, hasta 20 MB cada documento</p>
     </div>
-    <input ref={input} id="op-document" type="file" multiple accept={ACCEPTED_FILES} className="sr-only" onChange={e => void send(e.target.files)} />
+    <input ref={input} id="op-document" type="file" multiple accept={ACCEPTED_FILES} className="sr-only" onChange={e => void send(Array.from(e.target.files || []))} />
     {uploads.length > 0 && <ul className="mt-3 space-y-1.5 text-sm" aria-live="polite">{uploads.map((u, i) => <li key={i} className="flex items-start gap-2">
       {u.state === 'uploading' ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
         : u.state === 'done' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cw-success" aria-hidden="true" /> : <span aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-center text-destructive">!</span>}
-      <span className="min-w-0"><span className="break-words">{u.name}</span>{u.state === 'error' && <span className="block text-xs text-destructive">{u.message}</span>}{u.state === 'uploading' && <span className="block text-xs text-muted-foreground">Subiendo y leyendo…</span>}</span>
+      <span className="min-w-0"><span className="break-words">{u.name}</span>{u.state === 'error' && <span className="block text-xs text-destructive">{u.message}</span>}{u.state === 'done' && u.message && <span className="block text-xs text-muted-foreground">{u.message}</span>}{u.state === 'uploading' && <span className="block text-xs text-muted-foreground">Subiendo y leyendo…</span>}</span>
     </li>)}</ul>}
   </div>;
 }
 
 /** «Prepara el informe completo»: the four steps to add a tender's bases, or the plain upload for a received invitation. */
-export function ExpedientGuide({ kind, url, links, documents, onUpload, onGenerate, generating, hasReport, busy, closed }: {
+export function ExpedientGuide({ kind, url, links, documents, onUpload, onGenerate, generating, hasReport, busy, closed, incoming, onTaken }: {
   kind: string; url: string | null; links: PublicLinks; documents: ExpedientDocument[]; onUpload: (files: File[], report: (u: Upload[]) => void) => Promise<void>;
-  onGenerate: () => void; generating: boolean; hasReport: boolean; busy: boolean; closed?: string | null;
+  onGenerate: () => void; generating: boolean; hasReport: boolean; busy: boolean; closed?: string | null; incoming?: File[] | null; onTaken?: () => void;
 }) {
   const uploaded = documents.filter(d => d.source_kind === 'upload');
   const publicTender = kind === 'tender' && Boolean(url);
@@ -80,11 +91,11 @@ export function ExpedientGuide({ kind, url, links, documents, onUpload, onGenera
           <p className="mt-2 text-xs text-muted-foreground">{links?.attachments ? 'Se abre en otra pestaña con la lista de archivos.' : 'En la ficha, pulsa «Ver anexos» (ícono de documentos, arriba a la derecha).'} Si aparece «No soy un robot», márcalo.</p>
         </Step>
         <Step n={2} title="Descarga las bases y anexos">
-          <p className="text-sm text-muted-foreground">Usa «Descargar todos» para bajarlos en un ZIP, o el ícono de descarga de cada archivo: bases administrativas, bases técnicas, anexos y aclaraciones. Quedan en tu carpeta Descargas.</p>
+          <p className="text-sm text-muted-foreground">Usa «Descargar todos» para bajarlos en un ZIP, o el ícono de descarga de cada archivo: bases administrativas, bases técnicas, anexos y aclaraciones. Quedan en tu carpeta Descargas: arrástralos a cualquier parte de esta página.</p>
         </Step>
       </>}
       <Step n={publicTender ? 3 : 1} title={publicTender ? 'Súbelos aquí' : 'Sube los documentos'} done={uploaded.length > 0}>
-        <DocumentDrop onUpload={onUpload} disabled={busy} compact />
+        <DocumentDrop onUpload={onUpload} disabled={busy} compact incoming={incoming} onTaken={onTaken} />
         {uploaded.length > 0 && <p className="mt-2 text-xs text-muted-foreground">{uploaded.length === 1 ? '1 documento subido' : `${uploaded.length} documentos subidos`}: {uploaded.map(d => d.name).join(', ')}</p>}
       </Step>
       <Step n={publicTender ? 4 : 2} title={hasReport ? 'Actualiza el informe' : 'Genera el informe'}>

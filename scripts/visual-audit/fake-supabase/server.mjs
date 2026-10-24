@@ -19,6 +19,8 @@ export function startFakeSupabase({ port = 54321, datasets, personas, serviceKey
   let store = createStore(dataset.tables);
   const faults = new Map();
   const requests = [];
+  // What a run uploads to Storage (the expediente's documents), by «bucket/path»: gone with the next reset.
+  const uploads = new Map();
   const log = entry => { onLog(entry); };
 
   const reset = name => {
@@ -27,6 +29,7 @@ export function startFakeSupabase({ port = 54321, datasets, personas, serviceKey
     store = createStore(dataset.tables);
     faults.clear();
     requests.length = 0;
+    uploads.clear();
   };
   const caller = req => {
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -84,10 +87,20 @@ export function startFakeSupabase({ port = 54321, datasets, personas, serviceKey
         return send(200, { users: Object.values(personas), aud: 'authenticated' });
       }
       if (url.pathname.startsWith('/auth/v1/')) return send(200, {});
-      // Storage: only the objects the fixtures keep (`storage`, by «bucket/path»), read only; anything else is not there.
+      // Storage: the objects the fixtures keep (`storage`, by «bucket/path») and what server code uploads during the run, in
+      // memory; anything else is not there.
       if (url.pathname.startsWith('/storage/v1/')) {
         const key = decodeURIComponent(url.pathname.replace(/^\/storage\/v1\/object\/(?:authenticated\/|public\/)?/, ''));
-        const object = req.method === 'GET' || req.method === 'HEAD' ? dataset.storage?.[key] : null;
+        if (who.service && (req.method === 'POST' || req.method === 'PUT') && /^\/storage\/v1\/object\/[^/]+\/./.test(url.pathname)) {
+          if (uploads.has(key) && req.method === 'POST' && req.headers['x-upsert'] !== 'true') return send(400, { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' });
+          uploads.set(key, { type: String(req.headers['content-type'] || 'application/octet-stream'), body: Buffer.concat(chunks) });
+          return send(200, { Key: key, Id: key });
+        }
+        if (who.service && req.method === 'DELETE') {
+          for (const prefix of Array.isArray(body?.prefixes) ? body.prefixes : []) uploads.delete(`${key}/${prefix}`);
+          return send(200, []);
+        }
+        const object = req.method === 'GET' || req.method === 'HEAD' ? dataset.storage?.[key] || uploads.get(key) : null;
         if (!object) return send(404, { statusCode: '404', error: 'not_found', message: 'Object not found' });
         res.writeHead(200, { 'content-type': object.type, 'access-control-allow-origin': req.headers.origin || '*', 'access-control-allow-credentials': 'true' });
         return res.end(req.method === 'HEAD' ? undefined : object.body);

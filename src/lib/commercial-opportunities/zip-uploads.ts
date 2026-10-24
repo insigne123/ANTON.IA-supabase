@@ -6,7 +6,9 @@ export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.
   // Read as text on the server (document-files.ts): the macro and template versions of Word and Excel, LibreOffice, PowerPoint and RTF.
   '.docm', '.dotx', '.xlsm', '.xltx', '.xlsb', '.odt', '.ods', '.odp', '.pptx', '.rtf',
   // Photos and screenshots: the AI reads them as images (document-scans.ts).
-  '.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  '.jpg', '.jpeg', '.png', '.gif', '.webp',
+  // A received e-mail: its message and its attachments (mail-files.ts).
+  '.eml', '.msg'];
 /** Images in formats the AI does not read. */
 const IMAGES = ['.tif', '.tiff', '.bmp', '.heic'];
 const ARCHIVES = ['.rar', '.7z', '.tar', '.gz', '.tgz'];

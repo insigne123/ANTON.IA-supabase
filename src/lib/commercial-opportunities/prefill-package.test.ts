@@ -13,6 +13,9 @@ test('the document that names the process is read first and the law it quotes la
     'Bases_Tecnicas_Servicio.pdf', 'Anexo_1_-_Contrato_Marco.pdf', 'Anexo_B1_Formulario_Oferta.xlsx', 'Notas.txt', 'Anexo_10_-_Decreto_261_2024.pdf']
     .map(name => [name, prefillRank(name)]));
   assert.deepEqual(Object.values(ranks), [0, 0, 1, 2, 4, 3, 5, 6]);
+  // The e-mail that brought the process (OPP-49): as uploaded, and as its message once it is opened (mail-files.ts).
+  assert.deepEqual(['RV_ Cotización servicio de aseo.eml', 'Licitación guardias.MSG', 'Correo - Cotización servicio de aseo.txt', 'Correo adjunto - Bases.txt', 'Correos de contacto.xlsx']
+    .map(prefillRank), [0, 0, 0, 0, 5]);
 });
 
 test('a package is read in order of importance, within the request limits, and what is left out still goes up with the opportunity', () => {
