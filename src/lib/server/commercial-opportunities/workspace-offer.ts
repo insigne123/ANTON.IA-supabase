@@ -74,7 +74,7 @@ export async function runOpportunityOffer(client: SupabaseClient, job: Opportuni
   const ficha = await loadCompanyForModel(client, job.organization_id, { legal: true });
   const item = opportunityDb(itemRow); const context = opportunityDb(contextRow); const saved = opportunityDb(reportRow); const profile = opportunityDb(profileRow);
   if (!item) throw new AuthError('No encontramos esa oportunidad.', 404);
-  if (!context) throw new AuthError('Un administrador debe confirmar primero la oferta del workspace.', 409);
+  if (!context) throw new AuthError('Un administrador debe confirmar primero la oferta de la empresa.', 409);
   if (!saved) throw new AuthError('El informe cambió. Prepara el borrador de nuevo.', 409);
   const report = saved.report as OpportunityReport;
   const prompt = offerDraftPrompt({

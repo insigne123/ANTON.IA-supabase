@@ -120,7 +120,7 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
               <option value="">Todas las regiones</option>{regions.map(name => <option key={name} value={name}>{name}</option>)}</select></> : null}
           <label className="flex h-9 items-center gap-2 rounded-lg px-2 text-sm"><input type="checkbox" checked={onlyHigh} onChange={event => setOnlyHigh(event.target.checked)} className="h-4 w-4 accent-primary" />Solo calce alto</label>
           <div role="group" aria-label="Período" className="inline-flex rounded-xl bg-muted p-1">{([['soon', 'Próximos 6 meses'], ['all', 'Todos']] as const).map(([key, label]) =>
-            <button key={key} type="button" aria-pressed={scope === key} onClick={() => setScope(key)} className={cn('rounded-lg px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', scope === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>
+            <button key={key} type="button" aria-pressed={scope === key} onClick={() => setScope(key)} className={cn('rounded-lg px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', scope === key ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>)}</div>
         </div>
       </div>
       {!matching.length ? <p className="rounded-2xl border p-5 text-sm text-muted-foreground">{region || onlyHigh ? 'Ningún contrato con esos filtros. Prueba con todas las regiones o sin «Solo calce alto».' : 'Ninguno vence en los próximos 6 meses. Mira «Todos» para ver los que vienen después.'}</p> : null}

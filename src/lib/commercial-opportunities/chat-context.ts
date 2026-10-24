@@ -1,5 +1,6 @@
 import type { OpportunityReport } from './expedient';
 import { humanDate } from './report-view';
+import { milestoneDate } from './report-marks';
 
 /**
  * What the chat may lean on besides the fragments it retrieved: the report's decision and what it already established, its
@@ -12,7 +13,7 @@ export function opportunityChatReportContext(report: Partial<OpportunityReport> 
     decision: report.recommendation, executive: String(report.executive || '').slice(0, 4000),
     nextSteps: report.nextSteps || [], questions: (report.questions || []).slice(0, 8),
     requisitos: (report.requirements || []).slice(0, 20).map(r => ({ requisito: String(r.title || '').slice(0, 300), estado: r.status })),
-    fechas: (report.milestones || []).slice(0, 12).map(m => ({ hito: String(m.label || '').slice(0, 160), fecha: m.date })),
+    fechas: (report.milestones || []).slice(0, 12).map(m => ({ hito: String(m.label || '').slice(0, 160), fecha: milestoneDate(m.date) })),
   };
 }
 

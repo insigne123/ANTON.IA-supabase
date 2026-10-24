@@ -15,7 +15,7 @@ export async function linkObservedOpportunityContacts(client: SupabaseClient, sc
       if (!observations.some(o => o.provider === row.source_provider && o.provider_id === row.source_provider_id)) continue;
       opportunityDb(await client.from('opportunity_contact_links').upsert({ organization_id: scope.organizationId, opportunity_id: id, contact_id: String(row.id), contact_table: table,
         source_provider: row.source_provider, source_provider_id: row.source_provider_id, linked_by: scope.userId }, { onConflict: 'opportunity_id,contact_id', ignoreDuplicates: true }));
-      await addOpportunityActivity(client, scope, id, 'lead_linked', 'Contacto encontrado en la búsqueda y guardado en el workspace', { contactId: row.id, table }, `${id}:lead:${row.source_provider}:${row.source_provider_id}`); linked++;
+      await addOpportunityActivity(client, scope, id, 'lead_linked', 'Contacto encontrado en la búsqueda y guardado en la organización', { contactId: row.id, table }, `${id}:lead:${row.source_provider}:${row.source_provider_id}`); linked++;
     }
   }
   return { linked };

@@ -24,8 +24,8 @@ export function starsFor(score: number | null | undefined): Stars {
 
 export const starLabel = (stars: Stars) => PRIORITY_STEPS.find(step => step.stars === stars)!.label;
 
-/** What «4 de 5 estrellas» says in words, for the screen readers and the tooltip. */
-export const starsText = (score: number | null | undefined) => { const stars = starsFor(score); return `${stars} de 5 estrellas: ${starLabel(stars).toLowerCase()}`; };
+/** What «Calce ★★★★☆» says in words, for the screen readers and the tooltip. */
+export const starsText = (score: number | null | undefined) => { const stars = starsFor(score); return `Calce ${stars} de 5: ${starLabel(stars).toLowerCase()}`; };
 
 /** The two ways to read thousands: by how well they fit, or by how soon they close. */
 export type PrioritySort = 'priority' | 'deadline';

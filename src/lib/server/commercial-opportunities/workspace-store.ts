@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
-import { isOpportunityAdmin, type WorkScope, type WorkspaceOverview, type WorkItem, type WorkRecord, type privateOpportunitySchema, type assignmentSchema } from '@/lib/commercial-opportunities/workspace';
+import { DISCOVERY_JOB_KINDS, OPPORTUNITY_MONTHLY_MICRO_USD, isOpportunityAdmin, type WorkScope, type WorkspaceOverview, type WorkItem, type WorkRecord, type privateOpportunitySchema, type assignmentSchema } from '@/lib/commercial-opportunities/workspace';
 import type { z } from 'zod';
 import { reportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { marksFromRows, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
@@ -46,7 +46,7 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
   const period = new Date().toISOString().slice(0, 7) + '-01';
   // The reads do not depend on each other, so they go together (one after another they took ~2.7 s of the page's load);
   // only the work records wait for the list.
-  const [ids, items, notifications, groups, context, budget, members, documentAlerts] = await Promise.all([
+  const [ids, items, notifications, groups, context, budget, members, documentAlerts, searching] = await Promise.all([
     readableOpportunityIds(client, scope),
     readWorkspaceList(client, scope, options),
     client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at')
@@ -59,12 +59,15 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
     // «Tu F30 vence en 5 días»: the company's documents lapsed or about to (none before their migration).
     admin ? client.from('opportunity_company_documents').select('id,label,expires_at').eq('organization_id', scope.organizationId).not('expires_at', 'is', null).limit(100)
       .then(result => result.error ? [] : companyDocumentAlerts((result.data || []).map((row: any) => ({ id: row.id, label: row.label, expiresAt: row.expires_at })))) : [],
+    // «Buscando en licitaciones…» while «Actualizar oportunidades» or the daily search runs; a failed read just leaves it out.
+    admin ? client.from('opportunity_jobs').select('kind').eq('organization_id', scope.organizationId).in('kind', [...DISCOVERY_JOB_KINDS])
+      .in('state', ['queued', 'running', 'waiting']).limit(20).then(result => result.error ? [] : [...new Set((result.data || []).map((row: any) => String(row.kind)))]) : [],
   ]);
   const itemIds = items.map(item => item.id);
   const work = itemIds.length ? opportunityDb(await client.from('opportunity_work').select('*').eq('organization_id', scope.organizationId).in('opportunity_id', itemIds)) as WorkRecord[] : [];
   return { mode: admin ? 'management' : 'assigned', items, work: work || [], notifications: notifications.filter(n => ids === null || ids.includes(n.opportunity_id)),
-    members, groups, context, documentAlerts,
-    budget: { spent: Number(budget?.spent_micro_usd || 0) / 1e6, reserved: Number(budget?.reserved_micro_usd || 0) / 1e6, cap: 20 },
+    members, groups, context, documentAlerts, ...(admin ? { searching } : {}),
+    budget: { spent: Number(budget?.spent_micro_usd || 0) / 1e6, reserved: Number(budget?.reserved_micro_usd || 0) / 1e6, cap: OPPORTUNITY_MONTHLY_MICRO_USD / 1e6 },
     sourceStatus: admin ? { claude: Boolean(process.env.ANTHROPIC_API_KEY), linkedin: Boolean(process.env.APIFY_TOKEN), posts: Boolean(process.env.APIFY_TOKEN && process.env.OPPORTUNITIES_POST_USD_PER_ITEM),
       jsearch: Boolean(process.env.JSEARCH_API_KEY), automation: process.env.OPPORTUNITIES_AUTOMATION_ENABLED === 'true' } : {} };
 }
@@ -91,7 +94,7 @@ export async function createPrivateOpportunity(client: SupabaseClient, scope: Wo
     const { saveOpportunityDocument } = await import('./workspace-documents');
     await saveOpportunityDocument(client, scope, id, { name: options.documentName || 'Invitación recibida.txt', bytes: Buffer.from(input.description), sourceKind: 'pasted' });
   }
-  await addOpportunityActivity(client, scope, id, 'created', options.activity || 'Oportunidad recibida incorporada al workspace',{},`private-created:${id}`);
+  await addOpportunityActivity(client, scope, id, 'created', options.activity || 'Oportunidad recibida incorporada a la organización',{},`private-created:${id}`);
   return id;
 }
 export async function addOpportunityActivity(client: SupabaseClient, scope: WorkScope, id: string, kind: string, body: string, data: Record<string, unknown> = {}, eventKey?: string) {
@@ -104,7 +107,7 @@ export async function assignOpportunity(client: SupabaseClient, scope: WorkScope
   const users = new Set(input.participantIds);
   if (input.teamId) {
     const team = opportunityDb(await client.from('organization_reporting_groups').select('id').eq('organization_id', scope.organizationId).eq('id', input.teamId).eq('is_active', true).maybeSingle());
-    if (!team) throw new AuthError('El equipo no pertenece a este workspace.', 400);
+    if (!team) throw new AuthError('El equipo no pertenece a esta organización.', 400);
     const members = opportunityDb(await client.from('organization_reporting_group_members').select('user_id').eq('organization_id', scope.organizationId).eq('group_id', input.teamId).is('unassigned_at', null)) || [];
     members.forEach(member => users.add(member.user_id));
   }

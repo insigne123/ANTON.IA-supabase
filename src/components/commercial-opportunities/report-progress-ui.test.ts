@@ -20,7 +20,8 @@ const dependencies: Record<string, unknown> = {
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./ReportOffice'] = load(await compile('./ReportOffice.tsx'));
-const { ReportProgress } = load(await compile('./OpportunityExpedient.tsx'));
+const fsCompiled = await compile('./OpportunityExpedient.tsx');
+const { ReportProgress } = load(fsCompiled);
 const render = (props: Record<string, unknown>) => renderToStaticMarkup(React.createElement(ReportProgress, { state: 'failed', error: null, onRetry: () => {}, ...props }));
 
 test('a failed report offers one retry, and once pressed the button says it is on its way', () => {
@@ -86,4 +87,19 @@ test('writing says how long it has been at it, but not a time from an earlier at
 
 test('without progress from the server the card says what it always said', () => {
   assert.match(render({ state: 'running', progress: null }), /Leyendo los documentos y redactando el informe/);
+});
+
+test('a document read in part says what is missing and offers to upload the rest', () => {
+  const { DocumentList, partialReadHint } = load(fsCompiled);
+  const doc = (extra: Record<string, unknown>) => ({ id: 'd1', name: 'Aclaraciones del foro.pdf', extraction_status: 'partial', source_kind: 'upload', source_url: null,
+    pages_read: 12, pages_total: 24, created_at: '2026-10-20T12:00:00Z', ...extra });
+  assert.equal(partialReadHint(doc({})), 'Faltan 12 páginas: si son importantes, súbelas como foto o en otro PDF.');
+  assert.equal(partialReadHint(doc({ pages_read: 23 })), 'Falta 1 página: si son importantes, súbelas como foto o en otro PDF.');
+  assert.match(partialReadHint(doc({ pages_read: null, pages_total: null })), /^Parte del documento no se pudo leer/);
+  const html = renderToStaticMarkup(React.createElement(DocumentList, { id: 'op', documents: [doc({}), doc({ id: 'd2', name: 'Bases.pdf', extraction_status: 'read', pages_read: 30, pages_total: 30 })], onUploadMore: () => {} }));
+  assert.equal((html.match(/Subir el resto/g) || []).length, 1, 'only the document read in part');
+  assert.match(text(html), /Leído en parte · 12 de 24 páginas Faltan 12 páginas/);
+  // While the AI reads its scanned pages there is nothing to upload yet.
+  const reading = renderToStaticMarkup(React.createElement(DocumentList, { id: 'op', documents: [doc({})], scanning: ['d1'], onUploadMore: () => {} }));
+  assert.doesNotMatch(reading, /Subir el resto/);
 });

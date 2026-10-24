@@ -11,7 +11,7 @@ test('the sheet of a company that is hiring carries the signal, the fit, the peo
   assert.deepEqual([sheet.kind, sheet.title, sheet.kindLabel, sheet.written], ['hiring', 'Retail Pacífico', 'Avisos de empleo', true]);
   assert.deepEqual(sheet.relation, { code: 'contact', label: 'Ya tienes contactos ahí' });
   assert.deepEqual([sheet.stars.count, sheet.stars.score], [4, 75]);
-  assert.match(sheet.stars.text, /4 de 5 estrellas/);
+  assert.match(sheet.stars.text, /^Calce 4 de 5: /);
   assert.deepEqual(sheet.decision, { label: 'Contactar, validando primero lo pendiente', tone: 'evaluate' });
   assert.match(sheet.headline, /^Ofrecerles refuerzos de bodega/);
   assert.equal(sheet.whyNow.length, 3); assert.match(sheet.whyNow[0], /32 de los 41 avisos/);

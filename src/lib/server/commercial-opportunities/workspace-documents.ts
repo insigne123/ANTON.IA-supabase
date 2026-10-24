@@ -81,7 +81,9 @@ export async function saveOpportunityDocument(client: SupabaseClient, scope: Wor
   if (legacy) input = { ...input, ...legacy };
   const name = input.name.replace(/[\u0000-\u001f\\/]/g, '_').slice(0, 300);
   const mime = opportunityMime(name);
-  if (!mime) throw new AuthError(`«${name.slice(0, 120)}»: usa PDF, Word, Excel, texto o una imagen JPG o PNG.`, 400);
+  // The text pasted with an invitation is saved under a name the person never chose: an error calls it what it is.
+  const shown = input.sourceKind === 'pasted' ? 'el texto que pegaste' : `«${name.slice(0, 120)}»`;
+  if (!mime) throw new AuthError(`${shown}: usa PDF, Word, Excel, texto o una imagen JPG o PNG.`, 400);
   const sha = createHash('sha256').update(input.bytes).digest('hex');
   const existing = opportunityDb(await client.from('opportunity_documents').select('id').eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('sha256', sha).maybeSingle());
   if (existing) return existing.id;
@@ -90,7 +92,7 @@ export async function saveOpportunityDocument(client: SupabaseClient, scope: Wor
   if ((count.count || 0) >= 40) throw new AuthError('El expediente admite hasta 40 documentos por versión de trabajo.', 413);
   const docId = randomUUID(); const storagePath = `${scope.organizationId}/${id}/${docId}/${opportunityStorageName(name)}`;
   const stored = await client.storage.from(OPPORTUNITY_BUCKET).upload(storagePath, input.bytes, { contentType: mime, upsert: false });
-  if (stored.error) throw new AuthError(`No pudimos guardar «${name.slice(0, 120)}». Intenta de nuevo en un momento.`, 503);
+  if (stored.error) throw new AuthError(`No pudimos guardar ${shown}. Intenta de nuevo en un momento.`, 503);
   let extracted: ExtractedOpportunityFile;
   try { extracted = await extractOpportunityFile(name, input.bytes); }
   catch { extracted = { status: 'damaged', total: null, read: 0, sections: [] }; }

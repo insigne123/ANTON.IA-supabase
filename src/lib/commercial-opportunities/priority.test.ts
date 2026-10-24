@@ -20,10 +20,10 @@ test('what the AI leaves out (10 or less) is one star, and what it recommends is
 });
 
 test('the stars say in words what they mean, for the screen reader and the tooltip', () => {
-  assert.equal(starsText(85), '5 de 5 estrellas: calza muy bien con tu oferta');
-  assert.equal(starsText(70), '4 de 5 estrellas: calza bien con tu oferta');
-  assert.equal(starsText(35), '2 de 5 estrellas: calza poco con tu oferta');
-  assert.equal(starsText(null), '1 de 5 estrellas: calza muy poco con tu oferta');
+  assert.equal(starsText(85), 'Calce 5 de 5: calza muy bien con tu oferta');
+  assert.equal(starsText(70), 'Calce 4 de 5: calza bien con tu oferta');
+  assert.equal(starsText(35), 'Calce 2 de 5: calza poco con tu oferta');
+  assert.equal(starsText(null), 'Calce 1 de 5: calza muy poco con tu oferta');
 });
 
 test('priority puts the most stars first and, with the same stars, the one that closes first; deadline does the opposite', () => {

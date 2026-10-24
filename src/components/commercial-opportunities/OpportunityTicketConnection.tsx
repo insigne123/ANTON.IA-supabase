@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 /**
- * The workspace's Mercado Público ticket, in «Empresa del workspace»: connected once by an admin, checked before it is
+ * The workspace's Mercado Público ticket, in «Tu empresa»: connected once by an admin, checked before it is
  * saved. It sits inside the company form, so Enter here connects the ticket instead of sending the form.
  */
 export function OpportunityTicketConnection() {
@@ -39,7 +39,7 @@ export function OpportunityTicketConnection() {
             <h3 className="text-sm font-semibold">Mercado Público</h3>
             {connected ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-3 w-3" aria-hidden="true" />Conectado</span> : null}
           </div>
-          <p className="text-sm text-muted-foreground">{connected ? 'La búsqueda del workspace ya usa un ticket. Pega otro solo si quieres cambiarlo.' : 'Conecta tu ticket una vez para consultar licitaciones y Compra Ágil.'}</p>
+          <p className="text-sm text-muted-foreground">{connected ? 'La búsqueda de tu organización ya usa un ticket. Pega otro solo si quieres cambiarlo.' : 'Conecta tu ticket una vez para consultar licitaciones y Compra Ágil.'}</p>
         </div>
       </div>
       <div className="space-y-2 rounded-2xl border bg-muted/30 p-4 sm:p-5">
