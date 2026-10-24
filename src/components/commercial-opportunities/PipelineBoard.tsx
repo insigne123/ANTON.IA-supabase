@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Award, Inbox, Loader2, Send, Sparkles, Star, UserPlus, Wrench } from 'lucide-react';
+import { ArrowRight, Archive, Award, Inbox, Loader2, RotateCcw, Send, Sparkles, Star, UserPlus, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
@@ -9,7 +9,8 @@ import type { WorkItem, WorkRecord } from '@/lib/commercial-opportunities/worksp
 import { PIPELINE_STAGES, WORK_STATE_LABELS, daysToClose, pipelineStage } from '@/lib/commercial-opportunities/pipeline';
 import { PRIORITY_SORTS, comparePriority, type PrioritySort } from '@/lib/commercial-opportunities/priority';
 import { progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
-import { fallbackLine, opportunitySummary } from '@/lib/commercial-opportunities/summaries';
+import { fallbackLine, opportunityRegion, opportunitySummary } from '@/lib/commercial-opportunities/summaries';
+import { humanDate } from '@/lib/commercial-opportunities/report-view';
 import { PipelineRoute, type PipelineStop } from './PipelineRoute';
 import { PriorityStars } from './PriorityStars';
 import { ProgressMarks } from './ProgressMarks';
@@ -24,9 +25,15 @@ const CLOSED_STAGES = [
   { id: 'archived', label: 'Archivadas', hint: 'Se dejaron de trabajar o cerraron sin presentarse.' },
   { id: 'excluded', label: 'No recomendadas', hint: 'La IA las dejó fuera porque no calzan con tu oferta. Ábrelas para ver por qué o reconsiderarlas.' },
 ] as const;
-/** The stages the page loads by pages (readOpportunityPipeline): what nobody works yet. */
-export type PagedStage = 'found' | 'recommended' | 'excluded';
-const PAGED: string[] = ['found', 'recommended', 'excluded'];
+/** The stages the page loads by pages (readOpportunityPipeline): what nobody works yet, and what was lost or put aside. */
+export type PagedStage = 'found' | 'recommended' | 'excluded' | 'lost' | 'archived';
+const PAGED: string[] = ['found', 'recommended', 'excluded', 'lost', 'archived'];
+/** The paged stages that wait until someone opens them. */
+const ON_DEMAND: string[] = ['excluded', 'lost', 'archived'];
+/** «$48 M», «UF 1.200»: the amount at a glance, in the currency it comes in (millions shortened, the rest whole). */
+const compact = new Intl.NumberFormat('es-CL', { notation: 'compact', maximumFractionDigits: 1 });
+const whole = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 });
+const amountLabel = (item: WorkItem) => (item.amount ? `${!item.currency || item.currency === 'CLP' ? '$' : `${item.currency} `}${item.amount >= 1_000_000 ? compact.format(item.amount) : whole.format(item.amount)}` : null);
 /** How many job ads a hiring card stands for, when the search counted them. */
 const adsOf = (item: WorkItem) => { const ads = (item.data as { observed?: { ads?: unknown } } | null)?.observed?.ads; return typeof ads === 'number' && ads > 0 ? ads : 0; };
 const MOVES: Record<string, WorkRecord['state'][]> = {
@@ -39,10 +46,10 @@ const MOVES: Record<string, WorkRecord['state'][]> = {
  * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
 export function PipelineBoard({ items, work, totals, limits, members, busy, suggestions, reviewing, summariesWaiting = false, filtered = false, loadingMore = null, refreshing = false,
-  sort = 'priority', onSort, progress, opened, onReview, onMove, onOpen, onAssign, onMore, onClearFilters }: {
+  sort = 'priority', onSort, progress, opened, onReview, onMove, onOpen, onAssign, onDiscard, onReopen, onMore, onClearFilters }: {
   items: WorkItem[]; work: WorkRecord[]; members: Array<{ user_id: string; name: string }>; busy: boolean;
-  /** Exact counts of what nobody works yet; the page lists only the best scored of them. */
-  totals?: { found: number; recommended: number; excluded?: number };
+  /** Exact counts of what nobody works yet and of what was lost or put aside; the page lists only some of them. */
+  totals?: { found: number; recommended: number; excluded?: number; lost?: number; archived?: number };
   /** How many of each of those the page asked for: «Cargar más» asks for more until the most the server gives. */
   limits?: Partial<Record<PagedStage, number>>;
   /** A search or a source is on: an empty stage says so. */
@@ -58,6 +65,10 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   onMove: (id: string, state: WorkRecord['state'], revision: number) => void; onOpen: (id: string) => void;
   /** An administrator gives a team to a card nobody works yet without leaving the list (the stage the person is going through stays in view). */
   onAssign?: (item: WorkItem) => void;
+  /** «No es para nosotros»: the card goes to «Archivadas» with its reason (DiscardDialog). */
+  onDiscard?: (item: WorkItem) => void;
+  /** What was put aside comes back to the ones nobody works yet. */
+  onReopen?: (item: WorkItem, revision: number) => void;
 }) {
   const now = Date.now();
   // «Abierta hace 1 min» and «Informe listo · hace 2 h» keep counting while the board stays open.
@@ -77,7 +88,7 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   });
   const closed = CLOSED_STAGES.map(stage => {
     const inStage = placed.filter(p => p.stage === stage.id).length;
-    return { ...stage, count: stage.id === 'excluded' ? Math.max(totals?.excluded ?? 0, inStage) : inStage, loaded: inStage };
+    return { ...stage, count: Math.max(totals?.[stage.id] ?? 0, inStage), loaded: inStage };
   });
   const stage = [...PIPELINE_STAGES, ...CLOSED_STAGES].find(s => s.id === selected) ?? PIPELINE_STAGES[0];
   const rank = comparePriority(sort);
@@ -86,9 +97,9 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   const paged = PAGED.includes(stage.id) ? stage.id as PagedStage : null;
   // Another page while there are more and the server gives them (PIPELINE_MAX); beyond that, the search narrows them.
   const more = paged && count > shown.length ? ((limits?.[paged] ?? 0) < 600 ? Math.min(60, count - shown.length) : 0) : 0;
-  // What the AI left out loads only when someone opens it, and again after a new search or source left none loaded.
-  const excludedWaiting = selected === 'excluded' && count > 0 && !shown.length && !limits?.excluded && loadingMore !== 'excluded';
-  useEffect(() => { if (excludedWaiting) onMore?.('excluded'); }, [excludedWaiting, onMore]);
+  // What the AI left out, the lost and the archived load only when someone opens them, and again after a new search or source left none loaded.
+  const waitingStage = ON_DEMAND.includes(selected) && count > 0 && !shown.length && !limits?.[selected as PagedStage] && loadingMore !== selected ? selected as PagedStage : null;
+  useEffect(() => { if (waitingStage) onMore?.(waitingStage); }, [waitingStage, onMore]);
   const select = (id: string) => setSelected(id);
   const advice = new Map((suggestions || []).map(s => [s.id, s]));
   // What the AI reviews (runPipelineReview): the opportunities a team already works. Without any, there is nothing to ask.
@@ -133,7 +144,7 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
                 sort === option.id ? 'bg-foreground font-medium text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>{option.label}</button>)}
           </div>
         </div> : null}
-        {!shown.length ? (loadingMore === stage.id || excludedWaiting ? <p role="status" className="flex items-center justify-center gap-2 rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+        {!shown.length ? (loadingMore === stage.id || waitingStage ? <p role="status" className="flex items-center justify-center gap-2 rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Cargando…</p>
           : <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
             <p>{filtered ? 'Ninguna oportunidad de esta etapa coincide con la búsqueda o la fuente elegida.' : 'No hay oportunidades en esta etapa.'}</p>
@@ -147,6 +158,9 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
               const summary = opportunitySummary(item.data) ?? fallbackLine(item);
               const ads = adsOf(item);
               const marks = progressChips(progress?.[item.id], opened?.[item.id], now);
+              const amount = amountLabel(item);
+              const region = opportunityRegion(item);
+              const deadline = humanDate(item.deadline_at, true);
               return (
                 <li key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border bg-background p-4 shadow-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
                   style={{ animationDelay: `${Math.min(index, 8) * 50}ms`, animationFillMode: 'both' }}>
@@ -166,8 +180,10 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     {SOURCE_LABELS[item.kind] ? <span className="rounded-full border px-2 py-0.5 text-muted-foreground">{SOURCE_LABELS[item.kind]}</span> : null}
                     {ads ? <span className="rounded-full border px-2 py-0.5 text-muted-foreground">{ads} {ads === 1 ? 'aviso' : 'avisos'}</span> : null}
-                    {days !== null ? <span className={cn('rounded-full px-2 py-0.5 font-medium', days < 0 ? 'bg-muted text-muted-foreground' : days < 7 ? 'bg-destructive/10 text-destructive' : 'bg-muted text-foreground/80')}>
+                    {days !== null ? <span title={deadline ? `${days < 0 ? 'Cerró' : 'Cierra'} el ${deadline}` : undefined} className={cn('rounded-full px-2 py-0.5 font-medium', days < 0 ? 'bg-muted text-muted-foreground' : days < 7 ? 'bg-destructive/10 text-destructive' : 'bg-muted text-foreground/80')}>
                       {days < 0 ? 'Cerrada' : days === 0 ? 'Cierra hoy' : `Cierra en ${days} ${days === 1 ? 'día' : 'días'}`}</span> : null}
+                    {amount ? <span className="rounded-full border px-2 py-0.5 tabular-nums text-foreground/80" title={`Monto: ${new Intl.NumberFormat('es-CL').format(item.amount!)} ${item.currency || 'CLP'}`}>{amount}</span> : null}
+                    {region ? <span className="rounded-full border px-2 py-0.5 text-muted-foreground">{region}</span> : null}
                     {record?.state === 'blocked' ? <span className="rounded-full bg-cw-warning-soft px-2 py-0.5 font-medium text-cw-warning">Bloqueada</span> : null}
                     <ProgressMarks marks={marks} />
                   </div>
@@ -176,18 +192,26 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
                     {tip.move && record ? <Button type="button" size="sm" variant="secondary" className="mt-2 h-7 text-xs" disabled={busy} onClick={() => onMove(item.id, tip.move!, record.revision)}>
                       Mover a {WORK_STATE_LABELS[tip.move]}<ArrowRight className="ml-1 h-3.5 w-3.5" aria-hidden="true" /></Button> : null}
                   </div> : null}
-                  <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
+                  <div className="mt-auto flex flex-wrap items-center gap-2">
                     {options.length && record ? <label className="flex items-center gap-2 text-xs text-muted-foreground">Mover a
                       <select value="" disabled={busy} onChange={event => { const to = event.target.value as WorkRecord['state']; if (to) onMove(item.id, to, record.revision); }}
                         className="h-8 rounded-md border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <option value="">Elegir…</option>
                         {options.map(state => <option key={state} value={state}>{WORK_STATE_LABELS[state]}</option>)}
                       </select></label>
-                      : !record && item.data?.evaluation !== 'excluded' && onAssign
-                        ? <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => onAssign(item)} title="Elige quién la trabaja: pasa a «Asignadas» y avisamos a las personas.">
-                          <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Asignar</Button>
+                      : record?.state === 'archived' && onReopen
+                        ? <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => onReopen(item, record.revision)} title="Vuelve a las que nadie trabaja todavía.">
+                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Reabrir</Button>
+                      : (!record || record.state === 'unassigned') && item.data?.evaluation !== 'excluded' && onAssign
+                        ? <>
+                          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => onAssign(item)} title="Elige quién la trabaja: pasa a «Asignadas» y avisamos a las personas.">
+                            <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Asignar</Button>
+                          {/* On a phone it goes below, so «Asignar» and «Abrir» share the first row. */}
+                          {onDiscard ? <span className="order-last basis-full sm:order-none sm:basis-auto">
+                            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => onDiscard(item)} title="Pasa a «Archivadas» con el motivo; la IA lo tendrá en cuenta.">
+                              <Archive className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />No es para nosotros</Button></span> : null}</>
                         : <span className="text-xs text-muted-foreground">{record || item.data?.evaluation === 'excluded' ? '' : 'Asígnale un equipo para empezar'}</span>}
-                    <Button type="button" size="sm" variant="outline" onClick={() => onOpen(item.id)}>Abrir</Button>
+                    <Button type="button" size="sm" variant="outline" className="ml-auto" onClick={() => onOpen(item.id)}>Abrir</Button>
                   </div>
                 </li>
               );

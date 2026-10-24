@@ -9,6 +9,7 @@ import * as pipeline from '@/lib/commercial-opportunities/pipeline';
 import * as priority from '@/lib/commercial-opportunities/priority';
 import * as progress from '@/lib/commercial-opportunities/progress';
 import * as summaries from '@/lib/commercial-opportunities/summaries';
+import * as reportView from '@/lib/commercial-opportunities/report-view';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -22,6 +23,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/priority': priority,
   '@/lib/commercial-opportunities/progress': progress,
   '@/lib/commercial-opportunities/summaries': summaries,
+  '@/lib/commercial-opportunities/report-view': reportView,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./PipelineRoute'] = load(await compile('./PipelineRoute.tsx'));
@@ -212,4 +214,35 @@ test('a card nobody works yet offers «Asignar» to an administrator, in the lis
   assert.doesNotMatch(text(html), /Asígnale un equipo para empezar/, 'the button says it');
   assert.equal(render({}).includes('Asignar</button>'), false);
   assert.match(text(render({})), /Asígnale un equipo para empezar/);
+});
+
+test('an administrator can say «No es para nosotros» from a card nobody works yet, and reopen what was put aside', () => {
+  const html = render({ onAssign: () => {}, onDiscard: () => {} });
+  assert.match(text(html), /Asignar No es para nosotros Abrir/, 'next to «Asignar», before opening it');
+  assert.match(html, /title="Pasa a «Archivadas» con el motivo; la IA lo tendrá en cuenta\."/);
+  assert.doesNotMatch(render({ onAssign: () => {} }), /No es para nosotros/, 'without the action, nothing offered');
+  // What was put aside is out of the road, counted under «Archivadas» (its cards offer «Reabrir» once that chip is open).
+  const archived = render({ items: [item('z', 'Aseo de oficinas', 'review')], work: [{ opportunity_id: 'z', revision: 3, state: 'archived', team_id: null, responsible_id: null, assigned_by: null, objective: '', due_at: null, updated_at: '' }],
+    totals: { found: 0, recommended: 0, archived: 1 }, onReopen: () => {} });
+  assert.match(text(archived), /Fuera del embudo Archivadas 1/);
+  assert.doesNotMatch(text(archived), /Aseo de oficinas/, 'not among the ones nobody works');
+});
+
+test('the lost and the archived are counted by the server and load when opened; a card shows its amount, its region and the exact closing', () => {
+  const closed = render({ items: [item('d', 'Software RR.HH.', 'review')], work: [], totals: { found: 1, recommended: 0, excluded: 0, lost: 2, archived: 140 } });
+  assert.match(text(closed), /Perdidas 2/);
+  assert.match(text(closed), /Archivadas 140/, 'the count of the server, though none is loaded');
+  const rich = { ...item('m', 'Guardias para el museo', 'recommended'), amount: 48_000_000, currency: 'CLP', data: { evaluation: 'recommended', observed: { region: 'Valparaíso' } } };
+  const html = render({ items: [rich], work: [] });
+  assert.match(text(html), /\$48\s?M/);
+  assert.match(html, /title="Monto: 48\.000\.000 CLP"/);
+  assert.match(text(html), /Valparaíso/);
+  assert.match(html, /title="Cierra el \d{1,2} de [a-z]+ de \d{4}, \d{2}:\d{2}"/, 'the exact day and hour, on the chip that says how many days');
+  const uf = render({ items: [{ ...rich, amount: 1200, currency: 'UF' }], work: [] });
+  assert.match(text(uf), /UF 1\.200/, 'below a million, the whole number');
+});
+
+test('the order also offers the largest amount first', () => {
+  const html = render({ items: rated, work: [], sort: 'amount' });
+  assert.match(html, /aria-pressed="true"[^>]*title="Primero las de mayor monto; las que no lo informan, al final\."[^>]*>Mayor monto</);
 });

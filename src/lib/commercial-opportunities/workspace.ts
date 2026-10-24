@@ -51,6 +51,8 @@ export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkIt
   notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null }>;
   members: WorkspaceMember[]; groups: Array<{ id: string; name: string }>; context: Record<string, unknown> | null;
   budget: { spent: number; reserved: number; cap: number }; sourceStatus: Record<string, boolean>;
+  /** How many there are in each filter of the list, with the words, sources and lines of service of this reading (list-stages.ts). */
+  counts?: Record<string, number>;
   /** The sources searching right now (DISCOVERY_JOB_KINDS queued or running); admins only. */
   searching?: string[];
   /** The company's documents lapsed or about to (company-documents.ts); admins only. */

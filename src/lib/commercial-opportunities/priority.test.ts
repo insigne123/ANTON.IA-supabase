@@ -38,7 +38,14 @@ test('priority puts the most stars first and, with the same stars, the one that 
   assert.deepEqual([...cards].reverse().sort(comparePriority('priority')).map(card => card.id), order('priority'), 'the same order whatever the order they arrive in');
 });
 
+test('amount puts the largest first and the ones without an amount last, the most stars first among them', () => {
+  const cards = [{ id: 'none-top', score: 90, days: 3, amount: null }, { id: 'small', score: 40, days: 9, amount: 1_500_000 }, { id: 'big', score: 20, days: 30, amount: 230_000_000 },
+    { id: 'none-low', score: 10, days: 1 }, { id: 'mid', score: 70, days: 5, amount: 48_000_000 }];
+  assert.deepEqual([...cards].sort(comparePriority('amount')).map(card => card.id), ['big', 'mid', 'small', 'none-top', 'none-low']);
+});
+
 test('an unknown sort falls back to priority', () => {
   assert.equal(parsePrioritySort('deadline'), 'deadline');
+  assert.equal(parsePrioritySort('amount'), 'amount');
   for (const value of ['priority', '', null, undefined, 'score', 5]) assert.equal(parsePrioritySort(value), 'priority');
 });

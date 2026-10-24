@@ -86,7 +86,7 @@ function memory(seed: Record<string, any[]> = {}, options: { list?: (args: any) 
   };
   const rpc = async (name: string, args: any) => {
     rpcs.push([name, args]);
-    if (name === 'opportunity_workspace_list') return { data: options.list ? options.list(args) : [], error: null };
+    if (name === 'opportunity_workspace_page') return { data: options.list ? options.list(args) : [], error: null };
     return { data: null, error: null };
   };
   return { tables, rpcs, client: { from: query, rpc } as any };
@@ -124,7 +124,7 @@ test('the answer reads what the person can see, the conversation so far and no f
   const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
   const list = (args: any) => {
     if (args.p_query === 'camaras') return [opportunity('o2', 'Cámaras de seguridad Castro', { deadline_at: inDays(2) })];
-    if (args.p_view === 'recommended') return [opportunity('o1', 'Aseo Hospital de Castro', { deadline_at: inDays(1) }), opportunity('o2', 'Cámaras de seguridad Castro')];
+    if (args.p_evaluations?.includes('recommended')) return [opportunity('o1', 'Aseo Hospital de Castro', { deadline_at: inDays(1) }), opportunity('o2', 'Cámaras de seguridad Castro')];
     return [opportunity('o3', 'Guardias Puerto Montt', { deadline_at: '2026-09-01T18:00:00Z' })];
   };
   const { tables, rpcs, client } = memory({
@@ -142,9 +142,9 @@ test('the answer reads what the person can see, the conversation so far and no f
   const saved = await runOpportunityAssistant(client, job);
   const call = (globalThis as any).__call;
   assert.deepEqual([call.role, call.category, call.step], ['chat', 'chat', 'answer']);
-  assert.ok(rpcs.filter(([name]) => name === 'opportunity_workspace_list').every(([, args]) => args.p_user === 'u1' && args.p_org === 'org'), 'the list of that person, with its permissions');
+  assert.ok(rpcs.filter(([name]) => name === 'opportunity_workspace_page').every(([, args]) => args.p_user === 'u1' && args.p_org === 'org'), 'the list of that person, with its permissions');
   assert.ok(rpcs.some(([, args]) => args?.p_query === 'camaras'), 'the words of the question are looked up');
-  assert.ok(!rpcs.some(([, args]) => args?.p_view === 'assigned'), 'a member has no «assigned» view');
+  assert.ok(!rpcs.some(([, args]) => args?.p_stages?.includes('assigned')), 'a member has no «assigned» view');
   const listed = JSON.parse(call.prompt.match(/la IA: recommended = calza, excluded = descartada, pending = sin evaluar\): (\[.*\])\n/)[1]);
   assert.deepEqual(listed.map((item: any) => item.id), ['o1', 'o2', 'o3'], 'open and closing soonest first, the closed one last');
   assert.equal(listed[0].estado, 'en curso');

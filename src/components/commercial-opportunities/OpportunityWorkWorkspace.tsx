@@ -1,10 +1,13 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, Settings, Sparkles, Users, X } from 'lucide-react';
+import { Archive, ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, RotateCcw, Settings, Sparkles, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ActionBar } from '@/components/ui/action-bar';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
@@ -17,12 +20,12 @@ import type { OfferPrices, SavedOfferDraft } from '@/lib/commercial-opportunitie
 import { PipelineBoard, type PagedStage, type PipelineSuggestion } from './PipelineBoard';
 import { PriorityStars } from './PriorityStars';
 import { ProgressMarks } from './ProgressMarks';
-import type { PrioritySort } from '@/lib/commercial-opportunities/priority';
+import { PRIORITY_SORTS, parsePrioritySort, type PrioritySort } from '@/lib/commercial-opportunities/priority';
 import { isResearching, markOpened, openedKey, parseOpened, progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
 import { useAuth } from '@/context/AuthContext';
 import { OpportunityFilters, filterChip } from './OpportunityFilters';
 import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
-import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
+import { opportunityRegion, opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import type { MarkChange } from './ReportMarks';
 import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { OpportunityContacts } from './OpportunityContacts';
@@ -40,17 +43,20 @@ import { InitialsAvatar } from '@/components/initials-avatar';
 import { useConfirm } from '@/components/confirm-dialog';
 import { OpportunityTicketConnection } from './OpportunityTicketConnection';
 import { CloseReasonDialog, type CloseTarget } from './CloseReasonDialog';
+import { DiscardDialog, type DiscardTarget } from './DiscardDialog';
+import { ADMIN_LIST_VIEWS, inListView, listStageOf, type DiscardReason } from '@/lib/commercial-opportunities/list-stages';
 import { WorkspaceCompanyFields } from './WorkspaceCompanyFields';
 import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
 import { AdvicePill, ExclusionGroups, NewsList, StartHere, TenderPrerequisites } from './OpportunityRadar';
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
 import { pickPrefillFiles } from '@/lib/commercial-opportunities/prefill-package';
-import { OPPORTUNITY_SOURCES, bySource, closesLabel, inCategories, sourceKinds, workAdvice, type OpportunityCategory, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
+import { OPPORTUNITY_SOURCES, bySource, closesLabel, inCategories, parseCategories, sourceKinds, workAdvice, type OpportunityCategory, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@/lib/commercial-opportunities/workspace';
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
+import { readWorkspaceUrl, workspaceUrl, type WorkspaceView } from '@/lib/commercial-opportunities/workspace-url';
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress; documentId?: string };
 type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
@@ -84,7 +90,7 @@ async function json(response: Response) { const value = await response.json(); i
 const opportunityInUrl = () => typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('op');
 /** The pipeline's first page of each stage nobody works yet, and the size of «Cargar más» (workspace-pipeline.ts). */
 const PAGE = 60;
-const FIRST_PAGE: Record<PagedStage, number> = { found: PAGE, recommended: PAGE, excluded: 0 };
+const FIRST_PAGE: Record<PagedStage, number> = { found: PAGE, recommended: PAGE, excluded: 0, lost: 0, archived: 0 };
 
 export function OpportunityWorkWorkspace() {
   const { user } = useAuth();
@@ -94,6 +100,8 @@ export function OpportunityWorkWorkspace() {
   useEffect(() => { try { setOpened(parseOpened(window.localStorage.getItem(openedKey(user?.id)))); } catch { setOpened({}); } }, [user?.id]);
   const [overview, setOverview] = useState<(WorkspaceOverview & { suggestion?: any }) | null>(null);
   const [problem, setProblem] = useState(''); const [busy, setBusy] = useState(false);
+  // Nothing is read before the address says which filters (workspace-url.ts): otherwise the first reading would be thrown away.
+  const [urlRead, setUrlRead] = useState(false);
   // Closing as won or lost asks for the reason in a line first (CloseReasonDialog); the move waits for the person to confirm.
   const [closing, setClosing] = useState<CloseTarget | null>(null);
   const [query, setQuery] = useState(''); const [filter, setFilter] = useState('recommended');
@@ -112,9 +120,17 @@ export function OpportunityWorkWorkspace() {
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
+  // «No es para nosotros» (DiscardDialog): what is being put aside, from a card, the list's selection or the opportunity itself.
+  const [discarding, setDiscarding] = useState<DiscardTarget | null>(null);
+  // The list's selection, for the actions on several at once (administrators); a new filter, search or page starts it over.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const togglePick = (id: string, on: boolean) => setPicked(current => { const next = new Set(current); if (on) next.add(id); else next.delete(id); return next; });
+  // «Deshacer» next to the notice of what was just put aside.
+  const [undo, setUndo] = useState<{ label: string; run: () => void } | null>(null);
   // The admin sees the pipeline first; «Lista» keeps the filters and cards; «Mercado público» reads ChileCompra (what the
   // State plans to buy, the contracts that end, the competitors); «Asistente» is the section's general conversation, for everyone.
-  const [view, setView] = useState<'pipeline' | 'list' | 'market' | 'assistant'>('pipeline');
+  const [view, setView] = useState<WorkspaceView>('pipeline');
+  useEffect(() => setPicked(new Set()), [search, filter, source, categoryKey, page, view]);
   const [assistantThread, setAssistantThread] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   // A question the assistant hands to one opportunity's chat: asked there once its expediente is open.
@@ -124,6 +140,19 @@ export function OpportunityWorkWorkspace() {
   // How many of each stage nobody works yet the pipeline asks for: «Cargar más» adds a page; a new search, source or order starts over.
   const [sort, setSort] = useState<PrioritySort>('priority');
   const filterKey = `${source}|${search}|${sort}|${categoryKey}`;
+  // The address follows the filters (workspace-url.ts): a new filter is a step the back button returns from; the words typed only replace it.
+  const urlFilters = useRef({ view, filter, source, query: search, categories, sort });
+  urlFilters.current = { view, filter, source, query: search, categories, sort };
+  const urlStep = `${view}|${filter}|${source}|${categoryKey}|${sort}`;
+  const lastUrlStep = useRef('');
+  useEffect(() => {
+    if (!urlRead) return;
+    const next = workspaceUrl(window.location.pathname, urlFilters.current, opportunityInUrl());
+    if (next !== `${window.location.pathname}${window.location.search}`) {
+      if (lastUrlStep.current && lastUrlStep.current !== urlStep) window.history.pushState(null, '', next); else window.history.replaceState(null, '', next);
+    }
+    lastUrlStep.current = urlStep;
+  }, [urlRead, urlStep, search]);
   const [paging, setPaging] = useState<{ key: string; limits: Record<PagedStage, number> }>({ key: '', limits: FIRST_PAGE });
   const limits = paging.key === filterKey ? paging.limits : FIRST_PAGE;
   const [loadingMore, setLoadingMore] = useState<PagedStage | null>(null);
@@ -135,25 +164,31 @@ export function OpportunityWorkWorkspace() {
   const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const watching = useRef<string | null>(null);
-  useEffect(() => { if (!feedback) return; const timer = setTimeout(() => setFeedback(''), 6000); return () => clearTimeout(timer); }, [feedback]);
-  useEffect(() => { const read = () => setSelected(opportunityInUrl()); read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read); }, []);
+  useEffect(() => { if (!feedback) { setUndo(null); return; } const timer = setTimeout(() => setFeedback(''), undo ? 9000 : 6000); return () => clearTimeout(timer); }, [feedback, undo]);
+  // The filters and the open opportunity live in the address (workspace-url.ts): read when the page opens and when the browser goes back.
+  useEffect(() => {
+    const read = () => { const state = readWorkspaceUrl(window.location.search); setView(state.view); setFilter(state.filter); setSource(state.source); setQuery(state.query); setSearch(state.query);
+      setCategories(state.categories); setSort(state.sort); setSelected(state.op); setUrlRead(true); };
+    read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read);
+  }, []);
   // The list reads with the search and source only while it is on screen: typing in the pipeline does not read the list too.
   const listShown = view === 'list' || overview?.mode !== 'management';
-  const listSearch = listShown ? search : ''; const listSource = listShown ? source : 'all'; const listCategories = listShown ? categoryKey : '';
+  const listSearch = listShown ? search : ''; const listSource = listShown ? source : 'all'; const listCategories = listShown ? categoryKey : ''; const listSort = listShown ? sort : 'priority';
   const load = useCallback(async (signal?: AbortSignal) => {
-    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: memberView(filter), query: listSearch, page: String(page), source: listSource, category: listCategories })}`, { cache: 'no-store', signal }));
+    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: memberView(filter), query: listSearch, page: String(page), source: listSource, category: listCategories, sort: listSort })}`, { cache: 'no-store', signal }));
       if (!signal?.aborted) { setOverview(result); setProblem(''); }
     } catch (e) { if (!signal?.aborted) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar.'); setOverview(null); } }
-  }, [filter, listSearch, page, listSource, listCategories]);
+  }, [filter, listSearch, page, listSource, listCategories, listSort]);
   // The list is read again every minute while it is on view; an open opportunity or a hidden tab does not ask for it.
   useEffect(() => {
+    if (!urlRead) return;
     const controller = new AbortController(); void load(controller.signal);
     const refresh = () => { if (!document.hidden && !selectedRef.current) void load(controller.signal); };
     const timer = setInterval(refresh, 60_000);
     const onVisible = () => { if (!document.hidden) refresh(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { controller.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [load]);
+  }, [load, urlRead]);
   const loadDetail = useCallback(async (id: string, signal?: AbortSignal) => {
     try {
       // The expediente and its chat do not depend on each other: they are read together.
@@ -199,7 +234,8 @@ export function OpportunityWorkWorkspace() {
   const loadPipeline = useCallback(async () => {
     const request = ++pipelineRequest.current; const key = `${source}|${search}|${sort}|${categoryKey}`;
     try {
-      const params = new URLSearchParams({ view: 'pipeline', source, query: search, category: categoryKey, sort, found: String(limits.found), recommended: String(limits.recommended), excluded: String(limits.excluded) });
+      const params = new URLSearchParams({ view: 'pipeline', source, query: search, category: categoryKey, sort, found: String(limits.found), recommended: String(limits.recommended), excluded: String(limits.excluded),
+        lost: String(limits.lost), archived: String(limits.archived) });
       const result = await json(await fetch(`/api/commercial-opportunities/workspace?${params}`, { cache: 'no-store' }));
       if (request === pipelineRequest.current) { setPipeline(result); setPipelineFor(key); }
     }
@@ -273,6 +309,33 @@ export function OpportunityWorkWorkspace() {
     await moveNow(id, state, revision);
   };
   const confirmClose = async (target: CloseTarget, note: string) => { if (await moveNow(target.id, target.state, target.revision, note)) setClosing(null); };
+  type BulkResult = { done: string[]; skipped: number };
+  // After an action on several, what is on screen is read again: the list (perform does it), and the pipeline or the open opportunity.
+  const afterBulk = (ids: string[]) => { if (selected && ids.includes(selected)) void loadDetail(selected); if (admin && view === 'pipeline' && !selected) void loadPipeline(); };
+  // What was put aside comes back to the ones nobody works yet («Reabrir», or «Deshacer» right after).
+  const reopen = async (ids: string[]) => {
+    const result = await perform('bulk', { op: 'state', ids, state: 'unassigned' }, null, true) as BulkResult | null;
+    if (!result) return;
+    afterBulk(ids);
+    setFeedback(result.done.length > 1 ? `Reabrimos ${result.done.length}: vuelven a las que nadie trabaja todavía.` : 'Reabierta: vuelve a las que nadie trabaja todavía.');
+  };
+  // «No es para nosotros»: to «Archivadas» with the reason, and a «Deshacer» in the notice.
+  const confirmDiscard = async (target: DiscardTarget, reason: DiscardReason, note: string) => {
+    const result = await perform('bulk', { op: 'discard', ids: target.ids, reason, note }, null, true) as BulkResult | null;
+    if (!result) return;
+    setDiscarding(null); setPicked(new Set()); afterBulk(target.ids);
+    const done = result.done.length;
+    const left = result.skipped ? ` ${result.skipped === 1 ? 'Una ya tenía equipo y quedó como estaba' : `${result.skipped} ya tenían equipo y quedaron como estaban`}.` : '';
+    setFeedback(done ? `${done === 1 ? 'Pasó' : `Pasaron ${done}`} a «Archivadas». La IA tendrá en cuenta el motivo.${left}` : 'Ya tenían equipo: quedaron como estaban.');
+    if (done) setUndo({ label: 'Deshacer', run: () => void reopen(result.done) });
+  };
+  const movePicked = async (to: 'working' | 'submitted' | 'archived' | 'unassigned') => {
+    if (to === 'unassigned') { const ids = [...picked]; setPicked(new Set()); await reopen(ids); return; }
+    const result = await perform('bulk', { op: 'state', ids: [...picked], state: to }, null, true) as BulkResult | null;
+    if (!result) return;
+    afterBulk([...picked]); setPicked(new Set());
+    setFeedback(`${result.done.length === 1 ? 'Movimos 1' : `Movimos ${result.done.length}`} a «${WORK_STATE_LABELS[to]}».${result.skipped ? ` ${result.skipped === 1 ? 'Una quedó como estaba' : `${result.skipped} quedaron como estaban`}: nadie las trabaja o ya estaban ahí.` : ''}`);
+  };
   // «Cambiar etapa» of the administrator, in the opportunity: the closing stages ask for their reason first.
   const changeStage = async (to: WorkRecord['state']) => {
     if ((to === 'won' || to === 'lost') && selected && detail?.work) { setProblem(''); setClosing({ id: selected, state: to, revision: detail.work.revision }); return false; }
@@ -305,11 +368,11 @@ export function OpportunityWorkWorkspace() {
     setProblem(''); setSelected(id);
     const next = markOpened(openedRef.current, id); setOpened(next);
     try { window.localStorage.setItem(openedKey(user?.id), JSON.stringify(next)); } catch { /* private mode: it is remembered until the page closes */ }
-    if (opportunityInUrl() !== id) window.history.pushState(null, '', `${window.location.pathname}?op=${encodeURIComponent(id)}`);
+    if (opportunityInUrl() !== id) window.history.pushState(null, '', workspaceUrl(window.location.pathname, urlFilters.current, id));
     window.scrollTo({ top: 0 });
     for (const n of overview?.notifications.filter(n => n.opportunity_id === id && !n.read_at) || []) void fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'notification', data: { id: n.id } }) });
   };
-  const close = () => { setSelected(null); setProblem(''); if (opportunityInUrl()) window.history.pushState(null, '', window.location.pathname); };
+  const close = () => { setSelected(null); setProblem(''); if (opportunityInUrl()) window.history.pushState(null, '', workspaceUrl(window.location.pathname, urlFilters.current)); };
   const prepareOffer = (instructions: string) => {
     void perform('offer', { requestId: crypto.randomUUID(), ...(instructions ? { instructions } : {}) }, selected, true)
       .then(result => { if (result) setFeedback('Preparando el borrador de oferta. Tarda unos minutos: te avisaremos cuando esté listo.'); });
@@ -414,13 +477,26 @@ export function OpportunityWorkWorkspace() {
     setAssignFor({ id: target.id, title: target.title, revision });
     setDraft({ teamId: '', participantIds: [], responsibleId: '', objective: '' }); setModal('assign');
   };
-  useEffect(() => { if (modal !== 'assign') setAssignFor(null); }, [modal]);
+  // «Asignar» on the list's selection: the same dialog, for all of them at once.
+  const [assignMany, setAssignMany] = useState<string[] | null>(null);
+  const openBulkAssign = () => { setProblem(''); setFeedback(''); setAssignMany([...picked]); setDraft({ teamId: '', participantIds: [], responsibleId: '', objective: '' }); setModal('assign'); };
+  useEffect(() => { if (modal !== 'assign') { setAssignFor(null); setAssignMany(null); } }, [modal]);
   const saveModal = async () => {
     let result;
     if (modal === 'context') result = await perform('context', { offer: draft.offer, services: list(draft.services), territories: list(draft.territories), exclusions: list(draft.exclusions), priority: draft.priority,
       automation: Boolean(draft.automation), hour: Number(draft.hour), expectedRevision: Number((overview?.context as any)?.revision || 0) }, null);
     else if (modal === 'criteria') result = await perform('criteria', { criteria: { roles: list(draft.roles), keywords: list(draft.keywords), postQueries: list(draft.postQueries), decisionMakerTitles: list(draft.decisionMakerTitles) },
       expectedRevision: Number((overview?.context as any)?.revision || 0) }, null);
+    else if (modal === 'assign' && assignMany) {
+      const many = assignMany;
+      const bulk = await perform('bulk', { op: 'assign', ids: many, teamId: draft.teamId || null, participantIds: draft.participantIds || [], responsibleId: draft.responsibleId || null,
+        objective: draft.objective || '', dueAt: localDate(draft.dueAt || '') }, null, true) as BulkResult | null;
+      if (bulk) {
+        setPicked(new Set()); afterBulk(many);
+        setFeedback(`${bulk.done.length === 1 ? 'Asignamos 1' : `Asignamos ${bulk.done.length}`}: ya están en «Asignadas» y avisamos por correo.${bulk.skipped ? ` ${bulk.skipped === 1 ? 'Una no se pudo' : `${bulk.skipped} no se pudieron`}: estaban cerradas o cambiaron mientras tanto.` : ''}`);
+      }
+      result = bulk;
+    }
     else if (modal === 'assign') {
       const from = assignFor;
       result = await perform('assign', { expectedRevision: from ? from.revision : detail?.work?.revision || 0, teamId: draft.teamId || null, participantIds: draft.participantIds || [], responsibleId: draft.responsibleId || null, objective: draft.objective || '', dueAt: localDate(draft.dueAt || '') },
@@ -470,22 +546,56 @@ export function OpportunityWorkWorkspace() {
     if (admin && view === 'pipeline' && !selected) void loadPipeline();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- each new reading of the list, not each render.
   }, [overview]);
-  const filters = admin ? [['recommended', 'Recomendadas'], ['review', 'Por revisar'], ['assigned', 'Asignadas'], ['excluded', 'No recomendadas'], ['pending', 'Por evaluar'], ['all', 'Todas']] : MEMBER_FILTERS;
+  // The administrator's list has the stages of the pipeline (list-stages.ts), so «Por revisar» means the same on both.
+  const filters: ReadonlyArray<readonly [string, string]> = admin ? ADMIN_LIST_VIEWS.map(item => [item.id, item.label] as const) : MEMBER_FILTERS;
+  const filterHint = (key: string) => ADMIN_LIST_VIEWS.find(item => item.id === key)?.hint;
   // The list starts on «recommended» (the administrator's first filter, and for a member it reads as «Mi trabajo»): a filter that is not in this person's row marks the first one.
   const shownFilter = filters.some(([key]) => key === filter) ? filter : filters[0]![0];
   const kinds = sourceKinds(source);
+  const workOf = (id: string) => overview?.work.find(w => w.opportunity_id === id);
   const items = (overview?.items || []).filter(item => {
-    const work = overview?.work.find(w => w.opportunity_id === item.id);
+    const work = workOf(item.id);
     if (kinds.length && !kinds.includes(item.kind)) return false;
     if (categories.length && !inCategories(item, categories)) return false;
     if (search && ![item.title, item.company_name, item.buyer_name].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
     if (!admin) return memberFilter(filter, work?.state);
-    if (filter === 'assigned') return Boolean(work && work.state !== 'unassigned');
-    return filter === 'all' || (item.data.evaluation || (item.kind === 'private' ? 'review' : 'pending')) === filter;
+    return inListView(shownFilter, true, item, work?.state);
   });
+  // An address from before the stages («pending») opens the administrator's first filter.
+  useEffect(() => { if (admin && !ADMIN_LIST_VIEWS.some(item => item.id === filter)) setFilter(ADMIN_LIST_VIEWS[0].id); }, [admin, filter]);
+  const pickedItems = items.filter(item => picked.has(item.id));
+  const pickedOpen = pickedItems.filter(item => listStageOf(workOf(item.id)?.state) === 'open').length;
+  const pickedWorked = pickedItems.length - pickedOpen;
+  const pickedArchived = pickedItems.filter(item => workOf(item.id)?.state === 'archived').length;
   // With a source picked, its group is called by it («Compra Ágil», «Recibidas»), not by the family it belongs to.
   const listGroups = bySource(items).map(group => source === 'all' ? group : { ...group, label: OPPORTUNITY_SOURCES.find(item => item.id === source)?.label ?? group.label });
-  const card = (item: WorkItem) => { const work = overview?.work.find(w => w.opportunity_id === item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id); return <article key={item.id} className="rounded-xl border bg-background p-5"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="flex flex-wrap items-center gap-2"><span>{TYPES[item.kind]}</span><AdvicePill item={item} state={work?.state} />{item.data.evaluation === 'excluded' ? null : <PriorityStars score={item.score} />}<ProgressMarks marks={progressChips(null, opened[item.id])} /></span><span>{STATES[work?.state || 'unassigned']}</span></div><h3 className="mt-2 text-base font-semibold">{item.title}</h3>{opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}<p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p><p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>{work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}<Button variant="outline" size="sm" className="mt-4" onClick={() => open(item.id)}>Abrir y trabajar</Button></article>; };
+  const card = (item: WorkItem) => {
+    const work = workOf(item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id);
+    const region = opportunityRegion(item);
+    const checked = picked.has(item.id);
+    return <article key={item.id} className={cn('rounded-xl border bg-background p-5 transition-colors', checked && 'border-primary/50 bg-primary/5')}>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="flex flex-wrap items-center gap-2">
+          {admin ? <Checkbox checked={checked} onCheckedChange={value => togglePick(item.id, Boolean(value))} aria-label={`Seleccionar «${item.title.length > 80 ? `${item.title.slice(0, 79)}…` : item.title}»`} /> : null}
+          <span>{TYPES[item.kind]}</span><AdvicePill item={item} state={work?.state} />{item.data.evaluation === 'excluded' ? null : <PriorityStars score={item.score} />}<ProgressMarks marks={progressChips(null, opened[item.id])} />
+        </span>
+        <span>{STATES[work?.state || 'unassigned']}</span>
+      </div>
+      <h3 className="mt-2 text-base font-semibold">{item.title}</h3>
+      {opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}
+      <p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p>
+      <p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}
+        {region ? <span>Región: {region}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>
+      {work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => open(item.id)}>Abrir y trabajar</Button>
+        {admin && listStageOf(work?.state) === 'open' ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setProblem(''); setDiscarding({ ids: [item.id], title: item.title }); }}>
+          <Archive className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />No es para nosotros</Button> : null}
+        {admin && work?.state === 'archived' ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => void reopen([item.id])}><RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Reabrir</Button> : null}
+      </div>
+    </article>;
+  };
   const title = admin ? 'Gestionar oportunidades' : 'Mis oportunidades asignadas';
   const item = detail?.item;
   const signal = isSignalKind(item?.kind);
@@ -504,7 +614,8 @@ export function OpportunityWorkWorkspace() {
     </header>}
     {problem && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm"><p>{problem}</p><Button size="sm" variant="outline" onClick={() => { setProblem(''); void load(); if (selected) void loadDetail(selected); }}>Reintentar</Button></div>}
     {/* A notice floats at the bottom instead of pushing the page down (it moved «← Oportunidades» ≈46 px). */}
-    {feedback && <p role="status" className="fixed inset-x-4 bottom-6 z-50 mx-auto w-fit max-w-xl rounded-xl border bg-background/95 px-4 py-3 text-sm shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2">{feedback}</p>}
+    {feedback && <div role="status" className="fixed inset-x-4 bottom-6 z-50 mx-auto flex w-fit max-w-xl items-center gap-3 rounded-xl border bg-background/95 px-4 py-3 text-sm shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2">
+      <span>{feedback}</span>{undo ? <Button type="button" size="sm" variant="ghost" className="h-7 shrink-0" onClick={() => { const action = undo; setFeedback(''); action.run(); }}>{undo.label}</Button> : null}</div>}
     {!overview && !problem && <div role="status" className="rounded-xl border p-8"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando oportunidades…</div>}
     {overview && !selected && <>
       {/* The offer confirmed is a status, not a task: one quiet line with its three small actions. Without it, asking to confirm it is the card. */}
@@ -533,18 +644,44 @@ export function OpportunityWorkWorkspace() {
         <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} />
         {pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} limits={pipeline.limits} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting) && !summariesStalled}
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} onAssign={item => void openQuickAssign(item)}
+        onDiscard={item => { setProblem(''); setDiscarding({ ids: [item.id], title: item.title }); }} onReopen={item => void reopen([item.id])}
         filtered={Boolean(search) || source !== 'all' || categories.length > 0} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} onMore={loadMore} onClearFilters={clearFilters} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
       <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} showSources={admin}>
-        <div role="group" aria-label="Filtrar oportunidades" className="flex flex-wrap gap-1">{filters.map(([key, label]) => <button key={key} type="button" aria-pressed={shownFilter === key} onClick={() => setFilter(key)} className={filterChip(shownFilter === key)}>{label}</button>)}</div>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div role="group" aria-label="Filtrar oportunidades" className="-mx-1 flex max-w-full gap-1 overflow-x-auto px-1 pb-0.5 lg:flex-wrap lg:overflow-visible">{filters.map(([key, label]) => {
+            // «Todas» of an administrator holds what already closed too, so it goes without a number; a member's «Mi trabajo» has one.
+            const count = key === 'all' && admin ? undefined : overview.counts?.[key];
+            return <button key={key} type="button" aria-pressed={shownFilter === key} title={filterHint(key)} onClick={() => setFilter(key)} className={filterChip(shownFilter === key)}>
+              {label}{count !== undefined ? <span className="ml-1.5 tabular-nums opacity-70">{new Intl.NumberFormat('es-CL').format(count)}</span> : null}</button>; })}</div>
+          {admin ? <div role="group" aria-label="Ordenar la lista" className="flex w-fit shrink-0 items-center gap-0.5 rounded-full border p-0.5">{PRIORITY_SORTS.map(option => <button key={option.id} type="button" aria-pressed={sort === option.id} title={option.hint}
+            onClick={() => setSort(option.id)} className={cn('rounded-full px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              sort === option.id ? 'bg-foreground font-medium text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>{option.label}</button>)}</div> : null}
+        </div>
       </OpportunityFilters>
       {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{search || source !== 'all' || categories.length ? 'Prueba otro texto, otra fuente u otro rubro, o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p>
         {search || source !== 'all' || categories.length ? <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Quitar filtros</Button> : null}</section>}
-      {admin && filter === 'recommended' && !search && source === 'all' && !categories.length && <StartHere items={items} onOpen={open} />}
+      {admin && shownFilter === 'recommended' && !search && source === 'all' && !categories.length && <StartHere items={items} onOpen={open} />}
+      {admin && items.length > 1 && shownFilter !== 'excluded' ? <div className="flex items-center gap-2"><Checkbox id="op-pick-all" checked={items.every(item => picked.has(item.id))}
+        onCheckedChange={value => setPicked(value ? new Set(items.map(item => item.id)) : new Set())} /><Label htmlFor="op-pick-all" className="text-sm font-normal text-muted-foreground">Seleccionar las {items.length} de esta página</Label></div> : null}
       {items.length > 0 && <div className="space-y-8">{listGroups.map(group => <section key={group.key} aria-labelledby={`source-${group.key}`} className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><h2 id={`source-${group.key}`} className="text-lg font-semibold">{group.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{group.items.length}</span></h2><p className="text-xs text-muted-foreground">{group.note}</p></div>
-        {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className={cn('grid gap-3', group.items.length > 1 && 'xl:grid-cols-2')}>{group.items.map(card)}</div>}
+        {admin && shownFilter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className={cn('grid gap-3', group.items.length > 1 && 'xl:grid-cols-2')}>{group.items.map(card)}</div>}
       </section>)}</div>}
+      {admin && pickedItems.length > 0 ? <ActionBar ariaLabel="Acciones con las oportunidades seleccionadas" label={`${pickedItems.length} ${pickedItems.length === 1 ? 'seleccionada' : 'seleccionadas'}`}
+        hint={[pickedOpen ? `${pickedOpen} sin equipo` : '', pickedWorked ? `${pickedWorked} con equipo` : ''].filter(Boolean).join(' · ')}>
+        <Button type="button" variant="ghost" onClick={() => setPicked(new Set())}>Quitar selección</Button>
+        {pickedWorked ? <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="outline" disabled={busy}>Mover a…</Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => void movePicked('working')}>En preparación</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void movePicked('submitted')}>Presentada</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void movePicked('archived')}>Archivada</DropdownMenuItem>
+            {pickedArchived ? <DropdownMenuItem onClick={() => void movePicked('unassigned')}>Reabrir</DropdownMenuItem> : null}
+          </DropdownMenuContent></DropdownMenu> : null}
+        {pickedOpen ? <Button type="button" variant="outline" disabled={busy} onClick={() => { setProblem(''); setDiscarding({ ids: pickedItems.filter(item => listStageOf(workOf(item.id)?.state) === 'open').map(item => item.id) }); }}>
+          <Archive className="mr-2 h-4 w-4" aria-hidden="true" />No es para nosotros</Button> : null}
+        {pickedOpen ? <Button type="button" disabled={busy} onClick={openBulkAssign}><Users className="mr-2 h-4 w-4" aria-hidden="true" />Asignar</Button> : null}
+      </ActionBar> : null}
       </>}
       {!(admin && (view === 'pipeline' || view === 'market')) && view !== 'assistant' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
     </>}
@@ -567,7 +704,9 @@ export function OpportunityWorkWorkspace() {
             {/* With the report ready, the main action is the next step: applying, or finding whom to write to. Once it was handed in or closed there is no next step to push. */}
             {latest && !researching && <Button variant={isFinished(detail.work?.state) ? 'outline' : 'default'} onClick={() => setTab(signal ? 'contacts' : 'apply')}>{signal ? <Users className="mr-2 h-4 w-4" aria-hidden="true" /> : <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" />}{signal ? 'Buscar a quién escribir' : 'Cómo postular'}</Button>}
             {(latest || researching || tab !== 'summary') && <Button variant={latest && !researching ? 'ghost' : 'default'} onClick={generate} disabled={busy || researching}>{researching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}{researching ? 'Preparando…' : latest ? (signal ? 'Actualizar ficha comercial' : 'Actualizar informe') : (signal ? 'Generar ficha comercial' : 'Generar informe')}</Button>}
-            {admin && <Button variant="outline" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}><Users className="mr-2 h-4 w-4" />Asignar equipo</Button>}
+            {admin && detail.work?.state !== 'archived' && <Button variant="outline" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}><Users className="mr-2 h-4 w-4" />Asignar equipo</Button>}
+            {admin && listStageOf(detail.work?.state) === 'open' ? <Button variant="ghost" disabled={busy} onClick={() => { setProblem(''); setDiscarding({ ids: [item.id], title: item.title }); }}><Archive className="mr-2 h-4 w-4" aria-hidden="true" />No es para nosotros</Button> : null}
+            {admin && detail.work?.state === 'archived' ? <Button variant="outline" disabled={busy} onClick={() => void reopen([item.id])}><RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />Reabrir</Button> : null}
             {item.url && <Button asChild variant="ghost"><a href={item.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-2 h-4 w-4" />{item.kind === 'tender' ? 'Ver en Mercado Público' : signal ? 'Ver en LinkedIn' : 'Ver fuente'}</a></Button>}
           </div>
           {detail.work && detail.work.state !== 'unassigned' && <MemberStrip state={detail.work.state} canStep={!admin} busy={busy}
@@ -635,8 +774,9 @@ export function OpportunityWorkWorkspace() {
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
     {admin && <CloseReasonDialog target={closing} busy={busy} error={closing ? problem : ''} onConfirm={confirmClose} onCancel={() => setClosing(null)} />}
+    {admin && <DiscardDialog target={discarding} busy={busy} error={discarding ? problem : ''} onConfirm={confirmDiscard} onCancel={() => setDiscarding(null)} />}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
-    <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
+    <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignMany ? `Asignar ${assignMany.length === 1 ? 'una oportunidad' : `${assignMany.length} oportunidades`}` : assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>
           <WorkspaceCompanyFields draft={draft} field={field} />

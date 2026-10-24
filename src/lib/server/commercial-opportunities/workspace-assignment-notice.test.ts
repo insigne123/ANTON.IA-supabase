@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assignmentEmail, assignmentWhen } from '@/lib/commercial-opportunities/assignment-email';
-import { notifyNewParticipants, readParticipantIds } from './workspace-assignment-notice';
+import { assignmentDigestEmail, assignmentEmail, assignmentWhen } from '@/lib/commercial-opportunities/assignment-email';
+import { notifyBulkAssignment, notifyNewParticipants, readParticipantIds, readTeams } from './workspace-assignment-notice';
 
 const ORG = '00000000-0000-4000-8000-000000000001';
 const OPP = '00000000-0000-4000-8000-0000000000aa';
@@ -87,4 +87,35 @@ test('a send that fails or throws is counted and the others still go out', async
   } });
   assert.deepEqual(sent, ['luis@grupoexpro.cl']);
   assert.deepEqual(result, { sent: 0, skipped: 0, failed: 2 });
+});
+
+test('several assigned in one go are one email per person: the soonest to close first, each with its link and whether it is theirs', () => {
+  const email = assignmentDigestEmail({ name: 'Ana Pérez', assignedBy: 'Nicolás Yarur', appUrl: 'https://app.antonia.ai/', items: [
+    { opportunityId: 'a', title: 'Aseo Hospital Regional', buyer: 'Hospital Regional', deadlineAt: '2026-10-30T18:00:00Z', responsible: false },
+    { opportunityId: 'b', title: 'Guardias  Municipalidad', buyer: null, deadlineAt: '2026-10-23T18:00:00Z', responsible: true },
+    { opportunityId: 'c', title: '<b>Sin fecha</b>', buyer: null, deadlineAt: null, responsible: false }] });
+  assert.equal(email.subject, 'Te asignaron 3 oportunidades');
+  assert.match(email.text, /^Hola, Ana Pérez\. Nicolás Yarur te asignó 3 oportunidades; quedaste a cargo de una\./);
+  assert.ok(email.text.indexOf('Guardias Municipalidad') < email.text.indexOf('Aseo Hospital Regional'), 'the one that closes first goes first');
+  assert.ok(email.text.indexOf('Aseo Hospital Regional') < email.text.indexOf('<b>Sin fecha</b>'), 'without a deadline, last');
+  assert.match(email.text, /cierra el viernes 23 de octubre, 15:00 · a tu cargo/);
+  assert.match(email.text, /https:\/\/app\.antonia\.ai\/opportunities\?op=b/);
+  assert.match(email.html, /&lt;b&gt;Sin fecha&lt;\/b&gt;/);
+  assert.match(email.html, /Ver mis oportunidades/);
+});
+
+test('a bulk assignment emails each person who joined once, with what they joined; the single email when it was one', async () => {
+  const OPP2 = '00000000-0000-4000-8000-0000000000bb';
+  const both = world({
+    opportunity_participants: [...world().opportunity_participants, { organization_id: ORG, opportunity_id: OPP2, user_id: ANA }, { organization_id: ORG, opportunity_id: OPP2, user_id: OLD }],
+    commercial_opportunities: [...world().commercial_opportunities, { organization_id: ORG, id: OPP2, title: 'Guardias Puerto Montt', buyer_name: null, company_name: 'Municipalidad', deadline_at: null }],
+  });
+  const before = await readTeams(fakeClient(world()), scope, [OPP, OPP2]);
+  assert.deepEqual(before.get(OPP2), [], 'an opportunity without a team yet');
+  const sent: any[] = [];
+  const result = await notifyBulkAssignment(fakeClient(both), scope, new Map([[OPP, [OLD]], [OPP2, []]]), { send: async email => { sent.push(email); return { ok: true }; }, appUrl: 'https://app.antonia.ai', env: {} });
+  // Ana joined both (one email with both); the old member joined only the second (the single email); Luis turned the emails off.
+  assert.deepEqual(sent.map(email => [email.to, email.subject]).sort(), [['ana@grupoexpro.cl', 'Te asignaron 2 oportunidades'], ['old@grupoexpro.cl', 'Te asignaron: Guardias Puerto Montt']]);
+  assert.deepEqual(result, { sent: 2, skipped: 1, failed: 0 });
+  assert.deepEqual(await notifyBulkAssignment(fakeClient(both), scope, new Map([[OPP, []]]), { send: async () => { throw new Error('must not send'); }, env: { OPPORTUNITY_ASSIGNMENT_EMAIL: 'off' } }), { sent: 0, skipped: 0, failed: 0 });
 });

@@ -102,7 +102,9 @@ export async function POST(request: Request, context: Context) {
         .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', input.expectedRevision).select('revision').maybeSingle());
       if (!saved) throw new AuthError('El estado cambió. Actualiza la oportunidad.', 409);
       const note = input.note?.replace(/\s+/g, ' ').trim();
-      await addOpportunityActivity(auth.admin, scope, id, 'state', `Estado: ${STATE_LABELS[input.state] ?? input.state}${note ? `. ${note}` : ''}`, note ? { note } : {});
+      // Back to the ones nobody works (what was put aside by mistake, or a team that was let go) reads as what it is.
+      const line = input.state === 'unassigned' ? 'Reabierta: vuelve a las que nadie trabaja todavía.' : `Estado: ${STATE_LABELS[input.state] ?? input.state}`;
+      await addOpportunityActivity(auth.admin, scope, id, 'state', `${line}${note ? `${line.endsWith('.') ? ' ' : '. '}${note}` : ''}`, { ...(note ? { note } : {}), to: input.state });
       // A block is news for whoever can unblock it.
       if (input.state === 'blocked') {
         await notifyManagers(auth.admin, scope, id, 'Oportunidad bloqueada', `blocked:${id}:${saved.revision}`).catch(() => null);
