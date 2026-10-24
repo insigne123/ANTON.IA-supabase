@@ -11,3 +11,10 @@ export function coworkTimeZone(value = typeof process === 'undefined' ? undefine
     return COWORK_DEFAULT_TIME_ZONE;
   }
 }
+
+/** Whose hour a time is, in words: «hora de Chile» for Santiago, another zone by its city («hora de Lima»). */
+export function coworkZoneLabel(zone: string) {
+  if (zone === COWORK_DEFAULT_TIME_ZONE) return 'hora de Chile';
+  const city = zone.split('/').pop()?.replace(/_/g, ' ');
+  return city ? `hora de ${city}` : 'hora local';
+}

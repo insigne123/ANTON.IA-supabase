@@ -106,7 +106,21 @@ test('«Memoria» (what Cowork remembers) is always at the foot of the list, als
   }
 });
 
-test('«Tareas programadas» sits at the foot of the list only where the account has them', () => {
-  assert.match(render({ onSchedules: () => {} }), /aria-label="Tareas programadas"/);
-  assert.doesNotMatch(render({}), /Tareas programadas/);
+test('«Tareas programadas» sits at the foot of the list only where the account has them, by name, with how many and the next one', () => {
+  const none = render({ onSchedules: () => {} });
+  assert.match(none, /aria-label="Tareas programadas"/);
+  assert.match(none, />Programadas</, 'a word, not only an icon (COW-19)');
+  assert.doesNotMatch(render({}), /Tareas programadas|Programadas/);
+  const two = render({ onSchedules: () => {}, schedules: { active: 2, next: 'lunes 26 de octubre, 09:00' } });
+  assert.match(two, /aria-label="Tareas programadas: 2 activas, la próxima lunes 26 de octubre, 09:00"/);
+  assert.match(two, /title="Próxima: lunes 26 de octubre, 09:00"/);
+  assert.match(two, />2<\/span>/);
+});
+
+test('a conversation waiting for approval says «Aprobar» in words; the time goes to the tooltip so the title has the room', () => {
+  const waiting = { ...thread(1), status: 'waiting_approval' as const };
+  const html = render({ threads: [waiting, thread(2)] });
+  assert.match(html, />Aprobar<span class="sr-only">: Necesita tu aprobación<\/span>/);
+  assert.match(html, /title="Correos para clientes 2 · [^"]+"/, 'the time is still there, on hover');
+  assert.equal((html.match(/Aprobar/g) || []).length, 1, 'only the one that waits');
 });
