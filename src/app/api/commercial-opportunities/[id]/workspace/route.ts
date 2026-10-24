@@ -14,6 +14,7 @@ import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunitie
 import { AuthError } from '@/lib/server/auth-utils';
 import { notifyNewParticipants, readParticipantIds } from '@/lib/server/commercial-opportunities/workspace-assignment-notice';
 import { notifyManagers, recordDecision, replyToDecision } from '@/lib/server/commercial-opportunities/workspace-decisions';
+import { notifyDecisionByEmail } from '@/lib/server/commercial-opportunities/workspace-decision-notice';
 import { canSetPrices, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, memberMayMove, stateNoteSchema } from '@/lib/commercial-opportunities/member-work';
 import { proposeFitAnswer, resolveFitProposal } from '@/lib/server/commercial-opportunities/workspace-proposals';
 
@@ -41,8 +42,19 @@ export async function POST(request: Request, context: Context) {
       after(() => notifyNewParticipants(auth.admin, scope, id, before).catch(() => null));
       return opportunitiesJson({ revision });
     }
-    if (action === 'decision') { await recordDecision(auth.admin, scope, id, decisionSchema.parse(data)); return opportunitiesJson({ ok: true }); }
-    if (action === 'decision_reply') { assertOpportunityAdmin(scope); await replyToDecision(auth.admin, scope, id, decisionReplySchema.parse(data)); return opportunitiesJson({ ok: true }); }
+    if (action === 'decision') {
+      const input = decisionSchema.parse(data);
+      await recordDecision(auth.admin, scope, id, input);
+      // The administrators get it by email too, after the answer: before, a decision waited until one of them opened the page.
+      after(() => notifyDecisionByEmail(auth.admin, scope, id, { kind: input.type, text: input.text, dueAt: input.dueAt }).catch(() => null));
+      return opportunitiesJson({ ok: true });
+    }
+    if (action === 'decision_reply') {
+      assertOpportunityAdmin(scope); const input = decisionReplySchema.parse(data);
+      const { asker } = await replyToDecision(auth.admin, scope, id, input);
+      after(() => notifyDecisionByEmail(auth.admin, scope, id, { kind: 'reply', text: input.text, asker }).catch(() => null));
+      return opportunitiesJson({ ok: true });
+    }
     if (action === 'activity') {
       const input = activitySchema.parse(data); await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
     }
@@ -92,7 +104,10 @@ export async function POST(request: Request, context: Context) {
       const note = input.note?.replace(/\s+/g, ' ').trim();
       await addOpportunityActivity(auth.admin, scope, id, 'state', `Estado: ${STATE_LABELS[input.state] ?? input.state}${note ? `. ${note}` : ''}`, note ? { note } : {});
       // A block is news for whoever can unblock it.
-      if (input.state === 'blocked') await notifyManagers(auth.admin, scope, id, 'Oportunidad bloqueada', `blocked:${id}:${saved.revision}`).catch(() => null);
+      if (input.state === 'blocked') {
+        await notifyManagers(auth.admin, scope, id, 'Oportunidad bloqueada', `blocked:${id}:${saved.revision}`).catch(() => null);
+        after(() => notifyDecisionByEmail(auth.admin, scope, id, { kind: 'blocked', text: note || '' }).catch(() => null));
+      }
       return opportunitiesJson(saved);
     }
     if (action === 'task') {

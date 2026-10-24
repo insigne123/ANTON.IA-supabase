@@ -57,4 +57,5 @@ export async function replyToDecision(client: SupabaseClient, scope: WorkScope, 
   await addOpportunityActivity(client, scope, id, 'decision', replyBody(input.text), { type: 'reply', to: waiting.id }, key);
   const [title, responsible] = await Promise.all([opportunityTitle(client, scope, id), responsibleOf(client, scope, id)]);
   await notifyPeople(client, scope, id, [waiting.actorId, responsible], `Respondieron tu decisión: ${title}`, key);
+  return { asker: waiting.actorId ?? null };
 }

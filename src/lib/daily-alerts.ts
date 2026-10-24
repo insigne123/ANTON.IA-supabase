@@ -29,11 +29,19 @@ export type AlertFacts = {
   research: Array<{ leadId: string | null; name: string }>;
   /** Opportunities of the person, or recommended and nobody's when they manage them, closing within three days. */
   closing: AlertOpportunity[];
+  /** What happened on Oportunidades for this person since the last alert: assigned to them, a report ready on one of theirs. */
+  assigned?: Array<{ id: string; title: string }>;
+  reports?: Array<{ id: string; title: string }>;
+  /**
+   * What waits for an administrator: decisions asked (or a proposal not to apply) with no answer yet and opportunities blocked, the oldest
+   * first, with who asked and since when. Every day while they wait: it is the reminder that was missing.
+   */
+  waiting?: Array<{ id: string; title: string; kind: 'ask' | 'no_go' | 'blocked'; who: string; since: string; dueAt: string | null }>;
   goal: GoalProgress | null;
   /** Today's «Contacto del día», when it is ready. */
   drop?: { id: string; items: DropItem[] } | null;
 };
-export type AlertKind = 'reply' | 'pending' | 'commitment' | 'closing' | 'drop' | 'research' | 'ready' | 'goal';
+export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'closing' | 'assigned' | 'report' | 'drop' | 'research' | 'ready' | 'goal';
 export type AlertLine = { kind: AlertKind; text: string; href: string };
 export type DailyAlert = { subject: string; lines: AlertLine[] };
 
@@ -71,6 +79,18 @@ export function closingText(items: AlertOpportunity[], now: Date) {
   return `${items.length.toLocaleString('es-CL')} ${many}${qualifier} cierran ${when}`;
 }
 
+/** «Diego pide una decisión: Aseo Hospital Regional · espera hace 3 días», «Bloqueada: …», with the date asked for when it is close. */
+export function waitingText(item: NonNullable<AlertFacts['waiting']>[number], now: Date) {
+  const title = item.title.replace(/\s+/g, ' ').trim().slice(0, 140);
+  const head = item.kind === 'blocked' ? `Bloqueada: ${title}` : `${item.who} ${item.kind === 'no_go' ? 'propone no postular' : 'pide una decisión'}: ${title}`;
+  const days = Math.floor((now.getTime() - Date.parse(item.since)) / 86_400_000);
+  const due = item.dueAt && Number.isFinite(Date.parse(item.dueAt)) ? item.dueAt : null;
+  const late = due && dayInZone(new Date(due)) < dayInZone(now);
+  const tail = due && (late || dayInZone(new Date(due)) <= shiftDay(dayInZone(now), 1)) ? (late ? 'la fecha pedida ya pasó' : `la piden para ${dayWord(due, now)}`)
+    : days >= 2 ? `espera hace ${days} días` : '';
+  return tail ? `${head} · ${tail}` : head;
+}
+
 /**
  * The morning alert, or null when there is nothing concrete to do. The subject names the most urgent thing; the body lists
  * each thing once with its link, then the goal. `goalReminders: false` keeps a goal that is behind from being the reason
@@ -99,10 +119,33 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
   }
   if (facts.commitments.length > 2) lines.push({ kind: 'commitment', text: `Y ${plural(facts.commitments.length - 2, 'compromiso más', 'compromisos más')}`, href: '/contacted' });
 
+  // What waits for an administrator on Oportunidades, the oldest first; the subject when nothing above was more urgent.
+  const waiting = facts.waiting || [];
+  for (const item of waiting.slice(0, 2)) {
+    const text = waitingText(item, now);
+    lead(text.split(' · ')[0]);
+    lines.push({ kind: 'decision', text, href: `/opportunities?op=${encodeURIComponent(item.id)}` });
+  }
+  if (waiting.length > 2) lines.push({ kind: 'decision', text: `Y ${plural(waiting.length - 2, 'oportunidad más espera', 'oportunidades más esperan')} tu respuesta`, href: '/opportunities' });
+
+  const assigned = facts.assigned || [];
+  if (assigned.length) {
+    const text = assigned.length === 1 ? `Te asignaron: ${assigned[0].title}` : `Te asignaron ${assigned.length.toLocaleString('es-CL')} oportunidades`;
+    lead(text);
+    lines.push({ kind: 'assigned', text, href: assigned.length === 1 ? `/opportunities?op=${encodeURIComponent(assigned[0].id)}` : '/opportunities' });
+  }
+
   if (facts.closing.length) {
     const text = closingText(facts.closing, now);
     lead(facts.closing.length === 1 ? text.split(':')[0] : text);
     lines.push({ kind: 'closing', text, href: facts.closing.length === 1 ? `/opportunities?op=${encodeURIComponent(facts.closing[0].id)}` : '/opportunities' });
+  }
+
+  const reports = facts.reports || [];
+  if (reports.length) {
+    const text = reports.length === 1 ? `Listo el informe de ${reports[0].title}` : `Listos ${reports.length.toLocaleString('es-CL')} informes de tus oportunidades`;
+    lead(text);
+    lines.push({ kind: 'report', text, href: reports.length === 1 ? `/opportunities?op=${encodeURIComponent(reports[0].id)}` : '/opportunities' });
   }
 
   if (facts.drop?.items.length) {

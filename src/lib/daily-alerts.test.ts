@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { alertDay, alertEmail, closingText, composeAlert, dayWord, type AlertFacts } from './daily-alerts';
+import { alertDay, alertEmail, closingText, composeAlert, dayWord, waitingText, type AlertFacts } from './daily-alerts';
 import { DEFAULT_GOALS } from './weekly-goals';
 
 // Chile is UTC−3 in October: 12:00Z is 09:00 there.
@@ -128,4 +128,30 @@ test('with today\'s contact the email has one block and one main button; without
   const plain = alertEmail(composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana', company: null }] }), TUESDAY)!, 'Ana', 'https://app.antonia.ai/');
   assert.match(plain.html, /background:#111827[^>]*>Abrir ANTON\.IA</);
   assert.match(plain.html, /^<div style="background:#ffffff/);
+});
+
+test('what waits for an administrator on Oportunidades leads, with who asked, and says how long it has waited or when it is needed', () => {
+  const ask = { id: 'o1', title: 'Aseo Hospital Regional', kind: 'ask' as const, who: 'Diego', since: '2026-10-16T15:00:00Z', dueAt: null };
+  assert.equal(waitingText(ask, TUESDAY), 'Diego pide una decisión: Aseo Hospital Regional · espera hace 3 días');
+  assert.equal(waitingText({ ...ask, since: '2026-10-20T10:00:00Z' }, TUESDAY), 'Diego pide una decisión: Aseo Hospital Regional', 'asked today: no age to say');
+  assert.equal(waitingText({ ...ask, dueAt: '2026-10-21T15:00:00Z' }, TUESDAY), 'Diego pide una decisión: Aseo Hospital Regional · la piden para mañana');
+  assert.equal(waitingText({ ...ask, dueAt: '2026-10-19T15:00:00Z' }, TUESDAY), 'Diego pide una decisión: Aseo Hospital Regional · la fecha pedida ya pasó');
+  assert.equal(waitingText({ ...ask, kind: 'no_go' }, TUESDAY), 'Diego propone no postular: Aseo Hospital Regional · espera hace 3 días');
+  assert.equal(waitingText({ ...ask, kind: 'blocked', who: 'Alguien del equipo' }, TUESDAY), 'Bloqueada: Aseo Hospital Regional · espera hace 3 días');
+  const alert = composeAlert(facts({ waiting: [ask, { ...ask, id: 'o2', kind: 'blocked' }, { ...ask, id: 'o3' }, { ...ask, id: 'o4' }] }), TUESDAY)!;
+  assert.equal(alert.subject, 'Diego pide una decisión: Aseo Hospital Regional');
+  assert.deepEqual(alert.lines.filter(line => line.kind === 'decision').map(line => [line.text.split(' · ')[0], line.href]), [
+    ['Diego pide una decisión: Aseo Hospital Regional', '/opportunities?op=o1'], ['Bloqueada: Aseo Hospital Regional', '/opportunities?op=o2'],
+    ['Y 2 oportunidades más esperan tu respuesta', '/opportunities']]);
+});
+
+test('an opportunity assigned or a report ready on one of yours is reason enough for the alert, after the replies', () => {
+  const one = composeAlert(facts({ assigned: [{ id: 'o1', title: 'Guardias Puerto Montt' }] }), TUESDAY)!;
+  assert.equal(one.subject, 'Te asignaron: Guardias Puerto Montt');
+  assert.deepEqual(one.lines[0], { kind: 'assigned', text: 'Te asignaron: Guardias Puerto Montt', href: '/opportunities?op=o1' });
+  const both = composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Juan Pérez', company: null }], assigned: [{ id: 'o1', title: 'A' }, { id: 'o2', title: 'B' }], reports: [{ id: 'o3', title: 'Aseo' }] }), TUESDAY)!;
+  assert.equal(both.subject, 'Te respondió Juan Pérez');
+  assert.deepEqual(both.lines.map(line => line.kind), ['reply', 'assigned', 'report', 'goal']);
+  assert.equal(both.lines[1].text, 'Te asignaron 2 oportunidades');
+  assert.equal(both.lines[2].text, 'Listo el informe de Aseo');
 });
