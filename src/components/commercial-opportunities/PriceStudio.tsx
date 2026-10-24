@@ -7,34 +7,104 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { RATES_REFERENCE, laborCost } from '@/lib/commercial-opportunities/labor-cost';
 import { matchup, ourPriceMoves, scenarioGrid, scoreSetupProblem, thresholdSentence } from '@/lib/commercial-opportunities/price-scenarios';
-import { typed, costSummary, defaultDraft, laborInputs, newExpense, newLoad, newProfile, newSite, parseDraft, scoreInputs, siteKept, type StudioDraft, type StudioProfile, type StudioSite } from '@/lib/commercial-opportunities/price-studio';
+import { typed, costSummary, defaultDraft, laborInputs, newExpense, newLoad, newProfile, newSite, parseDraft, scoreInputs, siteKept, studyText, type PriceStudyVersion, type SavedPriceStudy,
+  type StudioDraft, type StudioProfile, type StudioSite } from '@/lib/commercial-opportunities/price-studio';
 
 const number = (value: number, digits = 0) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: digits }).format(value);
 const money = (value: number) => `$${number(Math.round(value))}`;
 const signed = (value: number) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${number(Math.abs(value), 2)}`;
 const stepWord = (step: number) => (step === 0 ? 'Igual que tú' : `${number(Math.abs(step) * 100)} % ${step < 0 ? 'más barato' : 'más caro'}`);
+const when = (at: string) => new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Santiago' }).format(new Date(at));
+/** What a save answers: the version saved, or why not (another person saved one since: `conflict`). */
+export type PriceSaveResult = { ok: true; saved: SavedPriceStudy } | { ok: false; conflict: boolean; message: string };
 
 /**
  * «Precio»: the two calculations a price decision needs. What an hour of work costs and should be quoted at (cost of each profile, margin,
- * overhead, VAT), and what the price is worth in points against a rival (how far a rival can go and still beat the offer). What is typed
- * stays in this browser, for this person and this opportunity: it is the company's costs, so it is not shared until it has a home in the
- * ficha. Closed by default: the page has one main action and this is the one for whoever sets the prices.
+ * overhead, VAT), and what the price is worth in points against a rival (how far a rival can go and still beat the offer). It is the
+ * company's costs: only whoever sets the prices sees it. It is saved for them as it is typed, with its versions (OPP-23); before its
+ * table exists it stays in this browser, as it did. Closed by default: the page has one main action and this is the one for whoever sets
+ * the prices.
  */
-export function PriceStudio({ storageKey, initialDraft }: { storageKey: string; /** A draft to start from instead of the empty one (what the browser kept replaces it once read). */ initialDraft?: StudioDraft }) {
+export function PriceStudio({ storageKey, initialDraft, server, people = [], onSave, onOpenVersion, offer, onMarket }: {
+  storageKey: string;
+  /** A draft to start from instead of the empty one (what the browser kept replaces it once read). */
+  initialDraft?: StudioDraft;
+  /** The study saved for the team and its versions; unavailable before its migration, and then it lives in this browser. */
+  server?: { available: boolean; latest: SavedPriceStudy | null; versions: PriceStudyVersion[] } | null;
+  /** The team's names, for who saved each version. */
+  people?: Array<{ user_id: string; name: string }>;
+  onSave?: (study: StudioDraft, base: string | null, options?: { over?: boolean; fresh?: boolean }) => Promise<PriceSaveResult>;
+  /** An older version, to bring it back. */
+  onOpenVersion?: (versionId: string) => Promise<StudioDraft | null>;
+  /** The lines of the economic offer, to put a figure of the calculation in one of them; `withTax` when the portal takes the price with VAT. */
+  offer?: { lines: Array<{ index: number; description: string }>; withTax: boolean; onUse: (line: number, value: number) => Promise<boolean> } | null;
+  /** «Cómo ganar», where the prices this buyer paid before are: the starting point for a rival's price. */
+  onMarket?: () => void;
+}) {
   const uid = useId();
-  const [draft, setDraft] = useState<StudioDraft>(() => initialDraft ?? defaultDraft());
+  const shared = Boolean(server?.available && onSave);
+  const first = shared && server?.latest ? server.latest.study : initialDraft ?? defaultDraft();
+  const [draft, setDraft] = useState<StudioDraft>(first);
   const [tab, setTab] = useState<'cost' | 'score'>('cost');
   const [copied, setCopied] = useState(false);
+  // The version this person works on, what it says, and how its save went.
+  const [base, setBase] = useState<string | null>(shared ? server?.latest?.id ?? null : null);
+  const [baseline, setBaseline] = useState(() => studyText(first));
+  const [save, setSave] = useState<{ state: 'idle' | 'saving' | 'saved' | 'error' | 'conflict'; message?: string }>({ state: 'idle' });
+  // A study only this browser kept (from before it was saved for the team): it is offered to the team once, never sent on its own.
+  const [onlyHere, setOnlyHere] = useState(false);
   const loaded = useRef(false);
+  const text = useMemo(() => studyText(draft), [draft]);
+  const dirty = text !== baseline;
   useEffect(() => {
-    try { const raw = window.localStorage.getItem(storageKey); if (raw) setDraft(parseDraft(raw)); } catch { /* private mode: it lives until the page closes */ }
+    let raw: string | null = null;
+    try { raw = window.localStorage.getItem(storageKey); } catch { /* private mode: it lives until the page closes */ }
+    if (!shared) { if (raw) setDraft(parseDraft(raw)); }
+    else if (!server?.latest && raw) {
+      const local = parseDraft(raw);
+      if (studyText(local) !== studyText(defaultDraft())) { setDraft(local); setOnlyHere(true); }
+    }
     loaded.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opportunity; the team's newer versions are followed below.
   }, [storageKey]);
+  const store = async (options: { over?: boolean; fresh?: boolean } = {}, study = draft) => {
+    if (!onSave) return;
+    setSave({ state: 'saving' });
+    const result = await onSave(study, base, options);
+    if (result.ok) { setBase(result.saved.id); setBaseline(studyText(study)); setSave({ state: 'saved' }); setOnlyHere(false); }
+    else setSave({ state: result.conflict ? 'conflict' : 'error', message: result.message });
+  };
+  // Saved as it is typed: in the browser before the table exists, for the team after. One save at a time, so the next starts from it.
   useEffect(() => {
     if (!loaded.current) return;
-    const timer = setTimeout(() => { try { window.localStorage.setItem(storageKey, JSON.stringify(draft)); } catch { /* not kept */ } }, 400);
+    if (!shared) {
+      const timer = setTimeout(() => { try { window.localStorage.setItem(storageKey, JSON.stringify(draft)); } catch { /* not kept */ } }, 400);
+      return () => clearTimeout(timer);
+    }
+    if (!dirty || onlyHere || save.state === 'saving' || save.state === 'conflict' || save.state === 'error') return;
+    const timer = setTimeout(() => void store(), 1200);
     return () => clearTimeout(timer);
-  }, [draft, storageKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- store reads the draft and the version of this render.
+  }, [draft, storageKey, shared, dirty, onlyHere, save.state]);
+  // A teammate saved another version while this one had nothing new: theirs comes in.
+  useEffect(() => {
+    const latest = server?.latest;
+    if (!shared || !latest || latest.id === base || dirty || save.state === 'saving') return;
+    setDraft(latest.study); setBase(latest.id); setBaseline(studyText(latest.study)); setSave({ state: 'idle' });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- when the newest version on the server changes.
+  }, [server?.latest?.id]);
+  const nameOf = (id?: string | null) => people.find(person => person.user_id === id)?.name ?? null;
+  const takeTheirs = () => {
+    const latest = server?.latest;
+    if (!latest) return;
+    setDraft(latest.study); setBase(latest.id); setBaseline(studyText(latest.study)); setSave({ state: 'idle' });
+  };
+  const bringBack = async (versionId: string) => {
+    const study = onOpenVersion ? await onOpenVersion(versionId) : null;
+    if (!study) return;
+    setDraft(study);
+    await store({ fresh: true }, study);
+  };
 
   const inputs = useMemo(() => laborInputs(draft), [draft]);
   const cost = useMemo(() => laborCost(inputs.profiles, inputs.params), [inputs]);
@@ -60,6 +130,21 @@ export function PriceStudio({ storageKey, initialDraft }: { storageKey: string; 
   const onCost = draft.params.profitOn === 'cost';
   const postProfile = result?.profiles.find(item => item.post) ?? null;
   const siteTotals = result?.sites ? { monthly: result.sites.monthly, withVat: result.sites.monthly * (1 + inputs.params.vatPct / 100), contract: result.sites.monthly * inputs.params.months } : null;
+  // «Usar en la oferta económica»: a figure of the calculation as the unit price of a line, with VAT when the portal takes it so.
+  const figures = result ? [
+    { key: 'month', label: 'Precio al mes', value: siteTotals?.monthly ?? result.totals.priceMonthly },
+    { key: 'hour', label: 'Valor hora promedio', value: result.totals.averagePricePerHour },
+    ...(postProfile?.post ? [{ key: 'post', label: `Un puesto de «${postProfile.name || 'Perfil'}» al mes`, value: postProfile.post.pricePerPost }] : []),
+  ].map(figure => ({ ...figure, value: offer?.withTax ? figure.value * (1 + inputs.params.vatPct / 100) : figure.value })) : [];
+  const [figure, setFigure] = useState('month');
+  const [line, setLine] = useState(0);
+  const [used, setUsed] = useState('');
+  const chosen = figures.find(item => item.key === figure) ?? figures[0];
+  const putInOffer = async () => {
+    if (!offer || !chosen) return;
+    const name = offer.lines.find(item => item.index === line)?.description ?? '';
+    setUsed(await offer.onUse(line, Math.round(chosen.value)) ? `Listo: ${money(chosen.value)} en «${name}».` : '');
+  };
   // The rows of the site table, by site: a row that says nothing was left out of the calculation, so the rows are matched in order.
   const siteRows = useMemo(() => {
     const rows = new Map<string, NonNullable<NonNullable<typeof result>['sites']>['rows'][number]>();
@@ -74,6 +159,21 @@ export function PriceStudio({ storageKey, initialDraft }: { storageKey: string; 
       <span aria-hidden="true" className="text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none">›</span>
     </summary>
     <div className="space-y-5 border-t px-4 py-4">
+      {shared ? <div className="space-y-2 text-sm" aria-live="polite">
+        {onlyHere ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/50 px-4 py-3">
+          <p>Este cálculo estaba solo en este navegador. Guárdalo para que lo vea quien fija los precios.</p>
+          <Button type="button" size="sm" onClick={() => void store()} disabled={save.state === 'saving'}>Guardar para el equipo</Button></div>
+          : save.state === 'conflict' ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-4 py-3">
+            <p>{nameOf(server?.latest?.created_by) ?? 'Otra persona'} guardó otro cálculo mientras trabajabas.</p>
+            <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={takeTheirs}>Ver el suyo</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => void store({ over: true })}>Guardar el mío encima</Button></div></div>
+          : save.state === 'error' ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-destructive/5 px-4 py-3">
+            <p role="alert">No se guardó: {save.message || 'inténtalo de nuevo.'} Tus cambios siguen aquí.</p>
+            <Button type="button" size="sm" variant="outline" onClick={() => void store()}>Reintentar</Button></div>
+          : <p className="text-xs text-muted-foreground">{save.state === 'saving' || dirty ? 'Guardando…'
+            : server?.latest ? `Guardado para quien fija los precios · ${nameOf(server.latest.created_by) ?? 'alguien del equipo'}, ${when(server.latest.updated_at)}`
+              : 'Se guarda mientras escribes, para quien fija los precios.'}</p>}
+      </div> : null}
       <div role="group" aria-label="Qué calcular" className="inline-flex rounded-xl bg-muted p-1">
         {([['cost', 'Costo y valor hora'], ['score', 'Puntaje por precio']] as const).map(([key, label]) => (
           <button key={key} type="button" aria-pressed={tab === key} onClick={() => setTab(key)}
@@ -249,12 +349,26 @@ export function PriceStudio({ storageKey, initialDraft }: { storageKey: string; 
               <Button type="button" size="sm" variant="outline" onClick={() => void copy()}>{copied ? <Check className="mr-2 h-4 w-4" aria-hidden="true" /> : <Copy className="mr-2 h-4 w-4" aria-hidden="true" />}{copied ? 'Copiado' : 'Copiar el cálculo'}</Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => { score('price', String(Math.round(result.sites?.annual ?? result.totals.contractNet))); setTab('score'); }}>{result.sites ? 'Usar el total anual de los sitios (neto) en el puntaje' : 'Usar el total (neto) en el puntaje'}</Button>
             </div>
+            {offer?.lines.length && chosen ? <div className="space-y-2 rounded-xl border px-4 py-3">
+              <p className="text-sm font-medium">Usar en la oferta económica</p>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="space-y-1"><Label htmlFor={`${uid}-figure`} className="text-xs">Valor</Label>
+                  <select id={`${uid}-figure`} value={chosen.key} onChange={event => { setFigure(event.target.value); setUsed(''); }} className="h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    {figures.map(item => <option key={item.key} value={item.key}>{item.label}: {money(item.value)}</option>)}</select></div>
+                <div className="min-w-0 space-y-1"><Label htmlFor={`${uid}-line`} className="text-xs">Línea</Label>
+                  <select id={`${uid}-line`} value={line} onChange={event => { setLine(Number(event.target.value)); setUsed(''); }} className="h-9 max-w-[18rem] rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    {offer.lines.map(item => <option key={item.index} value={item.index}>{item.description}</option>)}</select></div>
+                <Button type="button" size="sm" variant="outline" onClick={() => void putInOffer()}>Usar</Button>
+              </div>
+              <p className="text-xs text-muted-foreground">{used || `Queda como precio unitario ${offer.withTax ? 'con IVA' : 'neto'} de esa línea, en «Oferta económica».`}</p>
+            </div> : null}
           </> : null}
-          <p className="text-xs leading-5 text-muted-foreground">{onCost ? 'Margen y gastos generales se miden sobre el costo, como en un formulario de utilidad.' : 'Margen y gastos generales se miden sobre el precio, como en el escenario financiero.'} Esto vive en tu navegador: no se comparte con el equipo.</p>
+          <p className="text-xs leading-5 text-muted-foreground">{onCost ? 'Margen y gastos generales se miden sobre el costo, como en un formulario de utilidad.' : 'Margen y gastos generales se miden sobre el precio, como en el escenario financiero.'}{shared ? ' Solo lo ven quien está a cargo y los administradores.' : ' Esto vive en tu navegador: no se comparte con el equipo.'}</p>
         </div>
       </div>}
 
       {tab === 'score' && <div className="space-y-5">
+        {onMarket ? <p className="text-sm leading-6">¿Con cuánto ganaron antes? <button type="button" onClick={onMarket} className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">«Cómo ganar»</button> muestra lo que pagó este organismo por compras parecidas y quién ganó: es el punto de partida del precio del rival.</p> : null}
         <p className="text-sm leading-6 text-muted-foreground">Cuánto más caro o barato puede ser un rival antes de pasarte. Supone que el precio más bajo se lleva todos los puntos del criterio y los demás reciben <em>precio más bajo ÷ su precio × puntos</em>: confirma que esa es la fórmula de estas bases.</p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {field('weight', 'Puntos que vale el precio', draft.score.weight, value => score('weight', value), { hint: 'Está en los criterios de evaluación.' })}
@@ -293,6 +407,15 @@ export function PriceStudio({ storageKey, initialDraft }: { storageKey: string; 
           </> : null}
         </div>
       </div>}
+
+      {/* The versions saved before, newest first: one can come back, as a new version (the history stays). */}
+      {shared && server && server.versions.length > 1 ? <details className="rounded-xl border px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Versiones guardadas<span className="ml-2 text-xs font-normal tabular-nums text-muted-foreground">{server.versions.length}</span></summary>
+        <ul className="mt-3 divide-y text-sm">{server.versions.map(version => <li key={version.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+          <span>{when(version.updated_at)} · {nameOf(version.created_by) ?? 'Alguien del equipo'}{version.id === base ? <span className="ml-2 text-xs text-muted-foreground">en uso</span> : null}</span>
+          {version.id !== base && onOpenVersion ? <Button type="button" size="sm" variant="ghost" className="h-8" disabled={save.state === 'saving'} onClick={() => void bringBack(version.id)}>Usar esta</Button> : null}
+        </li>)}</ul>
+      </details> : null}
     </div>
   </details>;
 }

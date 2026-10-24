@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowRight, ArrowUp, Check, Copy, MessageSquare, MessagesSquare, PanelLeft, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowRight, ArrowUp, Check, Copy, MessageSquare, MessagesSquare, PanelLeft, Plus, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MarkdownText } from '@/components/ui/markdown-text';
 import { cn } from '@/lib/utils';
-import { ASSISTANT_KINDS, ASSISTANT_SUGGESTIONS, type AssistantMessage, type AssistantThread, type SavedAssistantAnswer } from '@/lib/commercial-opportunities/assistant';
+import { ASSISTANT_KINDS, ASSISTANT_SUGGESTIONS, type AssistantFeedback, type AssistantMessage, type AssistantThread, type SavedAssistantAnswer } from '@/lib/commercial-opportunities/assistant';
 import { humanDate } from '@/lib/commercial-opportunities/report-view';
 
 export type AssistantSidebarData = { available: boolean; threads: AssistantThread[]; opportunities: Array<{ id: string; title: string; updated_at: string }> };
@@ -36,8 +36,10 @@ function Typing() {
   );
 }
 
-function Answer({ answer, last, busy, onOpen, onHandoff, onAsk }: { answer: SavedAssistantAnswer; last: boolean; busy: boolean;
-  onOpen: (id: string) => void; onHandoff: (id: string, question: string) => void; onAsk: (question: string) => void }) {
+/** An answer with what can be done with it, as in Cowork (OPP-33): copy it, ask for another one (the last), and say whether it helped. */
+function Answer({ answer, last, busy, onOpen, onHandoff, onAsk, onAgain, onRate }: { answer: SavedAssistantAnswer; last: boolean; busy: boolean;
+  onOpen: (id: string) => void; onHandoff: (id: string, question: string) => void; onAsk: (question: string) => void;
+  onAgain: () => void; onRate: (feedback: AssistantFeedback | null) => void }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try { await navigator.clipboard.writeText(answer.answer); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
@@ -77,6 +79,16 @@ function Answer({ answer, last, busy, onOpen, onHandoff, onAsk }: { answer: Save
             {copied ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}
             {copied ? 'Copiado' : 'Copiar'}
           </Button>
+          {last ? <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" disabled={busy} onClick={onAgain}>
+            <RotateCcw className="mr-1 h-3.5 w-3.5" aria-hidden="true" />Otra respuesta
+          </Button> : null}
+          {([['up', 'Me sirvió', ThumbsUp], ['down', 'No me sirvió', ThumbsDown]] as const).map(([value, label, Icon]) => {
+            const chosen = answer.feedback === value;
+            return <Button key={value} type="button" variant="ghost" size="icon" aria-label={label} title={label} aria-pressed={chosen}
+              className={cn('h-7 w-7 text-muted-foreground', chosen && 'bg-muted text-foreground')} onClick={() => onRate(chosen ? null : value)}>
+              <Icon className={cn('h-3.5 w-3.5', chosen && 'fill-current')} aria-hidden="true" />
+            </Button>;
+          })}
         </div>
         {last && answer.followups.length ? (
           <div className="flex flex-wrap gap-2" aria-label="Preguntas para seguir">
@@ -149,9 +161,10 @@ export function AssistantSidebar({ data, threadId, onNew, onPick, onDelete, onOp
 }
 
 /** One conversation: the person's messages on the right, the answers on the left with the opportunities they name. */
-export function AssistantConversation({ admin, title, messages, pending, busy, onAsk, onRetry, onOpen, onHandoff }: {
+export function AssistantConversation({ admin, title, messages, pending, busy, onAsk, onRetry, onOpen, onHandoff, onRate = () => {} }: {
   admin: boolean; title: string; messages: AssistantMessage[]; pending: string | null; busy: boolean;
   onAsk: (question: string) => void; onRetry: (question: string) => void; onOpen: (id: string) => void; onHandoff: (id: string, question: string) => void;
+  onRate?: (messageId: string, feedback: AssistantFeedback | null) => void;
 }) {
   const [draft, setDraft] = useState('');
   const end = useRef<HTMLDivElement | null>(null);
@@ -207,7 +220,8 @@ export function AssistantConversation({ admin, title, messages, pending, busy, o
             <div className="flex justify-end">
               <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground">{message.question}</p>
             </div>
-            {message.answer ? <Answer answer={message.answer} last={index === thread.length - 1} busy={busy || waiting} onOpen={onOpen} onHandoff={onHandoff} onAsk={send} />
+            {message.answer ? <Answer answer={message.answer} last={index === thread.length - 1} busy={busy || waiting} onOpen={onOpen} onHandoff={onHandoff} onAsk={send}
+              onAgain={() => onRetry(message.question)} onRate={feedback => onRate(message.id, feedback)} />
               : message.job && !ACTIVE.includes(message.job.state) ? (
                 <div className="flex items-start gap-3">
                   <AssistantAvatar />
@@ -311,6 +325,28 @@ export function OpportunityAssistant({ admin, threadId, onThread, onOpen, onHand
       await loadSidebar();
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo borrar la conversación.'); }
   };
+  // 👍/👎 shows at once; if it cannot be kept, it goes back to what it was and says so.
+  const rate = async (messageId: string, feedback: AssistantFeedback | null) => {
+    const before = messages.find(message => message.id === messageId)?.answer?.feedback ?? null;
+    const mark = (value: AssistantFeedback | null) => setMessages(list => list.map(message => message.id === messageId && message.answer
+      ? { ...message, answer: { ...message.answer, feedback: value } } : message));
+    mark(feedback); setProblem('');
+    try { await post({ action: 'feedback', messageId, feedback }); }
+    catch (e) { mark(before); setProblem(e instanceof Error ? e.message : 'No se pudo guardar tu opinión.'); }
+  };
+  // As in Cowork, the box to ask stays on screen (OPP-33): on a computer the panel takes the height left below where it starts.
+  const panel = useRef<HTMLDivElement | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const fit = () => {
+      const box = panel.current;
+      if (!box || window.innerWidth < 768) { setHeight(null); return; }
+      setHeight(Math.round(Math.min(Math.max(window.innerHeight - (box.getBoundingClientRect().top + window.scrollY) - 24, 480), 960)));
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [problem]);
   const title = sidebar?.threads.find(thread => thread.id === threadId)?.title || 'Nueva conversación';
   const pick = (id: string | null) => { setProblem(''); setShowList(false); onThread(id); };
 
@@ -321,7 +357,7 @@ export function OpportunityAssistant({ admin, threadId, onThread, onOpen, onHand
   return (
     <div className="space-y-3">
       {problem && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm">{problem}</p>}
-      <div className="flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card md:h-[min(78vh,860px)] md:flex-row">
+      <div ref={panel} style={height ? { height } : undefined} className="flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card md:h-[min(78vh,860px)] md:flex-row">
         <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2 md:hidden">
           <Button type="button" variant="ghost" size="sm" aria-expanded={showList} aria-controls="assistant-list" onClick={() => setShowList(open => !open)}>
             <PanelLeft className="mr-2 h-4 w-4" aria-hidden="true" />Conversaciones
@@ -333,7 +369,8 @@ export function OpportunityAssistant({ admin, threadId, onThread, onOpen, onHand
             onOpportunity={id => { setShowList(false); onHandoff(id, null); }} />
         </div>
         <AssistantConversation admin={admin} title={title} messages={messages} pending={pending} busy={busy}
-          onAsk={question => void ask(question)} onRetry={question => void ask(question)} onOpen={onOpen} onHandoff={onHandoff} />
+          onAsk={question => void ask(question)} onRetry={question => void ask(question)} onOpen={onOpen} onHandoff={onHandoff}
+          onRate={(messageId, feedback) => void rate(messageId, feedback)} />
       </div>
     </div>
   );
