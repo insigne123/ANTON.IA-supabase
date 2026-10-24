@@ -37,7 +37,7 @@ const RULES: Rule[] = [
   { category: 'model_unavailable', test: error => /(?:OPENAI|GLM)_HTTP_5\d\d/.test(error.message),
     message: () => 'El servicio de IA no respondió. Reintenta en un momento.' },
   { category: 'access', test: error => error.name === 'AuthError' || error.status === 401 || error.status === 403,
-    message: () => 'Ya no tienes acceso a este trabajo en este workspace.' },
+    message: () => 'Ya no tienes acceso a este trabajo en esta organización.' },
   { category: 'cancelled', test: error => error.name === 'AbortError',
     message: () => 'El trabajo se detuvo antes de terminar. Lo consultado hasta aquí quedó guardado.' },
 ];

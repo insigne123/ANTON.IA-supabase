@@ -21,7 +21,7 @@ type PageHeaderProps = {
 export function PageHeader({ title, description, eyebrow, count, back, actions, children }: PageHeaderProps) {
   const trailing = actions ?? children;
   return (
-    <header className="mb-5 flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <header className="mb-5 flex flex-col gap-4 border-b border-border/60 pb-5 lg:flex-row lg:items-end lg:justify-between">
       <DocumentTitle title={title} />
       <div className="min-w-0 space-y-1.5">
         {back && (
@@ -40,7 +40,7 @@ export function PageHeader({ title, description, eyebrow, count, back, actions, 
         </h1>
         {description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>}
       </div>
-      {trailing && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-shrink-0 sm:justify-end">{trailing}</div>}
+      {trailing && <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:flex-shrink-0 lg:justify-end">{trailing}</div>}
     </header>
   );
 }

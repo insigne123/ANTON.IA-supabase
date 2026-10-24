@@ -91,7 +91,7 @@ export async function stageCoworkCode(
       if (!stored || !newest) throw new Error(`El archivo ${name} no está entre tus archivos subidos.`);
       if ('bucket' in newest && newest.bucket === 'cowork-artifacts') {
         const file = await client.storage.from(ARTIFACT_BUCKET).download(`${uploadPrefix(scope, newest.runId)}/${stored}`);
-        if (file.error || !file.data) throw new Error('No se pudo recuperar el asset del workspace.');
+        if (file.error || !file.data) throw new Error('No se pudo recuperar el archivo guardado de la organización.');
         const bytes = Buffer.from(await file.data.arrayBuffer());
         if ('sha256' in newest && newest.sha256 && digest(bytes) !== newest.sha256) throw new Error('El asset no coincide con su revisión publicada.');
         const copied = await bucket.upload(`${uploadPrefix(scope, runId)}/${name}`, bytes, { upsert: false });

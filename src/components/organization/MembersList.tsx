@@ -161,7 +161,7 @@ export function MembersList({
             const removed = await organizationService.removeMember(organizationId, removeCandidate.user_id);
             if (!removed) throw new Error('member-removal-failed');
 
-            toast({ title: 'Miembro removido', description: `${memberName(removeCandidate)} ya no tiene acceso a este workspace.` });
+            toast({ title: 'Miembro removido', description: `${memberName(removeCandidate)} ya no tiene acceso a esta organización.` });
             setRemoveCandidate(null);
             await onRefresh();
         } catch {
@@ -211,7 +211,7 @@ export function MembersList({
                         </div>
 
                         {members.length > 0 ? (
-                            <Table aria-label="Miembros activos del workspace">
+                            <Table aria-label="Miembros activos de la organización">
                                 <TableHeader className="sr-only md:not-sr-only md:table-header-group">
                                     <TableRow>
                                         <TableHead>Persona</TableHead>
@@ -288,7 +288,7 @@ export function MembersList({
                                                                         className="rounded-lg text-destructive focus:bg-destructive/10 focus:text-destructive"
                                                                     >
                                                                         <Trash2 aria-hidden="true" />
-                                                                        Remover del workspace
+                                                                        Quitar de la organización
                                                                     </DropdownMenuItem>
                                                                 </DropdownMenuContent>
                                                             </DropdownMenu>
@@ -305,7 +305,7 @@ export function MembersList({
                                 <UserRound className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
                                 <div>
                                     <p className="text-sm font-medium text-foreground">Aún no hay miembros visibles</p>
-                                    <p className="mt-1 text-sm leading-6 text-muted-foreground">Cuando alguien se una al workspace, aparecerá aquí.</p>
+                                    <p className="mt-1 text-sm leading-6 text-muted-foreground">Cuando alguien se una a la organización, aparecerá aquí.</p>
                                 </div>
                             </div>
                         )}
@@ -383,7 +383,7 @@ export function MembersList({
                     <AlertDialogHeader>
                         <AlertDialogTitle>¿Remover a {removeCandidate ? memberName(removeCandidate) : 'este miembro'}?</AlertDialogTitle>
                         <AlertDialogDescription className="leading-6">
-                            Perderá el acceso a este workspace. Sus datos personales y su cuenta no se eliminarán.
+                            Perderá el acceso a esta organización. Sus datos personales y su cuenta no se eliminarán.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter className="gap-2 sm:space-x-0">
