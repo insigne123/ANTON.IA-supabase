@@ -31,6 +31,47 @@ function listRows(args, { store }) {
   return rows.slice(Math.max(0, Math.min(page, 1000)) * 100, Math.max(0, Math.min(page, 1000)) * 100 + 100);
 }
 
+/** The stage as opportunity_workspace_page reads it: «open» while nobody works it, otherwise its work state. */
+const stageOf = (store, id) => { const state = (store.tables.opportunity_work || []).find(item => item.opportunity_id === id)?.state; return !state || state === 'unassigned' ? 'open' : state; };
+/** The AI's evaluation as the new reads take it: a received one without one is to review; any other without one, none. */
+const evaluationOfPage = row => row.data?.evaluation ?? (row.kind === 'private' ? 'review' : null);
+/** The rows a person reads with the filters of opportunity_workspace_page and opportunity_workspace_counts (20261024150000). */
+function readableRows(args, store) {
+  const { p_org: org, p_user: userId, p_query: query = '', p_kinds: kinds = [], p_terms: terms = [], p_biddable: biddable = false } = args;
+  if (!(store.tables.organization_members || []).some(member => member.organization_id === org && member.user_id === userId)) return [];
+  const has = (value, word) => String(value ?? '').toLowerCase().includes(String(word).toLowerCase());
+  const now = Date.now();
+  return (store.tables.commercial_opportunities || []).filter(row => {
+    if (row.organization_id !== org || !canRead(store, org, userId, row.id)) return false;
+    if (kinds?.length && !kinds.includes(row.kind)) return false;
+    if (query && !(has(row.title, query) || has(row.company_name, query) || has(row.buyer_name, query))) return false;
+    if (terms?.length && !terms.some(term => has(row.title, term) || has(row.data?.summary?.text, term))) return false;
+    if (biddable && stageOf(store, row.id) === 'open' && row.deadline_at && Date.parse(row.deadline_at) <= now) return false;
+    return true;
+  });
+}
+function pageRows(args, { store }) {
+  const { p_stages: stages = [], p_evaluations: evaluations = [], p_sort: sort = 'priority', p_limit: limit = 100, p_offset: offset = 0 } = args;
+  const work = new Map((store.tables.opportunity_work || []).map(item => [item.opportunity_id, item]));
+  const rows = readableRows(args, store).filter(row => (!stages?.length || stages.includes(stageOf(store, row.id))) && (!evaluations?.length || evaluations.includes(evaluationOfPage(row))));
+  const byDefault = (a, b) => b.score - a.score || String(b.updated_at).localeCompare(String(a.updated_at)) || String(a.id).localeCompare(String(b.id));
+  const last = value => (value === null || value === undefined ? 1 : 0);
+  const order = {
+    deadline: (a, b) => last(a.deadline_at) - last(b.deadline_at) || String(a.deadline_at).localeCompare(String(b.deadline_at)) || byDefault(a, b),
+    amount: (a, b) => last(a.amount) - last(b.amount) || Number(b.amount) - Number(a.amount) || byDefault(a, b),
+    recent: (a, b) => String(work.get(b.id)?.updated_at ?? b.updated_at).localeCompare(String(work.get(a.id)?.updated_at ?? a.updated_at)) || byDefault(a, b),
+  }[sort] || byDefault;
+  return rows.sort(order).slice(Math.max(0, offset), Math.max(0, offset) + Math.min(600, Math.max(0, limit)));
+}
+function countRows(args, { store }) {
+  const groups = new Map();
+  for (const row of readableRows(args, store)) {
+    const key = `${stageOf(store, row.id)}|${evaluationOfPage(row)}`;
+    groups.set(key, (groups.get(key) || 0) + 1);
+  }
+  return [...groups].map(([key, total]) => { const [stage, evaluation] = key.split('|'); return { stage, evaluation: evaluation === 'null' ? null : evaluation, total }; });
+}
+
 export default function workspace(ctx) {
   const opp = ctx.opp;
   const org = ctx.ORG;
@@ -209,6 +250,8 @@ export default function workspace(ctx) {
       opportunity_workspace_list: listRows,
       opportunity_workspace_list_kinds: listRows,
       opportunity_workspace_list_terms: listRows,
+      opportunity_workspace_page: pageRows,
+      opportunity_workspace_counts: countRows,
       opportunity_can_read: (args, { store }) => canRead(store, args.p_org, args.p_user, args.p_opportunity),
       // opportunity_assign: the team of an opportunity is replaced, the stage becomes «assigned» when it had none, and the people are told.
       opportunity_assign: (args, { store }) => {

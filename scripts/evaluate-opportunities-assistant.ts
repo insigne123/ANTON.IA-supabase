@@ -69,7 +69,7 @@ function memory(seed: Record<string, any[]>, list: (args: any) => any[]) {
     };
     return builder;
   };
-  const rpc = async (name: string, args: any) => name === 'opportunity_workspace_list' ? { data: list(args), error: null } : { data: null, error: null };
+  const rpc = async (name: string, args: any) => name === 'opportunity_workspace_page' ? { data: list(args), error: null } : { data: null, error: null };
   return { tables, client: { from: query, rpc } as any };
 }
 
@@ -89,7 +89,7 @@ const ITEMS = [
 ];
 const list = (args: any) => {
   const words = plain(String(args.p_query || '')).split(/\s+/).filter(Boolean);
-  return ITEMS.filter(item => (args.p_view === 'recommended' ? item.data.evaluation === 'recommended' : true))
+  return ITEMS.filter(item => (args.p_evaluations?.includes('recommended') ? item.data.evaluation === 'recommended' : true))
     .filter(item => !words.length || words.some(word => plain(`${item.title} ${item.buyer_name}`).includes(word)));
 };
 const month = Number(new Intl.DateTimeFormat('en-US', { month: 'numeric', timeZone: 'America/Santiago' }).format(new Date()));

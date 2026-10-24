@@ -158,16 +158,37 @@ export async function captureOpportunityLinkedIn(client: SupabaseClient, job: Op
     domain: c.domain, description: c.signals.map(s => `${s.title} · ${s.location || ''} · ${s.url || ''}`).join('\n').slice(0, 6000), url: c.signals[0]?.url || null, raw: { ads: c.ads } }));
   return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), coverage: 'bounded_daily_ads' };
 }
+/**
+ * What the team put aside lately («No es para nosotros», workspace-discards.ts): the title and the reason of the last ones, so the next
+ * evaluations learn what does not serve this company. A failed read leaves them out; the evaluation never waits for it.
+ */
+export async function recentDiscards(client: SupabaseClient, organizationId: string, limit = 20) {
+  const lines = await client.from('opportunity_activity').select('opportunity_id,data').eq('organization_id', organizationId).eq('kind', 'discarded')
+    .order('created_at', { ascending: false }).limit(limit);
+  if (lines.error || !lines.data?.length) return [];
+  const ids = [...new Set(lines.data.map((row: any) => String(row.opportunity_id)))];
+  const items = await client.from('commercial_opportunities').select('id,title,buyer_name').eq('organization_id', organizationId).in('id', ids);
+  if (items.error) return [];
+  const byId = new Map((items.data || []).map((row: any) => [String(row.id), row]));
+  return lines.data.flatMap((row: any) => {
+    const item = byId.get(String(row.opportunity_id));
+    if (!item) return [];
+    const reason = [String(row.data?.label || row.data?.reason || ''), String(row.data?.note || '')].filter(Boolean).join(': ');
+    return [{ titulo: String(item.title || '').slice(0, 160), comprador: String(item.buyer_name || '').slice(0, 80) || undefined, motivo: reason.slice(0, 200) }];
+  });
+}
 export async function evaluateOpportunityBatch(client: SupabaseClient, job: OpportunityJob, context: any) {
   const rows = opportunityDb(await client.from('commercial_opportunities').select('id,kind,title,company_name,data,deadline_at').eq('organization_id', job.organization_id).in('id', job.payload.ids || [])) || [];
   // The «Ficha para licitaciones»: a requirement or a scale is a reason to discard only when the profile disproves it.
-  const profile = await loadTenderProfile(client, job.organization_id);
+  const [profile, discards] = await Promise.all([loadTenderProfile(client, job.organization_id), recentDiscards(client, job.organization_id).catch(() => [])]);
   const evaluated = await opportunityGenerate(client, job, { step: 'evaluate', category: 'evaluation', role: 'screen', schema: verdictSchema, output: 5000,
     prompt: `Evalúa TODOS los candidatos contra la oferta de la empresa, no solo palabras. Devuelve exactamente un veredicto por id: recommended, review o excluded, razón breve, servicio al que encaja y score de prioridad (no probabilidad).\n` +
       `Si es excluded, motive dice por qué: otro_producto (piden otra cosa aunque compartan palabras), parte_menor (lo que ofrece es una parte menor), requisito (exigen algo que la oferta no tiene: productos o licencias de un fabricante, una certificación, presencia), escala (volumen, dotación o plazo fuera de proporción) o sin_compra (no muestra una compra: candidatos, proveedores, contratación interna); en los demás veredictos motive es null.\n` +
       `Ante ambigüedad o información incompleta usa review. Contrataciones no prueban compra externa. Distingue publicaciones de proveedores, candidatos y compradores. Un repost no prueba necesidad de quien comparte. Considera exclusiones de ESTA oferta; no descartes todas las agencias. La elegibilidad de licitaciones no está certificada leyendo su nombre.\n` +
       (profile ? `Para requisito y escala usa la ficha: ${TENDER_PROFILE_RULE} En ese caso usa review y di en la razón qué dato falta.\n` : 'Sin ficha de la empresa, requisito y escala solo descartan cuando la oferta o sus exclusiones lo dicen; si no, review.\n') +
-      JSON.stringify({ offer: context.offer, services: context.services, exclusions: context.exclusions, priority: context.priority, ...(profile ? { ficha: tenderProfileForModel(profile) } : {}), candidates: rows }) });
+      (discards.length ? 'descartadasPorElEquipo son oportunidades que el equipo dejó de lado y por qué: un candidato del mismo tipo y con el mismo motivo baja a review o excluded; uno solo parecido en palabras no.\n' : '') +
+      JSON.stringify({ offer: context.offer, services: context.services, exclusions: context.exclusions, priority: context.priority, ...(profile ? { ficha: tenderProfileForModel(profile) } : {}),
+        ...(discards.length ? { descartadasPorElEquipo: discards } : {}), candidates: rows }) });
   let count = 0;
   for (const row of rows) {
     const answer = evaluated.evaluations.find(v => v.id === row.id);

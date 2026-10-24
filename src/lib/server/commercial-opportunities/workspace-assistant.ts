@@ -56,10 +56,17 @@ async function workStates(client: SupabaseClient, scope: WorkScope, ids: string[
   return new Map(work.map(row => [row.opportunity_id, row]));
 }
 
+/** The assistant's views as the database reads them (opportunity_workspace_page): everything, what the AI recommends, what a team works. */
+const ASSISTANT_VIEWS = { all: { p_stages: [], p_evaluations: [] }, recommended: { p_stages: [], p_evaluations: ['recommended'] },
+  assigned: { p_stages: ['assigned', 'working', 'blocked', 'submitted', 'won', 'lost', 'archived'], p_evaluations: [] } } as const;
+async function readAssistantPage(client: SupabaseClient, scope: WorkScope, view: keyof typeof ASSISTANT_VIEWS, query = '', page = 0) {
+  return (opportunityDb(await client.rpc('opportunity_workspace_page', { p_org: scope.organizationId, p_user: scope.userId, ...ASSISTANT_VIEWS[view],
+    p_query: query, p_kinds: [], p_terms: [], p_biddable: false, p_sort: 'priority', p_limit: 100, p_offset: page * 100 })) || []) as WorkItem[];
+}
+
 /** The opportunities a question is about: what fits, what the team works, and what its words find in titles and buyers. */
 async function assistantItems(client: SupabaseClient, scope: WorkScope, question: string) {
-  const list = async (view: string, query = '') => (opportunityDb(await client.rpc('opportunity_workspace_list',
-    { p_org: scope.organizationId, p_user: scope.userId, p_view: view, p_query: query, p_page: 0 })) || []) as WorkItem[];
+  const list = (view: keyof typeof ASSISTANT_VIEWS, query = '') => readAssistantPage(client, scope, view, query);
   const words = assistantKeywords(question);
   const groups = await Promise.all([
     ...words.map(word => list('all', word)),
@@ -145,7 +152,7 @@ export function opportunityAssistantTools(client: SupabaseClient, scope: WorkSco
       schema: z.object({ consulta: z.string().max(120).default(''), vista: z.enum(['all', 'recommended', 'assigned']).default('all'), pagina: z.number().int().min(0).max(4).default(0) }),
       run: async ({ consulta, vista, pagina }) => {
         if (vista === 'assigned' && !admin) return { status: 'error', message: 'La vista «assigned» es de administradores: usa «all» o «recommended».' };
-        const rows = (opportunityDb(await client.rpc('opportunity_workspace_list', { p_org: scope.organizationId, p_user: scope.userId, p_view: vista, p_query: consulta, p_page: pagina })) || []) as WorkItem[];
+        const rows = await readAssistantPage(client, scope, vista, consulta, pagina);
         const page = rows.slice(0, LIST_PAGE);
         for (const item of page) known.set(item.id, knownOf(item));
         const states = await workStates(client, scope, page.map(item => item.id));

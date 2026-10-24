@@ -1,3 +1,4 @@
+import { after } from 'next/server';
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
 import { readWorkspaceOverview, createPrivateOpportunity, opportunityDb } from '@/lib/server/commercial-opportunities/workspace-store';
@@ -9,6 +10,9 @@ import { parsePrioritySort } from '@/lib/commercial-opportunities/priority';
 import { PIPELINE_MAX, readOpportunityPipeline } from '@/lib/server/commercial-opportunities/workspace-pipeline';
 import { OPPORTUNITY_SOURCES, parseCategories, sourceKinds, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { AuthError } from '@/lib/server/auth-utils';
+import { LIST_VIEWS } from '@/lib/commercial-opportunities/list-stages';
+import { assignOpportunities, bulkSchema, discardOpportunities, moveOpportunities } from '@/lib/server/commercial-opportunities/workspace-discards';
+import { notifyBulkAssignment, readTeams } from '@/lib/server/commercial-opportunities/workspace-assignment-notice';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
@@ -22,11 +26,13 @@ export async function GET(request: Request) {
       assertOpportunityAdmin(scope);
       const limit = z.coerce.number().int().min(0).max(PIPELINE_MAX).optional().catch(undefined);
       return opportunitiesJson(await readOpportunityPipeline(auth.admin, scope, { kinds: sourceKinds(source), categories, query: z.string().max(200).catch('').parse(params.get('query') || ''), sort: parsePrioritySort(params.get('sort')),
-        limits: { found: limit.parse(params.get('found') ?? undefined), recommended: limit.parse(params.get('recommended') ?? undefined), excluded: limit.parse(params.get('excluded') ?? undefined) } }));
+        limits: { found: limit.parse(params.get('found') ?? undefined), recommended: limit.parse(params.get('recommended') ?? undefined), excluded: limit.parse(params.get('excluded') ?? undefined),
+          lost: limit.parse(params.get('lost') ?? undefined), archived: limit.parse(params.get('archived') ?? undefined) } }));
     }
-    const options = z.object({ view: z.enum(['all','recommended','review','excluded','pending','assigned','working','blocked','submitted','won','lost','archived']), query: z.string().max(200), page: z.coerce.number().int().min(0).max(1000) })
+    // The list's filters are the stages of the pipeline (list-stages.ts); an unknown one reads everything this person can see.
+    const options = z.object({ view: z.enum(LIST_VIEWS).catch('all'), query: z.string().max(200).catch(''), page: z.coerce.number().int().min(0).max(1000).catch(0) })
       .parse({ view: params.get('view') || 'all', query: params.get('query') || '', page: params.get('page') || '0' });
-    const overview = await readWorkspaceOverview(auth.admin, scope, { ...options, kinds: sourceKinds(source), categories });
+    const overview = await readWorkspaceOverview(auth.admin, scope, { ...options, kinds: sourceKinds(source), categories, sort: parsePrioritySort(params.get('sort')) });
     // The company offer is confirmed by its admin, never borrowed from the operator's personal profile.
     return opportunitiesJson({ ...overview, suggestion: null });
   } catch (error) { return opportunitiesError(error); }
@@ -34,7 +40,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
-    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria', 'pipeline_review']), data: z.unknown() }).strict().parse(await request.json());
+    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria', 'pipeline_review', 'bulk']), data: z.unknown() }).strict().parse(await request.json());
     if (body.action === 'notification') {
       const { id } = z.object({ id: z.string().uuid() }).strict().parse(body.data);
       opportunityDb(await auth.admin.from('opportunity_notifications').update({ read_at: new Date().toISOString() }).eq('id', id).eq('organization_id', scope.organizationId).eq('user_id', scope.userId));
@@ -43,6 +49,18 @@ export async function POST(request: Request) {
     assertOpportunityAdmin(scope);
     if (body.action === 'create') return opportunitiesJson({ id: await createPrivateOpportunity(auth.admin, scope, privateOpportunitySchema.parse(body.data)) }, 201);
     if (body.action === 'discover') return opportunitiesJson(await requestOpportunityDiscovery(auth.admin, scope), 202);
+    if (body.action === 'bulk') {
+      // Several opportunities of the list at once: put aside with a reason, the same team, or another stage (workspace-discards.ts).
+      const input = bulkSchema.parse(body.data);
+      if (input.op === 'discard') return opportunitiesJson(await discardOpportunities(auth.admin, scope, input.ids, input));
+      if (input.op === 'state') return opportunitiesJson(await moveOpportunities(auth.admin, scope, input.ids, input.state));
+      const before = await readTeams(auth.admin, scope, input.ids);
+      const result = await assignOpportunities(auth.admin, scope, input.ids, input);
+      // One email per person with everything they joined, after the answer: a failure there never fails the assignments.
+      const assigned = new Map(result.done.map(id => [id, before.get(id) || []]));
+      after(() => notifyBulkAssignment(auth.admin, scope, assigned).catch(() => null));
+      return opportunitiesJson(result);
+    }
     if (body.action === 'pipeline_review') {
       // The AI's look at the opportunities in play, answered in this request (one per person and minute; a repeat reads it).
       const key = `pipeline:${scope.userId}:${new Date().toISOString().slice(0, 16)}`;
