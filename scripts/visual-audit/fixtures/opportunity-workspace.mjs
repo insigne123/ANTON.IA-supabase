@@ -238,6 +238,13 @@ export default function workspace(ctx) {
       letter: '[nombre de la empresa] presenta su oferta para el servicio de verificación de antecedentes del personal externo de la Municipalidad de Providencia y declara conocer y aceptar las bases y sus anexos.',
       missing: ['Certificado de antecedentes laborales de la empresa (F30) vigente'], annexes: [],
     } }];
+  // «Calcular el precio» of the same tender, saved for the team (OPP-23): Camila's first numbers, then Diego's, who is in charge of it.
+  const study = (base, margin) => ({ profiles: [{ id: 'p1', name: 'Analista de verificación', headcount: '3', base, bonus: '', nonTaxable: '', equipment: '', other: '', annualBonus: '', holidays: '',
+    holidayHours: '', exempt: '', postPeople: '', postHours: '' }], params: { margin, overhead: '8', absenteeism: '5' }, score: { weight: '40', ours: '50', rival: '55', price: '' } });
+  const priceStudies = [
+    { id: ctx.uid(9690), organization_id: org, opportunity_id: opp(2), study: study('720000', '10'), created_by: ctx.OWNER, created_at: ctx.daysAgo(3), updated_at: ctx.daysAgo(3) },
+    { id: ctx.uid(9691), organization_id: org, opportunity_id: opp(2), study: study('750000', '12'), created_by: ctx.MEMBER, created_at: ctx.daysAgo(1), updated_at: ctx.daysAgo(1) },
+  ];
   const jobs = [
     { id: job(2), organization_id: org, opportunity_id: opp(2), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:2', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(2), updated_at: ctx.daysAgo(2) },
     // A report reading its documents: 4 of 10 parts in two minutes, as the job notes it (report-progress.ts), with the estimate of its size.
@@ -278,6 +285,7 @@ export default function workspace(ctx) {
       opportunity_documents: documents,
       opportunity_reports: reports,
       opportunity_offer_drafts: offers,
+      opportunity_price_studies: priceStudies,
       opportunity_jobs: jobs,
       opportunity_notifications: notifications,
       opportunity_company_context: [context],
