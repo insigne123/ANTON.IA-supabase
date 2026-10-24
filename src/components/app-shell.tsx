@@ -68,7 +68,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <SidebarTrigger data-tour="menu" />
             <Logo size="sm" showWordmark={false} />
             {screenLabel && <span className="min-w-0 truncate text-sm font-semibold text-foreground">{screenLabel}</span>}
-            <div className="ml-auto flex shrink-0 items-center gap-1"><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
+            {/* A screen can add its own button here while it is open (Cowork's history, on a phone): one row less under the bar. */}
+            <div className="ml-auto flex shrink-0 items-center gap-1"><span id="shell-bar-actions" className="contents" /><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
           </header>
 
           <div className={cn('sticky top-0 z-10 hidden h-12 items-center justify-between border-b bg-background/85 px-6 backdrop-blur-sm', !immersive && 'md:flex')}>

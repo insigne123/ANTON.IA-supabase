@@ -143,7 +143,7 @@ function OfferCard({ draft, onDraftChange, onSave, onHide }: {
 }
 
 /** Start screen: one clear action (the composer), your account at a glance, a few concrete starting points. */
-export function CoworkHome({ composer, threads, ready, loading, listFailed = false, onSuggestion, onOpenThread, overview = null, overviewLoading = false,
+export function CoworkHome({ composer, threads, ready, loading, listFailed = false, onSuggestion, onOpenThread, overview = null, overviewLoading = false, railVisible = false,
   onSaveOffer = null, offerDraft = { offer: '', website: '' }, onOfferDraftChange = () => {} }: {
   composer: ReactNode;
   threads: CoworkThreadSummary[];
@@ -153,6 +153,8 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
   listFailed?: boolean;
   onSuggestion: (prompt: string) => void;
   onOpenThread: (id: string) => void;
+  /** The list of conversations is on screen beside the home: the home lists only what waits for the person, not the same ones again. */
+  railVisible?: boolean;
   /** Real figures of your account and whether Cowork knows what you sell (GET /api/cowork/overview). */
   overview?: CoworkOverview | null;
   overviewLoading?: boolean;
@@ -175,13 +177,18 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
     try { window.localStorage.setItem(OFFER_CARD_KEY, '1'); } catch { /* Storage unavailable: hidden for this visit only. */ }
   };
   const pending = threads.filter(thread => ['waiting_approval', 'running', 'queued', 'waiting_workers'].includes(thread.status)).slice(0, 3);
-  const recent = threads.filter(thread => !pending.includes(thread)).slice(0, 4);
+  // Beside the rail the recent ones would be listed twice (COW-24): only what waits for the person stays.
+  const recent = railVisible ? [] : threads.filter(thread => !pending.includes(thread)).slice(0, 4);
   const name = overview?.firstName;
   const askOffer = Boolean(onSaveOffer) && overview?.hasOffer === false && !offerHidden;
   const today = coworkTodayItems(overview);
   // A starting point «Para hoy» already offers with the account's own numbers is not repeated below it, nor is «¿A quién le escribo
   // hoy?», which its «Escribirles» answers (round 2 readings: the chips repeated those rows).
-  const starters = ready && today.some(item => item.id === 'write') ? COWORK_STARTERS.filter(item => item.id !== 'escribir' && item.id !== 'a-quien') : COWORK_STARTERS;
+  // Without saved contacts, «Escribir a mis contactos», «¿A quién le escribo hoy?» and «Invitar por LinkedIn» have no one to work on:
+  // finding prospects comes first (COW-26).
+  const noContacts = overview?.contacts === 0;
+  const starters = noContacts ? [...COWORK_STARTERS.filter(item => item.id === 'prospectos'), ...COWORK_STARTERS.filter(item => !['prospectos', 'escribir', 'a-quien', 'linkedin'].includes(item.id))]
+    : ready && today.some(item => item.id === 'write') ? COWORK_STARTERS.filter(item => item.id !== 'escribir' && item.id !== 'a-quien') : COWORK_STARTERS;
 
   return <div className="cw-scroll flex h-full min-h-0 flex-col overflow-y-auto">
     <div className="mx-auto flex w-full max-w-[46rem] flex-1 flex-col justify-center px-4 py-10 sm:px-6 md:py-16">
