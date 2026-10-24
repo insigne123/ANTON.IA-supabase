@@ -7,7 +7,7 @@ import { z } from 'zod';
  */
 
 /** The data an artifact can draw from, each one read by the server for the person's organization. */
-export const COWORK_ARTIFACT_TABLES = ['pipeline', 'contacts', 'activity', 'campaigns', 'opportunities'] as const;
+export const COWORK_ARTIFACT_TABLES = ['pipeline', 'contacts', 'activity', 'campaigns'] as const;
 export type CoworkArtifactTableName = typeof COWORK_ARTIFACT_TABLES[number];
 
 export const coworkDesignBriefSchema = z.object({

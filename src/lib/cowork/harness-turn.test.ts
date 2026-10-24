@@ -16,7 +16,6 @@ const capabilities = [
   { name: 'campaigns.list', description: 'Lista campañas', input: z.literal('') },
   { name: 'research.get_existing', description: 'Investigación de un contacto', input: z.string().uuid() },
   { name: 'privacy.contactability_batch', description: 'Restricciones de varios contactos', input: z.string().max(400) },
-  { name: 'opportunities.list', description: 'Oportunidades', input: z.string().max(200) },
 ];
 
 function harness(model: ScriptedModel, overrides: Partial<CoworkHarnessConfig> = {}): CoworkHarnessConfig {
@@ -55,7 +54,6 @@ test('reads are tools of the gateway, asked together run together, and the turn 
   assert.equal(recorded.length, 2);
   const tools = model.requests[0].tools.map(tool => tool.name);
   assert.ok(['leads_search', 'campaigns_list', 'research_get_existing', 'privacy_contactability_batch', 'actualizar_plan', 'responder'].every(name => tools.includes(name)));
-  assert.equal(tools.includes('opportunities_list'), false, 'a read the account does not have is not offered');
   assert.equal(tools.some(name => name.startsWith('proponer_')), false, 'no proposals without a way to stage them');
   assert.ok(model.requests[0].system.startsWith(COWORK_HARNESS_PROTOCOL));
   // A question for information is answered whole and the proposal is offered as the next step: «¿qué oportunidades hay hoy?» got only the proposal's two
@@ -68,7 +66,7 @@ test('reads are tools of the gateway, asked together run together, and the turn 
 });
 
 test('each read takes the input its capability takes: nothing, an id, a list of ids or free text', async () => {
-  assert.deepEqual(capabilities.map(coworkReadShape), ['text', 'none', 'id', 'leadIds', 'text']);
+  assert.deepEqual(capabilities.map(coworkReadShape), ['text', 'none', 'id', 'leadIds']);
   assert.equal(coworkToolName('campaign.stop_v2'), 'campaign_stop_v2');
   const model = new ScriptedModel([
     reply([call('research_get_existing', { id: UUID }), call('privacy_contactability_batch', { leadIds: [UUID] })]),

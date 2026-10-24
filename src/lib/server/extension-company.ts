@@ -5,7 +5,7 @@ import { canonicalExtensionProfileUrl } from '@/lib/extension-profile-url';
 import { companyDomain, companySearchName, emailDomain, sameCompany } from '@/lib/extension-company';
 import { companySearchHref } from '@/lib/search/company-prefill';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
-import { hiringSignal, OPPORTUNITIES_PAGE } from '@/lib/commercial-opportunities/cowork';
+import { hiringSignal, OPPORTUNITIES_PAGE } from '@/lib/commercial-opportunities/hiring-signal';
 import { findHiringProfile, listHiringOpportunities } from '@/lib/server/commercial-opportunities/store';
 import { icpDeclaredFromProfile } from '@/lib/server/cowork/icp-read';
 import { readExtensionPresence } from '@/lib/server/extension-presence';

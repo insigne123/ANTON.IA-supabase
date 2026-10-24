@@ -16,19 +16,17 @@ test('each change says what happened with its names, and asks Cowork to work on 
     replies: [{ name: 'Héctor Vidal', company: 'Retail Andes', meeting: false }, { name: 'Marcela Rojas', company: 'Constructora Andes', meeting: true },
       { name: 'Ana Ruiz', company: 'Minera Sur', meeting: false }],
     research: [{ name: 'Carlos Ahumada', company: 'Minera Centinela' }],
-    opportunities: { tenders: 2, hiring: 1, projects: 0 },
     linkedin: [{ name: 'Paula Soto' }, { name: 'Tomás Pizarro' }],
   });
-  assert.deepEqual(items.map(item => item.kind), ['replies', 'research', 'opportunities', 'linkedin']);
+  assert.deepEqual(items.map(item => item.kind), ['replies', 'research', 'linkedin']);
   assert.equal(items[0].text, '3 respuestas nuevas: Marcela Rojas, Héctor Vidal y 1 más · 1 pide reunión');
   assert.match(items[0].prompt, /partiendo por quien pide reunión/);
   assert.equal(items[1].text, '1 investigación lista: Carlos Ahumada (Minera Centinela)');
-  assert.equal(items[2].text, '3 oportunidades nuevas: 2 licitaciones o Compras Ágiles, 1 empresa contratando');
-  assert.equal(items[3].text, '2 aceptaron tu invitación de LinkedIn: Paula Soto y Tomás Pizarro');
+  assert.equal(items[2].text, '2 aceptaron tu invitación de LinkedIn: Paula Soto y Tomás Pizarro');
   for (const item of items) assert.ok(item.prompt.length > 20 && item.prompt.length <= 500, item.kind);
   // Nothing new, or a source that could not be read (null), is left out: never a zero.
-  assert.deepEqual(coworkSinceItems({ replies: [], research: null, opportunities: { tenders: 0, hiring: 0, projects: 0 }, linkedin: null }), []);
-  const one = coworkSinceItems({ replies: [{ name: 'Ana Ruiz', company: null, meeting: false }], research: null, opportunities: null, linkedin: null });
+  assert.deepEqual(coworkSinceItems({ replies: [], research: null, linkedin: null }), []);
+  const one = coworkSinceItems({ replies: [{ name: 'Ana Ruiz', company: null, meeting: false }], research: null, linkedin: null });
   assert.equal(one[0].text, '1 respuesta nueva: Ana Ruiz');
   assert.doesNotMatch(one[0].prompt, /reunión/);
 });
@@ -41,17 +39,4 @@ test('the last visit reads by calendar day in Chile, and the look back stops at 
   assert.equal(coworkSinceWhen('2026-10-02T15:00:00Z', now), 'hace 4 días');
   assert.equal(coworkSinceFrom('2026-10-04T15:00:00Z', now.getTime()), '2026-10-04T15:00:00.000Z');
   assert.equal(coworkSinceFrom('2026-08-01T15:00:00Z', now.getTime()), new Date(now.getTime() - COWORK_SINCE_MAX_DAYS * 86_400_000).toISOString());
-});
-
-test('whoever only sees what was assigned to them is told what reached them, not what the workspace found', () => {
-  const one = coworkSinceItems({ replies: null, research: null, opportunities: null, assigned: [{ title: 'Servicio de aseo Hospital Regional' }], linkedin: null });
-  assert.deepEqual(one.map(item => item.text), ['Te asignaron una oportunidad: Servicio de aseo Hospital Regional']);
-  assert.equal(one[0].kind, 'opportunities');
-  const many = coworkSinceItems({ replies: null, research: null, opportunities: null, linkedin: null,
-    assigned: [{ title: 'Guardias Municipalidad A' }, { title: 'Aseo Colegio B' }, { title: 'Selección Empresa C' }] });
-  assert.equal(many[0].text, 'Te asignaron 3 oportunidades: Guardias Municipalidad A, Aseo Colegio B y 1 más');
-  assert.match(many[0].prompt, /me asignaron/);
-  const long = coworkSinceItems({ replies: null, research: null, opportunities: null, linkedin: null, assigned: [{ title: 'x'.repeat(200) }] });
-  assert.ok(long[0].text.length < 130, 'a long title is cut');
-  assert.deepEqual(coworkSinceItems({ replies: null, research: null, opportunities: null, assigned: [], linkedin: null }), []);
 });

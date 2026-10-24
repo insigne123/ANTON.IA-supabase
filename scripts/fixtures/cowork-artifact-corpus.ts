@@ -7,7 +7,6 @@ import { coworkArtifactChangeMessage, coworkArtifactFixMessage } from '../../src
 import { COWORK_ARTIFACT_EXAMPLES } from '../../src/lib/server/cowork/code-artifact-examples';
 import { coworkSentPeriod } from '../../src/lib/cowork/sent-period';
 import { CORPUS_COMMON_CHECKS, CORPUS_NOW, corpusRead, corpusWithEmailQuery, type CorpusCase, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
-import { OPPORTUNITIES_READ, OPPORTUNITY_HIRING, OPPORTUNITY_PROJECTS, OPPORTUNITY_TENDERS } from './cowork-opportunities-corpus';
 
 const at = '2026-09-25T13:00:00Z';
 const PIPELINE = { name: 'artifact-pipeline-por-etapa-v1.html', title: 'Pipeline por etapa' };
@@ -104,8 +103,6 @@ export const ARTIFACT_RICH_WORLD: CorpusWorld = {
     if (action === 'campaigns.list') return { scope: 'own', campaigns: RICH_CAMPAIGNS };
     if (action === 'audience.analyze') return RICH_AUDIENCE;
     if (action === 'icp.analyze') return RICH_ICP;
-    if (action === 'opportunities.list') return OPPORTUNITIES_READ(input);
-    if (action === 'artifact.opportunities') return { hiring: OPPORTUNITY_HIRING, tenders: OPPORTUNITY_TENDERS, projects: OPPORTUNITY_PROJECTS };
     return corpusRead(action, input);
   },
 };
@@ -148,15 +145,6 @@ export const ARTIFACT_CORPUS: CorpusCase[] = [
       { label: 'la versión nueva se dibuja sin errores', test: drawn },
       { label: 'dice qué falló y cómo quedó', test: r => /error|fall[óo]|corregí|arregl|no exist|ahora (?:lee|usa|toma|muestra)/i.test(r.reply) }] },
   // 3c: the kinds of artifact the Designer had no example of.
-  { id: 'art-licitaciones', title: 'Tablero de oportunidades por monto y cierre', opportunities: true, world: ARTIFACT_RICH_WORLD,
-    request: 'hazme un tablero de mis oportunidades: las licitaciones y compras ágiles por monto y fecha de cierre, y las empresas que están contratando',
-    origin: 'Plan 12, 3c: oportunidades en un tablero (montos, plazos y señales), no en una lista de texto.',
-    checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'entrega algo visual', test: visual },
-      { label: 'el artefacto usa las oportunidades', test: usesTables('opportunities') },
-      { label: 'el artefacto se dibuja sin errores', test: r => !r.artifact || drawn(r) },
-      { label: 'muestra el cierre de las licitaciones', test: r => /cierr|plazo|vence/.test(text(r)) },
-      { label: 'no muestra la empresa descartada', test: r => !/seguridad austral/.test(text(r)) }] },
   { id: 'art-ficha-cuenta', title: 'Ficha de una cuenta antes de una reunión', world: ARTIFACT_RICH_WORLD,
     request: 'mañana me reúno con Constructora Andes: arma una ficha con mis contactos ahí y todo lo que les he enviado y lo que respondieron',
     origin: 'Plan 12, 3c: una ficha de cuenta junta contactos y envíos de una sola empresa.',

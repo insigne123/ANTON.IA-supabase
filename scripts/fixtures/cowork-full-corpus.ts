@@ -38,7 +38,7 @@ CORPUS.push(...WEB_CORPUS);
 CORPUS.push(...LECTURAS_CORPUS);
 // «¿Cuál es mi ICP?» (scripts/fixtures/cowork-icp-corpus.ts).
 CORPUS.push(...ICP_CORPUS);
-// «¿Qué oportunidades hay hoy?» (scripts/fixtures/cowork-opportunities-corpus.ts).
+// «¿Qué licitaciones hay hoy?»: Cowork points to «Oportunidades» (scripts/fixtures/cowork-opportunities-corpus.ts).
 CORPUS.push(...OPPORTUNITIES_CORPUS);
 // Revealing a phone (scripts/fixtures/cowork-telefono-corpus.ts).
 CORPUS.push(...TELEFONO_CORPUS);
