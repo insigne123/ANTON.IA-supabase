@@ -103,8 +103,8 @@ export default function workspace(ctx) {
     note(7, 0, 'created', 'Oportunidad recibida incorporada al workspace', ctx.OWNER, ctx.daysAgo(2)),
     note(10, 0, 'submitted', 'Oferta presentada en Mercado Público', ctx.MEMBER, ctx.daysAgo(3)),
     // Closed with their reasons (OPP-30): what «Lo que aprendimos» counts in Administración.
-    note(11, 0, 'state', 'Estado: Ganada · Experiencia, Precio.', ctx.OWNER, ctx.daysAgo(7), { to: 'won', motives: ['price', 'experience'] }),
-    note(12, 0, 'state', 'Estado: Perdida · Precio. Ganó Selección Austral SpA.', ctx.OWNER, ctx.daysAgo(9), { to: 'lost', motives: ['price'], winner: 'Selección Austral SpA' }),
+    note(11, 0, 'state', 'Estado: ganada · Experiencia, Precio.', ctx.OWNER, ctx.daysAgo(7), { to: 'won', motives: ['price', 'experience'] }),
+    note(12, 0, 'state', 'Estado: perdida · Precio. Ganó Selección Austral SpA.', ctx.OWNER, ctx.daysAgo(9), { to: 'lost', motives: ['price'], winner: 'Selección Austral SpA' }),
   ];
 
   const task = (n, index, title, status, owner, due) => ({ id: ctx.uid(9700 + n * 10 + index), organization_id: org, opportunity_id: opp(n), title, owner_id: owner, due_at: due, status, evidence: '', created_by: ctx.OWNER, updated_at: ctx.daysAgo(1) });

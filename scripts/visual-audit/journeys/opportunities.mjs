@@ -240,7 +240,7 @@ export default () => [
         c.check('la oportunidad quedó perdida', stateOf(c, 10) === 'lost', `estado: ${stateOf(c, 10)}`);
         c.check('ya perdida, «Cómo postular» deja de ser la acción principal', (await applyIsMain(c)) === false);
         c.check('los motivos y quién ganó quedaron en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(10)
-          && /^Estado: Perdida · Otro proveedor mejor evaluado, Plazo\. Ganó Centro de Llamadas del Pacífico SpA por \$118\.500\.000\. Pidieron menor plazo/.test(row.body)
+          && /^Estado: perdida · Otro proveedor mejor evaluado, Plazo\. Ganó Centro de Llamadas del Pacífico SpA por \$118\.500\.000\. Pidieron menor plazo/.test(row.body)
           && JSON.stringify(row.data?.motives) === '["competitor","deadline"]'), 'opportunity_activity');
       } },
     ] },
