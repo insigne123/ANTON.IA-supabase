@@ -459,7 +459,7 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 
 - **APP-02 · «Hoy» y «Tu semana» no tienen estado de error** · Estados · **A / B**
 
-  Con las lecturas fallando, «Hoy» queda en esqueletos grises para siempre y «Tu semana» en «Preparando tu informe…» con un spinner, sin mensaje ni «Reintentar» (el único aviso es el de la barra lateral: «No pudimos cargar tus workspaces»). Oportunidades y Cowork sí lo hacen bien (banner rojo con «Reintentar»). *Evidencia:* navegador (interacciones, comprobación «error»). *Propuesta:* tras ~8 s de esqueleto, «No pudimos cargar tu día. Reintentar».
+  Con las lecturas fallando, «Hoy» se queda en esqueletos grises y «Tu semana» en «Preparando tu informe…» con un spinner (el banco esperó a que se asentaran las lecturas), sin mensaje ni «Reintentar» (el único aviso es el de la barra lateral: «No pudimos cargar tus workspaces»). Oportunidades y Cowork sí lo hacen bien (banner rojo con «Reintentar»). *Evidencia:* navegador (interacciones, comprobación «error»). *Propuesta:* tras ~8 s de esqueleto, «No pudimos cargar tu día. Reintentar».
 
 - **APP-03 · Contraste de la pestaña inactiva de «Hoy | Tu semana»** · Accesibilidad · **B / B**
 
