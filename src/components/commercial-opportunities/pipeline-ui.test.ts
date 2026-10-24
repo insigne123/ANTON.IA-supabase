@@ -246,3 +246,15 @@ test('the order also offers the largest amount first', () => {
   const html = render({ items: rated, work: [], sort: 'amount' });
   assert.match(html, /aria-pressed="true"[^>]*title="Primero las de mayor monto; las que no lo informan, al final\."[^>]*>Mayor monto</);
 });
+
+test('«Cierran esta semana» sits over the road: which ones close within seven days, the soonest first, each one a click away', () => {
+  const hour = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+  const week = [{ id: 'w1', title: 'Aseo hospital', deadlineAt: hour(1), stage: 'recommended' }, { id: 'w2', title: 'Guardias museo', deadlineAt: hour(100), stage: 'blocked' },
+    { id: 'w3', title: 'Traslado de obras', deadlineAt: hour(120), stage: 'working' }];
+  const html = render({ week });
+  const words = text(html);
+  assert.match(words, /Cierran esta semana (Hoy|Mañana) Aseo hospital · sin equipo [A-ZÁÉÍÓÚ][a-záéíóú]{2} \d{1,2} Guardias museo · bloqueada [A-ZÁÉÍÓÚ][a-záéíóú]{2} \d{1,2} Traslado de obras/);
+  assert.ok(html.indexOf('Cierran esta semana') < html.indexOf('<nav aria-label="Etapas de las oportunidades">'), 'over the road');
+  assert.match(html, /title="Aseo hospital · Cierra el [^"]+"/, 'the exact closing on hover');
+  assert.doesNotMatch(text(render()), /Cierran esta semana/, 'nothing closing: no strip');
+});

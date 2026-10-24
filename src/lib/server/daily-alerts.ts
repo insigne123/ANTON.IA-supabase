@@ -6,6 +6,7 @@ import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
 import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
 import { dropPdf } from '@/lib/server/lead-drops';
+import { readWaitingOnAdmins } from '@/lib/server/commercial-opportunities/workspace-waiting';
 import { readPersonGoal } from '@/lib/server/weekly-goals';
 import type { SendSelf } from '@/lib/server/weekly-report';
 
@@ -19,6 +20,13 @@ export class DailyAlertsError extends Error {
 
 const CLOSED_WORK = new Set(['won', 'lost', 'archived', 'submitted']);
 const CLOSING_DAYS = 3;
+/**
+ * Whoever is in charge also hears a week ahead, once, then again in the last three days, not every day in between: seven days before,
+ * or six when the seventh was a Monday (the alerts go from Tuesday to Friday).
+ */
+const HEADS_UP_DAYS = [6, 7];
+const headsUp = (daysLeft: number, today: string) => daysLeft === 7 || (daysLeft === 6 && new Date(`${today}T12:00:00.000Z`).getUTCDay() === 2);
+
 const READY_SCAN = 1000;
 
 /** Whether the person gets the alerts: on unless they turned them off in «Tu semana». */
@@ -46,7 +54,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
   const { now, since } = options;
   const own = (table: string, columns: string) => client.from(table).select(columns).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
   const week = reportWeek(now, 'current');
-  const [profile, replied, commitments, enriched, sent, research, goal] = await Promise.all([
+  const [profile, replied, commitments, enriched, sent, research, goal, saved] = await Promise.all([
     client.from('profiles').select('full_name').eq('id', scope.userId).maybeSingle(),
     own('contacted_leads', 'id,email,name,company,reply_intent,replied_at,conversation_resolved_at,conversation_outbound_at').not('replied_at', 'is', null).order('replied_at', { ascending: false }).limit(200),
     own('contacted_leads', 'id,name,company,data').not('data->commitment', 'is', null).limit(200),
@@ -54,6 +62,8 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     own('contacted_leads', 'email').not('sent_at', 'is', null).limit(5000),
     own('lead_research_jobs', 'lead_id,company_name,email,completed_at').in('status', ['completed', 'partial']).gte('completed_at', since).order('completed_at').limit(20),
     readPersonGoal(client, scope, { from: week.from, to: week.to }),
+    // Whether the person ever saved a contact: who only works Oportunidades gets no prospecting goal (below).
+    options.opportunities === 'none' ? Promise.resolve({ data: [{}], error: null }) : own('leads', 'id').limit(1),
   ]);
   for (const result of [replied, commitments, enriched, sent, research] as any[]) if (result.error) throw new DailyAlertsError('No pudimos leer los pendientes.', 503);
 
@@ -105,8 +115,32 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     ready: ready.size,
     research: researchItems,
     closing: options.opportunities === 'none' ? [] : await readClosing(client, scope, now, options.opportunities === 'manager'),
-    goal,
+    ...(options.opportunities === 'none' ? {} : await readOpportunityNews(client, scope, { now, since, manager: options.opportunities === 'manager' })),
+    // APP-15: «Meta de la semana: personas contactadas» went to everyone, also to whoever only works tenders. With access to Oportunidades
+    // and nobody ever saved, given an email or written to, the goal is not theirs (a failed read keeps it, as before).
+    goal: options.opportunities !== 'none' && !(saved as any).error && !((saved as any).data || []).length && !ready.size && !written.size && !people.length ? null : goal,
   };
+}
+
+/**
+ * What happened on Oportunidades for the person since the last alert, from their own notices (assigned to them, a report ready on one
+ * of theirs) and, for whoever manages them, what waits for an answer: decisions with none yet and the opportunities blocked. A failed
+ * read leaves these lines out; the rest of the alert still goes.
+ */
+async function readOpportunityNews(client: Client, scope: AlertScope, options: { now: Date; since: string; manager: boolean }) {
+  const notices: any = await client.from('opportunity_notifications').select('opportunity_id,title,kind,created_at').eq('organization_id', scope.organizationId)
+    .eq('user_id', scope.userId).in('kind', ['assignment', 'report']).gte('created_at', options.since).order('created_at').limit(50);
+  // The titles are the notices' own (opportunity_assign and workspace-jobs.ts); a draft of the offer is asked for and awaited, so it
+  // is not news for the morning.
+  const once = (kind: string, prefix: RegExp) => {
+    const seen = new Set<string>();
+    return ((notices.error ? [] : notices.data || []) as any[]).filter(row => row.kind === kind && prefix.test(String(row.title || '')) && !seen.has(String(row.opportunity_id)) && seen.add(String(row.opportunity_id)))
+      .map(row => ({ id: String(row.opportunity_id), title: String(row.title || 'Oportunidad').replace(prefix, '').slice(0, 140) }));
+  };
+  const news = { assigned: once('assignment', /^Oportunidad asignada:\s*/), reports: once('report', /^Informe (?:listo|disponible):\s*/) };
+  if (!options.manager) return news;
+  const waiting = await readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null);
+  return waiting ? { ...news, waiting } : news;
 }
 
 /**
@@ -114,11 +148,23 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
  * person's, or recommended and nobody's when they manage them.
  */
 async function readClosing(client: Client, scope: AlertScope, now: Date, manager: boolean): Promise<AlertOpportunity[]> {
-  const until = dayStartInZone(shiftDay(dayInZone(now), CLOSING_DAYS + 1)).toISOString();
-  const closing: any = await client.from('commercial_opportunities').select('id,kind,title,deadline_at,data').eq('organization_id', scope.organizationId)
-    .gte('deadline_at', now.toISOString()).lt('deadline_at', until).order('deadline_at').limit(100);
-  if (closing.error) throw new DailyAlertsError('No pudimos leer las oportunidades.', 503);
-  const open = ((closing.data || []) as any[]).filter(row => row.data?.evaluation !== 'excluded');
+  const today = dayInZone(now);
+  const soon = dayStartInZone(shiftDay(today, CLOSING_DAYS + 1)).toISOString();
+  const until = dayStartInZone(shiftDay(today, Math.max(CLOSING_DAYS, ...HEADS_UP_DAYS) + 1)).toISOString();
+  const daysLeft = (at: string) => Math.round((dayStartInZone(dayInZone(new Date(at))).getTime() - dayStartInZone(today).getTime()) / 86_400_000);
+  // What closes within three days, and the person's own opportunities, whose week-ahead heads-up the first read would cut off.
+  const [closing, own]: any[] = await Promise.all([
+    client.from('commercial_opportunities').select('id,kind,title,deadline_at,data').eq('organization_id', scope.organizationId)
+      .gte('deadline_at', now.toISOString()).lt('deadline_at', soon).order('deadline_at').limit(100),
+    client.from('opportunity_work').select('opportunity_id').eq('organization_id', scope.organizationId).eq('responsible_id', scope.userId).limit(200),
+  ]);
+  if (closing.error || own.error) throw new DailyAlertsError('No pudimos leer las oportunidades.', 503);
+  const ownIds = ((own.data || []) as any[]).map(row => String(row.opportunity_id));
+  const ahead: any = ownIds.length ? await client.from('commercial_opportunities').select('id,kind,title,deadline_at,data').eq('organization_id', scope.organizationId)
+    .in('id', ownIds).gte('deadline_at', soon).lt('deadline_at', until) : { data: [], error: null };
+  if (ahead.error) throw new DailyAlertsError('No pudimos leer las oportunidades.', 503);
+  const rows = [...((closing.data || []) as any[]), ...((ahead.data || []) as any[]).filter(row => headsUp(daysLeft(String(row.deadline_at)), today))];
+  const open = rows.filter(row => row.data?.evaluation !== 'excluded');
   if (!open.length) return [];
   const work: any = await client.from('opportunity_work').select('opportunity_id,state,responsible_id').eq('organization_id', scope.organizationId).in('opportunity_id', open.map(row => row.id));
   if (work.error) throw new DailyAlertsError('No pudimos leer las oportunidades.', 503);
@@ -131,7 +177,7 @@ async function readClosing(client: Client, scope: AlertScope, now: Date, manager
     const nobodys = !state || state.state === 'unassigned' || !state.responsible;
     if (!mine && !(manager && nobodys && recommended)) return [];
     return [{ id: String(row.id), kind: String(row.kind), title: String(row.title || 'Oportunidad').slice(0, 140), deadlineAt: String(row.deadline_at), recommended, mine }];
-  }).slice(0, 10);
+  }).sort((a, b) => a.deadlineAt.localeCompare(b.deadlineAt)).slice(0, 10);
 }
 
 /** Today's «Contacto del día» of the person, once ready; nothing before the migration or while it is being written. */

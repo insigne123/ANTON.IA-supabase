@@ -1,6 +1,20 @@
 // The admin's pipeline: where each opportunity stands, drawn as a route of stages, and the rules that move it on their own
 // when the work shows it moved. Pure: the page, the API and the tests share it.
+import { dayInZone, shiftDay } from '@/lib/admin/chile-time';
 import type { WorkItem, WorkRecord } from './workspace';
+
+/** One of «Cierran esta semana» over the road (server/commercial-opportunities/workspace-pipeline.ts). */
+export type PipelineWeekItem = { id: string; title: string; deadlineAt: string; stage: 'recommended' | 'assigned' | 'working' | 'blocked' };
+const SHORT_DAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+/** «Hoy», «Mañana», «Vie 30»: the day it closes, in Chile, short enough for a chip. */
+export function weekDay(at: string, now: Date) {
+  const day = dayInZone(new Date(at)), today = dayInZone(now);
+  if (day === today) return 'Hoy';
+  if (day === shiftDay(today, 1)) return 'Mañana';
+  const [year, month, date] = day.split('-').map(Number);
+  const name = SHORT_DAYS[new Date(Date.UTC(year, month - 1, date, 12)).getUTCDay()];
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${date}`;
+}
 
 export const WORK_STATE_LABELS: Record<WorkRecord['state'], string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En preparación', blocked: 'Bloqueada',
   submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada' };

@@ -75,14 +75,17 @@ test('what is missing is left out instead of saying «sin fecha»', () => {
 });
 
 const decision = { id: 'a1', type: 'no_go', body: 'Propone no postular: Pide 24 meses de experiencia que no podemos acreditar', dueAt: '2026-10-23T15:00:00Z', actorId: 'u1', at: '2026-10-22T10:00:00Z' };
-const callout = (props: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(DecisionCallout, { decision, who: 'Luis Soto', admin: false, busy: false, onReply: noop, ...props }));
+const callout = (props: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(DecisionCallout, { decision, who: 'Luis Soto', admin: false, busy: false, onReply: noop,
+  now: new Date('2026-10-24T15:00:00Z'), ...props }));
 
 test('the team sees the decision waiting, who put it and the date it is needed by', () => {
   const words = text(callout());
   assert.match(words, /Propone no postular · Luis Soto · para el viernes 23 de octubre/);
   assert.match(words, /Pide 24 meses de experiencia que no podemos acreditar/);
   assert.doesNotMatch(words, /Propone no postular: Pide/, 'the label is not repeated in the sentence');
-  assert.match(words, /Un administrador te responderá aquí mismo/);
+  assert.match(words, /Esperando respuesta hace 2 días\. Un administrador te responderá aquí mismo y te avisaremos\./, 'whoever asked sees how long it has waited');
+  assert.doesNotMatch(words, /· espera/);
+  assert.match(text(callout({ now: new Date('2026-10-22T20:00:00Z') })), /Esperando respuesta desde hoy\./);
   assert.doesNotMatch(callout(), /<input/);
 });
 
@@ -92,5 +95,6 @@ test('only an administrator gets the box to answer it', () => {
   assert.match(html, /<input[^>]*id="decision-reply"/);
   assert.match(text(html), /Responder/);
   assert.doesNotMatch(text(html), /te responderá aquí mismo/);
+  assert.match(text(html), /Propone no postular · Luis Soto · para el viernes 23 de octubre · espera hace 2 días/);
   assert.doesNotMatch(text(callout({ decision: { ...decision, dueAt: null } })), /para el/);
 });

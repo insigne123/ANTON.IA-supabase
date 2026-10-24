@@ -15,6 +15,7 @@ import { ReconnectCard } from '@/components/home/ReconnectCard';
 import { TouchesCard } from '@/components/home/TouchesCard';
 import { WeeklyGoalCard } from '@/components/home/WeeklyGoalCard';
 import { LeadDropBanner } from '@/components/home/LeadDropBanner';
+import { OpportunitiesTodayCard } from '@/components/home/OpportunitiesTodayCard';
 import { WeeklyReport } from '@/components/weekly-report/WeeklyReport';
 import { cn } from '@/lib/utils';
 
@@ -25,9 +26,9 @@ const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric'
 
 /**
  * «Hoy» (docs/inicio-hoy.md). The work first: the next step, today's contact and what is waiting, in the main column. The
- * week's goal, how the day goes and the credits sit beside it, so they never push the work down. «Llamadas y LinkedIn»
- * and «Para retomar» follow the pending work when something is due. On phones the order is step → contact of the day →
- * pending → calls and LinkedIn → to reconnect → goal → summary → recommended.
+ * week's goal, how the day goes and the credits sit beside it, so they never push the work down. «Oportunidades», «Llamadas y
+ * LinkedIn» and «Para retomar» follow the pending work when something is due. On phones the order is step → contact of the day →
+ * pending → opportunities → calls and LinkedIn → to reconnect → goal → summary → recommended.
  */
 export default function DashboardPage() {
   const [view, setView] = useState<View>('hoy');
@@ -70,6 +71,7 @@ export default function DashboardPage() {
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4 xl:col-start-1">
           <TodayPanel afterPrimary={primary => <LeadDropBanner quietProfile={primary.href === '/profile'} />} />
+          <OpportunitiesTodayCard />
           <TouchesCard />
           <ReconnectCard />
         </div>

@@ -8,8 +8,12 @@ const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', '
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
 const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
 
-/** The button of the card of an opportunity, found by its title: the nearest block around the title that has that button is the card. */
-const inCard = (c, title, button) => c.page.getByText(title, { exact: true }).filter({ visible: true }).first()
+/**
+ * The button of the card of an opportunity, found by its title: the nearest block around the title that has that button is the card.
+ * The title also shows in «Cierran esta semana» over the road, whose block holds every card: that one is not the card.
+ */
+const inCard = (c, title, button) => c.page.getByText(title, { exact: true }).filter({ visible: true })
+  .and(c.page.locator('xpath=//*[not(ancestor-or-self::*[@aria-labelledby="pipeline-week"])]')).first()
   .locator(`xpath=ancestor::*[.//button[contains(normalize-space(.), "${button}")]][1]`).getByRole('button', { name: new RegExp(button) }).first();
 const open = async (c, title, button) => { await c.clickOn(inCard(c, title, button)); };
 const workOf = (c, n) => c.table('opportunity_work').find(row => row.opportunity_id === opp(n));
@@ -103,15 +107,31 @@ export default () => [
   { id: 'admin-decision', persona: 'owner', title: 'Administrador: responder la decisión que pidió Diego', goal: 'Contestar si se ofrece el módulo opcional.', passWrites: [ACTIONS, NOTIFY],
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
-      { say: 'Veo la novedad de la decisión pedida', do: async c => { await c.see('Decisión pedida'); } },
-      { say: 'Abro la licitación desde la novedad', do: async c => {
-        await c.click({ text: 'Decisión pedida' }); await c.see('Pide una decisión');
+      { say: 'Veo en «Novedades» que la decisión espera mi respuesta', do: async c => {
+        await c.see('Esperan tu respuesta'); await c.see('Diego pide una decisión');
+        c.check('la decisión se dice una vez, no también como novedad', !(await c.page.getByText(/^Decisión pedida:/).first().isVisible().catch(() => false)));
+      } },
+      { say: 'Pulso Responder', do: async c => {
+        await c.click('Responder'); await c.see('Pide una decisión'); await c.wait(400);
+        c.check('se abre en la caja para responder', (await c.page.evaluate(() => document.activeElement?.id).catch(() => null)) === 'decision-reply');
         c.check('mientras se gestiona, «Cómo postular» es la acción principal', (await applyIsMain(c)) === true);
       } },
       { say: 'Escribo mi respuesta', do: async c => { await c.fill('Tu respuesta', 'Sí, ofrécelo como opcional con el 12 % extra.'); } },
-      { say: 'Pulso Responder', do: async c => {
+      { say: 'Envío la respuesta', do: async c => {
         await c.click('Responder'); await c.wait(1500);
         c.check('la respuesta quedó en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(2) && /Respuesta a la decisión/.test(row.body)));
+      } },
+    ] },
+  { id: 'admin-hoy', persona: 'owner', title: 'Administrador: «Hoy» dice qué espera su respuesta y qué cierra sin equipo', goal: 'Saber desde el inicio qué hacer en Oportunidades.', passWrites: [],
+    steps: [
+      { say: 'Abro Hoy', do: async c => { await c.go('/dashboard'); await c.see('Lo que te espera'); } },
+      { say: 'Leo la tarjeta de Oportunidades', do: async c => {
+        await c.see('Esperan tu respuesta'); await c.see('Diego pide una decisión');
+        await c.see('Cierran esta semana y nadie las trabaja');
+        c.check('cada fila abre su oportunidad', await c.page.locator(`a[href="/opportunities?op=${opp(2)}"]`).first().isVisible().catch(() => false));
+      } },
+      { say: 'Abro Oportunidades y veo lo que cierra esta semana sobre el embudo', do: async c => {
+        await c.go('/opportunities'); await c.see('Embudo de oportunidades'); await c.see('Cierran esta semana');
       } },
     ] },
   { id: 'admin-presentada', persona: 'owner', title: 'Administrador: marcar una oportunidad como presentada', goal: 'Que la invitación de aseo pase a «Presentada».', passWrites: [ACTIONS],
@@ -165,6 +185,19 @@ export default () => [
       { say: 'Pulso Empezar a gestionarla', do: async c => {
         await c.click('Empezar a gestionarla'); await c.wait(1200);
         c.check('quedó en gestión', stateOf(c, 6) === 'working', `estado: ${stateOf(c, 6)}`);
+      } },
+    ] },
+  { id: 'miembro-hoy', persona: 'member', title: 'Integrante: «Hoy» muestra sus oportunidades y la decisión que pidió', goal: 'Ver desde el inicio lo que trabaja y abrir lo que cierra primero.', passWrites: [NOTIFY],
+    steps: [
+      // Nothing of prospecting waits for Diego, so «Hoy» says «Nada pendiente por ahora» instead of «Lo que te espera».
+      { say: 'Abro Hoy', do: async c => { await c.go('/dashboard'); await c.see('Nada pendiente por ahora'); } },
+      { say: 'Leo la tarjeta de Oportunidades', do: async c => {
+        await c.see('Esperando respuesta'); await c.see('Pediste una decisión'); await c.see('Las que trabajas'); await c.see('Informes listos');
+        c.check('no ve lo que solo administra un administrador', !(await c.page.getByText('Cierran esta semana y nadie las trabaja').first().isVisible().catch(() => false)));
+      } },
+      { say: 'Abro la licitación de guardias desde Hoy', do: async c => {
+        await c.click({ text: 'Servicio de guardias de seguridad para 12 sucursales' }); await c.see('Empezar a gestionarla');
+        c.check('llega a la oportunidad', c.page.url().includes(`op=${opp(6)}`), c.page.url());
       } },
     ] },
   { id: 'miembro-bloqueo', persona: 'member', title: 'Integrante: reportar un bloqueo', goal: 'Avisar que falta el certificado de antecedentes.', passWrites: [ACTIONS],

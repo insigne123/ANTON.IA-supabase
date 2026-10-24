@@ -217,11 +217,12 @@ export default function workspace(ctx) {
     { id: job(10), organization_id: org, opportunity_id: opp(10), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:10', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(6), updated_at: ctx.daysAgo(6) },
   ];
 
+  // The titles of production: opportunity_assign («Oportunidad asignada: …»), workspace-jobs.ts («Informe listo: …») and notifyManagers.
   const notification = (index, userId, n, title, kind, read) => ({ id: ctx.uid(9800 + index), organization_id: org, opportunity_id: opp(n), user_id: userId, title, assignment_revision: 1, kind, event_key: `fx-n:${index}`, created_at: ctx.hoursAgo(2 + index * 3), read_at: read ? ctx.hoursAgo(1) : null });
   const notifications = [
-    notification(0, ctx.MEMBER, 6, 'Te asignaron «Servicio de guardias de seguridad para 12 sucursales»', 'assignment', false),
-    notification(1, ctx.MEMBER, 2, 'El informe de «Servicio de verificación de antecedentes para personal externo» está listo', 'report', false),
-    notification(2, ctx.MEMBER, 3, 'Te asignaron «Compra Ágil: revisión de antecedentes de postulantes»', 'assignment', true),
+    notification(0, ctx.MEMBER, 6, 'Oportunidad asignada: Servicio de guardias de seguridad para 12 sucursales', 'assignment', false),
+    notification(1, ctx.MEMBER, 2, 'Informe listo: Servicio de verificación de antecedentes para personal externo', 'report', false),
+    notification(2, ctx.MEMBER, 3, 'Oportunidad asignada: Compra Ágil: revisión de antecedentes de postulantes', 'assignment', true),
     notification(3, ctx.OWNER, 2, 'Decisión pedida: Servicio de verificación de antecedentes para personal externo', 'task', false),
   ];
 

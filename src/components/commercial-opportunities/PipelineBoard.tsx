@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
 import type { WorkItem, WorkRecord } from '@/lib/commercial-opportunities/workspace';
-import { PIPELINE_STAGES, WORK_STATE_LABELS, daysToClose, pipelineStage } from '@/lib/commercial-opportunities/pipeline';
+import { PIPELINE_STAGES, WORK_STATE_LABELS, daysToClose, pipelineStage, weekDay, type PipelineWeekItem } from '@/lib/commercial-opportunities/pipeline';
 import { PRIORITY_SORTS, comparePriority, type PrioritySort } from '@/lib/commercial-opportunities/priority';
 import { progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
 import { fallbackLine, opportunityRegion, opportunitySummary } from '@/lib/commercial-opportunities/summaries';
@@ -41,13 +41,36 @@ const MOVES: Record<string, WorkRecord['state'][]> = {
 };
 
 /**
+ * «Cierran esta semana» over the road (OPP-11): what closes within seven days and the team can still act on, across the stages, the
+ * soonest first. The stops only said how many of each; this says which, and opens each one.
+ */
+function ClosingThisWeek({ items, onOpen }: { items: PipelineWeekItem[]; onOpen: (id: string) => void }) {
+  if (!items.length) return null;
+  const now = new Date();
+  return <div role="group" aria-labelledby="pipeline-week" className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
+    <span id="pipeline-week" className="shrink-0 text-xs font-medium text-muted-foreground">Cierran esta semana</span>
+    {items.map(item => {
+      const day = weekDay(item.deadlineAt, now);
+      return <button key={item.id} type="button" onClick={() => onOpen(item.id)} title={`${item.title} · Cierra el ${humanDate(item.deadlineAt, true) ?? ''}`}
+        className="flex max-w-[18rem] shrink-0 items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span className={cn('shrink-0 whitespace-nowrap font-medium tabular-nums', day === 'Hoy' || day === 'Mañana' ? 'text-destructive' : 'text-foreground')}>{day}</span>
+        <span className="truncate">{item.title}</span>
+        {item.stage === 'recommended' ? <span className="shrink-0 text-muted-foreground">· sin equipo</span> : item.stage === 'blocked' ? <span className="shrink-0 text-cw-warning">· bloqueada</span> : null}
+      </button>;
+    })}
+  </div>;
+}
+
+/**
  * The admin's pipeline: the stages as a road (PipelineRoute), the opportunities of the stage in view below it, and what the
  * AI suggests for each one. Moves the work shows happen on their own (pipeline.ts); here a person applies the rest. Each
  * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
 export function PipelineBoard({ items, work, totals, limits, members, busy, suggestions, reviewing, summariesWaiting = false, filtered = false, loadingMore = null, refreshing = false,
-  sort = 'priority', onSort, progress, opened, onReview, onMove, onOpen, onAssign, onDiscard, onReopen, onMore, onClearFilters }: {
+  sort = 'priority', onSort, progress, opened, week = [], onReview, onMove, onOpen, onAssign, onDiscard, onReopen, onMore, onClearFilters }: {
   items: WorkItem[]; work: WorkRecord[]; members: Array<{ user_id: string; name: string }>; busy: boolean;
+  /** «Cierran esta semana»: what closes within seven days across the stages a team can still act on (workspace-pipeline.ts). */
+  week?: PipelineWeekItem[];
   /** Exact counts of what nobody works yet and of what was lost or put aside; the page lists only some of them. */
   totals?: { found: number; recommended: number; excluded?: number; lost?: number; archived?: number };
   /** How many of each of those the page asked for: «Cargar más» asks for more until the most the server gives. */
@@ -122,6 +145,7 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
       {suggestions && <p role="status" className="rounded-xl bg-primary/5 px-3 py-2 text-sm">
         {suggestions.length ? `La IA revisó ${suggestions.length} ${suggestions.length === 1 ? 'oportunidad' : 'oportunidades'} en curso: ${moves ? `sugiere mover ${moves}` : 'ninguna necesita cambiar de etapa'} y deja una próxima acción para cada una.` : 'No hay oportunidades en curso para revisar.'}
       </p>}
+      <ClosingThisWeek items={week} onOpen={onOpen} />
       <PipelineRoute stops={stops} selected={selected} onSelect={select} />
       {closed.some(s => s.count) ? <div role="group" aria-labelledby="pipeline-closed" className="flex flex-wrap items-center justify-center gap-2">
         <span id="pipeline-closed" className="text-xs text-muted-foreground">Fuera del embudo</span>

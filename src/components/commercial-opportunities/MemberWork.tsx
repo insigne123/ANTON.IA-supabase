@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { DECISION_LABELS, adminMoves, memberSteps, type DecisionType, type OpenDecision, type WorkState } from '@/lib/commercial-opportunities/member-work';
+import { DECISION_LABELS, adminMoves, memberSteps, waitingSince, type DecisionType, type OpenDecision, type WorkState } from '@/lib/commercial-opportunities/member-work';
 import { assignmentWhen } from '@/lib/commercial-opportunities/assignment-email';
 
 const STATE_WORDS: Record<WorkState, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada' };
@@ -92,23 +92,24 @@ export function MemberStrip({ state, assignedBy, nextActionAt, openTasks, canSte
   </section>;
 }
 
-type CalloutProps = { decision: OpenDecision; who: string; admin: boolean; busy: boolean; onReply: (text: string) => Promise<boolean> };
+type CalloutProps = { decision: OpenDecision; who: string; admin: boolean; busy: boolean; onReply: (text: string) => Promise<boolean>; now?: Date };
 /**
- * The decision waiting for an answer, for the whole team: who put it and what, and for administrators the box to answer it.
- * It goes away when an administrator answers.
+ * The decision waiting for an answer, for the whole team: who put it and what, how long it has waited, and for administrators the box
+ * to answer it. It goes away when an administrator answers.
  */
-export function DecisionCallout({ decision, who, admin, busy, onReply }: CalloutProps) {
+export function DecisionCallout({ decision, who, admin, busy, onReply, now }: CalloutProps) {
   const [text, setText] = useState('');
   const when = decision.dueAt ? assignmentWhen(decision.dueAt).replace(/,\s*\d{2}:\d{2}$/, '') : '';
+  const waited = waitingSince(decision.at, now);
   return <section aria-label="Decisión pendiente" className="space-y-3 rounded-xl bg-cw-warning-soft px-4 py-3">
     <div>
-      <p className="text-xs font-medium text-muted-foreground">{DECISION_LABELS[decision.type]} · {who}{when ? ` · para el ${when}` : ''}</p>
+      <p className="text-xs font-medium text-muted-foreground">{DECISION_LABELS[decision.type]} · {who}{when ? ` · para el ${when}` : ''}{admin ? ` · espera ${waited}` : ''}</p>
       <p className="mt-1 text-sm leading-6">{decision.body.replace(/^[^:]+:\s*/, '')}</p>
     </div>
     {admin ? <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); void onReply(text.trim()).then(done => { if (done) setText(''); }); }}>
       <div className="min-w-[14rem] flex-1 space-y-1"><Label htmlFor="decision-reply" className="text-xs">Tu respuesta</Label>
         <Input id="decision-reply" value={text} onChange={event => setText(event.target.value)} maxLength={1000} placeholder={decision.type === 'no_go' ? 'Ej.: postulemos igual / de acuerdo, no postulamos' : 'Ej.: firma Nicolás'} /></div>
       <Button type="submit" size="sm" disabled={busy || text.trim().length < 2}>Responder</Button>
-    </form> : <p className="text-xs text-muted-foreground">Un administrador te responderá aquí mismo.</p>}
+    </form> : <p className="text-xs text-muted-foreground">Esperando respuesta {waited}. Un administrador te responderá aquí mismo y te avisaremos.</p>}
   </section>;
 }
