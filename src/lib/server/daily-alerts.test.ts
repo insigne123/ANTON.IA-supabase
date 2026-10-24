@@ -193,3 +193,30 @@ test('whoever is in charge hears a week ahead once, then in the last three days'
   // Wednesday 21: Tuesday 27 is six days ahead and was already said on Tuesday; Wednesday 28 is seven.
   assert.deepEqual(await ids(WEDNESDAY), ['soon', 'wed']);
 });
+
+test('whoever manages Oportunidades hears of a document on its day and of what is new in the searches they follow', async () => {
+  // Saved searches name people by their user id, as production does.
+  const ANA = '00000000-0000-4000-8000-0000000000a1', OTHER = '00000000-0000-4000-8000-0000000000b2';
+  const scope = { organizationId: ORG, userId: ANA };
+  const data: any = seed();
+  data.opportunity_company_documents = [
+    { organization_id: ORG, label: 'Certificado F30', expires_at: '2026-10-27' },
+    { organization_id: ORG, label: 'Certificado ISO', expires_at: '2027-03-01' },
+  ];
+  data.opportunity_company_context = [{ organization_id: ORG, admin_settings: { searches: [
+    { id: 's-1', name: 'Seguridad', filter: 'recommended', source: 'all', query: '', categories: ['seguridad'], notify: [ANA], createdBy: ANA },
+    { id: 's-2', name: 'Aseo', filter: 'recommended', source: 'all', query: '', categories: ['aseo'], notify: [OTHER], createdBy: OTHER },
+  ] } }];
+  data.commercial_opportunities = [
+    { id: 'n-1', organization_id: ORG, kind: 'tender', title: 'Servicio de guardias para bodegas', created_at: '2026-10-19T14:00:00Z', deadline_at: '2026-11-10T15:00:00Z', evaluation: null },
+    { id: 'n-2', organization_id: ORG, kind: 'tender', title: 'Vigilancia de recintos', created_at: '2026-10-19T15:00:00Z', deadline_at: '2026-11-12T15:00:00Z', evaluation: 'excluded' },
+    { id: 'n-3', organization_id: ORG, kind: 'tender', title: 'Guardias para el hospital', created_at: '2026-10-16T15:00:00Z', deadline_at: '2026-11-12T15:00:00Z', evaluation: null },
+  ];
+  const { client } = memory(data);
+  const facts = await readAlertFacts(client, scope, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'manager' });
+  assert.deepEqual(facts.documents, [{ label: 'Certificado F30', daysLeft: 7 }], 'a week before; the ISO certificate is far');
+  assert.deepEqual(facts.searches, [{ name: 'Seguridad', count: 1, href: '/opportunities?vista=lista&rubro=seguridad' }], 'only what arrived since the last alert and the AI did not leave out, of the search Ana follows');
+  const member = await readAlertFacts(client, scope, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'mine' });
+  assert.equal(member.documents, undefined);
+  assert.equal(member.searches, undefined);
+});

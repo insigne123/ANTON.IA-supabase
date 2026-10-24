@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { alertDay, alertEmail, closingText, composeAlert, dayWord, waitingText, type AlertFacts } from './daily-alerts';
+import { alertDay, alertEmail, closingText, composeAlert, dayWord, waitingText, type AlertFacts, documentDue } from './daily-alerts';
 import { DEFAULT_GOALS } from './weekly-goals';
 
 // Chile is UTC−3 in October: 12:00Z is 09:00 there.
@@ -164,4 +164,21 @@ test('a source of the search that failed two days in a row reaches whoever manag
   const alert = composeAlert(facts, TUESDAY)!;
   assert.equal(alert.subject, 'La búsqueda de Compra Ágil falló 2 días seguidos');
   assert.deepEqual(alert.lines, [{ kind: 'source', text: 'La búsqueda de Compra Ágil falló 2 días seguidos', href: '/opportunities' }]);
+});
+
+test('a document of the company is told two weeks before, a week before, the day before, the day itself and once after it lapsed; never every day', () => {
+  const told = (gap: number) => Array.from({ length: 22 }, (_, index) => 16 - index).filter(daysLeft => documentDue(daysLeft, gap));
+  assert.deepEqual(told(1), [15, 7, 1, 0, -1]);
+  // On Tuesday the last alert was on Friday: what crossed over the weekend or on Monday is told once, on Tuesday.
+  assert.ok(documentDue(5, 4), 'a week ahead fell on Saturday');
+  assert.ok(!documentDue(11, 4), 'no day crossed since Friday');
+  assert.ok(documentDue(-3, 4), 'it lapsed on Saturday');
+  const alert = composeAlert(facts({ goal: null, documents: [{ label: 'Certificado F30', daysLeft: 7 }, { label: 'Certificado F30-1', daysLeft: -1 }] }), TUESDAY)!;
+  assert.deepEqual(alert.lines.map(line => [line.kind, line.text]), [['document', 'Certificado F30 vence en 7 días'], ['document', 'Venció Certificado F30-1: renuévalo antes de la próxima postulación']]);
+});
+
+test('what is new in a saved search reaches whoever asked to hear of it, with the list of its filters', () => {
+  const alert = composeAlert(facts({ goal: null, searches: [{ name: '“guardias” · Seguridad', count: 3, href: '/opportunities?vista=lista&q=guardias&rubro=seguridad' }] }), TUESDAY)!;
+  assert.equal(alert.subject, '3 nuevas en tu búsqueda «“guardias” · Seguridad»');
+  assert.deepEqual(alert.lines, [{ kind: 'search', text: '3 nuevas en tu búsqueda «“guardias” · Seguridad»', href: '/opportunities?vista=lista&q=guardias&rubro=seguridad' }]);
 });

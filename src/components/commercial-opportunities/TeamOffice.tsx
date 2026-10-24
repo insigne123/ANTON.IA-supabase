@@ -4,7 +4,7 @@ import { Check, Star } from 'lucide-react';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
 
-export type TeamMember = { user_id: string; name: string; role?: string | null };
+export type TeamMember = { user_id: string; name: string; role?: string | null; /** How many opportunities in play they work, when known: «Asignar» shows it (OPP-06). */ open?: number };
 
 /** A desk in the office: a small table with its screen, drawn with the same line as the report's «oficina». */
 function Desk({ active }: { active: boolean }) {
@@ -94,7 +94,8 @@ export function TeamPicker({ members, selected, responsibleId, onChange }: {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{member.name}</span>
-                <span className="block text-xs text-muted-foreground">{lead ? 'Responsable' : picked ? 'Participa' : member.role === 'admin' || member.role === 'owner' ? 'Administra la organización' : 'Miembro'}</span>
+                <span className="block truncate text-xs text-muted-foreground">{lead ? 'Responsable' : picked ? 'Participa' : member.role === 'admin' || member.role === 'owner' ? 'Administra la organización' : 'Miembro'}
+                  {typeof member.open === 'number' ? ` · ${member.open} en curso` : ''}</span>
               </span>
             </button>
             {picked ? (

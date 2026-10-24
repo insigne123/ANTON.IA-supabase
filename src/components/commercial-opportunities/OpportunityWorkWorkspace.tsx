@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, RotateCcw, Settings, Sparkles, Users, X } from 'lucide-react';
+import { Archive, ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, RotateCcw, Settings, Sparkles, Users, X, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -44,9 +44,14 @@ import { useConfirm } from '@/components/confirm-dialog';
 import { OpportunityTicketConnection } from './OpportunityTicketConnection';
 import { SearchCriteriaFields } from './SearchCriteriaFields';
 import { SearchHealthLine } from './SearchHealthLine';
+import { CompanySetup } from './CompanySetup';
+import { SavedSearches } from './SavedSearches';
+import type { SetupStepId } from '@/lib/commercial-opportunities/company-setup';
 import { criteriaDraft, draftToSave, type CriteriaDraft } from '@/lib/commercial-opportunities/search-settings';
 import { CloseReasonDialog, type CloseTarget } from './CloseReasonDialog';
 import { DiscardDialog, type DiscardTarget } from './DiscardDialog';
+import { AssignmentRulesDialog, RuleAssignDialog, type rulesOf } from './AssignmentRules';
+import { buyerSearch, readAdminSettings, ruleFor, ruleLabel, sameSearch, searchName, type RuleGroup, type SavedSearch, type SearchState } from '@/lib/commercial-opportunities/admin-settings';
 import { ADMIN_LIST_VIEWS, inListView, listStageOf, type DiscardReason } from '@/lib/commercial-opportunities/list-stages';
 import { WorkspaceCompanyFields } from './WorkspaceCompanyFields';
 import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
@@ -101,6 +106,11 @@ export function OpportunityWorkWorkspace() {
   const [opened, setOpened] = useState<Record<string, number>>({});
   const openedRef = useRef(opened); openedRef.current = opened;
   useEffect(() => { try { setOpened(parseOpened(window.localStorage.getItem(openedKey(user?.id)))); } catch { setOpened({}); } }, [user?.id]);
+  // «Prepara tu empresa» put away in this browser; shown again only in another one (the steps stay true either way).
+  const setupKey = `anton:opportunities-setup-hidden:${user?.id || 'anon'}`;
+  const [setupHidden, setSetupHidden] = useState(true);
+  useEffect(() => { try { setSetupHidden(window.localStorage.getItem(setupKey) === '1'); } catch { setSetupHidden(false); } }, [setupKey]);
+  const hideSetup = () => { setSetupHidden(true); try { window.localStorage.setItem(setupKey, '1'); } catch { /* private mode: hidden until the page closes */ } };
   const [overview, setOverview] = useState<(WorkspaceOverview & { suggestion?: any }) | null>(null);
   const [problem, setProblem] = useState(''); const [busy, setBusy] = useState(false);
   // Nothing is read before the address says which filters (workspace-url.ts): otherwise the first reading would be thrown away.
@@ -125,6 +135,10 @@ export function OpportunityWorkWorkspace() {
   const [reconsider,setReconsider]=useState(false);
   // «No es para nosotros» (DiscardDialog): what is being put aside, from a card, the list's selection or the opportunity itself.
   const [discarding, setDiscarding] = useState<DiscardTarget | null>(null);
+  // The assignment rules (OPP-06): their dialog, what «Asignarlas» is about to assign, and the rule behind a «Asignar» that came suggested.
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [ruleAssign, setRuleAssign] = useState<RuleGroup[] | null>(null);
+  const [assignRule, setAssignRule] = useState('');
   // The list's selection, for the actions on several at once (administrators); a new filter, search or page starts it over.
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const togglePick = (id: string, on: boolean) => setPicked(current => { const next = new Set(current); if (on) next.add(id); else next.delete(id); return next; });
@@ -460,6 +474,29 @@ export function OpportunityWorkWorkspace() {
     }
     setBusy(false); await loadDetail(selected);
   };
+  const adminSettings = readAdminSettings((overview?.context as any)?.admin_settings);
+  const saveRules = async (rules: ReturnType<typeof rulesOf>) => {
+    if (await perform('admin_settings', { op: 'rules', rules }, null, true)) { setRulesOpen(false); setFeedback(rules.length ? 'Reglas guardadas: las recomendadas dicen a quién van.' : 'Quitamos las reglas de asignación.'); }
+  };
+  // «Asignarlas»: each person gets theirs in one step, as the responsible one, and is told by email (the same bulk assignment of the list).
+  const confirmRuleAssign = async (groups: RuleGroup[]) => {
+    let done = 0, skipped = 0;
+    for (const group of groups) {
+      const result = await perform('bulk', { op: 'assign', ids: group.ids, teamId: null, participantIds: [group.userId], responsibleId: group.userId, objective: '', dueAt: null }, null, true) as BulkResult | null;
+      if (!result) return;
+      done += result.done.length; skipped += result.skipped;
+    }
+    setRuleAssign(null); await afterBulk(groups.flatMap(group => group.ids));
+    setFeedback(`${done === 1 ? 'Asignamos 1' : `Asignamos ${done}`} según tus reglas: ${groups.map(group => `${group.name.split(' ')[0]} (${group.ids.length})`).join(', ')}. Les avisamos por correo.${skipped ? ` ${skipped === 1 ? 'Una no se pudo' : `${skipped} no se pudieron`}: cambiaron mientras tanto.` : ''}`);
+  };
+  // The searches of the list the team keeps (OPP-10): saved with the morning notice on for whoever saves it.
+  const saveSearch = async (state: SearchState, name = searchName(state)) => {
+    if (await perform('admin_settings', { op: 'search', search: { ...state, name, notify: true } }, null, true)) setFeedback(`Guardamos «${name}». Te avisaremos en el correo de la mañana cuando aparezcan nuevas.`);
+  };
+  const notifySearch = async (id: string, on: boolean) => {
+    if (await perform('admin_settings', { op: 'search_notify', id, on }, null, true)) setFeedback(on ? 'Te avisaremos de las nuevas en el correo de la mañana.' : 'Ya no te avisamos de esta búsqueda.');
+  };
+  const removeSearch = async (id: string) => { if (await perform('admin_settings', { op: 'search_remove', id }, null, true)) setFeedback('Quitamos la búsqueda guardada.'); };
   const openContext = () => {
     const c = overview?.context as any;
     setDraft({ offer: c?.offer || overview?.suggestion?.offer || '', services: (c?.services || overview?.suggestion?.services || []).join('\n'), territories: (c?.territories || []).join('\n'), exclusions: (c?.exclusions || []).join('\n'), priority: c?.priority || 'balanced', automation: c ? c.automation : true, hour: c?.hour ?? 8 }); setModal('context');
@@ -490,7 +527,11 @@ export function OpportunityWorkWorkspace() {
     let revision = 0;
     try { revision = Number((await json(await fetch(`/api/commercial-opportunities/${target.id}/workspace`, { cache: 'no-store' })))?.work?.revision || 0); } catch { /* it opens anyway: a stale revision is told when it is saved */ }
     setAssignFor({ id: target.id, title: target.title, revision });
-    setDraft({ teamId: '', participantIds: [], responsibleId: '', objective: '' }); setModal('assign');
+    // A rule that gives it to someone comes chosen: confirming is the common case, changing it the exception.
+    const rule = ruleFor(target, adminSettings.rules, new Set((overview?.members || []).map(member => member.user_id)));
+    const name = rule ? (overview?.members || []).find(member => member.user_id === rule.userId)?.name || 'Integrante' : '';
+    setAssignRule(rule ? `Elegida por tu regla «${ruleLabel(rule, name.split(' ')[0])}».` : '');
+    setDraft({ teamId: '', participantIds: rule ? [rule.userId] : [], responsibleId: rule?.userId || '', objective: '' }); setModal('assign');
   };
   // «Asignar» on the list's selection: the same dialog, for all of them at once.
   const [assignMany, setAssignMany] = useState<string[] | null>(null);
@@ -648,6 +689,11 @@ export function OpportunityWorkWorkspace() {
           <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>Ficha para licitaciones</Button>
           {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy || searching.length > 0} onClick={() => void discover()}>{searching.length ? 'Buscando…' : 'Actualizar oportunidades'}</Button> : null}</div></div>}
       {admin && overview.context && overview.health ? <SearchHealthLine health={overview.health} /> : null}
+      {admin && overview.context && overview.setup && !setupHidden ? <CompanySetup facts={overview.setup} onHide={hideSetup} onStep={(step: SetupStepId) => {
+        if (step === 'documents') setProfileOpen(true);
+        else if (step === 'assign') { setView('list'); setFilter('recommended'); }
+        else if (step === 'competitors') setView('market');
+      }} /> : null}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
         <Button onClick={openContext}>Confirmar oferta</Button></div>}
       {view !== 'assistant' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={id => open(id)} onDecision={id => open(id, 'decision')}
@@ -667,6 +713,7 @@ export function OpportunityWorkWorkspace() {
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} onAssign={item => void openQuickAssign(item)}
         onDiscard={item => { setProblem(''); setDiscarding({ ids: [item.id], title: item.title }); }} onReopen={item => void reopen([item.id])}
         filtered={Boolean(search) || source !== 'all' || categories.length > 0} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} week={pipeline.week}
+        rules={adminSettings.rules} onRules={() => { setProblem(''); setRulesOpen(true); }} onAssignByRules={groups => { setProblem(''); setRuleAssign(groups); }}
         onMore={loadMore} onClearFilters={clearFilters} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
       <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} showSources={admin}>
@@ -681,6 +728,9 @@ export function OpportunityWorkWorkspace() {
               sort === option.id ? 'bg-foreground font-medium text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>{option.label}</button>)}</div> : null}
         </div>
       </OpportunityFilters>
+      {admin ? <SavedSearches searches={adminSettings.searches} current={{ filter: shownFilter as SavedSearch['filter'], source, query: search.trim(), categories }} userId={user?.id || ''} busy={busy}
+        onApply={saved => { setFilter(saved.filter); setSource(saved.source); setQuery(saved.query); setSearch(saved.query); setCategories([...saved.categories]); }}
+        onSave={() => void saveSearch({ filter: shownFilter as SavedSearch['filter'], source, query: search.trim(), categories })} onNotify={(id, on) => void notifySearch(id, on)} onRemove={id => void removeSearch(id)} /> : null}
       {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{search || source !== 'all' || categories.length ? 'Prueba otro texto, otra fuente u otro rubro, o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p>
         {search || source !== 'all' || categories.length ? <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Quitar filtros</Button> : null}</section>}
       {admin && shownFilter === 'recommended' && !search && source === 'all' && !categories.length && <StartHere items={items} onOpen={open} />}
@@ -714,7 +764,13 @@ export function OpportunityWorkWorkspace() {
         <header className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{TYPES[item.kind]}</span><AdvicePill item={item} state={detail.work?.state} decision={latest ? reportDecision({ recommendation: latest.report.recommendation, kind: latest.report.kind ?? item.kind }) : undefined} /><span>· {STATES[detail.work?.state || 'unassigned']}</span></div>
           <h1 className="max-w-4xl text-2xl font-semibold tracking-tight">{item.title}</h1>
-          <p className="text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">{item.company_name || item.buyer_name}
+            {/* «Seguir a un organismo» (OPP-10): a saved search by its name, told in the morning email when it publishes something new. */}
+            {admin && !signal && item.buyer_name ? (() => {
+              const follow = buyerSearch(item.buyer_name); const saved = adminSettings.searches.find(search => sameSearch(search, follow)); const on = Boolean(saved && user?.id && saved.notify.includes(user.id));
+              return <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" aria-pressed={on} disabled={busy} onClick={() => void (saved ? notifySearch(saved.id, !on) : saveSearch(follow, follow.name))}>
+                <Bell className={cn('mr-1.5 h-3.5 w-3.5', on && 'fill-current')} aria-hidden="true" />{on ? 'Te avisamos de este organismo' : 'Avisarme de este organismo'}</Button>;
+            })() : null}</p>
           <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
             {!signal && <div><dt className="text-xs text-muted-foreground">Cierre</dt><dd className="font-medium">{humanDate(item.deadline_at, true) ?? 'Sin fecha informada'}{advice && closesLabel(advice) ? <span className={cn('ml-2 text-xs', advice.urgent ? 'text-destructive' : 'text-muted-foreground')}>{closesLabel(advice)}</span> : null}</dd></div>}
             {!signal && <div><dt className="text-xs text-muted-foreground">Monto</dt><dd className="font-medium">{item.amount ? `${money(item.amount)} ${item.currency || ''}` : 'No informado'}</dd></div>}
@@ -797,6 +853,9 @@ export function OpportunityWorkWorkspace() {
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
     {admin && <CloseReasonDialog target={closing} busy={busy} error={closing ? problem : ''} onConfirm={confirmClose} onCancel={() => setClosing(null)} />}
     {admin && <DiscardDialog target={discarding} busy={busy} error={discarding ? problem : ''} onConfirm={confirmDiscard} onCancel={() => setDiscarding(null)} />}
+    {admin ? <AssignmentRulesDialog open={rulesOpen} rules={adminSettings.rules} members={overview?.members || []} busy={busy} error={rulesOpen ? problem : ''} onSave={saveRules} onCancel={() => setRulesOpen(false)} /> : null}
+    {admin ? <RuleAssignDialog groups={ruleAssign} titles={Object.fromEntries((pipeline?.items || []).map(item => [item.id, item.title]))} busy={busy} error={ruleAssign ? problem : ''}
+      onConfirm={confirmRuleAssign} onCancel={() => setRuleAssign(null)} /> : null}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
     <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignMany ? `Asignar ${assignMany.length === 1 ? 'una oportunidad' : `${assignMany.length} oportunidades`}` : assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'Dónde buscamos y qué. La IA preparó los criterios desde tu oferta; corrígelos si algo no calza. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
@@ -807,7 +866,7 @@ export function OpportunityWorkWorkspace() {
         : modal === 'criteria' ? (criteria ? <SearchCriteriaFields draft={criteria} onChange={setCriteria} /> : null)
         : modal === 'assign' ? <>
           {overview?.groups.length ? <div className="space-y-1.5"><p className="text-sm font-medium">Usar un equipo de la organización · opcional</p><div className="flex flex-wrap gap-2">{overview.groups.map(g => <button key={g.id} type="button" aria-pressed={draft.teamId === g.id} onClick={() => field('teamId', draft.teamId === g.id ? '' : g.id)} className={cn(filterChip(draft.teamId === g.id), 'h-9')}>{g.name}</button>)}</div><p className="text-xs text-muted-foreground">Suma a todas las personas de ese equipo.</p></div> : null}
-          <div className="space-y-1.5"><p className="text-sm font-medium">¿Quién trabaja esta oportunidad?</p><p className="text-xs text-muted-foreground">Toca a cada persona; la estrella marca a quien responde por ella.</p>
+          <div className="space-y-1.5"><p className="text-sm font-medium">¿Quién trabaja esta oportunidad?</p><p className="text-xs text-muted-foreground">{assignFor && assignRule ? `${assignRule} ` : ''}Toca a cada persona; la estrella marca a quien responde por ella.</p>
             <TeamPicker members={overview?.members || []} selected={draft.participantIds || []} responsibleId={draft.responsibleId || ''} onChange={next => { field('participantIds', next.selected); field('responsibleId', next.responsibleId); }} /></div>
           <TeamOffice people={(overview?.members || []).filter(m => (draft.participantIds || []).includes(m.user_id))} responsibleId={draft.responsibleId} empty={draft.teamId ? 'Se sumará el equipo elegido.' : 'Elige a las personas y aquí verás a tu equipo.'} />
           <div className="space-y-2"><Label htmlFor="op-objective">Objetivo · opcional</Label><Input id="op-objective" value={draft.objective || ''} onChange={e => field('objective', e.target.value)} placeholder="Ej.: presentar la oferta antes del cierre" maxLength={500} /></div>

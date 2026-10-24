@@ -10,6 +10,7 @@ import * as priority from '@/lib/commercial-opportunities/priority';
 import * as progress from '@/lib/commercial-opportunities/progress';
 import * as summaries from '@/lib/commercial-opportunities/summaries';
 import * as reportView from '@/lib/commercial-opportunities/report-view';
+import * as adminSettings from '@/lib/commercial-opportunities/admin-settings';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -24,6 +25,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/progress': progress,
   '@/lib/commercial-opportunities/summaries': summaries,
   '@/lib/commercial-opportunities/report-view': reportView,
+  '@/lib/commercial-opportunities/admin-settings': adminSettings,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./PipelineRoute'] = load(await compile('./PipelineRoute.tsx'));
@@ -257,4 +259,18 @@ test('«Cierran esta semana» sits over the road: which ones close within seven 
   assert.ok(html.indexOf('Cierran esta semana') < html.indexOf('<nav aria-label="Etapas de las oportunidades">'), 'over the road');
   assert.match(html, /title="Aseo hospital · Cierra el [^"]+"/, 'the exact closing on hover');
   assert.doesNotMatch(text(render()), /Cierran esta semana/, 'nothing closing: no strip');
+});
+
+test('the recommended ones say who a rule gives each one to, «Asignarlas» takes them all, and without rules there is the way to set them', () => {
+  const recommended = [item('a', 'Servicio de aseo industrial para el hospital', 'recommended'), item('e', 'Guardias de seguridad para bodegas', 'recommended'), item('f', 'Compra de resmas de papel', 'recommended')];
+  const members = [{ user_id: 'u1', name: 'Ana Soto' }, { user_id: 'u2', name: 'Diego Paz' }];
+  const rules = [{ id: 'r1', category: 'seguridad', minAmount: null, userId: 'u2' }, { id: 'r2', category: 'aseo', minAmount: null, userId: 'u1' }];
+  const html = render({ items: recommended, work: [], members, rules, onRules: () => {}, onAssignByRules: () => {}, onAssign: () => {} });
+  assert.match(text(html), /2 calzan con tus reglas Asignarlas Reglas/);
+  assert.match(html, /Asignar a Diego…<\/button>/);
+  assert.match(html, /Asignar a Ana…<\/button>/);
+  assert.equal((html.match(/>Asignar<\/button>/g) || []).length, 1, 'the one no rule gives keeps the plain «Asignar»');
+  assert.match(text(render({ items: recommended, work: [], members, onRules: () => {} })), /Define quién trabaja cada rubro y asígnalas en un paso\. Reglas de asignación/);
+  assert.match(text(render({ items: recommended, work: [], members, rules: [rules[0]], onRules: () => {} })), /1 calza con tus reglas Asignarla Reglas/);
+  assert.doesNotMatch(text(render({ items: recommended, work: [], members })), /reglas/i, 'a member, or no way to set them: nothing about rules');
 });

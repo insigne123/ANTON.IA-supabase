@@ -49,10 +49,12 @@ test('the overview reads its parts together and still answers the same', async (
   assert.equal(state.order.at(-1), 'opportunity_work');
   assert.deepEqual({ ...overview, sourceStatus: undefined }, {
     mode: 'management', items: rows.opportunity_workspace_page, work: rows.opportunity_work, notifications: rows.opportunity_notifications,
-    members: [{ user_id: 'u1', role: 'admin', name: 'Pruebas ANTON.IA' }], groups: rows.organization_reporting_groups, context: rows.opportunity_company_context,
+    members: [{ user_id: 'u1', role: 'admin', name: 'Pruebas ANTON.IA', open: 0 }], groups: rows.organization_reporting_groups, context: rows.opportunity_company_context,
     budget: { spent: 2.14, reserved: 0, cap: 20 }, sourceStatus: undefined, documentAlerts: [], searching: [],
     // No search ran yet, and no member connected a ticket of their own.
     health: { sources: [], ticket: 'shared' },
+    // «Prepara tu empresa»: no document, no competitor followed, nobody given an opportunity yet, the shared ticket.
+    setup: { documentKinds: [], competitors: 0, assigned: false, ticket: 'shared' },
     // The numbers of the filters, from the stages and evaluations of the database.
     counts: { recommended: 3, review: 2, excluded: 0, assigned: 1, working: 0, submitted: 0, closed: 4 },
   });
