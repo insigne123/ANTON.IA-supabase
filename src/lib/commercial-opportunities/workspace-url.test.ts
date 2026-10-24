@@ -26,3 +26,14 @@ test('«Mis tareas» has its address, and the link of an email opens the opportu
   assert.deepEqual([readWorkspaceUrl('op=abc&seccion=tareas').section, readWorkspaceUrl('op=abc&seccion=actividad').section, readWorkspaceUrl('op=abc&seccion=otra').section],
     ['tasks', 'activity', null]);
 });
+
+test('the part on screen stays in the address while the opportunity is open, so a reload opens on it', () => {
+  const list = { ...WORKSPACE_URL_DEFAULTS, view: 'tasks' as const };
+  assert.equal(workspaceUrl('/opportunities', list, 'abc', 'tasks'), '/opportunities?vista=tareas&op=abc&seccion=tareas');
+  assert.equal(workspaceUrl('/opportunities', WORKSPACE_URL_DEFAULTS, 'abc', 'contacts'), '/opportunities?op=abc&seccion=contactos');
+  assert.equal(workspaceUrl('/opportunities', WORKSPACE_URL_DEFAULTS, 'abc', 'summary'), '/opportunities?op=abc', 'the report is the plain address');
+  assert.equal(workspaceUrl('/opportunities', list, null, 'tasks'), '/opportunities?vista=tareas', 'without an opportunity open there is no part of it');
+  assert.equal(workspaceUrl('/opportunities', WORKSPACE_URL_DEFAULTS, 'abc', 'unknown'), '/opportunities?op=abc');
+  for (const section of ['apply', 'market', 'documents', 'chat', 'tasks', 'contacts', 'activity'])
+    assert.equal(readWorkspaceUrl(workspaceUrl('/opportunities', WORKSPACE_URL_DEFAULTS, 'abc', section).split('?')[1]).section, section, section);
+});

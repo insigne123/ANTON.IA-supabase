@@ -8,8 +8,11 @@ import { isOpportunitySource, parseCategories, type OpportunityCategory, type Op
 export type WorkspaceView = 'pipeline' | 'list' | 'market' | 'tasks' | 'assistant';
 export type WorkspaceUrlState = { view: WorkspaceView; filter: string; source: OpportunitySource; query: string; categories: OpportunityCategory[]; sort: PrioritySort };
 const VIEW_WORDS: Record<WorkspaceView, string> = { pipeline: 'embudo', list: 'lista', market: 'mercado', tasks: 'tareas', assistant: 'asistente' };
-/** The part of an opportunity a link opens on (the emails of a note that names someone and of tasks given): «seccion=tareas». */
-const SECTION_WORDS: Record<string, string> = { informe: 'summary', postular: 'apply', documentos: 'documents', tareas: 'tasks', actividad: 'activity' };
+/**
+ * The part of the open opportunity on screen, «seccion=tareas»: a link opens on it (the emails of tasks given and of a note that names
+ * someone) and a reload stays there. The report, the first part, goes without it.
+ */
+const SECTION_WORDS: Record<string, string> = { informe: 'summary', postular: 'apply', ganar: 'market', documentos: 'documents', preguntar: 'chat', tareas: 'tasks', contactos: 'contacts', actividad: 'activity' };
 /** The member's «Presentadas y cerradas» is read on the page from everything of theirs (member-work.ts). */
 const FILTERS: readonly string[] = [...LIST_VIEWS, 'done'];
 export const WORKSPACE_URL_DEFAULTS: WorkspaceUrlState = { view: 'pipeline', filter: 'recommended', source: 'all', query: '', categories: [], sort: 'priority' };
@@ -28,8 +31,8 @@ export function readWorkspaceUrl(search: string): WorkspaceUrlState & { op: stri
   };
 }
 
-/** The address of a state: the path with only what is not the default, and the open opportunity last. */
-export function workspaceUrl(pathname: string, state: WorkspaceUrlState, op: string | null = null) {
+/** The address of a state: the path with only what is not the default, and the open opportunity last, with the part of it on screen. */
+export function workspaceUrl(pathname: string, state: WorkspaceUrlState, op: string | null = null, section: string | null = null) {
   const params = new URLSearchParams();
   if (state.view !== WORKSPACE_URL_DEFAULTS.view) params.set('vista', VIEW_WORDS[state.view]);
   if (state.filter !== WORKSPACE_URL_DEFAULTS.filter) params.set('etapa', state.filter);
@@ -38,6 +41,8 @@ export function workspaceUrl(pathname: string, state: WorkspaceUrlState, op: str
   if (state.categories.length) params.set('rubro', state.categories.join(','));
   if (state.sort !== 'priority') params.set('orden', state.sort);
   if (op) params.set('op', op);
+  const word = op && section !== 'summary' ? Object.keys(SECTION_WORDS).find(key => SECTION_WORDS[key] === section) : undefined;
+  if (word) params.set('seccion', word);
   const query = params.toString();
   return query ? `${pathname}?${query}` : pathname;
 }

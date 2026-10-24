@@ -65,7 +65,7 @@ export function closeMotives(state: 'won' | 'lost', motives: readonly string[] |
   return motivesFor(state).map(([id]) => id).filter(id => chosen.has(id)).slice(0, MAX_MOTIVES);
 }
 
-/** The line the activity keeps: «Estado: Perdida · Precio, Plazo. Ganó Seguridad Sur SpA por $85.000.000. Pidieron menor plazo.» */
+/** The line the activity keeps: «Estado: perdida · Precio, Plazo. Ganó Seguridad Sur SpA por $85.000.000. Pidieron menor plazo.» */
 export function closeBody(label: string, state: 'won' | 'lost', detail: CloseDetail, note: string | undefined, currency?: string | null) {
   const motives = closeMotives(state, detail.motives).map(id => motiveLabel(state, id)).filter(Boolean);
   const winner = state === 'lost' && detail.winner ? ` Ganó ${detail.winner}${detail.amount !== undefined ? ` por ${moneyOf(detail.amount, currency)}` : ''}.` : '';

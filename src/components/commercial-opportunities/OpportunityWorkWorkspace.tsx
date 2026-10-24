@@ -108,6 +108,7 @@ const listEs = (items: string[]) => items.length > 1 ? `${items.slice(0, -1).joi
 async function json(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error || 'No se pudo completar la acción.'); return value; }
 /** Each opportunity has its own address (?op=…): the browser's back button returns to the list and a teammate can open the same link. */
 const opportunityInUrl = () => typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('op');
+const sectionInUrl = () => typeof window === 'undefined' ? null : readWorkspaceUrl(window.location.search).section;
 /** The pipeline's first page of each stage nobody works yet, and the size of «Cargar más» (workspace-pipeline.ts). */
 const PAGE = 60;
 const FIRST_PAGE: Record<PagedStage, number> = { found: PAGE, recommended: PAGE, excluded: 0, lost: 0, archived: 0 };
@@ -181,7 +182,7 @@ export function OpportunityWorkWorkspace() {
   const lastUrlStep = useRef('');
   useEffect(() => {
     if (!urlRead) return;
-    const next = workspaceUrl(window.location.pathname, urlFilters.current, opportunityInUrl());
+    const next = workspaceUrl(window.location.pathname, urlFilters.current, opportunityInUrl(), sectionInUrl());
     if (next !== `${window.location.pathname}${window.location.search}`) {
       if (lastUrlStep.current && lastUrlStep.current !== urlStep) window.history.pushState(null, '', next); else window.history.replaceState(null, '', next);
     }
@@ -233,7 +234,9 @@ export function OpportunityWorkWorkspace() {
     } catch (e) { if (!signal?.aborted && selectedRef.current === id) { setDetail(null); setMessages([]); setProblem(e instanceof Error ? e.message : 'No se pudo abrir.'); } }
   }, []);
   useEffect(() => {
-    setDetail(null); setMessages([]); setTab(openOn.current ?? 'summary'); openOn.current = null; setNote(''); setPendingQuestion(null); setPlanOpen(false); watching.current = null;
+    // The part asked for is kept until an opportunity is open: the address is read before the first one is.
+    const section = selected ? openOn.current : null; if (selected) openOn.current = null;
+    setDetail(null); setMessages([]); setTab(section ?? 'summary'); setNote(''); setPendingQuestion(null); setPlanOpen(false); watching.current = null;
     if (!selected) return; const controller = new AbortController(); void loadDetail(selected, controller.signal);
     // Every 8 s while a report or an answer is on its way, every 45 s otherwise, and never in a hidden tab.
     let last = Date.now();
@@ -243,6 +246,13 @@ export function OpportunityWorkWorkspace() {
     }, 8000);
     return () => { controller.abort(); clearInterval(timer); };
   }, [selected, loadDetail]);
+  // The part on screen stays in the address (?seccion=…): a reload opens on it, and so does the page when it mounts again as the
+  // session settles (AuthContext keys the app by account), which a part kept only in memory would lose. Replaced, not a new step.
+  useEffect(() => {
+    if (!detail || detail.item.id !== selected || opportunityInUrl() !== selected) return;
+    const next = workspaceUrl(window.location.pathname, urlFilters.current, selected, tab);
+    if (next !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(null, '', next);
+  }, [tab, detail, selected]);
   const research = detail?.jobs.find(j => j.kind === 'research') ?? null;
   const researching = Boolean(research && ACTIVE.includes(research.state));
   const offerJob = detail?.jobs.find(j => j.kind === 'offer' && !j.part) ?? null;
@@ -425,10 +435,12 @@ export function OpportunityWorkWorkspace() {
   const open = (id: string, focus?: 'decision' | 'tasks' | 'activity') => {
     focusDecision.current = focus === 'decision' ? id : null;
     openOn.current = focus === 'tasks' || focus === 'activity' ? focus : null;
+    if (selectedRef.current === id && openOn.current) { setTab(openOn.current); openOn.current = null; }
+    const section = openOn.current;
     setProblem(''); setSelected(id);
     const next = markOpened(openedRef.current, id); setOpened(next);
     try { window.localStorage.setItem(openedKey(user?.id), JSON.stringify(next)); } catch { /* private mode: it is remembered until the page closes */ }
-    if (opportunityInUrl() !== id) window.history.pushState(null, '', workspaceUrl(window.location.pathname, urlFilters.current, id));
+    if (opportunityInUrl() !== id) window.history.pushState(null, '', workspaceUrl(window.location.pathname, urlFilters.current, id, section));
     window.scrollTo({ top: 0 });
     for (const n of overview?.notifications.filter(n => n.opportunity_id === id && !n.read_at) || []) void fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'notification', data: { id: n.id } }) });
   };
@@ -800,6 +812,12 @@ export function OpportunityWorkWorkspace() {
   const title = admin ? 'Gestionar oportunidades' : 'Mis oportunidades asignadas';
   const item = detail?.item;
   const signal = isSignalKind(item?.kind);
+  // The parts of this opportunity. A link to one it does not have (a LinkedIn signal has no «Cómo postular») opens the report.
+  const sections: Array<[string, string]> = detail ? [['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular'] as [string, string]]),
+    ...(MARKET_KINDS.includes(detail.item.kind) ? [['market', 'Cómo ganar'] as [string, string]] : []), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`],
+    ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']] : [];
+  const missingSection = sections.length > 0 && !sections.some(([id]) => id === tab);
+  useEffect(() => { if (missingSection) setTab('summary'); }, [missingSection]);
   const latest = detail?.reports[0];
   // The plan of the latest report as tasks to create (OPP-21): its steps, or «Qué hacer ahora» when it has none.
   const planDrafts = latest && detail ? planTaskDrafts(latest.report.tasks.length ? latest.report.tasks : reportNextSteps(latest.report).map(title => ({ title })),
@@ -850,10 +868,12 @@ export function OpportunityWorkWorkspace() {
       <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{((admin
         ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['market', 'Mercado público'], ...(overview.myTasks?.open || view === 'tasks' ? [['tasks', 'Mis tareas']] : []), ['assistant', 'Asistente']]
         : [['list', 'Mis oportunidades'], ['tasks', 'Mis tareas'], ['assistant', 'Asistente']]) as Array<[WorkspaceView, string]>).map(([key, label]) => {
+        // On a phone «Mis oportunidades» says «Oportunidades», so the three fit in one row.
+        const shown = label === 'Mis oportunidades' ? <><span className="sm:hidden">Oportunidades</span><span className="hidden sm:inline">{label}</span></> : label;
         const pressed = admin || key !== 'list' ? view === key : view !== 'assistant' && view !== 'tasks';
         const late = key === 'tasks' ? overview.myTasks?.late ?? 0 : 0;
-        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', pressed ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>
-          {label}{key === 'tasks' && overview.myTasks?.open ? <span className="tabular-nums text-muted-foreground">{overview.myTasks.open}</span> : null}
+        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4', pressed ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>
+          {shown}{key === 'tasks' && overview.myTasks?.open ? <span className="tabular-nums text-muted-foreground">{overview.myTasks.open}</span> : null}
           {late ? <><span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden="true" /><span className="sr-only">, {late === 1 ? '1 vencida' : `${late} vencidas`}</span></> : null}</button>; })}</div>
       {view === 'assistant' ? <OpportunityAssistant admin={admin} threadId={assistantThread} onThread={setAssistantThread} onOpen={open} onHandoff={continueIn} />
         : view === 'tasks' ? <MyTasks tasks={myTasks} error={myTasksError} busy={busy} onOpen={id => open(id, 'tasks')} onDone={finishMyTask} onRetry={() => void loadMyTasks()} />
@@ -950,7 +970,7 @@ export function OpportunityWorkWorkspace() {
           return decision ? <DecisionCallout decision={decision} admin={admin} busy={busy} onReply={replyDecision}
             who={(detail.members || detail.participants).find(m => m.user_id === decision.actorId)?.name ?? 'Alguien del equipo'} /> : null;
         })()}
-        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular']]), ...(MARKET_KINDS.includes(item.kind) ? [['market', 'Cómo ganar']] : []), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={filterChip(tab === id)}>{label}</button>)}</div>
+        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{sections.map(([id, label]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={filterChip(tab === id)}>{label}</button>)}</div>
         {tab === 'summary' && <div className="space-y-5">
           {detail.participants.length ? <section aria-label="Equipo de trabajo" className="space-y-2"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">Equipo de trabajo</h2>{admin && <Button variant="ghost" size="sm" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}>Cambiar equipo</Button>}</div>
             <TeamOffice people={detail.participants} responsibleId={detail.work?.responsible_id} /></section> : null}
