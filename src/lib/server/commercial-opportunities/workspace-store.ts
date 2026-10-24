@@ -211,5 +211,7 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
     // A report's progress for the page's «oficina»; the payload itself never leaves the server.
     jobs: (opportunityDb(jobs) || []).map(({ payload, ...job }) => job.kind === 'research' ? { ...job, progress: reportJobProgress(job.state, payload) }
       // Which document an image or scan reading is about, so the expediente can say «La IA lo está leyendo».
-      : payload?.scan && typeof payload.documentId === 'string' ? { ...job, documentId: payload.documentId } : job) };
+      : payload?.scan && typeof payload.documentId === 'string' ? { ...job, documentId: payload.documentId }
+      // Which part of the offer the AI is rewriting (OPP-24): that part waits, the rest of the draft does not.
+      : job.kind === 'offer' && typeof payload?.part === 'string' ? { ...job, part: payload.part } : job) };
 }

@@ -17,6 +17,7 @@ import { OfferDraft } from './OfferDraft';
 import { PublicMarket } from './PublicMarket';
 import { WinPlan } from './WinPlan';
 import type { OfferPrices, SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
+import { withPartEdit, type OfferEdit, type OfferReview } from '@/lib/commercial-opportunities/offer-edits';
 import { PipelineBoard, type PagedStage, type PipelineSuggestion } from './PipelineBoard';
 import { PriorityStars } from './PriorityStars';
 import { ProgressMarks } from './ProgressMarks';
@@ -73,9 +74,9 @@ import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { readWorkspaceUrl, workspaceUrl, type WorkspaceView } from '@/lib/commercial-opportunities/workspace-url';
 
-type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress; documentId?: string };
+type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress; documentId?: string; part?: string };
 type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string; role?: string }>; activity: ActivityRow[]; tasks: OpportunityTask[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
-  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null; canPrice?: boolean }; fit?: OpportunityFitView };
+  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null; canPrice?: boolean; versions?: Array<{ id: string; created_at: string }> }; fit?: OpportunityFitView };
 /** The kinds with bases to answer with an offer (server/commercial-opportunities/workspace-offer.ts). */
 const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
 /** The kinds with a public buyer whose history ChileCompra keeps (server/commercial-opportunities/workspace-market.ts). */
@@ -252,8 +253,10 @@ export function OpportunityWorkWorkspace() {
   }, [tab, detail, selected]);
   const research = detail?.jobs.find(j => j.kind === 'research') ?? null;
   const researching = Boolean(research && ACTIVE.includes(research.state));
-  const offerJob = detail?.jobs.find(j => j.kind === 'offer') ?? null;
-  const preparingOffer = Boolean(offerJob && ACTIVE.includes(offerJob.state));
+  const offerJob = detail?.jobs.find(j => j.kind === 'offer' && !j.part) ?? null;
+  // The parts of the offer the AI is rewriting (OPP-24): only that part waits.
+  const partJobs = (detail?.jobs || []).flatMap(j => j.kind === 'offer' && j.part ? [{ id: j.id, part: j.part, state: j.state, error: j.error, created_at: j.created_at }] : []);
+  const preparingOffer = Boolean(offerJob && ACTIVE.includes(offerJob.state)) || partJobs.some(j => ACTIVE.includes(j.state));
   // Images and scanned pages the AI is reading (workspace-scans.ts).
   const scanning = (detail?.jobs || []).flatMap(j => j.documentId && ACTIVE.includes(j.state) ? [j.documentId] : []);
   busyRef.current = researching || preparingOffer || scanning.length > 0 || messages.some(m => !m.answer?.answer);
@@ -264,6 +267,16 @@ export function OpportunityWorkWorkspace() {
     if (ACTIVE.includes(offerJob.state)) { offerWatch.current = offerJob.id; return; }
     if (offerWatch.current === offerJob.id && offerJob.state === 'ready') { offerWatch.current = null; setFeedback('Tu borrador de oferta está listo.'); }
   }, [offerJob]);
+  // And a part the AI rewrote while the person kept working: said once it is on the page.
+  const partWatch = useRef(new Set<string>());
+  const partStates = partJobs.map(j => `${j.id}:${j.state}`).join('|');
+  useEffect(() => {
+    for (const job of partJobs) {
+      if (ACTIVE.includes(job.state)) partWatch.current.add(job.id);
+      else if (partWatch.current.delete(job.id) && job.state === 'ready') setFeedback('La IA reescribió la parte que pediste. Revísala en «Tu oferta».');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- partStates says when a part job moved.
+  }, [partStates]);
   // Say so when the report the person is waiting for arrives, then show it.
   useEffect(() => {
     if (!research) return;
@@ -527,6 +540,39 @@ export function OpportunityWorkWorkspace() {
       // Prices a teammate saved meanwhile come in, so the next save starts from them.
       setProblem(e instanceof Error ? e.message : 'No se pudieron guardar los precios.'); void loadDetail(selected); return null;
     }
+  };
+  // A part of the offer in the team's words (OPP-24): saved on its own, like the prices, and shown without reading the expediente again.
+  const offerPost = async <T,>(action: string, data: unknown) => json(await fetch(`/api/commercial-opportunities/${selected}/workspace`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, data }) })) as Promise<T>;
+  const withOffer = (draftId: string, change: (latest: SavedOfferDraft) => SavedOfferDraft) =>
+    setDetail(current => current?.offer?.latest?.id === draftId ? { ...current, offer: { ...current.offer, latest: change(current.offer.latest) } } : current);
+  const saveOfferPart = async (draftId: string, part: string, text: string | null, base: string | null) => {
+    if (!selected) return false;
+    setProblem('');
+    try {
+      const saved = await offerPost<{ edit: OfferEdit | null }>('offer_part', { draftId, part, text, base });
+      withOffer(draftId, latest => ({ ...latest, draft: withPartEdit(latest.draft, part, saved.edit) }));
+      return true;
+    } catch (e) {
+      // Someone else's version of that part comes in, so the next save starts from it; what this person typed stays in the box.
+      setProblem(e instanceof Error ? e.message : 'No se pudo guardar.'); void loadDetail(selected); return false;
+    }
+  };
+  const reviewOffer = async (draftId: string, reviewed: boolean) => {
+    if (!selected) return false;
+    setProblem('');
+    try {
+      const saved = await offerPost<{ review: OfferReview | null }>('offer_review', { draftId, reviewed });
+      withOffer(draftId, latest => ({ ...latest, draft: { ...latest.draft, review: saved.review } }));
+      setFeedback(reviewed ? 'Oferta marcada como revisada.' : 'Cambios guardados.');
+      return true;
+    } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar.'); return false; }
+  };
+  const rewriteOfferPart = async (draftId: string, part: string, instructions: string, base: string | null) => {
+    const result = await perform('offer_rewrite', { draftId, part, instructions, base, requestId: crypto.randomUUID() }, selected, true) as { state?: string } | null;
+    if (result?.state === 'ready') setFeedback('Listo: la IA reescribió esa parte. Revísala.');
+    else if (result && ACTIVE.includes(result.state ?? 'queued')) setFeedback('La IA está reescribiendo esa parte. Puedes seguir trabajando.');
+    return Boolean(result);
   };
   const generate = () => { if (!detail) return; if (admin && detail.item.data.evaluation === 'excluded' && !detail.reports.length) setReconsider(true); else { setTab('summary'); void perform('research', {}, selected, true); } };
   // The question shows at once; the answer arrives in the same wait (the server answers it now) or, if a worker took it, by polling.
@@ -980,7 +1026,9 @@ export function OpportunityWorkWorkspace() {
           offer={latest && OFFER_KINDS.includes(item.kind) ? <OfferDraft offer={detail.offer} job={offerJob} onPrepare={prepareOffer} preparing={busy} onSavePrices={saveOfferPrices}
             downloadHref={`/api/commercial-opportunities/${selected}/export?doc=offer&format=docx`}
             annexHref={index => `/api/commercial-opportunities/${selected}/export?doc=offer&format=docx&annex=${index}`}
-            canPrice={detail.offer?.canPrice !== false}
+            canPrice={detail.offer?.canPrice !== false} people={detail.members || detail.participants} partJobs={partJobs}
+            onSavePart={saveOfferPart} onRewritePart={rewriteOfferPart} onReview={reviewOffer}
+            versionHref={version => `/api/commercial-opportunities/${selected}/export?doc=offer&format=docx&version=${version}`}
             budget={{ amount: latest.report.submission?.numbers.budget ?? item.amount, includesTax: latest.report.submission?.numbers.budgetIncludesTax ?? null }} /> : null}
           onDraft={latest ? title => ask(`Prepara el borrador de «${title}» como un formulario listo para llenar y pegar en Word: el título tal como lo dan las bases, una tabla de dos columnas (Campo | Dato) con los datos de mi empresa que conoces, el texto de cada declaración o cláusula tal como lo piden las bases, y [corchetes] para lo que falte. Si no tienes el formato oficial en los fragmentos, dilo al comienzo en una frase.`) : undefined} />
           {/* The cost of an hour and the points the price is worth: for whoever sets the prices (an administrator or whoever is in charge). */}

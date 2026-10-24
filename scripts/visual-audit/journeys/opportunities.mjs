@@ -6,7 +6,7 @@ const opp = n => `00000000-0000-4000-8000-${String(9510 + n).padStart(12, '0')}`
 /** Diego, the member of the fixtures (ids.mjs). */
 const DIEGO = '00000000-0000-4000-8000-000000000012';
 const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
-const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'mark', 'decision', 'decision_reply'] };
+const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'mark', 'decision', 'decision_reply', 'offer_part', 'offer_review'] };
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
 const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
 const CRITERIA = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['criteria'] };
@@ -365,6 +365,26 @@ export default () => [
       } },
     ] },
 
+  { id: 'miembro-oferta', persona: 'member', title: 'Integrante: corregir una sección del borrador de oferta y darla por revisada', goal: 'Dejar la oferta en las palabras del equipo antes de presentarla, sin pasar por el Word.', passWrites: [ACTIONS],
+    steps: [
+      { say: 'Abro «Cómo postular» de la licitación', do: async c => {
+        await c.go(`/opportunities?op=${opp(2)}`); await c.see('Qué hacer ahora');
+        await c.clickOn(c.page.getByRole('button', { name: 'Cómo postular' }).first()); await c.see('Tu oferta · borrador');
+      } },
+      { say: 'Corrijo la sección de experiencia', do: async c => {
+        await c.click({ role: 'button', name: 'Editar la sección «Experiencia en verificación de antecedentes»' });
+        await c.page.getByLabel('Texto de la sección «Experiencia en verificación de antecedentes»').fill('Hemos verificado antecedentes para 12 empresas del retail, con 9.000 informes al año.');
+        await c.clickOn(c.page.getByRole('button', { name: 'Guardar', exact: true })); await c.see(/^Editada por Diego Fuentes/);
+        const draft = c.table('opportunity_offer_drafts').find(row => row.opportunity_id === opp(2))?.draft;
+        c.check('quedó en el borrador, con el texto de la IA debajo', draft?.edits?.['technical:0']?.text === 'Hemos verificado antecedentes para 12 empresas del retail, con 9.000 informes al año.'
+          && /\[N\.º de clientes\]/.test(draft?.technical?.[0]?.body), JSON.stringify(draft?.edits));
+      } },
+      { say: 'La marco como revisada', do: async c => {
+        await c.click('Marcar como revisada'); await c.see(/^Revisado por Diego Fuentes el /);
+        c.check('dice quién la revisó', c.table('opportunity_offer_drafts').find(row => row.opportunity_id === opp(2))?.draft?.review?.by === DIEGO);
+        c.check('y queda en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(2) && row.body === 'Oferta revisada antes de presentarla'));
+      } },
+    ] },
   { id: 'miembro-urgente', persona: 'member', title: 'Integrante: abrir lo más urgente y empezar a gestionarlo', goal: 'Empezar la licitación de guardias, que cierra mañana.', passWrites: [ACTIONS, NOTIFY],
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Mis oportunidades asignadas'); } },
