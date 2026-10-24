@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CALENDAR_PROVIDERS, calendarUrl, googleCalendarUrl, isCalendarProvider, markInputSchema, outlookCalendarUrl, marksFromRows, parseReportDate, reportCalendarFile, reportChecklist, reportItemKey, reportProgress, reportRoute } from './report-marks';
+import { CALENDAR_PROVIDERS, calendarUrl, googleCalendarUrl, isCalendarProvider, markInputSchema, milestoneDate, outlookCalendarUrl, marksFromRows, parseReportDate, reportCalendarFile, reportChecklist, reportItemKey, reportProgress, reportRoute } from './report-marks';
 
 test('an item keeps its key across versions of the report: case and spaces do not matter, the kind does', () => {
   const key = reportItemKey('requirement', 'Boleta de garantía de seriedad');
@@ -128,4 +128,18 @@ test('the calendar is picked by name: Outlook for a work account first, Google C
   assert.equal(calendarUrl('google', input), googleCalendarUrl(input));
   assert.match(calendarUrl('outlook', input), /^https:\/\/outlook\.office\.com\//);
   assert.match(calendarUrl('google', input), /^https:\/\/calendar\.google\.com\//);
+});
+
+test('a milestone without a date has none, whatever the words the report used', () => {
+  for (const none of ['Sin fecha informada', 'Sin información', 'sin fecha publicada', 'No se indica fecha', 'No informada', 'Por definir', 'Por confirmar', 'Pendiente', 'N/A', '—', '', '  '])
+    assert.equal(milestoneDate(none), null, none);
+  for (const date of ['29-10-2026 9:00', '15 de noviembre de 2026', '2026-11-12T17:00:00-03:00', 'Dentro de 10 días hábiles desde la adjudicación', 'Noviembre 2026'])
+    assert.equal(milestoneDate(date), date);
+  // The route does not show «Sin fecha informada» as when a step happens.
+  const route = reportRoute({ tasks: [], milestones: [
+    { label: 'Cierre de consultas', date: 'Sin fecha informada', state: 'unknown', citations: [] },
+    { label: 'Recepción de ofertas', date: '12-11-2026 17:00', state: 'documented', citations: [] },
+    { label: 'Adjudicación', date: 'Por definir', state: 'unknown', citations: [] },
+  ] });
+  assert.deepEqual(route.map(step => [step.title, step.date]), [['Recepción de ofertas', '12-11-2026 17:00'], ['Cierre de consultas', ''], ['Adjudicación', '']]);
 });

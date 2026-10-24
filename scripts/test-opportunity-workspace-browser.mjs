@@ -33,7 +33,7 @@ try{
   });
   await page.goto('https://opportunities.test/');await page.addScriptTag({content:compiled.outputFiles[0].text});
   await page.getByRole('heading',{name:admin?'Gestionar oportunidades':'Mis oportunidades asignadas',exact:true}).waitFor();
-  if(!admin){assert.equal(await page.getByRole('button',{name:'Cargar oportunidad',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'Empresa del workspace',exact:true}).count(),0);}
+  if(!admin){assert.equal(await page.getByRole('button',{name:'Cargar oportunidad',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'Tu empresa',exact:true}).count(),0);}
   else {await page.getByRole('button',{name:'Cargar oportunidad',exact:true}).click();await page.getByRole('dialog').waitFor();await page.getByLabel('Nombre de la oportunidad',{exact:true}).fill('Invitación de demostración');await page.getByLabel('Cliente o entidad convocante',{exact:true}).fill('Cliente de prueba');await page.keyboard.press('Escape');}
   await page.getByRole('button',{name:'Oportunidad asignada:',exact:false}).click();
   await page.getByRole('button',{name:'Decisión ejecutiva',exact:true}).waitFor();

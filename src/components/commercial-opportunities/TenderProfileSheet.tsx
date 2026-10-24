@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { useConfirm } from '@/components/confirm-dialog';
 import { CompanyDocuments } from './CompanyDocuments';
 import { CERTIFICATIONS, CHILE_REGIONS, COMPANY_SIZES, EMPTY_TENDER_PROFILE, PROVIDER_REGISTRY, WOMEN_OWNERSHIP, femaleLedSeal, normalizeRut, tenderProfileProgress,
   type TenderProfile, type TenderProfileField, type TenderProfileSuggestion } from '@/lib/commercial-opportunities/tender-profile';
@@ -279,9 +280,18 @@ export function TenderProfileSheet({ open, onOpenChange }: { open: boolean; onOp
     finally { setBusy(null); }
   };
   const progress = tenderProfileProgress(profileFromForm(form));
+  // Closing with answers not saved (typed, or filled by the AI) asks first: seven sections are a lot to lose to an Esc.
+  const confirm = useConfirm();
+  const dirty = Boolean(view?.available) && JSON.stringify(profileFromForm(form)) !== JSON.stringify(profileFromForm(formFromProfile(view!.profile)));
+  const close = async () => {
+    if (busy) return;
+    if (dirty && !(await confirm({ title: '¿Cerrar sin guardar la ficha?', description: 'Las respuestas que cambiaste o que completó la IA no se guardaron.',
+      confirmLabel: 'Cerrar sin guardar', cancelLabel: 'Seguir editando', tone: 'danger' }))) return;
+    onOpenChange(false);
+  };
 
   return (
-    <Sheet open={open} onOpenChange={next => { if (!busy) onOpenChange(next); }}>
+    <Sheet open={open} onOpenChange={next => { if (next) onOpenChange(true); else void close(); }}>
       <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle>Ficha para licitaciones</SheetTitle>
@@ -299,7 +309,7 @@ export function TenderProfileSheet({ open, onOpenChange }: { open: boolean; onOp
               </Button>
             </div>
             <Progress value={(progress.answered / progress.total) * 100} aria-label={`Ficha: ${progress.answered} de ${progress.total} respuestas`} />
-            <p className="text-xs text-muted-foreground">La IA lee tu Perfil, tu sitio web y la oferta del workspace, y solo llena lo que está en blanco.</p>
+            <p className="text-xs text-muted-foreground">La IA lee tu Perfil, tu sitio web y la oferta de tu empresa, y solo llena lo que está en blanco.</p>
           </div>
           {problem ? <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">{problem}</p> : null}
           {notice ? <p role="status" className="rounded-lg border bg-muted/30 p-3 text-sm">{notice}</p> : null}
@@ -317,7 +327,7 @@ export function TenderProfileSheet({ open, onOpenChange }: { open: boolean; onOp
           <div className="border-t pt-6"><CompanyDocuments /></div>
           {/* The sheet pads 1.5rem: the bar sits on its very edge, so nothing scrolls into view below it. */}
           <SheetFooter className="sticky -bottom-6 -mx-6 mt-auto gap-2 border-t bg-background px-6 py-3">
-            <Button type="button" variant="outline" disabled={Boolean(busy)} onClick={() => onOpenChange(false)}>Cerrar</Button>
+            <Button type="button" variant="outline" disabled={Boolean(busy)} onClick={() => void close()}>Cerrar</Button>
             <Button type="submit" form="tender-profile-form" disabled={Boolean(busy) || Boolean(form.rut && form.rut.trim() && !normalizeRut(form.rut))}>
               {busy === 'save' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}Guardar ficha
             </Button>

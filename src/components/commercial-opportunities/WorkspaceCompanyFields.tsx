@@ -31,7 +31,7 @@ function Group({ icon, title, hint, children }: { icon: ReactNode; title: string
 const areaClass = 'resize-y bg-background leading-6';
 
 /**
- * «Empresa del workspace»: what the company sells (the AI reads it to search and to decide what fits), where it works and
+ * «Tu empresa»: what the company sells (the AI reads it to search and to decide what fits), where it works and
  * what it does not do, and when the daily search runs. The form around it saves (OpportunityWorkWorkspace.tsx).
  */
 export function WorkspaceCompanyFields({ draft, field }: { draft: Draft; field: (name: string, value: unknown) => void }) {

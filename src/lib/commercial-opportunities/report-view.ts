@@ -1,5 +1,6 @@
 // How a report is shown and exported: the decision first, then what to do. Pure, shared by the page, the PDF and Markdown.
 import { isSignalKind, type OpportunityReport } from './expedient';
+import { milestoneDate } from './report-marks';
 
 export const DECISION: Record<OpportunityReport['recommendation'], { label: string; tone: 'go' | 'evaluate' | 'no' | 'pending' }> = {
   advance: { label: 'Postular', tone: 'go' },
@@ -45,7 +46,7 @@ export function reportNextSteps(report: Pick<OpportunityReport, 'nextSteps' | 't
 const QUESTIONS = /consulta|pregunta|aclaraci/i;
 /** The dates that decide the work: until when to ask and when offers close («Cierre de consultas» is not the closing). */
 export function reportKeyDates(report: Pick<OpportunityReport, 'milestones'>, deadline?: string | null) {
-  const find = (pattern: RegExp, unless?: RegExp) => report.milestones.find(m => pattern.test(m.label) && !unless?.test(m.label))?.date ?? null;
+  const find = (pattern: RegExp, unless?: RegExp) => milestoneDate(report.milestones.find(m => pattern.test(m.label) && !unless?.test(m.label))?.date);
   return {
     questions: find(QUESTIONS, /respuesta/i),
     closes: humanDate(deadline, true) ?? find(/cierre|recepci[oó]n de ofertas|presentaci[oó]n de (la )?oferta/i, QUESTIONS),
@@ -112,7 +113,7 @@ export const isSignalReport = (report: Pick<OpportunityReport, 'kind'>) => isSig
 const JOB_ERRORS: Array<[RegExp, string]> = [
   [/no termin[oó]|consumo observado|no pudo terminar|pendiente de conciliaci[oó]n|retom[oó] en otro proceso|formato requerido/i, 'Tardó más de lo esperado. Vuelve a intentarlo: suele resolverse al segundo intento.'],
   // The budget refusal does not say which cap was reached: one report (USD 0.75) or the month (USD 20).
-  [/presupuesto/i, 'Se alcanzó el gasto permitido para un informe o para el mes en Oportunidades. Revisa el uso en «Empresa del workspace», o deja solo las bases y anexos, y vuelve a intentarlo.'],
+  [/presupuesto/i, 'Se alcanzó el gasto permitido para un informe o para el mes en Oportunidades. Revisa el uso en «Tu empresa», o deja solo las bases y anexos, y vuelve a intentarlo.'],
   [/documentos nuevos|oferta cambi[oó]|criterios cambiaron/i, 'El expediente cambió mientras se preparaba. Vuelve a generarlo para incluir lo nuevo.'],
   [/proveedor de IA|precio verificable/i, 'La IA no está disponible en este momento. Inténtalo más tarde.'],
 ];

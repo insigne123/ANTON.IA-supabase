@@ -4,7 +4,7 @@ import { readWorkspaceOverview, createPrivateOpportunity, opportunityDb } from '
 import { criteriaSchema } from '@/lib/server/commercial-opportunities/workspace-sources';
 import { companyContextSchema, privateOpportunitySchema } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
-import { enqueueOpportunityDiscovery, runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
+import { requestOpportunityDiscovery, runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { parsePrioritySort } from '@/lib/commercial-opportunities/priority';
 import { PIPELINE_MAX, readOpportunityPipeline } from '@/lib/server/commercial-opportunities/workspace-pipeline';
 import { OPPORTUNITY_SOURCES, parseCategories, sourceKinds, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     }
     assertOpportunityAdmin(scope);
     if (body.action === 'create') return opportunitiesJson({ id: await createPrivateOpportunity(auth.admin, scope, privateOpportunitySchema.parse(body.data)) }, 201);
-    if (body.action === 'discover') return opportunitiesJson({ enqueued: await enqueueOpportunityDiscovery(auth.admin, scope, true) }, 202);
+    if (body.action === 'discover') return opportunitiesJson(await requestOpportunityDiscovery(auth.admin, scope), 202);
     if (body.action === 'pipeline_review') {
       // The AI's look at the opportunities in play, answered in this request (one per person and minute; a repeat reads it).
       const key = `pipeline:${scope.userId}:${new Date().toISOString().slice(0, 16)}`;

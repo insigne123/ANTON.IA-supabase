@@ -19,20 +19,51 @@ import { runOpportunityPrefill } from './workspace-prefill';
 import { runDocumentScan } from './workspace-scans';
 import type { ClaudeAttachment } from '@/ai/anthropic-json';
 
+/** The sources of the daily search for this offer: tenders and Compra Ágil, job ads when there are roles, LinkedIn posts; the criteria first. */
+const discoveryKinds = (context: { criteria?: { postQueries?: string[]; roles?: string[] } | null }) =>
+  context.criteria?.postQueries?.length ? ['tenders', ...(context.criteria?.roles?.length ? ['hiring'] : []), 'posts'] : ['criteria'];
+const SEARCHING = ['queued', 'running', 'waiting'];
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
   const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle());
-  if (!context) throw new AuthError('Confirma primero la oferta del workspace.', 409);
+  if (!context) throw new AuthError('Confirma primero la oferta de tu empresa.', 409);
   const clock = opportunityLocalClock();
   if (!manual && (!context.automation || clock.hour < context.hour)) return 0;
   const prefix = `daily:${clock.day}:${context.revision}`;
-  const kinds = context.criteria?.postQueries?.length ? ['tenders', ...(context.criteria?.roles?.length ? ['hiring'] : []), 'posts'] : ['criteria'];
+  const kinds = discoveryKinds(context);
   for (const kind of kinds) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind, dedupe_key: `${prefix}:${kind}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
   // «Demanda futura» reads the Plan Anual de Compras once a month, once the words exist; «Contratos por vencer» too.
   await enqueueMonthlyDemand(client, scope, context, clock.day);
   await enqueueMonthlyContracts(client, scope, context, clock.day).catch(() => undefined);
   return kinds.length;
+}
+/**
+ * «Actualizar oportunidades»: each source searches again unless it is searching now or searched less than an hour ago, at
+ * most once an hour (manual:<day>:<hour>). The daily search keeps its own key, which pressed once a day was all the button did:
+ * after it, or after it failed, the button queued nothing and still said «Cambios guardados». `later`: tried this hour already.
+ */
+export async function requestOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, now = Date.now()) {
+  assertOpportunityAdmin(scope);
+  const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle());
+  if (!context) throw new AuthError('Confirma primero la oferta de tu empresa.', 409);
+  const clock = opportunityLocalClock(new Date(now));
+  const kinds = discoveryKinds(context);
+  const recent = (opportunityDb(await client.from('opportunity_jobs').select('kind,state,updated_at').eq('organization_id', scope.organizationId).in('kind', kinds)
+    .gte('created_at', new Date(now - 86_400_000).toISOString()).order('created_at', { ascending: false }).limit(60)) || []) as Array<{ kind: string; state: string; updated_at: string }>;
+  const queued: string[] = []; const searching: string[] = []; const fresh: string[] = []; const later: string[] = [];
+  for (const kind of kinds) {
+    const last = recent.find(job => job.kind === kind);
+    if (last && SEARCHING.includes(last.state)) { searching.push(kind); continue; }
+    if (last?.state === 'ready' && now - Date.parse(last.updated_at) < 3_600_000) { fresh.push(kind); continue; }
+    const added = opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind,
+      dedupe_key: `manual:${clock.day}:${clock.hour}:${context.revision}:${kind}`, payload: { revision: context.revision } },
+    { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }).select('id')) as unknown[] | null;
+    (added?.length ? queued : later).push(kind);
+  }
+  await enqueueMonthlyDemand(client, scope, context, clock.day);
+  await enqueueMonthlyContracts(client, scope, context, clock.day).catch(() => undefined);
+  return { queued, searching, fresh, later };
 }
 export async function enqueueDailyOpportunityWork(client: SupabaseClient) {
   if (!opportunityAutomationEnabled()) return 0;
@@ -82,7 +113,7 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
   try {
     const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', job.organization_id).maybeSingle());
     // Reading a document (to fill the form, or an image's text) needs no offer: an admin may load an opportunity before confirming it.
-    if (!context && !job.payload.prefill && !job.payload.scan) throw new AuthError('Falta la oferta compartida del workspace.', 409);
+    if (!context && !job.payload.prefill && !job.payload.scan) throw new AuthError('Falta la oferta de la empresa.', 409);
     if (job.payload.revision && job.payload.revision !== context.revision) throw new AuthError('Los criterios cambiaron; se preparará una búsqueda actualizada.', 409);
     if (job.kind === 'criteria') {
       const criteria = await opportunityGenerate(client, job, { role: 'screen', category: 'evaluation', step: 'criteria', schema: criteriaSchema, output: 3000,

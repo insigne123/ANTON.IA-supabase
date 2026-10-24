@@ -88,7 +88,7 @@ export async function captureOpportunityTenders(client: SupabaseClient, job: Opp
 async function apifyOpportunityItems(client: SupabaseClient, job: OpportunityJob, actor: string, body: Record<string, unknown>, cap: number) {
   if (!process.env.APIFY_TOKEN) throw new AuthError('LinkedIn no está conectado.', 503);
   const admission = opportunityDb(await client.rpc('opportunity_budget_reserve', { p_org: job.organization_id, p_job: job.id, p_step: 'provider', p_category: 'sources', p_micro: Math.ceil(cap * 1e6), p_lease:job.lease_token }));
-  if (!admission?.admitted) throw new AuthError('Se alcanzó el presupuesto de captación del workspace.', 402);
+  if (!admission?.admitted) throw new AuthError('Se alcanzó el presupuesto de búsqueda de este mes.', 402);
   const saved = opportunityDb(await client.from('opportunity_ai_results').select('data').eq('organization_id', job.organization_id).eq('reservation_id', admission.id).maybeSingle());
   if (saved) return { waiting: false as const, items: saved.data.items as Record<string, any>[] };
   const headers = { authorization: `Bearer ${process.env.APIFY_TOKEN}`, 'content-type': 'application/json' };
@@ -163,7 +163,7 @@ export async function evaluateOpportunityBatch(client: SupabaseClient, job: Oppo
   // The «Ficha para licitaciones»: a requirement or a scale is a reason to discard only when the profile disproves it.
   const profile = await loadTenderProfile(client, job.organization_id);
   const evaluated = await opportunityGenerate(client, job, { step: 'evaluate', category: 'evaluation', role: 'screen', schema: verdictSchema, output: 5000,
-    prompt: `Evalúa TODOS los candidatos contra la oferta del workspace, no solo palabras. Devuelve exactamente un veredicto por id: recommended, review o excluded, razón breve, servicio al que encaja y score de prioridad (no probabilidad).\n` +
+    prompt: `Evalúa TODOS los candidatos contra la oferta de la empresa, no solo palabras. Devuelve exactamente un veredicto por id: recommended, review o excluded, razón breve, servicio al que encaja y score de prioridad (no probabilidad).\n` +
       `Si es excluded, motive dice por qué: otro_producto (piden otra cosa aunque compartan palabras), parte_menor (lo que ofrece es una parte menor), requisito (exigen algo que la oferta no tiene: productos o licencias de un fabricante, una certificación, presencia), escala (volumen, dotación o plazo fuera de proporción) o sin_compra (no muestra una compra: candidatos, proveedores, contratación interna); en los demás veredictos motive es null.\n` +
       `Ante ambigüedad o información incompleta usa review. Contrataciones no prueban compra externa. Distingue publicaciones de proveedores, candidatos y compradores. Un repost no prueba necesidad de quien comparte. Considera exclusiones de ESTA oferta; no descartes todas las agencias. La elegibilidad de licitaciones no está certificada leyendo su nombre.\n` +
       (profile ? `Para requisito y escala usa la ficha: ${TENDER_PROFILE_RULE} En ese caso usa review y di en la razón qué dato falta.\n` : 'Sin ficha de la empresa, requisito y escala solo descartan cuando la oferta o sus exclusiones lo dicen; si no, review.\n') +

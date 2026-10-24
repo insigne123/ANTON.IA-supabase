@@ -62,7 +62,8 @@ test('a stage with more than the page shows loads the next page, up to the most 
 
 test('what is out of the road is a click away: lost, archived and the ones the AI left out, with their counts', () => {
   const html = render({ totals: { found: 40, recommended: 12, excluded: 340 } });
-  assert.match(html, /<div role="group" aria-label="Fuera del embudo"/);
+  assert.match(html, /<div role="group" aria-labelledby="pipeline-closed"[^>]*><span id="pipeline-closed"[^>]*>Fuera del embudo<\/span>/);
+  assert.match(html, /<button type="button" aria-pressed="false" title="La IA las dejó fuera[^"]*" class="rounded-full border/, 'a chip that reads as a button, with what it holds');
   assert.match(text(html), /No recomendadas 340/);
   assert.doesNotMatch(text(html), /Perdidas|Archivadas/, 'only the ones with something');
 });
@@ -103,14 +104,16 @@ test('each card says what the opportunity is about under its name, with its buye
   const withSummary = [{ ...item('a', 'Aseo hospital', 'recommended', soon), data: { evaluation: 'recommended', summary: { text: 'Aseo diario de pabellones y salas del hospital regional.' } } },
     { ...item('e', 'SERVICIOS VIGILANCIA DSSA PP-65', 'recommended'), buyer_name: null }];
   const html = render({ items: withSummary, work: [] });
-  assert.match(text(html), /Municipalidad Aseo hospital Aseo diario de pabellones y salas del hospital regional\./);
+  assert.match(text(html), /Municipalidad Calce Aseo hospital Aseo diario de pabellones y salas del hospital regional\./);
   assert.doesNotMatch(text(html), /—/);
   assert.doesNotMatch(html, /animate-pulse/, 'nothing is on its way');
 });
 
 test('on a phone the cards fit the screen: the column can shrink below a long buyer name, which is cut with an ellipsis', () => {
   const html = render({ items: [{ ...item('a', 'SERVICIOS DE VIGILANCIA-GUARDIAS DRT VALPARAÍSO', 'recommended', soon), buyer_name: 'CORPORACION ADMINISTRATIVA DEL PODER JUDICIAL DE LA REGION' }], work: [] });
-  assert.match(html, /<ul class="grid grid-cols-1 gap-3 lg:grid-cols-2">/);
+  // A lone card takes the whole row; two or more go side by side from lg up.
+  assert.match(html, /<ul class="grid grid-cols-1 gap-3">/);
+  assert.match(render({ items: [item('a', 'Aseo hospital', 'recommended', soon), item('b', 'Guardias', 'recommended', soon)], work: [] }), /<ul class="grid grid-cols-1 gap-3 lg:grid-cols-2">/);
   assert.match(html, /<li class="flex min-w-0 flex-col/);
   assert.match(html, /class="min-w-0 flex-1 truncate text-xs text-muted-foreground">CORPORACION ADMINISTRATIVA/);
 });
@@ -129,9 +132,9 @@ const order = (html: string) => [...html.matchAll(/<p class="line-clamp-2 font-m
 
 test('each card shows one to five stars with what they mean in words, and the ones the AI left out show none', () => {
   const html = render({ items: rated, work: [] });
-  assert.match(html, /role="img" aria-label="5 de 5 estrellas: calza muy bien con tu oferta"/);
-  assert.match(html, /aria-label="3 de 5 estrellas: calza en parte: vale la pena revisarla"/);
-  assert.match(html, /aria-label="1 de 5 estrellas: calza muy poco con tu oferta"/);
+  assert.match(html, /role="img" aria-label="Calce 5 de 5: calza muy bien con tu oferta"/);
+  assert.match(html, /aria-label="Calce 3 de 5: calza en parte: vale la pena revisarla"/);
+  assert.match(html, /aria-label="Calce 1 de 5: calza muy poco con tu oferta"/);
   assert.equal((html.match(/role="img"/g) || []).length, 4, 'one group of stars per card');
   assert.match(text(html), /Las estrellas dicen qué tan bien calza cada una con tu oferta\./);
   // A card with a team keeps its stars; one the AI left out (here still shown through its work state) has none.
@@ -139,7 +142,7 @@ test('each card shows one to five stars with what they mean in words, and the on
     work: [{ opportunity_id: 'x', revision: 1, state: 'assigned', team_id: null, responsible_id: null, assigned_by: null, objective: '', due_at: null, updated_at: '' },
       { opportunity_id: 'y', revision: 1, state: 'assigned', team_id: null, responsible_id: null, assigned_by: null, objective: '', due_at: null, updated_at: '' }] });
   assert.equal((left.match(/role="img"/g) || []).length, 1);
-  assert.match(left, /aria-label="4 de 5 estrellas: calza bien con tu oferta"/);
+  assert.match(left, /aria-label="Calce 4 de 5: calza bien con tu oferta"/);
 });
 
 test('by priority the most stars come first and, with the same stars, the one that closes first; by deadline the soonest', () => {

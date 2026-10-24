@@ -109,9 +109,15 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
 const sourceGroups = (kind?: string): Array<[string, string]> => [['upload', 'Subidos por tu equipo'],
   ['official', kind === 'tender' || kind === 'compra_agil' ? 'Traídos de Mercado Público' : kind === 'hiring' || kind === 'linkedin_post' ? 'Datos de la señal' : 'Traídos de la fuente'],
   ['public_web', 'Traídos de la web'], ['pasted', 'Texto recibido']];
+/** What a document read in part is missing, in a line: the pages without readable text, or what a Word or Excel did not give. */
+export function partialReadHint(d: Pick<ExpedientDocument, 'pages_read' | 'pages_total'>) {
+  const missing = d.pages_total && d.pages_read !== null ? d.pages_total - d.pages_read : 0;
+  return missing > 0 ? `${missing === 1 ? 'Falta 1 página' : `Faltan ${missing} páginas`}: si son importantes, súbelas como foto o en otro PDF.`
+    : 'Parte del documento no se pudo leer (imágenes o tablas muy grandes): si falta algo importante, súbelo como foto o en otro archivo.';
+}
 /** The documents of the expediente, grouped by where they came from, with how much was read. `scanning`: the images and scans
- * the AI is reading right now. */
-export function DocumentList({ id, documents, kind, scanning = [] }: { id: string; documents: ExpedientDocument[]; kind?: string; scanning?: string[] }) {
+ * the AI is reading right now. `onUploadMore`: «Subir el resto» next to a document read in part. */
+export function DocumentList({ id, documents, kind, scanning = [], onUploadMore }: { id: string; documents: ExpedientDocument[]; kind?: string; scanning?: string[]; onUploadMore?: () => void }) {
   if (!documents.length) return <p className="rounded-2xl border p-5 text-sm text-muted-foreground">Todavía no hay documentos. Los que subas o traigamos de Mercado Público aparecerán aquí.</p>;
   return <div className="space-y-5">{sourceGroups(kind).map(([source, label]) => {
     const list = documents.filter(d => d.source_kind === source); if (!list.length) return null;
@@ -120,8 +126,10 @@ export function DocumentList({ id, documents, kind, scanning = [] }: { id: strin
         <span className="flex min-w-0 items-start gap-2"><FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0"><span className="block break-words text-sm font-medium">{d.name}</span>
             {scanning.includes(d.id) ? <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />La IA lo está leyendo…</span>
-              : <span className={cn('text-xs', d.extraction_status === 'read' ? 'text-muted-foreground' : 'text-cw-warning')}>{statusLabel(d.extraction_status)}{d.pages_total ? ` · ${d.pages_read} de ${d.pages_total} páginas` : ''}</span>}</span></span>
+              : <span className={cn('text-xs', d.extraction_status === 'read' ? 'text-muted-foreground' : 'text-cw-warning')}>{statusLabel(d.extraction_status)}{d.pages_total ? ` · ${d.pages_read} de ${d.pages_total} páginas` : ''}</span>}
+            {d.extraction_status === 'partial' && !scanning.includes(d.id) ? <span className="block text-xs text-muted-foreground">{partialReadHint(d)}</span> : null}</span></span>
         <span className="flex gap-2">
+          {d.extraction_status === 'partial' && !scanning.includes(d.id) && onUploadMore ? <Button type="button" variant="ghost" size="sm" onClick={onUploadMore}><UploadCloud className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Subir el resto</Button> : null}
           {d.source_kind === 'official' && d.source_url && /\(texto del (Word|Excel)\)/.test(d.name) && <Button asChild variant="ghost" size="sm"><a href={d.source_url} target="_blank" rel="noopener noreferrer">Original</a></Button>}
           <Button asChild variant="outline" size="sm"><a href={`/api/commercial-opportunities/${id}/documents?document=${d.id}`}><Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Descargar</a></Button>
         </span>

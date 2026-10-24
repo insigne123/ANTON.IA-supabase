@@ -31,7 +31,7 @@ export async function POST(request: Request, context: Context) {
     const body = z.union([z.object({ providerIds: z.array(z.string().min(1).max(200)).max(100) }).strict(), z.object({ contactId: z.string().min(1).max(200), table: z.enum(['leads', 'enriched_leads']) }).strict()]).parse(await request.json());
     if ('providerIds' in body) return opportunitiesJson(await linkObservedOpportunityContacts(auth.admin, scope, id, body.providerIds));
     const row = opportunityDb(await auth.admin.from(body.table).select('id,source_provider,source_provider_id').eq('organization_id', scope.organizationId).eq('id', body.contactId).maybeSingle());
-    if (!row) throw new AuthError('El contacto no pertenece a este workspace.', 404);
+    if (!row) throw new AuthError('El contacto no pertenece a esta organización.', 404);
     opportunityDb(await auth.admin.from('opportunity_contact_links').upsert({ organization_id: scope.organizationId, opportunity_id: id, contact_id: body.contactId,
       contact_table: body.table, source_provider: row.source_provider, source_provider_id: row.source_provider_id, linked_by: scope.userId }, { onConflict: 'opportunity_id,contact_id', ignoreDuplicates: true }));
     await addOpportunityActivity(auth.admin, scope, id, 'lead_linked', 'Contacto guardado vinculado a la oportunidad', { contactId: row.id }, `${id}:lead:${row.id}`);

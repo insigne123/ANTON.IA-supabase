@@ -34,7 +34,7 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunitiesAccess();
-    if (opportunityWorkspaceEnabled()) throw new AuthError('Usa la búsqueda del workspace para mantener el presupuesto compartido.', 409);
+    if (opportunityWorkspaceEnabled()) throw new AuthError('Usa la búsqueda de la organización para mantener el presupuesto compartido.', 409);
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     const { kind } = body;
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };

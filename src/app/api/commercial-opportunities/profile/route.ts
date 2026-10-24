@@ -28,7 +28,7 @@ export const maxDuration = 60;
 export async function PUT(request: Request) {
   try {
     const auth = await requireOpportunitiesAccess();
-    if (opportunityWorkspaceEnabled()) throw new AuthError('La oferta compartida se administra desde Empresa del workspace.', 409);
+    if (opportunityWorkspaceEnabled()) throw new AuthError('La oferta compartida se administra desde «Tu empresa», en Oportunidades.', 409);
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const body = await request.json().catch(() => ({}));
     const regenerate = Boolean(body && typeof body === 'object' && (body as { regenerate?: unknown }).regenerate === true);

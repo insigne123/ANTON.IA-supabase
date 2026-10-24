@@ -23,7 +23,7 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     await requireOpportunitiesAccess();
-    if (opportunityWorkspaceEnabled()) throw new AuthError('Los criterios se generan desde la oferta compartida del workspace.', 409);
+    if (opportunityWorkspaceEnabled()) throw new AuthError('Los criterios se generan desde la oferta de la empresa.', 409);
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     const roles = searchRoles(body.roles);
     const regions = CHILE_REGIONS.filter(region => body.regions.includes(region));

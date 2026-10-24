@@ -43,7 +43,7 @@ const key = (kind: any, label: string) => reportMarks.reportItemKey(kind, label)
 test('the sheet of a company that is hiring shows the pulse as figures and bars, the fit as a meter, and every part of the plan', () => {
   const html = render({ onContacts: () => {}, downloadHref: '/api/x/export?format=pdf' });
   const words = text(html);
-  assert.match(html, /role="img" aria-label="4 de 5 estrellas/, 'the stars have their words');
+  assert.match(html, /role="img" aria-label="Calce 4 de 5/, 'the stars have their words');
   assert.match(words, /Contactar, validando primero lo pendiente/);
   assert.match(words, /Ofrecerles refuerzos de bodega/);
   for (const title of ['La señal', 'Calce con tu oferta', 'La empresa', 'A quién contactar', 'Cómo abordarlos', 'Mensajes listos', 'Secuencia de seguimiento', 'Objeciones y cómo responderlas', 'Qué validar antes de invertir tiempo', 'Pasos comerciales', 'Riesgos', 'Preguntas para la primera conversación', 'Avisos de muestra', 'Qué falta en esta ficha'])
