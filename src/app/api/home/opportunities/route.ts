@@ -51,7 +51,9 @@ export async function GET(request: Request) {
       mine: ((items.data || []) as any[]).filter(row => !FINISHED.includes(String(workOf.get(String(row.id))?.state || 'assigned')))
         .map(row => ({ id: String(row.id), title: String(row.title || 'Oportunidad'), kind: String(row.kind), deadlineAt: row.deadline_at ?? null, nextActionAt: workOf.get(String(row.id))?.due_at ?? null,
           state: String(workOf.get(String(row.id))?.state || 'assigned') })),
-      reports: ((reports.data || []) as any[]).map(row => ({ id: String(row.opportunity_id), title: String(row.title || '').replace(/^Informe disponible:\s*/, '') })),
+      // «Informe listo: …» (workspace-jobs.ts) or «Borrador de oferta listo: …» (workspace-offer.ts).
+      reports: ((reports.data || []) as any[]).map(row => ({ id: String(row.opportunity_id), title: String(row.title || '').replace(/^(?:Informe (?:listo|disponible)|Borrador de oferta listo):\s*/, ''),
+        offer: /^Borrador de oferta listo:/.test(String(row.title || '')) })),
       waiting,
       closingWithoutTeam: ((closing.data || []) as any[]).filter(row => { const state = workOf.get(String(row.id))?.state; return !state || state === 'unassigned'; })
         .map(row => ({ id: String(row.id), title: String(row.title || 'Oportunidad'), deadlineAt: String(row.deadline_at) })),

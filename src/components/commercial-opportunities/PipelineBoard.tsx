@@ -53,7 +53,7 @@ function ClosingThisWeek({ items, onOpen }: { items: PipelineWeekItem[]; onOpen:
       const day = weekDay(item.deadlineAt, now);
       return <button key={item.id} type="button" onClick={() => onOpen(item.id)} title={`${item.title} · Cierra el ${humanDate(item.deadlineAt, true) ?? ''}`}
         className="flex max-w-[18rem] shrink-0 items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <span className={cn('font-medium tabular-nums', day === 'Hoy' || day === 'Mañana' ? 'text-destructive' : 'text-foreground')}>{day}</span>
+        <span className={cn('shrink-0 whitespace-nowrap font-medium tabular-nums', day === 'Hoy' || day === 'Mañana' ? 'text-destructive' : 'text-foreground')}>{day}</span>
         <span className="truncate">{item.title}</span>
         {item.stage === 'recommended' ? <span className="shrink-0 text-muted-foreground">· sin equipo</span> : item.stage === 'blocked' ? <span className="shrink-0 text-cw-warning">· bloqueada</span> : null}
       </button>;

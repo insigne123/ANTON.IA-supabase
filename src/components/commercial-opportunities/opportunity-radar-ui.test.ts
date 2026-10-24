@@ -44,6 +44,9 @@ test('«Novedades» puts first what waits for the administrator, until someone a
   assert.match(words, /Y 2 más esperan tu respuesta\./);
   assert.doesNotMatch(words, /Marcar como leídas/, 'nothing unread to clear: what waits goes away when it is answered');
   assert.equal(news({}), '', 'nothing waiting and nothing new: no box');
+  const twice = text(news({ waiting, notifications: [notice('n1', 'o1', 'task', 'Decisión pedida: Aseo Hospital Regional'), notice('n2', 'o9', 'report', 'Informe listo: Casino')] }));
+  assert.doesNotMatch(twice, /Decisión pedida: Aseo/, 'the decision waiting is said once, above');
+  assert.match(twice, /Novedades 1 Marcar como leídas/);
 });
 
 test('each notice is cleared on its own, and the kinds show only when there is more than one', () => {

@@ -20,8 +20,12 @@ export class DailyAlertsError extends Error {
 
 const CLOSED_WORK = new Set(['won', 'lost', 'archived', 'submitted']);
 const CLOSING_DAYS = 3;
-/** Whoever is in charge also hears a week ahead (6 or 7 days before), then again in the last three days, not every day in between. */
+/**
+ * Whoever is in charge also hears a week ahead, once, then again in the last three days, not every day in between: seven days before,
+ * or six when the seventh was a Monday (the alerts go from Tuesday to Friday).
+ */
 const HEADS_UP_DAYS = [6, 7];
+const headsUp = (daysLeft: number, today: string) => daysLeft === 7 || (daysLeft === 6 && new Date(`${today}T12:00:00.000Z`).getUTCDay() === 2);
 
 const READY_SCAN = 1000;
 
@@ -126,12 +130,14 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
 async function readOpportunityNews(client: Client, scope: AlertScope, options: { now: Date; since: string; manager: boolean }) {
   const notices: any = await client.from('opportunity_notifications').select('opportunity_id,title,kind,created_at').eq('organization_id', scope.organizationId)
     .eq('user_id', scope.userId).in('kind', ['assignment', 'report']).gte('created_at', options.since).order('created_at').limit(50);
+  // The titles are the notices' own (opportunity_assign and workspace-jobs.ts); a draft of the offer is asked for and awaited, so it
+  // is not news for the morning.
   const once = (kind: string, prefix: RegExp) => {
     const seen = new Set<string>();
-    return ((notices.error ? [] : notices.data || []) as any[]).filter(row => row.kind === kind && !seen.has(String(row.opportunity_id)) && seen.add(String(row.opportunity_id)))
+    return ((notices.error ? [] : notices.data || []) as any[]).filter(row => row.kind === kind && prefix.test(String(row.title || '')) && !seen.has(String(row.opportunity_id)) && seen.add(String(row.opportunity_id)))
       .map(row => ({ id: String(row.opportunity_id), title: String(row.title || 'Oportunidad').replace(prefix, '').slice(0, 140) }));
   };
-  const news = { assigned: once('assignment', /^Oportunidad asignada:\s*/), reports: once('report', /^Informe disponible:\s*/) };
+  const news = { assigned: once('assignment', /^Oportunidad asignada:\s*/), reports: once('report', /^Informe (?:listo|disponible):\s*/) };
   if (!options.manager) return news;
   const waiting = await readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null);
   return waiting ? { ...news, waiting } : news;
@@ -157,7 +163,7 @@ async function readClosing(client: Client, scope: AlertScope, now: Date, manager
   const ahead: any = ownIds.length ? await client.from('commercial_opportunities').select('id,kind,title,deadline_at,data').eq('organization_id', scope.organizationId)
     .in('id', ownIds).gte('deadline_at', soon).lt('deadline_at', until) : { data: [], error: null };
   if (ahead.error) throw new DailyAlertsError('No pudimos leer las oportunidades.', 503);
-  const rows = [...((closing.data || []) as any[]), ...((ahead.data || []) as any[]).filter(row => HEADS_UP_DAYS.includes(daysLeft(String(row.deadline_at))))];
+  const rows = [...((closing.data || []) as any[]), ...((ahead.data || []) as any[]).filter(row => headsUp(daysLeft(String(row.deadline_at)), today))];
   const open = rows.filter(row => row.data?.evaluation !== 'excluded');
   if (!open.length) return [];
   const work: any = await client.from('opportunity_work').select('opportunity_id,state,responsible_id').eq('organization_id', scope.organizationId).in('opportunity_id', open.map(row => row.id));

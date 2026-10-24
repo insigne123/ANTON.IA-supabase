@@ -78,6 +78,7 @@ test('the ones they work, the most pressing first, each said once', () => {
   const closed = opportunitiesToday(input({ mine: [{ id: 'late', title: 'Aseo Iquique', kind: 'tender', deadlineAt: ago(1), nextActionAt: null, state: 'working' }] }));
   assert.deepEqual([closed.mine.lines[0].detail, closed.mine.lines[0].urgent], ['El plazo de cierre ya pasó', false]);
   assert.deepEqual(today.reports.lines.map(line => [line.id, line.detail]), [['later', 'El informe está listo']]);
+  assert.equal(opportunitiesToday(input({ reports: [{ id: 'x', title: 'Aseo', offer: true }] })).reports.lines[0].detail, 'El borrador de oferta está listo');
   assert.equal(today.reports.total, 1);
   const quiet = opportunitiesToday(input({ mine: [{ id: 'none', title: 'Guardias Arica', kind: 'tender', deadlineAt: null, nextActionAt: ago(0), state: 'assigned' }] }));
   assert.equal(quiet.mine.lines[0].detail, 'Próxima acción hoy');

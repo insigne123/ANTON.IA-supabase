@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WorkItem, WorkspaceOverview } from '@/lib/commercial-opportunities/workspace';
-import { NEWS_KINDS, TENDER_PREREQUISITES, closesLabel, exclusionGroups, latestNews, startHere, workAdvice, type NewsKind, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
+import { NEWS_KINDS, TENDER_PREREQUISITES, closesLabel, exclusionGroups, latestNews, newsKindOf, startHere, workAdvice, type NewsKind, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
 import { filterChip } from './OpportunityFilters';
 
 const TONES: Record<WorkAdvice['tone'], string> = {
@@ -152,10 +152,13 @@ export function NewsList({ notifications, waiting, onOpen, onDecision, onClear, 
 }) {
   const [all, setAll] = useState(false);
   const [kind, setKind] = useState<NewsKind | 'all'>('all');
-  const { kinds } = latestNews(notifications);
-  const shownKind = kind !== 'all' && kinds.includes(kind) ? kind : 'all';
-  const { items, ids, byOpportunity } = latestNews(notifications, shownKind);
   const waits = waiting?.lines ?? [];
+  // A decision or a block already in «Esperan tu respuesta» is said there, not twice.
+  const waitingIds = new Set(waits.map(line => line.id));
+  const notices = notifications.filter(n => !(newsKindOf(n) === 'task' && waitingIds.has(n.opportunity_id)));
+  const { kinds } = latestNews(notices);
+  const shownKind = kind !== 'all' && kinds.includes(kind) ? kind : 'all';
+  const { items, ids, byOpportunity } = latestNews(notices, shownKind);
   if (!items.length && !waits.length) return null;
   const shown = all ? items : items.slice(0, 3);
   return (

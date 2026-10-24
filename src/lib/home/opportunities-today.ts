@@ -17,8 +17,8 @@ export type OpportunitiesTodayInput = {
   userId: string;
   /** The ones the person is part of and still in play. */
   mine: TodayOpportunity[];
-  /** Reports ready on one of theirs, not read yet. */
-  reports: Array<{ id: string; title: string }>;
+  /** Reports (or drafts of the offer, `offer`) ready on one of theirs, not read yet. */
+  reports: Array<{ id: string; title: string; offer?: boolean }>;
   /** What waits for the administrators (server/commercial-opportunities/workspace-waiting.ts). */
   waiting: WaitingItem[];
   /** Recommended, closing within a week, and nobody works them. Only read for an administrator. */
@@ -74,7 +74,7 @@ export function opportunitiesToday(input: OpportunitiesTodayInput): Opportunitie
     .sort((a, b) => a.due[0] - b.due[0] || a.due[1] - b.due[1] || a.item.title.localeCompare(b.item.title, 'es'))
     .map(({ item }) => mineLine(item, now)));
   const reports = section(input.reports.filter((item, index, all) => all.findIndex(other => other.id === item.id) === index)
-    .map(item => ({ id: item.id, title: clean(item.title), detail: 'El informe está listo', urgent: false, href: href(item.id) })));
+    .map(item => ({ id: item.id, title: clean(item.title), detail: item.offer ? 'El borrador de oferta está listo' : 'El informe está listo', urgent: false, href: href(item.id) })));
   const closing = section(admin ? [...input.closingWithoutTeam].filter(item => valid(item.deadlineAt)).sort((a, b) => Date.parse(a.deadlineAt) - Date.parse(b.deadlineAt))
     .map(item => ({ id: item.id, title: clean(item.title), detail: `Cierra ${dayLabel(item.deadlineAt, now)} · sin equipo`, urgent: dayInZone(new Date(item.deadlineAt)) <= shiftDay(dayInZone(now), 2), href: href(item.id) })) : []);
   return {

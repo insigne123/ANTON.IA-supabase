@@ -55,12 +55,12 @@ export const alertDay = (now: Date) => { const weekday = weekdayOf(dayInZone(now
 /** Wednesday and Friday: the days a goal that is behind is worth an email on its own. */
 const goalDay = (now: Date) => [3, 5].includes(weekdayOf(dayInZone(now)));
 
-/** «hoy», «mañana», «el viernes», relative to today in Chile. */
+/** «hoy», «mañana», «el viernes», relative to today in Chile; a week or more ahead with its date («el martes 27»), or it reads as today. */
 export function dayWord(at: string, now: Date) {
   const day = dayInZone(new Date(at)), today = dayInZone(now);
   if (day === today) return 'hoy';
   if (day === shiftDay(today, 1)) return 'mañana';
-  return `el ${WEEKDAYS[weekdayOf(day)]}`;
+  return day > shiftDay(today, 6) ? `el ${WEEKDAYS[weekdayOf(day)]} ${Number(day.slice(8))}` : `el ${WEEKDAYS[weekdayOf(day)]}`;
 }
 
 const KIND_WORDS: Record<string, [string, string]> = { tender: ['licitación', 'licitaciones'], compra_agil: ['compra ágil', 'compras ágiles'] };

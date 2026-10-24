@@ -25,6 +25,8 @@ test('days are said the way a person says them', () => {
   assert.equal(dayWord('2026-10-20T20:00:00.000Z', TUESDAY), 'hoy');
   assert.equal(dayWord('2026-10-21T20:00:00.000Z', TUESDAY), 'mañana');
   assert.equal(dayWord('2026-10-23T20:00:00.000Z', TUESDAY), 'el viernes');
+  assert.equal(dayWord('2026-10-26T20:00:00.000Z', TUESDAY), 'el lunes', 'within the week the weekday is enough');
+  assert.equal(dayWord('2026-10-27T20:00:00.000Z', TUESDAY), 'el martes 27', 'a week ahead says its date, or «el martes» reads as today');
 });
 
 test('opportunities closing are named by kind and by why they matter', () => {
