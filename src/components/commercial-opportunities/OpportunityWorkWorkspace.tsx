@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ActionBar } from '@/components/ui/action-bar';
+import { SegmentedTabs, tabPanelProps } from '@/components/ui/segmented-tabs';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
@@ -771,7 +772,14 @@ export function OpportunityWorkWorkspace() {
     const work = workOf(item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id);
     const region = opportunityRegion(item);
     const checked = picked.has(item.id);
-    return <article key={item.id} className={cn('rounded-xl border bg-background p-5 transition-colors', checked && 'border-primary/50 bg-primary/5')}>
+    // Why it showed, without the keyword that matched: that is the radar's own detail, not news for whoever works it (OPP-41).
+    const reason = item.reasons.find(text => !/^Palabra clave/i.test(text));
+    // The whole card opens it with the pointer; with the keyboard, «Abrir y trabajar» does, one stop per card.
+    const openFromCard = (event: { target: EventTarget | null }) => {
+      if ((event.target as HTMLElement).closest('button, a, input, label, [role="checkbox"]') || window.getSelection()?.toString()) return;
+      open(item.id);
+    };
+    return <article key={item.id} onClick={openFromCard} className={cn('cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-foreground/25', checked && 'border-primary/50 bg-primary/5')}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span className="flex flex-wrap items-center gap-2">
           {admin ? <Checkbox checked={checked} onCheckedChange={value => togglePick(item.id, Boolean(value))} aria-label={`Seleccionar «${item.title.length > 80 ? `${item.title.slice(0, 79)}…` : item.title}»`} /> : null}
@@ -781,10 +789,11 @@ export function OpportunityWorkWorkspace() {
       </div>
       <h3 className="mt-2 text-base font-semibold">{item.title}</h3>
       {opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}
-      <p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p>
-      <p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}
-        {region ? <span>Región: {region}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>
+      {/* Who buys, when it closes and how much, in one line (OPP-41). */}
+      <p className="mt-1 text-sm text-muted-foreground">{[item.company_name || item.buyer_name, item.deadline_at ? `Cierre ${date(item.deadline_at)}` : '',
+        item.amount ? `${money(item.amount)} ${item.currency || ''}`.trim() : '', region].filter(Boolean).join(' · ')}</p>
+      {admin && reason ? <p className="mt-3 text-sm leading-6">{reason}</p> : null}
+      {work?.due_at || owner ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div> : null}
       {work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => open(item.id)}>Abrir y trabajar</Button>
@@ -882,23 +891,27 @@ export function OpportunityWorkWorkspace() {
       }} /> : null}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
         <Button onClick={openContext}>Confirmar oferta</Button></div>}
-      {view !== 'assistant' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={(id, section) => open(id, section)} onDecision={id => open(id, 'decision')}
+      {view !== 'assistant' && view !== 'market' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={(id, section) => open(id, section)} onDecision={id => open(id, 'decision')}
         onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
       {admin && view !== 'assistant' && overview.documentAlerts?.length ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-4 py-3 text-sm">
         <p className="min-w-0"><span className="font-medium">{overview.documentAlerts[0].text}</span>{overview.documentAlerts.length > 1 ? <span className="text-muted-foreground"> · y {overview.documentAlerts.length - 1} más por renovar</span> : null}</p>
         <Button size="sm" variant="outline" onClick={() => setProfileOpen(true)}>Ver documentos</Button></div> : null}
-      {view !== 'assistant' && <TenderPrerequisites />}
+      {view !== 'assistant' && view !== 'market' && <TenderPrerequisites />}
       {/* «Mis tareas» (OPP-27) for everyone who works: a member always sees it; an administrator once they have tasks of their own. */}
-      <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{((admin
-        ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['market', 'Mercado público'], ...(overview.myTasks?.open || view === 'tasks' ? [['tasks', 'Mis tareas']] : []), ['assistant', 'Asistente']]
-        : [['list', 'Mis oportunidades'], ['tasks', 'Mis tareas'], ['assistant', 'Asistente']]) as Array<[WorkspaceView, string]>).map(([key, label]) => {
-        // On a phone «Mis oportunidades» says «Oportunidades», so the three fit in one row.
-        const shown = label === 'Mis oportunidades' ? <><span className="sm:hidden">Oportunidades</span><span className="hidden sm:inline">{label}</span></> : label;
-        const pressed = admin || key !== 'list' ? view === key : view !== 'assistant' && view !== 'tasks';
-        const late = key === 'tasks' ? overview.myTasks?.late ?? 0 : 0;
-        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4', pressed ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>
-          {shown}{key === 'tasks' && overview.myTasks?.open ? <span className="tabular-nums text-muted-foreground">{overview.myTasks.open}</span> : null}
-          {late ? <><span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden="true" /><span className="sr-only">, {late === 1 ? '1 vencida' : `${late} vencidas`}</span></> : null}</button>; })}</div>
+      {/* The views are tabs (OPP-43): arrow keys between them, «pestaña 2 de 4», and on a phone one row that scrolls instead of wrapping. */}
+      <SegmentedTabs label="Vistas de Oportunidades" idPrefix="opp-view" className="w-fit"
+        value={admin || view === 'assistant' || view === 'tasks' ? view : 'list'} onChange={setView}
+        tabs={((admin
+          ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['market', 'Mercado público'], ...(overview.myTasks?.open || view === 'tasks' ? [['tasks', 'Mis tareas']] : []), ['assistant', 'Asistente']]
+          : [['list', 'Mis oportunidades'], ['tasks', 'Mis tareas'], ['assistant', 'Asistente']]) as Array<[WorkspaceView, string]>).map(([key, label]) => {
+          const late = key === 'tasks' ? overview.myTasks?.late ?? 0 : 0;
+          return { value: key, count: key === 'tasks' && overview.myTasks?.open ? overview.myTasks.open : null,
+            // On a phone «Mis oportunidades» says «Oportunidades».
+            label: <>{label === 'Mis oportunidades' ? <><span className="sm:hidden">Oportunidades</span><span className="hidden sm:inline">{label}</span></> : label}
+              {late ? <><span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden="true" /><span className="sr-only">, {late === 1 ? '1 vencida' : `${late} vencidas`}</span></> : null}</> };
+        })} />
+      {/* The panel of the view on show, named by its tab (OPP-43). */}
+      <div {...tabPanelProps('opp-view', view)} className="flex flex-col gap-5">
       {view === 'assistant' ? <OpportunityAssistant admin={admin} threadId={assistantThread} onThread={setAssistantThread} onOpen={open} onHandoff={continueIn} />
         : view === 'tasks' ? <MyTasks tasks={myTasks} error={myTasksError} busy={busy} onOpen={id => open(id, 'tasks')} onDone={finishMyTask} onRetry={() => void loadMyTasks()} />
         : admin && view === 'market' ? <PublicMarket onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} onProfile={() => setProfileOpen(true)} />
@@ -951,6 +964,7 @@ export function OpportunityWorkWorkspace() {
       </ActionBar> : null}
       </>}
       {!(admin && (view === 'pipeline' || view === 'market')) && view !== 'assistant' && view !== 'tasks' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
+      </div>
     </>}
     {selected && <>
       <Button variant="ghost" className="-ml-2 self-start" onClick={close}><ArrowLeft className="mr-2 h-4 w-4" />Oportunidades</Button>
@@ -975,9 +989,9 @@ export function OpportunityWorkWorkspace() {
           <div className="flex flex-wrap gap-2">
             {/* One main action per screen: while the guide shows its own «Generar», the header does not repeat it. */}
             {/* With the report ready, the main action is the next step: applying, or finding whom to write to. Once it was handed in or closed there is no next step to push. */}
-            {latest && !researching && <Button variant={isFinished(detail.work?.state) ? 'outline' : 'default'} onClick={() => setTab(signal ? 'contacts' : 'apply')}>{signal ? <Users className="mr-2 h-4 w-4" aria-hidden="true" /> : <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" />}{signal ? 'Buscar a quién escribir' : 'Cómo postular'}</Button>}
+            {latest && !researching && tab !== (signal ? 'contacts' : 'apply') && <Button variant={isFinished(detail.work?.state) ? 'outline' : 'default'} onClick={() => setTab(signal ? 'contacts' : 'apply')}>{signal ? <Users className="mr-2 h-4 w-4" aria-hidden="true" /> : <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" />}{signal ? 'Buscar a quién escribir' : 'Cómo postular'}</Button>}
             {(latest || researching || tab !== 'summary') && <Button variant={latest && !researching ? 'ghost' : 'default'} onClick={generate} disabled={busy || researching}>{researching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}{researching ? 'Preparando…' : latest ? (signal ? 'Actualizar ficha comercial' : 'Actualizar informe') : (signal ? 'Generar ficha comercial' : 'Generar informe')}</Button>}
-            {admin && detail.work?.state !== 'archived' && <Button variant="outline" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}><Users className="mr-2 h-4 w-4" />Asignar equipo</Button>}
+            {admin && detail.work?.state !== 'archived' && <Button variant="outline" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}><Users className="mr-2 h-4 w-4" />{detail.participants.length ? 'Cambiar equipo' : 'Asignar equipo'}</Button>}
             {admin && listStageOf(detail.work?.state) === 'open' ? <Button variant="ghost" disabled={busy} onClick={() => { setProblem(''); setDiscarding({ ids: [item.id], title: item.title }); }}><Archive className="mr-2 h-4 w-4" aria-hidden="true" />No es para nosotros</Button> : null}
             {admin && detail.work?.state === 'archived' ? <Button variant="outline" disabled={busy} onClick={() => void reopen([item.id])}><RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />Reabrir</Button> : null}
             {item.url && <Button asChild variant="ghost"><a href={item.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-2 h-4 w-4" />{item.kind === 'tender' ? 'Ver en Mercado Público' : signal ? 'Ver en LinkedIn' : 'Ver fuente'}</a></Button>}
@@ -994,10 +1008,12 @@ export function OpportunityWorkWorkspace() {
           return decision ? <DecisionCallout decision={decision} admin={admin} busy={busy} onReply={replyDecision}
             who={(detail.members || detail.participants).find(m => m.user_id === decision.actorId)?.name ?? 'Alguien del equipo'} /> : null;
         })()}
-        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{sections.map(([id, label]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={filterChip(tab === id)}>{label}</button>)}</div>
+        {/* The sections are tabs, not filters (OPP-43): underlined, with the arrow keys, and one row that scrolls on a phone (OPP-42). */}
+        <SegmentedTabs variant="underline" label="Secciones de la oportunidad" idPrefix="opp-section" value={tab} onChange={setTab}
+          tabs={sections.map(([id, label]) => ({ value: id, label }))} />
+        <div {...tabPanelProps('opp-section', tab)}>
         {tab === 'summary' && <div className="space-y-5">
-          {detail.participants.length ? <section aria-label="Equipo de trabajo" className="space-y-2"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">Equipo de trabajo</h2>{admin && <Button variant="ghost" size="sm" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}>Cambiar equipo</Button>}</div>
-            <TeamOffice people={detail.participants} responsibleId={detail.work?.responsible_id} /></section> : null}
+          {/* The team is said once, in the header with its «Cambiar equipo» (OPP-40). */}
           <FitProposals proposals={pendingFitProposals(detail.activity)} admin={admin} busy={busy} onResolve={(activityId, accept) => void resolveProposal(activityId, accept)}
             nameOf={userId => (detail.members || detail.participants).find(m => m.user_id === userId)?.name ?? 'Alguien del equipo'} />
           {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} pending={busy} onRetry={generate} kept={Boolean(latest)}
@@ -1052,6 +1068,7 @@ export function OpportunityWorkWorkspace() {
         {tab === 'chat' && <OpportunityChat messages={messages} pending={pendingQuestion} documentCount={detail.documents.length} busy={busy}
           suggestions={signal ? SUGGESTED_QUESTIONS.signal : SUGGESTED_QUESTIONS.tender}
           placeholder={signal ? '¿Qué cargo debería contactar primero?' : 'Pregunta lo que quieras sobre esta licitación…'} onAsk={ask} />}
+        </div>
       </>}
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
