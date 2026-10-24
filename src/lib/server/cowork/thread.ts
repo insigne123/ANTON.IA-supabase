@@ -1,6 +1,7 @@
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { getCoworkRun } from './runs';
+import { getCoworkUsage } from './usage';
 
 /** Each lookup uses the caller's RLS client plus explicit organization/owner scope. */
 export async function getCoworkThread(auth: AuthContext, id: string) {
@@ -28,5 +29,7 @@ export async function getCoworkThread(auth: AuthContext, id: string) {
     depth, maxDepth: budgets.maxDepth,
     exhausted: current.events.some((event: { kind: string }) => event.kind === 'thread.budget_exhausted'),
   };
-  return { ...current, ancestors, olderTurnsOmitted: Boolean(cursor), budget };
+  // The share of the assistant's use taken so far (COW-15). A failed read only hides the indicator.
+  const usage = await getCoworkUsage(auth, (current.run.root_run_id as string | null) || current.run.id).catch(() => null);
+  return { ...current, ancestors, olderTurnsOmitted: Boolean(cursor), budget, usage };
 }
