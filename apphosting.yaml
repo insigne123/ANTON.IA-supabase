@@ -324,6 +324,14 @@ env:
   - variable: OPPORTUNITIES_AUTOMATION_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # El chat de cada oportunidad y el asistente de la sección buscan y leen antes de responder: un agente con Haiku 5.5 (todos los roles de
+  # Oportunidades son Haiku), cada ronda un paso del libro de presupuesto de la categoría «chat». Medido con llave de prueba el 24 oct 2026:
+  # el chat acierta 34 de 34 preguntas (la llamada única, 27 de 34: no encuentra lo que está fuera de los primeros fragmentos) con un costo
+  # de unos US$0,0007 por pregunta (US$0,0005 la llamada única), y el asistente 7 de 7 (docs/funciones-apagadas-encendidas-2026-10-24.md). La segunda lectura del informe
+  # (OPPORTUNITIES_REPORT_VERIFY) sigue apagada: no se midió con informes reales.
+  - variable: OPPORTUNITIES_RUNTIME
+    value: harness
+    availability: [RUNTIME]
   - variable: OPPORTUNITIES_MONTHLY_USD_CAP
     value: "20"
     availability: [RUNTIME]
