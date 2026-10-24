@@ -7,6 +7,7 @@ import { AuthError } from '@/lib/server/auth-utils';
 import { opportunityDb } from './workspace-store';
 import { opportunityModel, opportunityUsageCost, type OpportunityRole } from '@/lib/commercial-opportunities/model-policy';
 import { readOpportunityReportEnvelope, reportEnvelopeSchema } from '@/lib/commercial-opportunities/report-generation';
+import { budgetRefusal, REPORT_TOO_LONG } from './workspace-budget';
 
 export type OpportunityJob = { id: string; organization_id: string; opportunity_id: string | null; requested_by: string; dedupe_key: string;
   kind: string; payload: Record<string, any>; state: string; lease_token: string; attempts: number;
@@ -38,7 +39,8 @@ export async function reserveOpportunityStep(client: SupabaseClient, job: Opport
     .eq('state', 'running').gt('lease_until', new Date().toISOString()).select('id').maybeSingle();
   if (!opportunityDb(lease)) throw new AuthError('El trabajo se retomó en otro proceso.', 409);
   const admitted = opportunityDb(await client.rpc('opportunity_budget_reserve', { p_org: job.organization_id, p_job: job.id, p_step: input.step, p_category: input.category, p_micro: input.reserve, p_lease: job.lease_token }));
-  if (!admitted?.admitted) throw new AuthError('Se alcanzó el presupuesto disponible para este trabajo.', 402);
+  // The database refuses without saying which cap: the person hears which one, and when it renews (workspace-budget.ts).
+  if (!admitted?.admitted) throw new AuthError(await budgetRefusal(client, job, input.category, input.reserve), 402);
   if (admitted.fresh) return { fresh: true, id: admitted.id };
   const cached = opportunityDb(await client.from('opportunity_ai_results').select('data').eq('organization_id', job.organization_id).eq('reservation_id', admitted.id).maybeSingle());
   if (cached) return { fresh: false, data: cached.data };
@@ -62,7 +64,8 @@ export async function opportunityGenerate<T extends z.ZodTypeAny>(client: Supaba
   const attachmentTokens = input.attachments?.length ? Math.max(0, Math.ceil(input.attachmentTokens ?? 0)) : 0;
   // UTF-8 bytes conservatively bound text tokens. Haiku stays below its 100k input price threshold: reading and screening split their
   // documents into blocks under that line. The report is one synthesis of all of them and cannot be split (Sonnet, which wrote it until
-  // 23 Oct 2026, has no such line), so a report over the line is reserved and settled at the long-context price: the estimate only errs upwards.
+  // 23 Oct 2026, has no such line), so a report over the line in bytes is reserved at the long-context price; it is settled at the price
+  // the provider billed, which is the long one only past 100k tokens (two or more bytes make a token).
   const promptBytes = Buffer.byteLength(input.prompt, 'utf8') + 3000;
   const systemBytes = Buffer.byteLength(SYSTEM_PROMPT, 'utf8') + Buffer.byteLength(JSON.stringify(zodToJsonSchema(input.schema)), 'utf8');
   const bytes = promptBytes + systemBytes + attachmentTokens;
@@ -79,21 +82,29 @@ export async function opportunityGenerate<T extends z.ZodTypeAny>(client: Supaba
   // The images and PDFs carry the cache mark of the user turn (anthropic-json.ts): reserved at the write price.
   const reserve = Math.max(1, Math.ceil(promptBytes * price.input + systemBytes * Math.max(price.input, price.write) + attachmentTokens * Math.max(price.input, price.write)
     + chargedOutput * price.output));
-  if (reserve > 750_000) throw new AuthError('El contexto supera el presupuesto del trabajo; divide los documentos.', 402);
+  if (reserve > 750_000) throw new AuthError(input.role === 'report' ? REPORT_TOO_LONG
+    : 'Los documentos son demasiado extensos para esta tarea. Quita los que no sean bases ni anexos y vuelve a intentarlo.', 402);
   const admitted = await reserveOpportunityStep(client, job, { step: input.step, category: input.category, reserve });
   if (!admitted.fresh) return input.schema.parse(admitted.data);
+  // The prompt the provider counted: an unknown count keeps the price reserved.
+  const billed = (telemetry: StructuredTelemetry) => (longContext && Number((telemetry.usage as any)?.prompt_tokens) <= 100_000 ? prices(model) : price);
   try {
     const answer = await generate({ schema: input.schema, prompt: input.prompt, ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       systemPrompt: SYSTEM_PROMPT,
-      openAiModel: model, allowDefaultModelFallback: false, provider: 'openai', maxAttempts: 1,
+      // A refusal before answering (rate limit, overload) is not billed and is asked again; an answer that came back never is
+      // (openai-json.ts, isRetryableError). The parts of a report are read four at a time, so a short limit may say no for a moment.
+      // The report is not: it runs alone at the start of its tick, and a second try could outlast the route.
+      openAiModel: model, allowDefaultModelFallback: false, provider: 'openai', maxAttempts: input.role === 'report' ? 1 : 3,
       // The report writes up to 16k tokens and runs at the start of its own tick (route limit 300 s), so it gets 230 s.
       reasoningEffort: effort, maxOutputTokens: output, timeoutMs: input.role === 'report' ? 230_000 : 110_000 });
-    const cost = answer.telemetry.modelName === model ? opportunityUsageCost(answer.telemetry, price) : null;
-    await settleOpportunityStep(client, admitted.id, cost, { model: answer.telemetry.modelName, usage: answer.telemetry.usage, price, pricingVersion: PRICING_VERSION }, answer.data);
+    const charged = billed(answer.telemetry);
+    const cost = answer.telemetry.modelName === model ? opportunityUsageCost(answer.telemetry, charged) : null;
+    await settleOpportunityStep(client, admitted.id, cost, { model: answer.telemetry.modelName, usage: answer.telemetry.usage, price: charged, pricingVersion: PRICING_VERSION }, answer.data);
     return answer.data;
   } catch (error) {
     const telemetry = (error as any)?.structuredTelemetry as StructuredTelemetry | undefined;
-    await settleOpportunityStep(client, admitted.id, telemetry ? opportunityUsageCost(telemetry, price) : null, { model, price, status: telemetry ? 'invalid_output' : 'uncertain' }, null);
+    const charged = telemetry ? billed(telemetry) : price;
+    await settleOpportunityStep(client, admitted.id, telemetry ? opportunityUsageCost(telemetry, charged) : null, { model, price: charged, status: telemetry ? 'invalid_output' : 'uncertain' }, null);
     throw new AuthError('La evaluación no terminó. Conservamos los datos y el consumo observado.', 503);
   }
 }

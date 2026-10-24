@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { z } from 'genkit';
 
-import { generateStructured, generateStructuredWithTelemetry, isProviderQuotaExhausted } from './openai-json';
+import { generateStructured, generateStructuredWithTelemetry, isProviderQuotaExhausted, isRetryableError } from './openai-json';
 
 type RequestBody = {
   model?: string;
@@ -628,4 +628,16 @@ test('an account without credits fails at once: no retries and no other model of
   assert.equal(fetchMock.mock.callCount(), 1);
   // A busy service is still retried: only the exhausted account stops at once.
   assert.equal(isProviderQuotaExhausted(new Error('OPENAI_HTTP_429:{"error":{"type":"rate_limit_exceeded"}}')), false);
+});
+
+test('only a refusal before answering is asked again: an answer that came back was paid, and a Claude 400 that mentions 429 is no 429', () => {
+  assert.equal(isRetryableError(new Error('CLAUDE_HTTP_429:{"type":"rate_limit_error"}')), true);
+  assert.equal(isRetryableError(new Error('CLAUDE_HTTP_529:Overloaded')), true);
+  assert.equal(isRetryableError(new Error('CLAUDE_HTTP_400:prompt is too long: 214290 tokens > 200000 maximum')), false);
+  assert.equal(isRetryableError(new Error('CLAUDE_HTTP_400:Your credit balance is too low. credit_balance_exhausted')), false);
+  const paid = Object.defineProperty(new Error("Expected ',' or '}' after property value in JSON at position 4291"), 'structuredTelemetry',
+    { value: { usage: { prompt_tokens: 900, completion_tokens: 4000 } }, enumerable: false });
+  assert.equal(isRetryableError(paid), false, 'an invalid answer was billed');
+  assert.equal(isRetryableError(new Error('OPENAI_HTTP_429:{"error":{"type":"rate_limit_exceeded"}}')), true);
+  assert.equal(isRetryableError(new Error('Service temporarily unavailable')), true);
 });

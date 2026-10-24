@@ -6,6 +6,11 @@ export function opportunityModel(role: OpportunityRole, env: Record<string,strin
   if (!['claude-haiku-5-5','gpt-6-luna'].includes(wanted)) throw new Error('El modelo configurado no está permitido para Oportunidades.');
   return wanted;
 }
+/**
+ * Paid steps one job asks for at once: a report's parts, a plan's or a contract list's batches (OPP-18, OPP-19). Haiku answers four as
+ * fast as one, a refusal for the rate is asked again (workspace-ai.ts), and each job keeps the results in the order it gave them.
+ */
+export const STEPS_AT_ONCE = 4;
 export function opportunityUsageCost(telemetry: StructuredTelemetry, price: { input:number;output:number;cache:number;write:number }) {
   const u = telemetry.usage as any;
   const input=u?.prompt_tokens, output=u?.completion_tokens;

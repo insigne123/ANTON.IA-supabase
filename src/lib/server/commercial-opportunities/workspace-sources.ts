@@ -11,6 +11,7 @@ import { resolveTicketForOrganization } from './tickets';
 import { CompraAgilError, searchCompraAgil, compraAgilQuery } from './compra-agil';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { budgetRefusal } from './workspace-budget';
 import { EXCLUSION_MOTIVES, RULE_MOTIVE, tenderWordsOfTheDay } from '@/lib/commercial-opportunities/workspace-radar';
 import { TENDER_PROFILE_RULE, tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
 import { loadTenderProfile } from './tender-profile-read';
@@ -101,7 +102,7 @@ export async function captureOpportunityTenders(client: SupabaseClient, job: Opp
 async function apifyOpportunityItems(client: SupabaseClient, job: OpportunityJob, actor: string, body: Record<string, unknown>, cap: number) {
   if (!process.env.APIFY_TOKEN) throw new AuthError('LinkedIn no está conectado.', 503);
   const admission = opportunityDb(await client.rpc('opportunity_budget_reserve', { p_org: job.organization_id, p_job: job.id, p_step: 'provider', p_category: 'sources', p_micro: Math.ceil(cap * 1e6), p_lease:job.lease_token }));
-  if (!admission?.admitted) throw new AuthError('Se alcanzó el presupuesto de búsqueda de este mes.', 402);
+  if (!admission?.admitted) throw new AuthError(await budgetRefusal(client, job, 'sources', Math.ceil(cap * 1e6)), 402);
   const saved = opportunityDb(await client.from('opportunity_ai_results').select('data').eq('organization_id', job.organization_id).eq('reservation_id', admission.id).maybeSingle());
   if (saved) return { waiting: false as const, items: saved.data.items as Record<string, any>[] };
   const headers = { authorization: `Bearer ${process.env.APIFY_TOKEN}`, 'content-type': 'application/json' };

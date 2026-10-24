@@ -66,7 +66,7 @@ export function ledgeredModel(client: SupabaseClient, job: OpportunityJob, input
       const readBytes = Buffer.byteLength(JSON.stringify([request.system, request.messages, request.tools]), 'utf8');
       const writeTokens = anthropicRequest(request, model).max_tokens;
       const reserve = Math.max(1, Math.ceil(readBytes * Math.max(price.input, price.write) + writeTokens * price.output));
-      if (reserve > HELD_LIMIT) throw new AuthError('El contexto supera el presupuesto del trabajo; divide los documentos.', 402);
+      if (reserve > HELD_LIMIT) throw new AuthError('La respuesta necesitaba leer más de lo que permite una pregunta. Prueba con una pregunta más acotada.', 402);
       const admitted = await reserveOpportunityStep(client, job, { step: `${input.step}:r${round}`, category: input.category, reserve });
       if (!admitted.fresh) return replayOf(admitted.data);
       let response: ModelResponse;

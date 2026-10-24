@@ -11,6 +11,7 @@ import { readAgencyHistory, readMarketCoverage, readSupplierProfile, searchSuppl
 import { assertOpportunityAdmin, assertOpportunityRead } from './workspace-access';
 import { addOpportunityActivity, createPrivateOpportunity, opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { STEPS_AT_ONCE } from '@/lib/commercial-opportunities/model-policy';
 import { loadCompanyForModel, loadTenderProfile } from './tender-profile-read';
 
 /** The kinds with a public buyer whose history ChileCompra keeps. */
@@ -165,14 +166,24 @@ export async function runMarketContracts(client: SupabaseClient, job: Opportunit
   const rows = (data || []) as ExpiringRow[];
   const offer = { offer: String(context.offer || ''), services: context.services || [], exclusions: context.exclusions || [], territories: context.territories || [] };
   const kept = new Map<string, { fit: 'alta' | 'media'; reason: string }>();
-  for (let offset = 0; offset < rows.length; offset += CONTRACTS_SCREEN_BATCH) {
-    if (Date.now() - started > 200_000) return { waiting: true as const };
-    const batch = rows.slice(offset, offset + CONTRACTS_SCREEN_BATCH);
-    const ids = new Set(batch.map(row => String(row.tender_id)));
-    const step = `contracts:${createHash('sha256').update(batch.map(row => row.tender_id).join('|')).digest('hex').slice(0, 32)}`;
-    const answer = await opportunityGenerate(client, job, { step, category: 'evaluation', role: 'screen', schema: contractsScreenSchema, output: 6000,
-      prompt: contractsScreenPrompt(offer, batch.map(row => ({ id: String(row.tender_id), name: row.name, agency: row.agency, category: row.category, region: row.region }))) });
-    for (const match of answer.matches) if (ids.has(match.id.trim())) kept.set(match.id.trim(), { fit: match.fit, reason: match.reason.replace(/\s+/g, ' ').trim().slice(0, 300) });
+  // Four batches at a time, as a report reads its parts; a group starts while its slowest call still ends inside the route.
+  for (let offset = 0; offset < rows.length; offset += CONTRACTS_SCREEN_BATCH * STEPS_AT_ONCE) {
+    if (Date.now() - started > 150_000) return { waiting: true as const };
+    const batches = Array.from({ length: Math.min(STEPS_AT_ONCE, Math.ceil((rows.length - offset) / CONTRACTS_SCREEN_BATCH)) },
+      (_, index) => rows.slice(offset + index * CONTRACTS_SCREEN_BATCH, offset + (index + 1) * CONTRACTS_SCREEN_BATCH));
+    const outcomes = await Promise.allSettled(batches.map(batch => opportunityGenerate(client, job, {
+      step: `contracts:${createHash('sha256').update(batch.map(row => row.tender_id).join('|')).digest('hex').slice(0, 32)}`,
+      category: 'evaluation', role: 'screen', schema: contractsScreenSchema, output: 6000,
+      prompt: contractsScreenPrompt(offer, batch.map(row => ({ id: String(row.tender_id), name: row.name, agency: row.agency, category: row.category, region: row.region }))) })));
+    // Every call ends before the job does; the first failure, in the list's order, is the job's.
+    const failed = outcomes.find(outcome => outcome.status === 'rejected');
+    if (failed) throw (failed as PromiseRejectedResult).reason;
+    outcomes.forEach((outcome, index) => {
+      if (outcome.status !== 'fulfilled') return;
+      const ids = new Set(batches[index].map(row => String(row.tender_id)));
+      for (const match of outcome.value.matches)
+        if (ids.has(match.id.trim())) kept.set(match.id.trim(), { fit: match.fit, reason: match.reason.replace(/\s+/g, ' ').trim().slice(0, 300) });
+    });
   }
   const contracts: ExpiringContract[] = rows.filter(row => kept.has(String(row.tender_id))).map(row => ({
     tenderId: Number(row.tender_id), code: row.code, name: row.name, agency: row.agency, region: row.region, category: row.category, awardedOn: row.awarded_on,

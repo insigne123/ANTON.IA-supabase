@@ -57,7 +57,13 @@ test('warnings: missing bases first, unreadable documents explained, system note
 
 test('a failed report explains what happened and what to do, never the internal accounting', () => {
   assert.equal(friendlyJobError('La evaluación no terminó. Conservamos los datos y el consumo observado.'), 'Tardó más de lo esperado. Vuelve a intentarlo: suele resolverse al segundo intento.');
-  assert.match(friendlyJobError('Se alcanzó el presupuesto disponible para este trabajo.'), /gasto permitido para un informe o para el mes/);
+  // A job refused before the caps were named: try again, and hear which one if it is still reached.
+  for (const old of ['Se alcanzó el presupuesto disponible para este trabajo.', 'El contexto supera el presupuesto del trabajo; divide los documentos.'])
+    assert.match(friendlyJobError(old), /^Se alcanzó un tope de gasto de Oportunidades\. Vuelve a intentarlo/);
+  // A cap named by the server is already what the person must know.
+  for (const named of ['Oportunidades llegó al tope de US$20 de octubre. Se renueva el 1 de noviembre.',
+    'Otro trabajo de Oportunidades ocupó lo que quedaba del presupuesto. Vuelve a intentarlo en unos minutos.'])
+    assert.equal(friendlyJobError(named), named);
   assert.match(friendlyJobError('El expediente recibió documentos nuevos. Solicita un análisis actualizado.'), /cambió mientras se preparaba/);
   assert.equal(friendlyJobError('Faltan documentos legibles para investigar. Adjunta las bases o la invitación.'), 'Faltan documentos legibles para investigar. Adjunta las bases o la invitación.');
   assert.equal(friendlyJobError(null), 'Intenta de nuevo en un momento.');

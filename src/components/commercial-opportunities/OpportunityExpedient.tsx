@@ -137,7 +137,7 @@ export function DocumentList({ id, documents, kind, scanning = [], onUploadMore 
   })}</div>;
 }
 
-/** While the report is being prepared: who at the «oficina» is doing what (ReportOffice) and how long it usually takes. `pending`:
+/** While the report is being prepared: who at the «oficina» is doing what (ReportOffice) and about how long is left. `pending`:
  * the retry was sent and its answer is on its way, so the button says so instead of looking untouched for the seconds the reload takes. */
 export function ReportProgress({ state, error, signal, pending = false, onRetry, progress, tender, documents = 0, buyer, kept = false }: { state: string; error?: string | null;
   signal?: boolean; pending?: boolean; onRetry: () => void; progress?: ReportJobProgress | null; tender?: boolean; documents?: number; buyer?: string | null;
@@ -150,6 +150,6 @@ export function ReportProgress({ state, error, signal, pending = false, onRetry,
   return <div role="status" className="rounded-2xl border bg-muted/30 p-4">
     <p className="flex items-center gap-2 text-sm font-medium"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{state === 'queued' ? 'En cola: empieza en menos de un minuto' : signal ? 'Analizando la señal y preparando la ficha…' : 'Leyendo los documentos y redactando el informe…'}</p>
     <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full w-1/3 animate-pulse rounded-full bg-primary" /></div>
-    <p className="mt-2 text-xs text-muted-foreground">Suele tardar entre {signal ? '1 y 3' : '2 y 5'} minutos. Puedes seguir trabajando: {signal ? 'la ficha' : 'el informe'} aparecerá aquí y te avisaremos.</p>
+    <p className="mt-2 text-xs text-muted-foreground">Puedes seguir trabajando: {signal ? 'la ficha' : 'el informe'} aparecerá aquí y te avisaremos.</p>
   </div>;
 }

@@ -1,10 +1,10 @@
 'use client';
 // The «oficina» while a report is prepared: four characters, one per stage the job really goes through (report-progress.ts),
-// and one line that says what is happening right now. Nothing here is an estimate: a stage is done only when the job moved on,
-// and reading counts the parts the job read.
+// and one line that says what is happening right now. A stage is done only when the job moved on, and reading counts the parts
+// the job read. The only estimate is the time left: from the size of the documents, then from this report's own pace.
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { REPORT_STAGES, type ReportJobProgress, type ReportStage } from '@/lib/commercial-opportunities/report-progress';
+import { REPORT_STAGES, reportMinutesLeft, type ReportJobProgress, type ReportStage } from '@/lib/commercial-opportunities/report-progress';
 
 type Seat = 'waiting' | 'working' | 'done';
 type Props = { progress: ReportJobProgress; signal?: boolean; tender?: boolean; documents: number; buyer?: string | null };
@@ -50,6 +50,17 @@ function deskLine(stage: ReportStage, seat: Seat, props: Props, desk = false): s
   return desk ? (signal ? 'Escribe la ficha' : 'Escribe el informe') : signal ? 'Escribe la ficha comercial' : 'Escribe el informe y decide si conviene postular';
 }
 
+/** About the time left (OPP-19), never a fixed promise: what the size suggests, then the pace of the parts read; nothing honest, nothing. */
+function timeLeft(progress: ReportJobProgress, now: number): string {
+  if (progress.stage === 'write') return 'Falta poco.';
+  const minutes = reportMinutesLeft(progress, now);
+  if (!minutes) return '';
+  if (minutes > 60) return 'Va más lento de lo habitual: puede tardar más de una hora.';
+  const going = progress.stage === 'read' && progress.read > 0;
+  if (minutes === 1) return going ? 'Queda alrededor de un minuto.' : 'Tardará alrededor de un minuto.';
+  return going ? `Quedan unos ${minutes} minutos.` : `Tardará unos ${minutes} minutos.`;
+}
+
 /** How long writing has taken, while it is believable. */
 function writingTime(progress: ReportJobProgress, now: number): string | null {
   const since = progress.stage === 'write' && progress.since ? now - Date.parse(progress.since) : null;
@@ -60,12 +71,12 @@ export function ReportOffice(props: Props) {
   const { progress, signal } = props;
   const writing = progress.stage === 'write' && Boolean(progress.since);
   const [now, setNow] = useState(() => Date.now());
+  // Writing shows its seconds; otherwise the time left is worked out again every half minute and with each new part read.
   useEffect(() => {
     setNow(Date.now());
-    if (!writing) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), writing ? 1000 : 30_000);
     return () => clearInterval(timer);
-  }, [writing, progress.since]);
+  }, [writing, progress.since, progress.stage, progress.read]);
 
   const seats = REPORT_STAGES.map(stage => ({ stage, seat: seatOf(stage, props.progress) }));
   const active = seats.find(item => item.seat === 'working');
@@ -102,7 +113,7 @@ export function ReportOffice(props: Props) {
           style={{ width: seat === 'done' ? '100%' : seat === 'working' ? (stage === 'read' ? `${Math.max(Math.round(reading * 1000) / 10, 4)}%` : '100%') : '0%' }} />
       </div>)}
     </div>
-    <p className="mt-3 text-xs text-muted-foreground">Suele tardar entre {signal ? '1 y 3' : '2 y 5'} minutos. Puedes seguir trabajando: {signal ? 'la ficha' : 'el informe'} aparecerá aquí y te avisaremos.</p>
+    <p className="mt-3 text-xs text-muted-foreground">{[timeLeft(progress, now), `Puedes seguir trabajando: ${signal ? 'la ficha' : 'el informe'} aparecerá aquí y te avisaremos.`].filter(Boolean).join(' ')}</p>
   </div>;
 }
 
