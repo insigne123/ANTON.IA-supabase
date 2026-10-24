@@ -28,8 +28,8 @@ export async function GET() {
     const auth = await requireCoworkAccess();
     // Names and hidden conversations; without the table (or on a failed read) the list stays as it was and the menu hides.
     const threads = await readCoworkThreadSettings(auth.supabase, { userId: auth.user.id, organizationId: auth.organizationId })
-      .catch(() => ({ available: false, hiddenRootIds: [] as string[], titles: {} as Record<string, string> }));
-    const runs = await listCoworkRuns(auth, { hiddenRootIds: threads.hiddenRootIds });
+      .catch(() => ({ available: false, hiddenRootIds: [] as string[], titles: {} as Record<string, string>, pinnedRootIds: [] as string[], pinsAvailable: false }));
+    const runs = await listCoworkRuns(auth, { hiddenRootIds: threads.hiddenRootIds, pinnedRootIds: threads.pinnedRootIds });
     // The names Cowork gave each conversation (Plan 13); a name the person chose (titles) always wins.
     const rootIds = runs.flatMap((run: { id: string; root_run_id?: string | null; parent_run_id?: string | null }) =>
       run.root_run_id ? [run.root_run_id] : run.parent_run_id ? [] : [run.id]);
@@ -40,7 +40,7 @@ export async function GET() {
       coworkSearchQuota(auth),
     ]);
     return NextResponse.json({
-      runs, threads: { available: threads.available, titles: threads.titles, autoTitles },
+      runs, threads: { available: threads.available, titles: threads.titles, autoTitles, pinned: threads.pinnedRootIds, pinsAvailable: threads.pinsAvailable },
       canSubmit: coworkWorkerConfigured(), canAutonomous: process.env.COWORK_AUTONOMY_ENABLED === 'true', searchQuota,
     }, { headers });
   } catch (error) {

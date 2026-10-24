@@ -111,7 +111,9 @@ export default function cowork(ctx) {
           last_run_at: null, last_run_id: null, last_status: null, consecutive_failures: 0, run_count: 0, created_from_run_id: null, created_at: ctx.daysAgo(10), updated_at: ctx.daysAgo(10) },
       ],
       // The campaign conversation was renamed (Plan 9, PR-20).
-      cowork_thread_settings: [{ root_run_id: second, user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Campaña logística · reclutamiento', hidden_at: null, updated_at: ctx.hoursAgo(2) }],
+      // The renamed one, and «Prioridades de esta semana» pinned on top (COW-12).
+      cowork_thread_settings: [{ root_run_id: second, user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Campaña logística · reclutamiento', hidden_at: null, pinned_at: null, updated_at: ctx.hoursAgo(2) },
+        { root_run_id: first, user_id: ctx.OWNER, organization_id: ctx.ORG, title: null, hidden_at: null, pinned_at: ctx.hoursAgo(5), updated_at: ctx.hoursAgo(5) }],
       // The names Cowork gave its conversations (Plan 13): the first one shows it; the renamed one keeps the person's name.
       cowork_thread_memory: [
         { root_run_id: first, user_id: ctx.OWNER, organization_id: ctx.ORG, source_run_id: ctx.uid(9005), source_created_at: ctx.hoursAgo(24), updated_at: ctx.hoursAgo(24),

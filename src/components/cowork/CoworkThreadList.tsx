@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { Brain, CalendarClock, Keyboard, LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
+import { Brain, CalendarClock, Keyboard, LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
   coworkDateBucket, coworkShortTime, coworkStatusCopy, isCoworkActive, type CoworkThreadSummary,
@@ -20,7 +20,7 @@ const TITLE_MAX = 120;
  * `closeStyle` «dismiss» closes with an X, as in a sheet; «collapse» folds the side rail.
  */
 export function CoworkThreadList({ threads, loading, error = '', onRetry, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete, onShortcuts, onSchedules,
-  schedules = null, idPrefix = 'cowork-rail', closeStyle = 'collapse' }: {
+  schedules = null, idPrefix = 'cowork-rail', closeStyle = 'collapse', pinnedRootIds = [], onPin }: {
   idPrefix?: string;
   threads: CoworkThreadSummary[];
   loading: boolean;
@@ -33,6 +33,10 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   onClose: () => void;
   onRename?: (rootId: string, title: string) => Promise<boolean>;
   onDelete?: (thread: CoworkThreadSummary) => void;
+  /** The pinned conversations (COW-12), latest pinned first: they go on top, under what waits for approval. */
+  pinnedRootIds?: string[];
+  /** «Fijar arriba» / «Quitar de fijadas»; only once the server keeps pins. */
+  onPin?: (rootId: string, pinned: boolean) => void;
   /** «Atajos de teclado» (Plan 13), from the footer; on a desktop, where there is a keyboard. */
   onShortcuts?: () => void;
   /** «Tareas programadas» from the footer; only where the account has them. */
@@ -50,16 +54,21 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
     const now = new Date();
     // What waits for the person's approval goes first, all of it, so a proposal in an older conversation is not forgotten (COW-16).
     const waiting = { label: 'Esperan tu aprobación', items: [] as CoworkThreadSummary[] };
-    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [waiting];
+    // The recurring ones the person pinned («Licitaciones del lunes») stay on top, whatever their date (COW-12).
+    const pinned = { label: 'Fijadas', items: [] as CoworkThreadSummary[] };
+    const pins = new Map(pinnedRootIds.map((rootId, index) => [rootId, index]));
+    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [waiting, pinned];
     for (const thread of threads) {
       if (term && !thread.title.toLocaleLowerCase('es').includes(term)) continue;
       if (thread.status === 'waiting_approval') { waiting.items.push(thread); continue; }
+      if (pins.has(thread.rootId)) { pinned.items.push(thread); continue; }
       const label = coworkDateBucket(thread.updatedAt, now);
       const group = result.find(item => item.label === label);
       if (group) group.items.push(thread); else result.push({ label, items: [thread] });
     }
+    pinned.items.sort((a, b) => (pins.get(a.rootId) ?? 0) - (pins.get(b.rootId) ?? 0));
     return result.filter(group => group.items.length > 0);
-  }, [threads, term]);
+  }, [threads, term, pinnedRootIds]);
 
   const save = async () => {
     if (!editing || !onRename || saving) return;
@@ -112,7 +121,8 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
             const current = selectedThreadId === thread.rootId;
             const working = isCoworkActive(thread.status);
             const flagged = working || thread.status === 'failed';
-            const manageable = Boolean(onRename || onDelete);
+            const manageable = Boolean(onRename || onDelete || onPin);
+            const isPinned = pinnedRootIds.includes(thread.rootId);
             if (editing?.rootId === thread.rootId) {
               return <li key={thread.rootId} className="px-1 py-0.5">
                 <label htmlFor={`${idPrefix}-rename`} className="sr-only">Nombre de la conversación</label>
@@ -155,6 +165,10 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
                   {onRename && <DropdownMenuItem onSelect={() => setEditing({ rootId: thread.rootId, draft: thread.title })}
                     className="gap-2 rounded-lg px-2.5 py-2 text-[13px] focus:bg-cw-hover focus:text-cw-text">
                     <Pencil className="h-4 w-4 text-cw-muted" aria-hidden="true" />Renombrar
+                  </DropdownMenuItem>}
+                  {onPin && <DropdownMenuItem onSelect={() => onPin(thread.rootId, !isPinned)}
+                    className="gap-2 rounded-lg px-2.5 py-2 text-[13px] focus:bg-cw-hover focus:text-cw-text">
+                    {isPinned ? <PinOff className="h-4 w-4 text-cw-muted" aria-hidden="true" /> : <Pin className="h-4 w-4 text-cw-muted" aria-hidden="true" />}{isPinned ? 'Quitar de fijadas' : 'Fijar arriba'}
                   </DropdownMenuItem>}
                   {onDelete && <DropdownMenuItem disabled={working} onSelect={() => onDelete(thread)}
                     className="gap-2 rounded-lg px-2.5 py-2 text-[13px] text-cw-danger focus:bg-cw-danger-soft focus:text-cw-danger data-[disabled]:text-cw-muted">

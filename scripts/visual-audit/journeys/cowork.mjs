@@ -59,6 +59,19 @@ export default () => [
         c.check('las que esperan van primero, con cuántas son', /Esperan tu aprobación · \d+/.test(rail) && dates.every(at => waiting < at), rail.slice(0, 160).replace(/\n/g, ' | '));
       } },
     ] },
+  { id: 'cowork-fijadas', persona: 'owner', title: 'La conversación que uso cada semana queda fijada arriba',
+    goal: 'Encontrar «Prioridades de esta semana» sin buscarla entre las fechas (COW-12).',
+    steps: [
+      { say: 'Abro Cowork', do: async c => { await c.go(`/cowork?work=${run(4)}`); await c.see('Fijadas'); } },
+      { say: 'Miro la lista y el menú de la fijada', do: async c => {
+        const rail = await c.page.getByRole('navigation', { name: 'Conversaciones' }).first().innerText();
+        const pinned = rail.indexOf('\nFijadas'), today = rail.indexOf('\nHoy\n');
+        c.check('las fijadas van antes de las fechas, con la suya', pinned >= 0 && rail.indexOf('Prioridades de esta semana') > pinned && (today < 0 || pinned < today), rail.slice(0, 200).replace(/\n/g, ' | '));
+        await c.click({ role: 'button', name: 'Opciones de «Prioridades de esta semana»' });
+        c.check('su menú ofrece quitarla de fijadas', await c.page.getByRole('menuitem', { name: 'Quitar de fijadas' }).isVisible().catch(() => false));
+        await c.page.keyboard.press('Escape');
+      } },
+    ] },
   { id: 'cowork-uso', persona: 'owner', title: 'Saber cuánto del uso del asistente llevo, antes de chocar con el tope',
     goal: 'Ver el uso de la conversación y el del día en el resumen (COW-15).',
     steps: [
