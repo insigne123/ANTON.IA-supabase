@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildTodayPlan, commitmentDueToday, conversationHref, replyNeedsAnswer, type TodayInput } from '@/lib/home/today';
+import { buildTodayPlan, commitmentDueToday, conversationHref, repliesWaiting, replyNeedsAnswer, type TodayInput } from '@/lib/home/today';
 
 const NOW = new Date('2026-10-01T15:00:00-03:00');
 const base = (overrides: Partial<TodayInput> = {}): TodayInput => ({
@@ -79,4 +79,15 @@ test('a historical pending reply keeps its date and uses an initial instead of p
   const plan=buildTodayPlan(base({replies:[reply]}));assert.match(plan.primary.title,/Daniela M\./);assert.doesNotMatch(plan.primary.title,/\*\*/);
   assert.equal(plan.queue[0].occurredAt,reply.repliedAt);
   assert.equal(commitmentDueToday({dueAt:'2026-10-02T03:00:00Z'},NOW),null,'next Chile midnight is tomorrow, even if UTC changed first');
+});
+
+test('the number beside «Conversaciones» counts each person who waits once, by the rule of «Por responder» (APP-23)', () => {
+  assert.equal(repliesWaiting([
+    { id: '1', email: 'ana@cliente.cl', replied_at: '2026-10-01T10:00:00Z', reply_intent: 'positive' },
+    { id: '2', email: 'ANA@cliente.cl', replied_at: '2026-10-02T10:00:00Z', reply_intent: 'meeting_request' },
+    { id: '3', email: 'bruno@cliente.cl', replied_at: '2026-10-01T10:00:00Z', reply_intent: 'auto_reply' },
+    { id: '4', email: 'carla@cliente.cl', replied_at: '2026-10-01T10:00:00Z', conversation_outbound_at: '2026-10-01T12:00:00Z' },
+    { id: '5', email: null, replied_at: '2026-10-03T10:00:00Z' },
+  ]), 2, 'Ana once, and the reply without an e-mail; not the auto-reply nor the one already answered');
+  assert.equal(repliesWaiting([]), 0);
 });
