@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { citationSchema, validOpportunityCitation, type DocumentChunk, type OpportunityReport } from './expedient';
 import { clampSubmissionKit, offerNumbers } from './submission-kit';
 import { clampOfferAnnexes, type OfferAnnex } from './offer-annexes';
+import type { OfferEdits, OfferReview } from './offer-edits';
 
 const s = (max: number) => z.string().max(max);
 export const OFFER_DRAFT_VERSION = 1;
@@ -37,8 +38,11 @@ export const offerDraftSchema = z.object({
   /** The data the team must fill in before sending, in short sentences. */
   missing: z.array(s(500)).max(24),
 });
-/** The draft the model writes, plus the forms of the bases it filled in (written apart, see offerAnnexesSchema); older drafts have none. */
-export type OfferDraft = z.infer<typeof offerDraftSchema> & { annexes?: OfferAnnex[] };
+/**
+ * The draft the model writes, plus the forms of the bases it filled in (written apart, see offerAnnexesSchema; older drafts have none),
+ * and what the team changed on it: the parts it rewrote and who reviewed it (offer-edits.ts).
+ */
+export type OfferDraft = z.infer<typeof offerDraftSchema> & { annexes?: OfferAnnex[]; edits?: OfferEdits; review?: OfferReview | null };
 /** What the page reads: the draft and the prices the team typed, by line index. */
 export type OfferPrices = Record<string, number>;
 export type SavedOfferDraft = { id: string; created_at: string; updated_at?: string; revision: number; report_id: string | null; draft: OfferDraft; prices: OfferPrices };

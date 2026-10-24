@@ -7,6 +7,7 @@ import { coworkZipGuard } from '@/lib/cowork/zip-guard';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
 import { DocumentFileError, opportunityLegacyAsText, opportunityStorageName, opportunityTextChunks } from './document-files';
+import { isMailFile, mailDocuments } from './mail-files';
 import { SCAN_IMAGE_TYPES, isScanImage, scanPages } from '@/lib/commercial-opportunities/document-scans';
 
 export { opportunityLegacyAsText, opportunityStorageName, opportunityTextChunks };
@@ -74,9 +75,10 @@ export function webPageBody(html: string) {
 }
 export async function saveOpportunityDocument(client: SupabaseClient, scope: WorkScope, id: string, input: {
   name: string; bytes: Uint8Array; sourceKind: 'upload' | 'pasted' | 'official' | 'public_web'; sourceUrl?: string;
-}) {
+}): Promise<string> {
   await assertOpportunityRead(client, scope, id);
   if (input.bytes.length < 1 || input.bytes.length > 20 * 1024 * 1024) throw new AuthError('Cada documento puede pesar hasta 20 MB.', 400);
+  if (isMailFile(input.name)) return (await saveOpportunityMail(client, scope, id, input)).id;
   const legacy = await opportunityLegacyAsText(input.name, input.bytes).catch(error => { throw error instanceof DocumentFileError ? new AuthError(error.message, 422) : error; });
   if (legacy) input = { ...input, ...legacy };
   const name = input.name.replace(/[\u0000-\u001f\\/]/g, '_').slice(0, 300);
@@ -114,4 +116,26 @@ export async function saveOpportunityDocument(client: SupabaseClient, scope: Wor
   if (pages) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, opportunity_id: id, requested_by: scope.userId,
     kind: 'evaluate', dedupe_key: `scan:${docId}`, payload: { scan: true, documentId: docId, pages } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
   return docId;
+}
+
+/**
+ * A received e-mail (.eml, .msg) goes in as its message and each document it brings (OPP-49). The message is the id returned; the note
+ * says what went in and names what did not, with what to do.
+ */
+export async function saveOpportunityMail(client: SupabaseClient, scope: WorkScope, id: string, input: {
+  name: string; bytes: Uint8Array; sourceKind: 'upload' | 'pasted' | 'official' | 'public_web'; sourceUrl?: string;
+}): Promise<{ id: string; note: string }> {
+  const { documents: [message, ...attached], left } = await mailDocuments(input.name, input.bytes)
+    .catch(error => { throw error instanceof DocumentFileError ? new AuthError(error.message, 422) : error; });
+  const first = await saveOpportunityDocument(client, scope, id, { ...input, name: message.name, bytes: message.bytes });
+  let saved = 0;
+  for (const file of attached) {
+    try { await saveOpportunityDocument(client, scope, id, { ...input, name: file.name, bytes: file.bytes }); saved++; }
+    catch (error) {
+      const why = error instanceof AuthError ? error.message.replace(/^«[^»]*»:?\s*/, '') : 'No se pudo guardar.';
+      left.push({ name: file.name, why: `${why.charAt(0).toUpperCase()}${why.slice(1)}` });
+    }
+  }
+  const went = saved ? `Guardamos el mensaje y ${saved === 1 ? '1 documento adjunto' : `${saved} documentos adjuntos`}.` : 'Guardamos el mensaje.';
+  return { id: first, note: [went, ...left.map(item => `«${item.name}»: ${item.why}`)].join(' ') };
 }
