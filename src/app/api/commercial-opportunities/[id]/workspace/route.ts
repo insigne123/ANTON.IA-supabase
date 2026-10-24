@@ -16,6 +16,7 @@ import { notifyNewParticipants, readParticipantIds } from '@/lib/server/commerci
 import { notifyManagers, recordDecision, replyToDecision } from '@/lib/server/commercial-opportunities/workspace-decisions';
 import { notifyDecisionByEmail } from '@/lib/server/commercial-opportunities/workspace-decision-notice';
 import { canSetPrices, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, memberMayMove, stateNoteSchema } from '@/lib/commercial-opportunities/member-work';
+import { closeBody, closeDetailSchema, closeMotives } from '@/lib/commercial-opportunities/close-outcome';
 import { proposeFitAnswer, resolveFitProposal } from '@/lib/server/commercial-opportunities/workspace-proposals';
 
 export const dynamic = 'force-dynamic';
@@ -90,7 +91,8 @@ export async function POST(request: Request, context: Context) {
       return opportunitiesJson(await saveOpportunityOfferPrices(auth.admin, scope, id, input));
     }
     if (action === 'state') {
-      const input = z.object({ state: z.enum(WORK_STATES), expectedRevision: z.number().int().nonnegative(), note: z.string().trim().max(500).optional() }).strict().parse(data);
+      const input = z.object({ state: z.enum(WORK_STATES), expectedRevision: z.number().int().nonnegative(), note: z.string().trim().max(500).optional() })
+        .merge(closeDetailSchema).strict().parse(data);
       if (!isOpportunityAdmin(scope.role)) {
         // A member moves the work along (managing it, blocked, presented); the stages the administrators set stay theirs, and so does
         // an opportunity they already closed.
@@ -102,6 +104,16 @@ export async function POST(request: Request, context: Context) {
         .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', input.expectedRevision).select('revision').maybeSingle());
       if (!saved) throw new AuthError('El estado cambió. Actualiza la oportunidad.', 409);
       const note = input.note?.replace(/\s+/g, ' ').trim();
+      if (input.state === 'won' || input.state === 'lost') {
+        // Closed with its reasons in chips, and for one lost who won it and for how much (OPP-30): counted in «Lo que aprendimos».
+        const detail = { motives: closeMotives(input.state, input.motives), winner: input.state === 'lost' ? input.winner || undefined : undefined, amount: input.amount };
+        const currency = detail.amount === undefined ? null
+          : (opportunityDb(await auth.admin.from('commercial_opportunities').select('currency').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle()) as { currency: string | null } | null)?.currency;
+        await addOpportunityActivity(auth.admin, scope, id, 'state', closeBody(STATE_LABELS[input.state] ?? input.state, input.state, detail, note, currency),
+          { ...(note ? { note } : {}), to: input.state, ...(detail.motives.length ? { motives: detail.motives } : {}), ...(detail.winner ? { winner: detail.winner } : {}),
+            ...(detail.amount !== undefined ? { amount: detail.amount } : {}) });
+        return opportunitiesJson(saved);
+      }
       // Back to the ones nobody works (what was put aside by mistake, or a team that was let go) reads as what it is.
       const line = input.state === 'unassigned' ? 'Reabierta: vuelve a las que nadie trabaja todavía.' : `Estado: ${STATE_LABELS[input.state] ?? input.state}`;
       await addOpportunityActivity(auth.admin, scope, id, 'state', `${line}${note ? `${line.endsWith('.') ? ' ' : '. '}${note}` : ''}`, { ...(note ? { note } : {}), to: input.state });

@@ -214,19 +214,34 @@ export default () => [
         c.check('la oportunidad quedó presentada', stateOf(c, 7) === 'submitted', `estado: ${stateOf(c, 7)}`);
       } },
     ] },
-  { id: 'admin-perdida', persona: 'owner', title: 'Administrador: cerrar una oportunidad presentada como perdida, con su motivo', goal: 'Que la propuesta presentada pase a «Perdida» y el equipo lea por qué.', passWrites: [ACTIONS],
+  { id: 'admin-perdida', persona: 'owner', title: 'Administrador: registrar el resultado de una presentada, con sus motivos', goal: 'Que la propuesta presentada pase a «Perdida» con lo que dijo Mercado Público y por qué, y el equipo lo lea.', passWrites: [ACTIONS],
     steps: [
       { say: 'Abro la oportunidad presentada', do: async c => {
-        await c.go(`/opportunities?op=${opp(10)}`); await c.see('Cambiar etapa');
+        await c.go(`/opportunities?op=${opp(10)}`); await c.see('Resultado: Adjudicada');
         c.check('presentada, «Cómo postular» ya no es la acción principal', (await applyIsMain(c)) === false);
+        const act = await c.page.getByRole('link', { name: /Ver acta/ }).first().getAttribute('href').catch(() => null);
+        c.check('el acta se abre en Mercado Público', Boolean(act?.startsWith('https://www.mercadopublico.cl/')), String(act));
       } },
-      { say: 'Elijo la etapa Perdida', do: async c => { await c.choose('Cambiar etapa', 'Perdida'); await c.seeRole('dialog', /Pasar a Perdida/); c.check('aún no cambió: pide el motivo primero', stateOf(c, 10) === 'submitted', `estado: ${stateOf(c, 10)}`); } },
-      { say: 'Cuento qué pasó, en una línea', do: async c => { await c.page.getByRole('dialog').getByRole('textbox').first().fill('Adjudicaron a otra empresa con menor plazo de entrega.'); } },
+      { say: 'Pulso Pasar a Perdida en el resultado', do: async c => {
+        await c.click({ role: 'button', name: 'Pasar a Perdida' }); await c.seeRole('dialog', /Pasar a Perdida/);
+        c.check('aún no cambió: pide el motivo primero', stateOf(c, 10) === 'submitted', `estado: ${stateOf(c, 10)}`);
+        const dialog = c.page.getByRole('dialog');
+        const winner = await dialog.getByLabel('Quién la ganó (opcional)').inputValue().catch(() => '');
+        c.check('quién ganó viene de Mercado Público', winner === 'Centro de Llamadas del Pacífico SpA', winner);
+        c.check('«Otro proveedor mejor evaluado» viene marcado', (await dialog.getByRole('button', { name: 'Otro proveedor mejor evaluado' }).getAttribute('aria-pressed').catch(() => null)) === 'true');
+      } },
+      { say: 'Marco el plazo y cuento qué pasó', do: async c => {
+        const dialog = c.page.getByRole('dialog');
+        await c.clickOn(dialog.getByRole('button', { name: 'Plazo', exact: true }));
+        await dialog.getByLabel('Algo más (opcional)').fill('Pidieron menor plazo de entrega.');
+      } },
       { say: 'Pulso Pasar a Perdida', do: async c => {
         await c.page.getByRole('dialog').getByRole('button', { name: 'Pasar a Perdida' }).click(); await c.wait(1500);
         c.check('la oportunidad quedó perdida', stateOf(c, 10) === 'lost', `estado: ${stateOf(c, 10)}`);
         c.check('ya perdida, «Cómo postular» deja de ser la acción principal', (await applyIsMain(c)) === false);
-        c.check('el motivo quedó en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(10) && /perdida\. Adjudicaron a otra empresa/.test(row.body)), 'opportunity_activity');
+        c.check('los motivos y quién ganó quedaron en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(10)
+          && /^Estado: perdida · Otro proveedor mejor evaluado, Plazo\. Ganó Centro de Llamadas del Pacífico SpA por \$118\.500\.000\. Pidieron menor plazo/.test(row.body)
+          && JSON.stringify(row.data?.motives) === '["competitor","deadline"]'), 'opportunity_activity');
       } },
     ] },
   { id: 'admin-marcar-informe', persona: 'owner', title: 'Administrador: marcar un paso del informe como hecho', goal: 'Que «Pedir las referencias» quede hecho.', passWrites: [ACTIONS],

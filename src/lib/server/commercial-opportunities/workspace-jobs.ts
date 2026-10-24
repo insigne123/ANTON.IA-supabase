@@ -18,6 +18,7 @@ import { enqueueMonthlyContracts, runMarketContracts, runWinPlan } from './works
 import { runOpportunitySummaries } from './workspace-summaries';
 import { runOpportunityPrefill } from './workspace-prefill';
 import { runDocumentScan } from './workspace-scans';
+import { runResultChecks } from './workspace-results';
 import type { ClaudeAttachment } from '@/ai/anthropic-json';
 
 /**
@@ -37,6 +38,9 @@ export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope:
   const kinds = discoveryKinds(context, clock.day);
   for (const kind of kinds) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind, dedupe_key: `${prefix}:${kind}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
+  // What happened to the tenders presented (workspace-results.ts): once a day, whatever the offer says.
+  opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
+    kind: 'evaluate', dedupe_key: `results:${clock.day}`, payload: { results: true } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
   // «Demanda futura» reads the Plan Anual de Compras once a month, once the words exist; «Contratos por vencer» too.
   await enqueueMonthlyDemand(client, scope, context, clock.day);
   await enqueueMonthlyContracts(client, scope, context, clock.day).catch(() => undefined);
@@ -137,6 +141,8 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
       result = scan;
     } else if (job.kind === 'evaluate' && job.payload.pipeline) {
       result = await runPipelineReview(client, job);
+    } else if (job.kind === 'evaluate' && job.payload.results) {
+      result = await runResultChecks(client, job);
     } else if (['tenders', 'hiring', 'posts', 'evaluate'].includes(job.kind)) {
       if (!opportunityAutomationEnabled()) throw new AuthError('La búsqueda automática aún no está activada.', 409);
       if (job.kind === 'tenders') { result = await captureOpportunityTenders(client, job, context);if(result.waiting)state='waiting'; }

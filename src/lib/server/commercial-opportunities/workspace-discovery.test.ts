@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 
 // «Actualizar oportunidades» (requestOpportunityDiscovery) with an in-memory client: what it queues, and why it does not.
-const STUBBED = /^\.\/(workspace-ai|workspace-sources|workspace-research|workspace-pipeline|workspace-offer|purchase-plan|workspace-assistant|workspace-tender-profile|workspace-fit|workspace-market|workspace-summaries|workspace-prefill|workspace-scans|workspace-access|workspace-store)$|auth-utils$/;
+const STUBBED = /^\.\/(workspace-ai|workspace-sources|workspace-research|workspace-pipeline|workspace-offer|purchase-plan|workspace-assistant|workspace-tender-profile|workspace-fit|workspace-market|workspace-summaries|workspace-prefill|workspace-scans|workspace-results|workspace-access|workspace-store)$|auth-utils$/;
 const entry = await build({
   stdin: { contents: `export { requestOpportunityDiscovery } from './src/lib/server/commercial-opportunities/workspace-jobs';`, loader: 'ts', resolveDir: process.cwd() },
   bundle: true, write: false, format: 'cjs', platform: 'node', packages: 'external',
@@ -17,7 +17,7 @@ const entry = await build({
         : args.path.endsWith('workspace-access') ? 'export function assertOpportunityAdmin(scope){ if (scope.role !== "admin" && scope.role !== "owner") throw new Error("solo administradores"); }'
           : args.path.endsWith('purchase-plan') ? 'export async function enqueueMonthlyDemand(){ globalThis.__monthly.push("demand"); } export async function runOpportunityDemand(){}'
             : args.path.endsWith('workspace-market') ? 'export async function enqueueMonthlyContracts(){ globalThis.__monthly.push("contracts"); } export async function runMarketContracts(){} export async function runWinPlan(){}'
-              : 'export const opportunityGenerate=()=>{}, criteriaSchema={}, captureOpportunityLinkedIn=()=>{}, captureOpportunityTenders=()=>{}, evaluateOpportunityBatch=()=>{}, runOpportunityResearch=()=>{}, runOpportunityChat=()=>{}, applyAutomaticMove=()=>{}, runPipelineReview=()=>{}, runOpportunityOffer=()=>{}, runOpportunityAssistant=()=>{}, runTenderProfileSuggestion=()=>{}, enqueueFitAfterReport=()=>{}, runRequirementFit=()=>{}, runOpportunitySummaries=()=>{}, runOpportunityPrefill=()=>{}, runDocumentScan=()=>{};' }));
+              : 'export const opportunityGenerate=()=>{}, criteriaSchema={}, captureOpportunityLinkedIn=()=>{}, captureOpportunityTenders=()=>{}, evaluateOpportunityBatch=()=>{}, runOpportunityResearch=()=>{}, runOpportunityChat=()=>{}, applyAutomaticMove=()=>{}, runPipelineReview=()=>{}, runOpportunityOffer=()=>{}, runOpportunityAssistant=()=>{}, runTenderProfileSuggestion=()=>{}, enqueueFitAfterReport=()=>{}, runRequirementFit=()=>{}, runOpportunitySummaries=()=>{}, runOpportunityPrefill=()=>{}, runDocumentScan=()=>{}, runResultChecks=()=>{};' }));
   } }],
 });
 const compiled: { exports: any } = { exports: {} };

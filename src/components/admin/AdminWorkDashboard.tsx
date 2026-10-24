@@ -43,6 +43,29 @@ function Budget({ cap }: { cap: WorkReport['caps'][number] }) {
   </Card>;
 }
 
+/** «Lo que aprendimos» (OPP-30): of the opportunities closed in the period, why they were won and lost, and who won the ones lost. */
+function Lessons({ learned }: { learned: WorkReport['opportunities']['learned'] }) {
+  const closed = learned.won + learned.lost;
+  if (!closed) return null;
+  const lists = [
+    { title: 'Por qué perdimos', items: learned.lostFor.map(item => ({ key: item.id, label: item.label, count: item.count })) },
+    { title: 'Por qué ganamos', items: learned.wonFor.map(item => ({ key: item.id, label: item.label, count: item.count })) },
+    { title: 'Quiénes nos ganaron', items: learned.rivals.map(item => ({ key: item.name, label: item.name, count: item.count })) },
+  ].filter(list => list.items.length);
+  return <section aria-labelledby="work-lessons" className="space-y-3 rounded-xl border border-border/60 p-4">
+    <div>
+      <h3 id="work-lessons" className="text-sm font-medium">Lo que aprendimos</h3>
+      <p className="text-xs leading-5 text-muted-foreground">{closed === 1 ? 'Se cerró 1 oportunidad' : `Se cerraron ${n(closed)} oportunidades`} en el período: {n(learned.won)} {learned.won === 1 ? 'ganada' : 'ganadas'} y {n(learned.lost)} {learned.lost === 1 ? 'perdida' : 'perdidas'}{learned.winRate !== null ? ` (${Math.round(learned.winRate * 100)} % ganadas)` : ''}.
+        {lists.length ? '' : ' Al cerrarlas con su motivo, aquí verán por qué.'}</p>
+    </div>
+    {lists.length ? <div className="grid gap-4 sm:grid-cols-3">{lists.map(list => <div key={list.title} className="min-w-0">
+      <p className="text-xs text-muted-foreground">{list.title}</p>
+      <ul className="mt-1 space-y-1">{list.items.map(item => <li key={item.key} className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 break-words">{item.label}</span><span className="tabular-nums text-muted-foreground">{n(item.count)}</span></li>)}</ul>
+    </div>)}</div> : null}
+  </section>;
+}
+
 /** The report itself, given the data: the page loads it, the tests render it. */
 export function AdminWorkReport({ report }: { report: Report }) {
   const { opportunities: opp, cowork } = report;
@@ -71,6 +94,7 @@ export function AdminWorkReport({ report }: { report: Report }) {
             <TableCell className="text-right tabular-nums">{n(person.actions)}</TableCell><TableCell className="hidden text-right tabular-nums sm:table-cell">{n(person.submitted)}</TableCell>
             <TableCell className="hidden text-right tabular-nums sm:table-cell">{n(person.won)}</TableCell><TableCell className="hidden text-muted-foreground md:table-cell">{when(person.lastAt)}</TableCell></TableRow>)}</TableBody>
         </Table></div> : <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">Cuando alguien trabaje una oportunidad, aparecerá aquí. <Link href="/opportunities" className="font-medium text-primary underline-offset-2 hover:underline">Ir a Oportunidades</Link></p>}
+        <Lessons learned={opp.learned} />
       </CardContent>
     </Card>
 

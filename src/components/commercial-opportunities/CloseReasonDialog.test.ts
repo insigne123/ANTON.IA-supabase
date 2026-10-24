@@ -5,6 +5,7 @@ import test from 'node:test';
 import ts from 'typescript';
 import React, { act } from 'react';
 import { JSDOM } from 'jsdom';
+import * as closeOutcome from '@/lib/commercial-opportunities/close-outcome';
 
 const require = createRequire(import.meta.url);
 const source = await readFile(new URL('./CloseReasonDialog.tsx', import.meta.url), 'utf8');
@@ -16,6 +17,9 @@ const dependencies: Record<string, unknown> = {
   'lucide-react': new Proxy({}, { get: () => () => null }),
   '@/components/ui/button': { Button: ({ variant: _variant, size: _size, ...props }: Record<string, unknown>) => h('button', props) },
   '@/components/ui/textarea': { Textarea: (props: Record<string, unknown>) => h('textarea', props) },
+  '@/components/ui/input': { Input: (props: Record<string, unknown>) => h('input', props) },
+  '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
+  '@/lib/commercial-opportunities/close-outcome': closeOutcome,
   '@/components/ui/label': { Label: pass('label') },
   // The dialog without a portal: what matters here is what it holds while it is open.
   '@/components/ui/dialog': {
@@ -30,16 +34,17 @@ const { CloseReasonDialog } = exports as { CloseReasonDialog: React.ComponentTyp
 
 const WON = { id: '00000000-0000-4000-8000-000000000201', state: 'won' as const, revision: 4 };
 const LOST = { id: '00000000-0000-4000-8000-000000000202', state: 'lost' as const, revision: 7 };
+type Target = { id: string; state: 'won' | 'lost'; revision: number; prefill?: Record<string, unknown> };
 
-async function mount(props: { target: typeof WON | typeof LOST | null; busy?: boolean; error?: string }) {
+async function mount(props: { target: Target | null; busy?: boolean; error?: string }) {
   const dom = new JSDOM('<div id="root"></div>');
   const previous = { window: globalThis.window, document: globalThis.document };
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(dom.window.document.getElementById('root')!);
-  const confirmed: Array<[unknown, string]> = []; let cancelled = 0;
+  const confirmed: Array<[unknown, string]> = []; const details: unknown[] = []; let cancelled = 0;
   const render = (next: typeof props) => act(async () => root.render(h(CloseReasonDialog, { busy: false, ...next,
-    onConfirm: (target: unknown, note: string) => { confirmed.push([target, note]); }, onCancel: () => { cancelled += 1; } })));
+    onConfirm: (target: unknown, note: string, detail: unknown) => { confirmed.push([target, note]); details.push(detail); }, onCancel: () => { cancelled += 1; } })));
   await render(props);
   const doc = dom.window.document;
   const text = () => doc.body.textContent || '';
@@ -50,8 +55,14 @@ async function mount(props: { target: typeof WON | typeof LOST | null; busy?: bo
     field.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
   });
   const submit = () => act(async () => { doc.querySelector('form')!.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); });
+  const press = (label: string) => act(async () => { button(label).dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });
+  const fill = (id: string, value: string) => act(async () => {
+    const field = doc.getElementById(id) as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+    field.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  });
   const done = async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous); };
-  return { doc, text, button, type, submit, render, confirmed, cancelled: () => cancelled, done };
+  return { doc, text, button, type, submit, press, fill, render, confirmed, details, cancelled: () => cancelled, done };
 }
 
 test('nothing shows until an opportunity is being closed', async () => {
@@ -63,8 +74,9 @@ test('closing as won asks what made the difference, in one optional line, and th
   const view = await mount({ target: WON });
   try {
     assert.match(view.text(), /Pasar a Ganada/);
-    assert.match(view.text(), /qué hizo la diferencia/);
-    assert.match(view.text(), /Motivo \(opcional\)/);
+    assert.match(view.text(), /qué hizo la diferencia/i);
+    assert.match(view.text(), /Por qué la ganamos/);
+    assert.match(view.text(), /Algo más \(opcional\)/);
     // With the line empty the move works: the reason is not a toll.
     await view.submit();
     assert.deepEqual(view.confirmed, [[WON, '']]);
@@ -78,7 +90,7 @@ test('closing as lost says so, and cancel leaves the opportunity where it was', 
   const view = await mount({ target: LOST });
   try {
     assert.match(view.text(), /Pasar a Perdida/);
-    assert.match(view.text(), /qué pasó/);
+    assert.match(view.text(), /qué pasó/i);
     assert.ok(view.button('Pasar a Perdida'), 'the main action says what it does');
     await act(async () => { view.button('Cancelar').dispatchEvent(new (view.doc.defaultView as any).MouseEvent('click', { bubbles: true })); });
     assert.equal(view.cancelled(), 1);
@@ -108,5 +120,36 @@ test('the line of one opportunity is not carried to the next one', async () => {
     await view.render({ target: null });
     await view.render({ target: LOST });
     assert.equal(view.doc.querySelector('textarea')!.value, '');
+  } finally { await view.done(); }
+});
+
+test('the reasons are chips of the state closed, three at most, and who won and for how much go with a lost one (OPP-30)', async () => {
+  const view = await mount({ target: LOST });
+  try {
+    for (const label of ['Precio', 'Otro proveedor mejor evaluado', 'Requisitos o documentos', 'Plazo', 'Sin capacidad para ejecutarla', 'Desierta o revocada'])
+      assert.ok(view.button(label), `${label} is offered`);
+    await view.press('Precio'); await view.press('Plazo'); await view.press('Requisitos o documentos');
+    assert.equal(view.button('Precio').getAttribute('aria-pressed'), 'true');
+    assert.equal(view.button('Sin capacidad para ejecutarla').disabled, true, 'a fourth waits until one is taken away');
+    await view.press('Plazo');
+    assert.equal(view.button('Sin capacidad para ejecutarla').disabled, false);
+    await view.fill('close-winner', '  Seguridad   Sur SpA ');
+    await view.fill('close-amount', '$85.000.000');
+    await view.submit();
+    assert.deepEqual(view.details[0], { motives: ['price', 'requirements'], winner: 'Seguridad Sur SpA', amount: 85000000 });
+  } finally { await view.done(); }
+});
+
+test('what Mercado Público said comes filled in, and a won one asks its own reasons and no winner', async () => {
+  const view = await mount({ target: { ...LOST, prefill: { motives: ['competitor'], winner: 'Seguridad Sur SpA', amount: 85000000 } } });
+  try {
+    assert.equal(view.button('Otro proveedor mejor evaluado').getAttribute('aria-pressed'), 'true');
+    assert.equal((view.doc.getElementById('close-winner') as HTMLInputElement).value, 'Seguridad Sur SpA');
+    assert.equal((view.doc.getElementById('close-amount') as HTMLInputElement).value, '85.000.000');
+    await view.render({ target: { ...WON, prefill: { amount: 40000000 } } });
+    assert.ok(view.button('Experiencia') && view.button('Relación con el cliente'));
+    assert.equal(view.doc.getElementById('close-winner'), null, 'who won is us');
+    await view.submit();
+    assert.deepEqual(view.details.at(-1), { motives: [], amount: 40000000 });
   } finally { await view.done(); }
 });
