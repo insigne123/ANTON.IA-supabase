@@ -264,6 +264,19 @@ export default () => [
       } },
     ] },
 
+  { id: 'admin-cambios-informe', persona: 'owner', title: 'Administrador: qué cambió en el informe actualizado, y las preguntas al foro', goal: 'Saber qué movió la nueva versión sin leer el informe completo otra vez.',
+    steps: [
+      { say: 'Abro la licitación del Registro Civil', do: async c => {
+        await c.go(`/opportunities?op=${opp(10)}`); await c.see(/^Cambios desde el informe del /);
+        c.check('dice que cambió la recomendación', await shows(c, /^La recomendación cambió: de «Postular si se resuelve lo pendiente» a «Postular»\.$/));
+        c.check('nombra el documento que leyó', await shows(c, 'Leyó un documento nuevo: «Aclaraciones del foro.pdf».'));
+      } },
+      { say: 'Bajo a las preguntas para el comprador', do: async c => {
+        await c.clickOn(c.page.getByRole('button', { name: 'Copiar para el foro' }));
+        c.check('en una licitación se preguntan en el foro', await shows(c, /^En Mercado Público se preguntan en el foro de la licitación/));
+        c.check('y no ofrece un correo', !(await shows(c, 'Abrir en mi correo')));
+      } },
+    ] },
   { id: 'admin-plan-tareas', persona: 'owner', title: 'Administrador: convertir el plan del informe en tareas', goal: 'Que los pasos del plan queden como tareas con responsable y fecha, sin escribirlas de a una.', passWrites: [ACTIONS],
     steps: [
       // The link of the email of tasks opens the opportunity on «Plan y tareas» (?seccion=tareas).
