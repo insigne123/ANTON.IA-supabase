@@ -1,3 +1,4 @@
+import type { SourceHealth } from './source-health';
 import { z } from 'zod';
 
 /** Separate rollout from the existing opportunity and research pipelines. */
@@ -57,6 +58,8 @@ export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkIt
   searching?: string[];
   /** The company's documents lapsed or about to (company-documents.ts); admins only. */
   documentAlerts?: Array<{ id: string; label: string; expiresAt: string; status: 'vencido' | 'por_vencer'; text: string }>;
+  /** How each source of the daily search went and whose ticket it runs on (source-health.ts); admins only. */
+  health?: { sources: SourceHealth[]; ticket: 'own' | 'shared' };
   /** Decisions asked and opportunities blocked, waiting for an administrator, the oldest first (waiting.ts); admins only. */
   waiting?: { total: number; lines: Array<{ id: string; title: string; detail: string; urgent: boolean; href: string; kind: 'ask' | 'no_go' | 'blocked' }> } };
 

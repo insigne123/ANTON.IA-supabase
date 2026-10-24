@@ -1,4 +1,5 @@
 import { after } from 'next/server';
+import { criteriaProblem, readSearchSettings, searchSettingsSchema } from '@/lib/commercial-opportunities/search-settings';
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
 import { readWorkspaceOverview, createPrivateOpportunity, opportunityDb } from '@/lib/server/commercial-opportunities/workspace-store';
@@ -73,9 +74,14 @@ export async function POST(request: Request) {
       return opportunitiesJson({ suggestions: null, queued: true }, 202);
     }
     if (body.action === 'criteria') {
-      // What the daily search looks for, as the admin corrected it. Keeps the offer revision: no new derivation is paid.
-      const input = z.object({ criteria: criteriaSchema, expectedRevision: z.number().int().positive() }).strict().parse(body.data);
-      const saved = opportunityDb(await auth.admin.from('opportunity_company_context').update({ criteria: input.criteria })
+      // What the daily search looks for, as the admin corrected it, and where (search-settings.ts). Keeps the offer revision: no new
+      // derivation is paid. LinkedIn needs a search only while it is on.
+      const input = z.object({ criteria: criteriaSchema.extend({ postQueries: z.array(z.string().max(400)).max(12) }), search: searchSettingsSchema.optional(),
+        expectedRevision: z.number().int().positive() }).strict().parse(body.data);
+      const current = opportunityDb(await auth.admin.from('opportunity_company_context').select('search').eq('organization_id', scope.organizationId).maybeSingle()) as { search?: unknown } | null;
+      const problem = criteriaProblem(input.search ?? readSearchSettings(current?.search), input.criteria);
+      if (problem) throw new AuthError(problem, 422);
+      const saved = opportunityDb(await auth.admin.from('opportunity_company_context').update({ criteria: input.criteria, ...(input.search ? { search: input.search } : {}) })
         .eq('organization_id', scope.organizationId).eq('revision', input.expectedRevision).select('revision').maybeSingle());
       if (!saved) throw new AuthError('La oferta fue actualizada por otro administrador. Recarga antes de guardar.', 409);
       return opportunitiesJson({ ok: true });

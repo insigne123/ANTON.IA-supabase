@@ -157,3 +157,11 @@ test('an opportunity assigned or a report ready on one of yours is reason enough
   assert.equal(both.lines[1].text, 'Te asignaron 2 oportunidades');
   assert.equal(both.lines[2].text, 'Listo el informe de Aseo');
 });
+
+test('a source of the search that failed two days in a row reaches whoever manages Oportunidades', () => {
+  const facts: AlertFacts = { name: 'Camila', newReplies: [], olderPending: 0, commitments: [], newReady: { count: 0, yesterday: false }, ready: 0, research: [], closing: [], goal: null,
+    sources: [{ label: 'Compra Ágil', days: 2 }] };
+  const alert = composeAlert(facts, TUESDAY)!;
+  assert.equal(alert.subject, 'La búsqueda de Compra Ágil falló 2 días seguidos');
+  assert.deepEqual(alert.lines, [{ kind: 'source', text: 'La búsqueda de Compra Ágil falló 2 días seguidos', href: '/opportunities' }]);
+});

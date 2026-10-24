@@ -52,9 +52,22 @@ test('a busy Mercado Público ticket leaves the keyword search waiting for a lat
   const CompraAgilError = (globalThis as any).__CompraAgilError;
   const job = { id: 'j1', organization_id: 'org', requested_by: 'u1', kind: 'tenders', dedupe_key: 'k', lease_token: 'l', state: 'running', attempts: 1, payload: { keyword: 'aseo', revision: 1 } };
   (globalThis as any).__compraAgil = new CompraAgilError('Compra Ágil no aceptó más consultas del ticket por ahora (429).', true);
-  assert.deepEqual(await captureOpportunityTenders(memoryClient({}) as any, job as any, { revision: 1 }), { waiting: true });
+  const first = await captureOpportunityTenders(memoryClient({}) as any, job as any, { revision: 1 });
+  assert.equal(first.waiting, true);
+  assert.equal(first.retry.tries, 1);
+  assert.ok(Math.abs(Date.parse(first.retry.nextAt) - Date.now() - 60_000) < 5_000, 'the next try in a minute');
+  // Taken again before its time, it waits without calling Mercado Público.
+  (globalThis as any).__compraAgil = new Error('must not call');
+  assert.deepEqual(await captureOpportunityTenders(memoryClient({}) as any, { ...job, result: first } as any, { revision: 1 }), { waiting: true, retry: first.retry });
+  // Each try waits longer: the fourth, eight minutes.
+  (globalThis as any).__compraAgil = new CompraAgilError('Compra Ágil respondió 504 (falla de Mercado Público).', true);
+  const third = { waiting: true, retry: { tries: 3, nextAt: new Date(Date.now() - 1000).toISOString() } };
+  const fourth = await captureOpportunityTenders(memoryClient({}) as any, { ...job, result: third } as any, { revision: 1 });
+  assert.equal(fourth.retry.tries, 4);
+  assert.ok(Math.abs(Date.parse(fourth.retry.nextAt) - Date.now() - 8 * 60_000) < 5_000);
   // After six tries it is reported, with the reason a person can read.
-  await assert.rejects(captureOpportunityTenders(memoryClient({}) as any, { ...job, attempts: 6 } as any, { revision: 1 }), (error: any) => error.status === 503 && /429/.test(error.message));
+  const sixth = { waiting: true, retry: { tries: 6, nextAt: new Date(Date.now() - 1000).toISOString() } };
+  await assert.rejects(captureOpportunityTenders(memoryClient({}) as any, { ...job, result: sixth } as any, { revision: 1 }), (error: any) => error.status === 503 && /504/.test(error.message));
   // A rejected ticket is not retried.
   (globalThis as any).__compraAgil = new CompraAgilError('Compra Ágil rechazó el ticket.', false);
   await assert.rejects(captureOpportunityTenders(memoryClient({}) as any, job as any, { revision: 1 }), /rechazó el ticket/);
@@ -88,4 +101,21 @@ test('LinkedIn searches ask for a week of ads after a pause, five post queries, 
     globalThis.fetch = realFetch;
     for (const name of ['APIFY_TOKEN', 'OPPORTUNITIES_POST_USD_PER_ITEM', 'OPPORTUNITIES_POST_START_USD', 'OPPORTUNITIES_POST_EMPTY_QUERY_USD']) delete process.env[name];
   }
+});
+
+test('the tenders job runs the listing and Compra Ágil only when each is on in «Qué buscamos»', async () => {
+  const { captureOpportunityTenders } = await load({ ...STUBS, './mercado-publico': 'export async function listOpenLicitaciones(){ globalThis.__listed = (globalThis.__listed || 0) + 1; return [] }' });
+  const upserts: unknown[] = [];
+  const client = (() => { const base: any = memoryClient({}); const from = base.from; base.from = (table: string) => { const chain = from(table); chain.upsert = (row: unknown) => { if (table === 'opportunity_jobs') upserts.push(row); return chain; }; return chain; }; return base; })();
+  const job = { id: 'j3', organization_id: 'org', requested_by: 'u1', kind: 'tenders', dedupe_key: 'daily:2026-10-24:1:tenders', lease_token: 'l', state: 'running', attempts: 1, payload: { revision: 1 } };
+  const context = { revision: 1, criteria: { keywords: ['aseo', 'guardias'] } };
+  (globalThis as any).__listed = 0;
+  const off = await captureOpportunityTenders(client, job as any, { ...context, search: { sources: { tenders: false } } });
+  assert.equal((globalThis as any).__listed, 0, 'the listing is off');
+  assert.equal(off.coverage, 'compra_agil_only');
+  assert.ok(upserts.length > 0, 'Compra Ágil still searches the words of the day');
+  upserts.length = 0;
+  await captureOpportunityTenders(client, job as any, { ...context, search: { sources: { compraAgil: false } } });
+  assert.equal((globalThis as any).__listed, 1);
+  assert.equal(upserts.length, 0, 'no Compra Ágil searches');
 });

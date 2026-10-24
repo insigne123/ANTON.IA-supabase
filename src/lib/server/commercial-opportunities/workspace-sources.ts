@@ -11,9 +11,10 @@ import { resolveTicketForOrganization } from './tickets';
 import { CompraAgilError, searchCompraAgil, compraAgilQuery } from './compra-agil';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
-import { EXCLUSION_MOTIVES, tenderWordsOfTheDay } from '@/lib/commercial-opportunities/workspace-radar';
+import { EXCLUSION_MOTIVES, RULE_MOTIVE, tenderWordsOfTheDay } from '@/lib/commercial-opportunities/workspace-radar';
 import { TENDER_PROFILE_RULE, tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
 import { loadTenderProfile } from './tender-profile-read';
+import { readSearchSettings, sourceOn, tenderPreferences, tenderRuledOut, unspscMatch } from '@/lib/commercial-opportunities/search-settings';
 
 export const criteriaSchema = z.object({ roles: z.array(z.string().max(80)).max(30), keywords: z.array(z.string().max(120)).max(30),
   postQueries: z.array(z.string().max(400)).min(1).max(12), decisionMakerTitles: z.array(z.string().max(80)).max(12) });
@@ -56,7 +57,12 @@ export async function persistOpportunityCandidates(client: SupabaseClient, job: 
 const tenderCandidate = (t: Tender): Candidate => ({ kind: t.source === 'compra_agil' ? 'compra_agil' : 'tender', key: `${t.source}:${t.code}`, title: t.name,
   company: t.buyer, description: t.description || t.name, deadline: t.closesAt, amount: t.amount, currency: t.currency, url: tenderUrl(t), raw: { code: t.code, status: t.status, items: t.items, region: t.region } });
 
-const COMPRA_AGIL_ATTEMPTS = 6;
+/**
+ * A busy or failing Compra Ágil is tried again further apart each time (1, 2, 4, 8, 15 and 15 minutes: about 45 minutes in all) instead
+ * of six times in five minutes: in two weeks 12 searches failed with «504», and Mercado Público is often back within the hour. The
+ * claim takes a waiting job again every 45 s and stops after 100 claims, which leaves room for it.
+ */
+const COMPRA_AGIL_RETRY_MINUTES = [1, 2, 4, 8, 15, 15];
 export async function captureOpportunityTenders(client: SupabaseClient, job: OpportunityJob, context: any) {
   const snapshot = opportunityDb(await client.from('opportunity_source_snapshots').select('candidates').eq('job_id',job.id).eq('organization_id',job.organization_id).maybeSingle());
   if (snapshot) return persistOpportunityCandidates(client,job,snapshot.candidates as Candidate[],context.revision);
@@ -64,24 +70,31 @@ export async function captureOpportunityTenders(client: SupabaseClient, job: Opp
   if (!ticket) throw new AuthError('Conecta el ticket de Mercado Público desde la cuenta administradora.', 409);
   // One ticket cannot run concurrent MP calls. Listing first; each Compra Ágil query gets its own checkpointed job.
   if (job.payload.keyword) {
+    // Not yet time for the next try: the claim took it early, so it waits without calling.
+    const retry = job.result?.retry as { tries: number; nextAt: string } | undefined;
+    if (retry && Date.parse(retry.nextAt) > Date.now()) return { waiting: true as const, retry };
     let response: Awaited<ReturnType<typeof searchCompraAgil>>;
     try {
       response = await searchCompraAgil({ keyword: compraAgilQuery(job.payload.keyword), publishedFrom: new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10), pages: 4 }, { fetch: globalThis.fetch, ticket: ticket.ticket, canWait: () => false });
     } catch (error) {
-      // The ticket takes a limited number of calls at a time: a 429 or a 5xx waits for a later tick instead of failing the search.
-      if (error instanceof CompraAgilError && error.retryable && Number(job.attempts || 0) < COMPRA_AGIL_ATTEMPTS) return { waiting: true as const };
+      // The ticket takes a limited number of calls at a time: a 429 or a 5xx waits for a later try instead of failing the search.
+      const tries = (retry?.tries ?? 0) + 1;
+      if (error instanceof CompraAgilError && error.retryable && tries <= COMPRA_AGIL_RETRY_MINUTES.length)
+        return { waiting: true as const, retry: { tries, nextAt: new Date(Date.now() + COMPRA_AGIL_RETRY_MINUTES[tries - 1] * 60_000).toISOString() } };
       throw error instanceof CompraAgilError ? new AuthError(error.message, 503) : error;
     }
     const candidates=response.tenders.map(tenderCandidate);
     opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
     return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), coverage: response.error ? 'partial' : 'up_to_four_pages' };
   }
-  const tenders = await listOpenLicitaciones({ fetch: globalThis.fetch, ticket: ticket.ticket });
+  // The sources the administrator chose in «Qué buscamos» (search-settings.ts): the listing of tenders, Compra Ágil, or both.
+  const settings = readSearchSettings(context.search);
+  const tenders = sourceOn(settings, 'tenders') ? await listOpenLicitaciones({ fetch: globalThis.fetch, ticket: ticket.ticket }) : [];
   const candidates=tenders.map(tenderCandidate);
   opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
-  for (const keyword of tenderWordsOfTheDay(context.criteria?.keywords || [], Date.now() / 86_400_000)) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: job.organization_id, requested_by: job.requested_by,
+  if (sourceOn(settings, 'compraAgil')) for (const keyword of tenderWordsOfTheDay(context.criteria?.keywords || [], Date.now() / 86_400_000)) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: job.organization_id, requested_by: job.requested_by,
     kind: 'tenders', dedupe_key: `${job.dedupe_key}:agil:${createHash('sha256').update(keyword).digest('hex')}`, payload: { keyword, revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
-  return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), listed: tenders.length, coverage: 'active_listing' };
+  return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), listed: tenders.length, coverage: sourceOn(settings, 'tenders') ? 'active_listing' : 'compra_agil_only' };
 }
 
 /** External paid starts have a reservation/receipt checkpoint BEFORE POST; never replay an ambiguous start. */
@@ -178,7 +191,24 @@ export async function recentDiscards(client: SupabaseClient, organizationId: str
   });
 }
 export async function evaluateOpportunityBatch(client: SupabaseClient, job: OpportunityJob, context: any) {
-  const rows = opportunityDb(await client.from('commercial_opportunities').select('id,kind,title,company_name,data,deadline_at').eq('organization_id', job.organization_id).in('id', job.payload.ids || [])) || [];
+  const all = opportunityDb(await client.from('commercial_opportunities').select('id,kind,title,company_name,data,deadline_at,amount,currency').eq('organization_id', job.organization_id).in('id', job.payload.ids || [])) || [];
+  // The administrator's own rules in «Qué buscamos» (search-settings.ts) leave a tender out before the AI reads it: no cost, and the
+  // reason the list shows. An amount the tender does not say is never a reason.
+  const settings = readSearchSettings(context.search);
+  const ruledOut = new Set<string>();
+  for (const row of all) {
+    const reason = ['tender', 'compra_agil'].includes(row.kind) ? tenderRuledOut(settings, { amount: row.amount, currency: row.currency, company: row.company_name }) : null;
+    if (!reason || row.data?.profileRevision !== context.revision) continue;
+    opportunityDb(await client.from('opportunity_evaluations').upsert({ organization_id: job.organization_id, opportunity_id: row.id, profile_revision: context.revision,
+      content_hash: row.data.contentHash, verdict: 'excluded', reason, service: '', model: 'rule', evidence: [{ source: row.data.source, description: row.data.description }] }, { onConflict: 'opportunity_id,profile_revision,content_hash' }));
+    opportunityDb(await client.from('commercial_opportunities').update({ score: 0, reasons: [reason], data: { ...row.data, evaluation: 'excluded', matchedService: null, excludedMotive: RULE_MOTIVE } })
+      .eq('organization_id', job.organization_id).eq('id', row.id).eq('data->>contentHash', row.data.contentHash).eq('data->>profileRevision', String(context.revision)));
+    ruledOut.add(row.id);
+  }
+  const rows = all.filter(row => !ruledOut.has(row.id))
+    .map((row: any) => (unspscMatch(settings.tenders.unspsc, row.data?.observed?.items || []) ? { ...row, calzaUnspsc: true } : row));
+  if (!rows.length) return { evaluated: ruledOut.size, pending: 0 };
+  const preferences = tenderPreferences(settings);
   // The «Ficha para licitaciones»: a requirement or a scale is a reason to discard only when the profile disproves it.
   const [profile, discards] = await Promise.all([loadTenderProfile(client, job.organization_id), recentDiscards(client, job.organization_id).catch(() => [])]);
   const evaluated = await opportunityGenerate(client, job, { step: 'evaluate', category: 'evaluation', role: 'screen', schema: verdictSchema, output: 5000,
@@ -187,8 +217,9 @@ export async function evaluateOpportunityBatch(client: SupabaseClient, job: Oppo
       `Ante ambigüedad o información incompleta usa review. Contrataciones no prueban compra externa. Distingue publicaciones de proveedores, candidatos y compradores. Un repost no prueba necesidad de quien comparte. Considera exclusiones de ESTA oferta; no descartes todas las agencias. La elegibilidad de licitaciones no está certificada leyendo su nombre.\n` +
       (profile ? `Para requisito y escala usa la ficha: ${TENDER_PROFILE_RULE} En ese caso usa review y di en la razón qué dato falta.\n` : 'Sin ficha de la empresa, requisito y escala solo descartan cuando la oferta o sus exclusiones lo dicen; si no, review.\n') +
       (discards.length ? 'descartadasPorElEquipo son oportunidades que el equipo dejó de lado y por qué: un candidato del mismo tipo y con el mismo motivo baja a review o excluded; uno solo parecido en palabras no.\n' : '') +
+      (Object.keys(preferences).length ? 'preferenciasDeLicitaciones son organismos que el equipo sigue, regiones y códigos UNSPSC que prefiere (calzaUnspsc marca a quien pide uno): súbele el score a la licitación que calce, sin excluir a una solo por no calzar.\n' : '') +
       JSON.stringify({ offer: context.offer, services: context.services, exclusions: context.exclusions, priority: context.priority, ...(profile ? { ficha: tenderProfileForModel(profile) } : {}),
-        ...(discards.length ? { descartadasPorElEquipo: discards } : {}), candidates: rows }) });
+        ...(discards.length ? { descartadasPorElEquipo: discards } : {}), ...(Object.keys(preferences).length ? { preferenciasDeLicitaciones: preferences } : {}), candidates: rows }) });
   let count = 0;
   for (const row of rows) {
     const answer = evaluated.evaluations.find(v => v.id === row.id);
@@ -200,5 +231,5 @@ export async function evaluateOpportunityBatch(client: SupabaseClient, job: Oppo
       .eq('organization_id', job.organization_id).eq('id', row.id).eq('data->>contentHash', row.data.contentHash).eq('data->>profileRevision', String(context.revision)));
     count++;
   }
-  return { evaluated: count, pending: rows.length - count };
+  return { evaluated: count + ruledOut.size, pending: rows.length - count };
 }

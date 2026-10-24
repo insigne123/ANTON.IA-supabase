@@ -11,6 +11,7 @@ import { adminViewCounts, listViewQuery, memberViewCounts } from '@/lib/commerci
 import { waitingLine } from '@/lib/commercial-opportunities/waiting';
 import { assertOpportunityRead, assertOpportunityAdmin, readableOpportunityIds } from './workspace-access';
 import { readWaitingOnAdmins } from './workspace-waiting';
+import { readSearchHealth } from './workspace-source-health';
 
 /** One page of the list: 100 opportunities, or the size a stage of the pipeline asks for. */
 export const LIST_PAGE = 100;
@@ -58,7 +59,7 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
   const period = new Date().toISOString().slice(0, 7) + '-01';
   // The reads do not depend on each other, so they go together (one after another they took ~2.7 s of the page's load);
   // only the work records wait for the list.
-  const [ids, items, counts, notifications, groups, context, budget, members, documentAlerts, searching, waiting] = await Promise.all([
+  const [ids, items, counts, notifications, groups, context, budget, members, documentAlerts, searching, waiting, health] = await Promise.all([
     readableOpportunityIds(client, scope),
     readWorkspacePage(client, scope, options),
     readWorkspaceCounts(client, scope, options),
@@ -80,11 +81,13 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
       const now = new Date();
       return { total: found.length, lines: found.slice(0, 5).map(item => ({ ...waitingLine(item, now, true), kind: item.kind })) };
     }).catch(() => null) : null,
+    // How each source of the daily search went (OPP-15); a failed read leaves the strip as it was.
+    admin ? readSearchHealth(client, scope.organizationId).catch(() => null) : null,
   ]);
   const itemIds = items.map(item => item.id);
   const work = itemIds.length ? opportunityDb(await client.from('opportunity_work').select('*').eq('organization_id', scope.organizationId).in('opportunity_id', itemIds)) as WorkRecord[] : [];
   return { mode: admin ? 'management' : 'assigned', items, work: work || [], notifications: notifications.filter(n => ids === null || ids.includes(n.opportunity_id)),
-    members, groups, context, documentAlerts, ...(admin ? { searching } : {}), ...(waiting?.total ? { waiting } : {}), ...(counts ? { counts: admin ? adminViewCounts(counts) : memberViewCounts(counts) } : {}),
+    members, groups, context, documentAlerts, ...(admin ? { searching } : {}), ...(waiting?.total ? { waiting } : {}), ...(health ? { health } : {}), ...(counts ? { counts: admin ? adminViewCounts(counts) : memberViewCounts(counts) } : {}),
     budget: { spent: Number(budget?.spent_micro_usd || 0) / 1e6, reserved: Number(budget?.reserved_micro_usd || 0) / 1e6, cap: OPPORTUNITY_MONTHLY_MICRO_USD / 1e6 },
     sourceStatus: admin ? { claude: Boolean(process.env.ANTHROPIC_API_KEY), linkedin: Boolean(process.env.APIFY_TOKEN), posts: Boolean(process.env.APIFY_TOKEN && process.env.OPPORTUNITIES_POST_USD_PER_ITEM),
       jsearch: Boolean(process.env.JSEARCH_API_KEY), automation: process.env.OPPORTUNITIES_AUTOMATION_ENABLED === 'true' } : {} };
