@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, RotateCcw, Settings, Sparkles, Users, X, Bell } from 'lucide-react';
+import { Archive, ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, RotateCcw, Settings, Sparkles, UploadCloud, Users, X, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -195,7 +195,7 @@ export function OpportunityWorkWorkspace() {
   const [pipelineFor, setPipelineFor] = useState(filterKey);
   // «Cargar oportunidad»: from a document the AI reads (prefill.ts) or typed, and what the reading found.
   const [createMode, setCreateMode] = useState<'upload' | 'write'>('upload');
-  const [prefill, setPrefill] = useState<{ status: 'idle' | 'reading' | 'done' | 'error'; name?: string; missing?: string[]; partial?: boolean; message?: string; read?: string[]; kept?: number; notes?: string[] }>({ status: 'idle' });
+  const [prefill, setPrefill] = useState<{ status: 'idle' | 'reading' | 'done' | 'error'; name?: string; missing?: string[]; partial?: boolean; message?: string; read?: string[]; kept?: number; notes?: string[]; pasted?: boolean }>({ status: 'idle' });
   const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const watching = useRef<string | null>(null);
@@ -342,6 +342,19 @@ export function OpportunityWorkWorkspace() {
       setPrefill({ status: 'done', name: label, missing: result.missing || [], partial: Boolean(result.partial), read: result.read || [], kept: opened.length, notes: [...notes.map(note => note.message), ...skipped] });
       setCreateMode('write');
     } catch (e) { setPrefill({ status: 'error', name: label, message: e instanceof Error ? e.message : 'No pudimos leer el documento. Escribe los datos.' }); }
+  };
+  // The invitation pasted in the form, read like a document to complete the rest (OPP-49); the pasted text stays as it is.
+  const readPasted = async () => {
+    const text = String(draft.description || '').trim();
+    if (text.length < 40) return;
+    setPrefill({ status: 'reading', name: 'el texto pegado', pasted: true }); setProblem('');
+    try {
+      const body = new FormData(); body.append('text', text);
+      const result = await json(await fetch('/api/commercial-opportunities/workspace/prefill', { method: 'POST', body }));
+      const found = Object.fromEntries(Object.entries(result.fields || {}).filter(([key, value]) => key !== 'description' && value !== '' && value !== null && value !== undefined));
+      setDraft(current => ({ ...current, ...found }));
+      setPrefill({ status: 'done', name: 'el texto pegado', missing: result.missing || [], partial: Boolean(result.partial), read: [], kept: 0, notes: [], pasted: true });
+    } catch (e) { setPrefill({ status: 'error', name: 'el texto pegado', message: e instanceof Error ? e.message : 'La IA no pudo leer el texto. Completa los datos.', pasted: true }); }
   };
   // «Bases y anexos»: a ZIP goes up as the documents inside it, like in Documentos.
   const addFiles = async (chosen: File[]) => {
@@ -618,7 +631,8 @@ export function OpportunityWorkWorkspace() {
     report([...states, ...left]);
     setBusy(true);
     for (const [i, file] of files.entries()) {
-      try { const body = new FormData(); body.set('file', file); await json(await fetch(`/api/commercial-opportunities/${selected}/documents`, { method: 'POST', body })); states[i] = { ...states[i], state: 'done' }; }
+      try { const body = new FormData(); body.set('file', file); const result = await json(await fetch(`/api/commercial-opportunities/${selected}/documents`, { method: 'POST', body }));
+        states[i] = { ...states[i], state: 'done', message: typeof result?.note === 'string' ? result.note : undefined }; }
       catch (e) { states[i] = { ...states[i], state: 'error', message: e instanceof Error ? e.message : 'No se pudo subir.' }; }
       report([...states, ...left]);
     }
@@ -818,6 +832,37 @@ export function OpportunityWorkWorkspace() {
     ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']] : [];
   const missingSection = sections.length > 0 && !sections.some(([id]) => id === tab);
   useEffect(() => { if (missingSection) setTab('summary'); }, [missingSection]);
+  // The bases from anywhere on an open opportunity (OPP-17): files dropped on the page, or pasted outside a field, go to
+  // «Documentos», where DocumentDrop sends them and says how each one went. A ZIP opens there, as always.
+  const [incoming, setIncoming] = useState<File[] | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const canDrop = Boolean(selected && item?.id === selected && !signal && !modal);
+  useEffect(() => {
+    if (!canDrop) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Not while a dialog is open (the company profile has documents of its own): there a drop is that dialog's or nobody's.
+    const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes('Files') && !document.querySelector('[role="dialog"], [role="alertdialog"]');
+    const take = (files: File[]) => { if (files.length) { setTab('documents'); setIncoming(files); } };
+    // The browser repeats «dragover» while files are over the page: the hint goes away a moment after they leave.
+    const over = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault(); setDropping(true);
+      clearTimeout(timer); timer = setTimeout(() => setDropping(false), 400);
+    };
+    const drop = (event: DragEvent) => {
+      clearTimeout(timer); setDropping(false);
+      // A drop zone of its own (DocumentDrop) already took them.
+      if (event.defaultPrevented || !carriesFiles(event)) return;
+      event.preventDefault(); take(Array.from(event.dataTransfer?.files || []));
+    };
+    const paste = (event: ClipboardEvent) => {
+      if ((event.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]') || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      const files = Array.from(event.clipboardData?.files || []);
+      if (files.length) { event.preventDefault(); take(files); }
+    };
+    window.addEventListener('dragover', over); window.addEventListener('drop', drop); window.addEventListener('paste', paste);
+    return () => { clearTimeout(timer); setDropping(false); window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); window.removeEventListener('paste', paste); };
+  }, [canDrop]);
   const latest = detail?.reports[0];
   // The plan of the latest report as tasks to create (OPP-21): its steps, or «Qué hacer ahora» when it has none.
   const planDrafts = latest && detail ? planTaskDrafts(latest.report.tasks.length ? latest.report.tasks : reportNextSteps(latest.report).map(title => ({ title })),
@@ -831,6 +876,14 @@ export function OpportunityWorkWorkspace() {
     await load();
   };
   return <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 sm:p-6">
+    {/* Where files dropped on an open opportunity go: it lets the drop through to the zone under it. */}
+    {dropping && <div aria-hidden="true" data-testid="opportunity-drop" className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0">
+      <div className="flex max-w-sm flex-col items-center gap-2 rounded-3xl border-2 border-dashed border-primary bg-background px-8 py-10 text-center shadow-lg">
+        <UploadCloud className="h-8 w-8 text-primary" aria-hidden="true" />
+        <p className="text-base font-semibold">Suelta para subirlos a esta oportunidad</p>
+        <p className="text-sm text-muted-foreground">Quedan en «Documentos» y la IA los lee. Un ZIP se abre solo.</p>
+      </div>
+    </div>}
     {!selected && <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{admin ? 'Hallazgos y oportunidades recibidas, con un equipo y una siguiente acción.' : 'Tus asignaciones, el equipo de trabajo y lo que hay que hacer después.'}</p></div>
       {admin && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={openContext}><Settings className="mr-2 h-4 w-4" />Tu empresa</Button><Button onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setCreateMode('upload'); setPrefill({ status: 'idle' }); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button></div>}
     </header>}
@@ -1015,7 +1068,8 @@ export function OpportunityWorkWorkspace() {
         </div>}
         {tab === 'market' && MARKET_KINDS.includes(item.kind) && <WinPlan id={selected} />}
         {tab === 'documents' && <section className="space-y-5">
-          {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
+          {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null}
+            incoming={incoming} onTaken={() => setIncoming(null)} />}
           {signal && <p className="text-sm text-muted-foreground">Las señales de LinkedIn no tienen bases. Si recibiste algo de esta empresa (una invitación, un requerimiento), súbelo en <button type="button" className="underline" onClick={() => document.getElementById('op-document')?.click()}>Documentos</button>.</p>}
           {signal && <input id="op-document" type="file" multiple accept={ACCEPTED_FILES} className="sr-only" onChange={e => void upload(Array.from(e.target.files || []), () => undefined)} />}
           <div><h2 className="mb-3 font-semibold">En el expediente</h2><DocumentList id={selected} documents={detail.documents} kind={item.kind} scanning={scanning} onUploadMore={() => document.getElementById('op-document')?.click()} /></div>
@@ -1077,12 +1131,17 @@ export function OpportunityWorkWorkspace() {
             {prefill.status === 'reading' ? <p role="status" className="sr-only">Leyendo el documento</p> : null}
             {prefill.status === 'error' ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm"><p>{prefill.message}</p>
               <Button type="button" size="sm" variant="outline" onClick={() => setCreateMode('write')}>Escribir los datos</Button></div> : null}
-            <p className="text-xs text-muted-foreground">PDF, Word, Excel, texto, fotos o un ZIP, hasta 20 MB cada documento. Todos quedan guardados con la oportunidad.</p>
+            <p className="text-xs text-muted-foreground">PDF, Word, Excel, texto, fotos, el correo (.eml o .msg) o un ZIP, hasta 20 MB cada documento. Todos quedan guardados con la oportunidad.</p>
           </div> : <>
-            {prefill.status === 'done' ? <div role="status" className="flex gap-2 rounded-xl bg-primary/5 px-3 py-2.5 text-sm leading-6"><Sparkles className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><div className="space-y-1"><p>{(prefill.read?.length ?? 0) > 1 ? `Completamos el formulario leyendo ${prefill.read!.length} documentos${(prefill.kept ?? 0) > prefill.read!.length ? ` (los ${prefill.kept} quedan para subir con la oportunidad)` : ''}.` : `Completamos el formulario con «${prefill.name}».`} Revisa los datos antes de guardar.{prefill.missing?.length ? ` No encontramos ${listEs(prefill.missing)}.` : ''}{prefill.partial ? ((prefill.read?.length ?? 0) > 1 ? ' Algunos documentos son largos: leímos sus partes más importantes.' : ' El documento es largo: leímos su primera parte.') : ''}</p>{prefill.notes?.length ? <p className="text-xs text-muted-foreground">{prefill.notes.join(' ')}</p> : null}</div></div> : null}
+            {prefill.status === 'done' ? <div role="status" className="flex gap-2 rounded-xl bg-primary/5 px-3 py-2.5 text-sm leading-6"><Sparkles className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><div className="space-y-1"><p>{prefill.pasted ? 'Completamos el formulario con el texto que pegaste.' : (prefill.read?.length ?? 0) > 1 ? `Completamos el formulario leyendo ${prefill.read!.length} documentos${(prefill.kept ?? 0) > prefill.read!.length ? ` (los ${prefill.kept} quedan para subir con la oportunidad)` : ''}.` : `Completamos el formulario con «${prefill.name}».`} Revisa los datos antes de guardar.{prefill.missing?.length ? ` No encontramos ${listEs(prefill.missing)}.` : ''}{prefill.partial ? ((prefill.read?.length ?? 0) > 1 ? ' Algunos documentos son largos: leímos sus partes más importantes.' : ' El documento es largo: leímos su primera parte.') : ''}</p>{prefill.notes?.length ? <p className="text-xs text-muted-foreground">{prefill.notes.join(' ')}</p> : null}</div></div> : null}
             {[['title', 'Nombre de la oportunidad'], ['company', 'Cliente o entidad convocante'], ['url', 'Enlace · opcional']].map(([key, label]) => <div key={key} className="space-y-2"><Label htmlFor={`op-new-${key}`}>{label}</Label><Input id={`op-new-${key}`} type={key === 'url' ? 'url' : 'text'} required={key !== 'url'} value={draft[key] || ''} onChange={e => field(key, e.target.value)} /></div>)}
             <div className="space-y-2"><Label htmlFor="op-kind">Tipo</Label><select id="op-kind" value={draft.kind || 'private_tender'} onChange={e => field('kind', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="private_tender">Licitación privada</option><option value="proposal">Solicitud de propuesta</option><option value="quote">Solicitud de cotización</option><option value="commercial">Oportunidad comercial</option></select></div>
-            <div className="space-y-2"><Label htmlFor="op-invitation">Invitación o contexto recibido</Label><Textarea id="op-invitation" rows={8} className="resize-y leading-6" value={draft.description || ''} onChange={e => field('description', e.target.value)} maxLength={40000} placeholder="Pega aquí el correo o mensaje con la invitación." /><p className="text-xs text-muted-foreground">Pega también el correo de la invitación: suele decir por qué plataforma se postula (Coupa, Ariba, WEX…) y qué hay que ingresar en ella.</p></div>
+            <div className="space-y-2"><Label htmlFor="op-invitation">Invitación o contexto recibido</Label><Textarea id="op-invitation" rows={8} className="resize-y leading-6" value={draft.description || ''} onChange={e => field('description', e.target.value)} maxLength={40000} placeholder="Pega aquí el correo o mensaje con la invitación." />
+              {/* Pasted, the invitation completes the form like a document does (OPP-49). */}
+              <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Pega también el correo de la invitación: suele decir por qué plataforma se postula (Coupa, Ariba, WEX…) y qué hay que ingresar en ella.</p>
+                {String(draft.description || '').trim().length >= 40 ? <Button type="button" size="sm" variant="outline" disabled={prefill.status === 'reading'} onClick={() => void readPasted()}>
+                  {prefill.status === 'reading' && prefill.pasted ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Sparkles className="mr-2 h-4 w-4" aria-hidden="true" />}{prefill.status === 'reading' && prefill.pasted ? 'Leyendo…' : 'Completar con la IA'}</Button> : null}</div>
+              {prefill.pasted && prefill.status === 'error' ? <p role="alert" className="text-sm text-destructive">{prefill.message}</p> : null}</div>
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem]"><div className="space-y-2"><Label htmlFor="op-new-deadline">Cierre · hora local, opcional</Label><Input id="op-new-deadline" type="datetime-local" aria-describedby="op-new-deadline-hint" value={draft.deadline || ''} onChange={e => field('deadline', e.target.value)} /><p id="op-new-deadline-hint" className="text-xs text-muted-foreground">Sin fecha no entra en los avisos de cierre.</p></div><div className="space-y-2"><Label htmlFor="op-amount">Monto · opcional</Label><Input id="op-amount" type="number" min={0} value={draft.amount || ''} onChange={e => field('amount', e.target.value)} /></div><div className="space-y-2"><Label htmlFor="op-currency">Moneda</Label><select id="op-currency" value={draft.currency || 'CLP'} onChange={e => field('currency', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{(CURRENCIES.includes(draft.currency || 'CLP') ? CURRENCIES : [draft.currency, ...CURRENCIES]).map(code => <option key={code} value={code}>{code}</option>)}</select></div></div>
             <div className="space-y-2"><p className="text-sm font-medium" id="op-new-files-label">Bases y anexos</p>
               <label htmlFor="op-new-files" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const dropped = Array.from(e.dataTransfer.files || []); if (dropped.length) void addFiles(dropped); }}
@@ -1091,7 +1150,7 @@ export function OpportunityWorkWorkspace() {
                 <input id="op-new-files" type="file" multiple accept={ACCEPTED_FILES} aria-labelledby="op-new-files-label" className="sr-only" onChange={e => { const chosen = Array.from(e.target.files || []); e.target.value = ''; void addFiles(chosen); }} />
               </label>
               {files.length ? <ul className="flex flex-wrap gap-2" aria-label="Documentos que se subirán">{files.map(file => <li key={file.name} className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted py-1 pl-3 pr-1 text-xs"><span className="truncate">{file.name}</span><button type="button" className="rounded-full p-1 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Quitar ${file.name}`} onClick={() => setFiles(current => current.filter(item => item !== file))}><X className="h-3 w-3" aria-hidden="true" /></button></li>)}</ul> : null}
-              <p className="text-xs text-muted-foreground">PDF, Word, Excel, fotos o un ZIP, hasta 20 MB cada documento. También puedes subirlos después en Documentos.</p></div>
+              <p className="text-xs text-muted-foreground">PDF, Word, Excel, fotos, el correo (.eml o .msg) o un ZIP, hasta 20 MB cada documento. También puedes subirlos después en Documentos.</p></div>
           </>}
         </>}
         {problem && modal && <p role="alert" className="text-sm text-destructive">{problem}</p>}<div className="sticky bottom-0 -mx-6 -mb-6 flex justify-end gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="outline" type="button" disabled={busy} onClick={() => void closeModal()}>Cancelar</Button>{modal === 'create' && createMode === 'upload' ? null : <Button type="submit" disabled={busy || prefill.status === 'reading'}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{uploading ? `Subiendo ${Math.min(uploading.done + 1, uploading.total)} de ${uploading.total}…` : modal === 'context' ? 'Confirmar oferta' : modal === 'criteria' ? 'Guardar' : modal === 'assign' ? 'Asignar y notificar' : 'Guardar'}</Button>}</div>

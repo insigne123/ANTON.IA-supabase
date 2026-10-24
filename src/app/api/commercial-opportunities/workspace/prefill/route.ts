@@ -6,18 +6,20 @@ import { opportunityDb } from '@/lib/server/commercial-opportunities/workspace-s
 import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import { prefillText } from '@/lib/commercial-opportunities/prefill';
-import { PREFILL_MAX_BYTES, PREFILL_MAX_FILES, prefillPackageText } from '@/lib/commercial-opportunities/prefill-package';
+import { pickPrefillFiles, prefillPackageText } from '@/lib/commercial-opportunities/prefill-package';
 import { SCAN_IMAGE_TOKENS, SCAN_MAX_PAGES, SCAN_PAGE_TOKENS, isScanImage, scanPages } from '@/lib/commercial-opportunities/document-scans';
 import { AuthError } from '@/lib/server/auth-utils';
+import { isMailFile, mailDocuments } from '@/lib/server/commercial-opportunities/mail-files';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
+type Upload = { name: string; bytes: Uint8Array };
 /** One uploaded file as the expediente reads it: legacy formats converted, type checked, text extracted. The errors say what to do. */
-async function readPrefillFile(file: File) {
-  if (file.size > 20 * 1024 * 1024) throw new AuthError('El documento pasa de 20 MB. Sube solo la invitación o las bases.', 413);
+async function readPrefillFile(file: Upload) {
+  if (file.bytes.length > 20 * 1024 * 1024) throw new AuthError('El documento pasa de 20 MB. Sube solo la invitación o las bases.', 413);
   let name = file.name || 'documento';
-  let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
+  let bytes: Uint8Array = file.bytes;
   const legacy = await opportunityLegacyAsText(name, bytes).catch(error => { throw error instanceof DocumentFileError ? new AuthError(error.message, 422) : error; });
   if (legacy) ({ name, bytes } = legacy);
   const mime = opportunityMime(name);
@@ -31,7 +33,8 @@ async function readPrefillFile(file: File) {
 
 /**
  * «Cargar oportunidad» from a document or a package of them (the bases of a private process: invitation, conditions, technical
- * bases, contract, annexes): the text is read here, the model proposes the form's fields (prefill.ts) and the person reviews them.
+ * bases, contract, annexes), from the e-mail that brought them (.eml, .msg: its message and its attachments, OPP-49), or from the
+ * text pasted in the form: the text is read here, the model proposes the form's fields (prefill.ts) and the person reviews them.
  * The documents are not saved: the form uploads them with the opportunity, as its bases. A package is read together
  * (prefill-package.ts); a scan or a photo is read by the model itself only when it is the one document.
  */
@@ -40,14 +43,28 @@ export async function POST(request: Request) {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
     assertOpportunityAdmin(scope);
     const form = await request.formData().catch(() => null);
-    const files = (form?.getAll('file') ?? []).filter((file): file is File => typeof file !== 'string');
-    if (!files.length) throw new AuthError('Elige el documento que recibiste.', 400);
-    if (files.length > PREFILL_MAX_FILES) throw new AuthError(`Sube hasta ${PREFILL_MAX_FILES} documentos para que la IA los lea juntos; el resto puedes subirlo después en Documentos.`, 413);
-    if (files.reduce((sum, file) => sum + file.size, 0) > PREFILL_MAX_BYTES) throw new AuthError('Los documentos pasan de 24 MB juntos. Sube primero la invitación y las bases.', 413);
+    const uploaded = (form?.getAll('file') ?? []).filter((file): file is File => typeof file !== 'string');
+    // The text of the invitation pasted in the form, when there is no document: read the same way.
+    const pasted = String(form?.get('text') ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 50_000);
+    if (!uploaded.length && pasted.length < 40) throw new AuthError(pasted ? 'Pega el texto completo de la invitación: con tan poco la IA no puede completar el formulario.' : 'Elige el documento que recibiste.', 400);
+    if (uploaded.some(file => file.size > 20 * 1024 * 1024)) throw new AuthError('El documento pasa de 20 MB. Sube solo la invitación o las bases.', 413);
+    const read: string[] = [], skipped: Array<{ name: string; why: string }> = [];
+    // An e-mail is read as its message and the documents it brings (mail-files.ts); what it brings that cannot be read is named.
+    const received: Upload[] = [];
+    for (const file of uploaded) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!isMailFile(file.name)) { received.push({ name: file.name, bytes }); continue; }
+      const mail = await mailDocuments(file.name, bytes).catch(error => { throw new AuthError(error instanceof Error ? error.message : 'No pudimos abrir el correo.', 422); });
+      received.push(...mail.documents); skipped.push(...mail.left);
+    }
+    if (!received.length) received.push({ name: 'Texto pegado.txt', bytes: new TextEncoder().encode(pasted) });
+    // An e-mail can bring more than one reading takes: the documents that define the process are read (prefill-package.ts), and the
+    // rest still go up with the opportunity, with the e-mail.
+    const { chosen: files, skipped: over } = pickPrefillFiles(received.map(file => ({ ...file, size: file.bytes.length })));
+    skipped.push(...over.map(file => ({ name: file.name, why: 'No entró en esta lectura: queda guardado con la oportunidad.' })));
 
     let text = '', label = '', count = 1, partial = false;
     let scanBytes: Uint8Array | null = null, scanMime = '', scanImage = false, scanTotal = 0;
-    const read: string[] = [], skipped: Array<{ name: string; why: string }> = [];
     if (files.length === 1) {
       const one = await readPrefillFile(files[0]);
       // A scan or a photo: the model reads the file itself (document-scans.ts), within the same limits as the expediente.
