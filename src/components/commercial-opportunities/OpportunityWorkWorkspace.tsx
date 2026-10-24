@@ -230,7 +230,9 @@ export function OpportunityWorkWorkspace() {
     } catch (e) { if (!signal?.aborted && selectedRef.current === id) { setDetail(null); setMessages([]); setProblem(e instanceof Error ? e.message : 'No se pudo abrir.'); } }
   }, []);
   useEffect(() => {
-    setDetail(null); setMessages([]); setTab(openOn.current ?? 'summary'); openOn.current = null; setNote(''); setPendingQuestion(null); setPlanOpen(false); watching.current = null;
+    // The part asked for is kept until an opportunity is open: the address is read before the first one is.
+    const section = selected ? openOn.current : null; if (selected) openOn.current = null;
+    setDetail(null); setMessages([]); setTab(section ?? 'summary'); setNote(''); setPendingQuestion(null); setPlanOpen(false); watching.current = null;
     if (!selected) return; const controller = new AbortController(); void loadDetail(selected, controller.signal);
     // Every 8 s while a report or an answer is on its way, every 45 s otherwise, and never in a hidden tab.
     let last = Date.now();

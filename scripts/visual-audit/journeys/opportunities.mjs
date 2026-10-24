@@ -334,10 +334,11 @@ export default () => [
         const box = c.page.getByLabel('Editar la nota');
         await box.fill('Leí las bases: piden dos referencias y el certificado de antecedentes. El certificado llega el lunes.');
         await c.clickOn(c.page.getByRole('button', { name: 'Guardar', exact: true }));
-        await c.see('El certificado llega el lunes.');
+        // The new text is in the box while it saves (React writes it there too): «editada» shows once it is saved and read again.
+        await c.see(/· editada/);
         const row = c.table('opportunity_activity').find(item => item.opportunity_id === opp(2) && item.kind === 'progress');
         c.check('la nota quedó corregida y dice que se editó', /llega el lunes/.test(row?.body) && Boolean(row?.data?.editedAt), JSON.stringify(row?.data));
-        c.check('se lee «editada»', await shows(c, /· editada/));
+        c.check('se lee la nota corregida', await shows(c, 'El certificado llega el lunes.'));
       } },
     ] },
 
