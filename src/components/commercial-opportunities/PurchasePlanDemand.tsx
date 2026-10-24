@@ -75,7 +75,7 @@ export function PurchasePlanDemand({ onOpen, onCriteria }: { onOpen: (id: string
 
     {problem ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm"><p>{problem}</p><Button size="sm" variant="outline" onClick={() => void load()}>Reintentar</Button></div> : null}
 
-    {data && !data.available ? <div className="rounded-3xl border p-6 text-sm text-muted-foreground">La demanda futura estará disponible en cuanto terminemos de preparar esta función en tu workspace.</div> : null}
+    {data && !data.available ? <div className="rounded-3xl border p-6 text-sm text-muted-foreground">La demanda futura estará disponible en cuanto terminemos de preparar esta función en tu organización.</div> : null}
 
     {data?.available && reading ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Leyendo el Plan Anual de Compras de ChileCompra y eligiendo lo que calza con tu oferta. Tarda unos minutos.</p> : null}
 
@@ -99,7 +99,7 @@ export function PurchasePlanDemand({ onOpen, onCriteria }: { onOpen: (id: string
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm"><span className="font-semibold tabular-nums">{view.groups.length}</span> organismos · <span className="font-semibold tabular-nums">{short(view.upcoming)}</span> por comprar de aquí a fin de año<span className="text-muted-foreground"> · {short(view.total)} en todo el plan</span></p>
         <div role="group" aria-label="Período" className="inline-flex rounded-xl bg-muted p-1">{([['ahead', 'Lo que viene'], ['all', 'Todo el año']] as const).map(([key, label]) =>
-          <button key={key} type="button" aria-pressed={scope === key} onClick={() => setScope(key)} className={cn('rounded-lg px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', scope === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>
+          <button key={key} type="button" aria-pressed={scope === key} onClick={() => setScope(key)} className={cn('rounded-lg px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', scope === key ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>)}</div>
       </div>
       {!groups.length ? <p className="rounded-2xl border p-5 text-sm text-muted-foreground">Las compras que calzan ya estaban planificadas para meses anteriores. Mira «Todo el año» para ver a quién le compran y prepararte para el próximo plan.</p> : null}
       <ul className="grid gap-3 xl:grid-cols-2">

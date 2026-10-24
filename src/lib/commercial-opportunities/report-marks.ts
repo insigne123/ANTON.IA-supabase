@@ -64,6 +64,15 @@ const chileTime = (year: number, month: number, day: number, hour: number, minut
   new Date(Date.UTC(year, month - 1, day, hour, minute) - chileOffsetMinutes(year, month, day) * 60_000);
 
 /** A date written in a report, as an instant; null when there is no full date (a «por confirmar», a relative date). */
+/**
+ * A milestone's date, or null when the report wrote that there is none («Sin fecha informada», «Sin información», «Por definir»):
+ * those read as dates in the list, the route and the e-mail to the buyer. 2 of the last 8 reports had one.
+ */
+export function milestoneDate(value: string | null | undefined): string | null {
+  const text = (value || '').replace(/\s+/g, ' ').trim();
+  if (!text || /^[-—–.\s]+$/.test(text)) return null;
+  return /^(sin|no)\b.{0,40}\b(fecha|informaci|informad|publicad|indica|defin|precis|especific)|^(por (definir|confirmar|informar)|pendiente|n\/?a|desconocid[ao])\b/i.test(text) ? null : text;
+}
 export function parseReportDate(text: string): { at: Date; hasTime: boolean } | null {
   const value = text.trim();
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) && /(Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value))) return { at: new Date(value), hasTime: true };
@@ -207,7 +216,7 @@ export function reportRoute(report: Pick<OpportunityReport, 'milestones' | 'task
   const at = (date: string) => parseReportDate(date)?.at.getTime() ?? null;
   const steps = [
     ...report.tasks.slice(0, 3).map(t => ({ title: t.title.slice(0, 120), detail: [t.role, t.dependency && `Antes: ${t.dependency}`].filter(Boolean).join(' · ').slice(0, 400), date: t.due.slice(0, 120), kind: 'prepare' as const })),
-    ...report.milestones.filter(m => !/publicaci[oó]n/i.test(m.label)).slice(0, 6).map(m => ({ title: m.label.slice(0, 120), detail: '', date: m.date.slice(0, 120),
+    ...report.milestones.filter(m => !/publicaci[oó]n/i.test(m.label)).slice(0, 6).map(m => ({ title: m.label.slice(0, 120), detail: '', date: (milestoneDate(m.date) ?? '').slice(0, 120),
       kind: /consulta|pregunta/i.test(m.label) ? 'ask' as const : /cierre|oferta|presentaci/i.test(m.label) ? 'submit' as const : /adjudic|resultado/i.test(m.label) ? 'decide' as const : 'wait' as const })),
   ].map((step, order) => ({ step, order, when: at(step.date) ?? (step.kind === 'prepare' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY) }))
     .sort((a, b) => (a.when === b.when ? 0 : a.when < b.when ? -1 : 1) || a.order - b.order).map(({ step }) => step);

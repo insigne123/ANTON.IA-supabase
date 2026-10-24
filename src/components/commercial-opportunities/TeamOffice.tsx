@@ -80,7 +80,7 @@ export function TeamPicker({ members, selected, responsibleId, onChange }: {
 }) {
   const toggle = (id: string) => onChange(toggleTeamMember({ selected, responsibleId }, id));
   return (
-    <ul aria-label="Personas del workspace" className="grid gap-2 sm:grid-cols-2">
+    <ul aria-label="Personas de la organización" className="grid gap-2 sm:grid-cols-2">
       {members.map(member => {
         const picked = selected.includes(member.user_id);
         const lead = picked && member.user_id === responsibleId;
@@ -94,7 +94,7 @@ export function TeamPicker({ members, selected, responsibleId, onChange }: {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{member.name}</span>
-                <span className="block text-xs text-muted-foreground">{lead ? 'Responsable' : picked ? 'Participa' : member.role === 'admin' || member.role === 'owner' ? 'Administra el workspace' : 'Miembro'}</span>
+                <span className="block text-xs text-muted-foreground">{lead ? 'Responsable' : picked ? 'Participa' : member.role === 'admin' || member.role === 'owner' ? 'Administra la organización' : 'Miembro'}</span>
               </span>
             </button>
             {picked ? (

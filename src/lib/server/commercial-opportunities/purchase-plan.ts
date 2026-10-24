@@ -126,7 +126,7 @@ export function planYear(now = new Date()) { return Number(opportunityLocalClock
 export async function enqueueOpportunityDemand(client: SupabaseClient, scope: WorkScope, manual: boolean) {
   assertOpportunityAdmin(scope);
   const context = opportunityDb(await client.from('opportunity_company_context').select('revision,criteria,services').eq('organization_id', scope.organizationId).maybeSingle());
-  if (!context) throw new AuthError('Confirma primero la oferta del workspace.', 409);
+  if (!context) throw new AuthError('Confirma primero la oferta de tu empresa.', 409);
   if (!planKeywords({ keywords: context.criteria?.keywords, services: context.services }).length)
     throw new AuthError('Faltan las palabras para compras públicas: revísalas en «Qué buscamos».', 409);
   const day = opportunityLocalClock().day;

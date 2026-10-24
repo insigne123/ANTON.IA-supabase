@@ -307,7 +307,7 @@ export function drawSignalSheet(pen: Pen, sheet: SignalSheet, options: SheetPdfO
   for (const line of titleLines) { pen.text(line, pen.left, nameY, { size: 20, bold: true, color: WHITE }); nameY += 8.6; }
   const sub = [sheet.kindLabel, sheet.relation?.label, sheet.preparedAt ? `Preparada el ${sheet.preparedAt}` : options.radarDate ? `Datos del radar al ${options.radarDate}` : null].filter(Boolean).join(' · ');
   pen.text(clean(sub), pen.left, band - 8, { size: 8.5, color: [219, 234, 254] });
-  pen.text(`Prioridad ${sheet.stars.count} de 5`, pen.right, 10, { size: 8.5, bold: true, color: WHITE, align: 'right' });
+  pen.text(`Calce ${sheet.stars.count} de 5`, pen.right, 10, { size: 8.5, bold: true, color: WHITE, align: 'right' });
   for (let i = 0; i < 5; i++) pen.dot(pen.right - 2 - (4 - i) * 4.2, 15, 1.6, i < sheet.stars.count ? { fill: WHITE } : { stroke: [147, 197, 253] });
   pen.y = band + 6;
   if (sheet.decision) { const w = chip(sheet.decision.label, pen.left, pen.y, TONES[sheet.decision.tone] ?? TONES.pending, 9); void w; }

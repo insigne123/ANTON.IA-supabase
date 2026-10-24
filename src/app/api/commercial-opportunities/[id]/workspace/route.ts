@@ -120,7 +120,7 @@ export async function POST(request: Request, context: Context) {
     if (action === 'link') {
       const { contactId } = z.object({ contactId: z.string().min(1).max(200) }).strict().parse(data);
       const contact = opportunityDb(await auth.admin.from('leads').select('id').eq('organization_id', scope.organizationId).eq('id', contactId).maybeSingle());
-      if (!contact) throw new AuthError('El contacto no está guardado en este workspace.', 404);
+      if (!contact) throw new AuthError('El contacto no está guardado en esta organización.', 404);
       opportunityDb(await auth.admin.from('opportunity_contact_links').upsert({ organization_id: scope.organizationId, opportunity_id: id, contact_id: contactId, linked_by: scope.userId }, { onConflict: 'opportunity_id,contact_id', ignoreDuplicates: true }));
       await addOpportunityActivity(auth.admin, scope, id, 'lead_linked', 'Contacto vinculado a la oportunidad', { contactId }, `${id}:lead:${contactId}`); return opportunitiesJson({ ok: true });
     }

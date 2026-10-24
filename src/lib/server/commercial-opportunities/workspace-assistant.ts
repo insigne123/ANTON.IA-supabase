@@ -196,7 +196,7 @@ export function opportunityAssistantTools(client: SupabaseClient, scope: WorkSco
 /** The worker's side: reads what the person can see, asks Claude once, and keeps only the opportunities that exist. */
 export async function runOpportunityAssistant(client: SupabaseClient, job: OpportunityJob, agentModel?: ModelClient): Promise<SavedAssistantAnswer> {
   const member = opportunityDb(await client.from('organization_members').select('role').eq('organization_id', job.organization_id).eq('user_id', job.requested_by).maybeSingle());
-  if (!member) throw new AuthError('Ya no tienes acceso a este workspace.', 409);
+  if (!member) throw new AuthError('Ya no tienes acceso a esta organización.', 409);
   const scope: WorkScope = { organizationId: job.organization_id, userId: job.requested_by, role: member.role };
   const message = opportunityDb(await client.from(MESSAGES).select('id,thread_id,question,created_at').eq('organization_id', job.organization_id)
     .eq('user_id', job.requested_by).eq('request_id', job.payload.requestId).single()) as { id: string; thread_id: string; question: string; created_at: string };

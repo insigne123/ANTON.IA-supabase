@@ -67,8 +67,8 @@ export function opportunityReportPrompt(cutoff: string, evidence: unknown, kind?
   const priv = isPrivateKind(kind);
   return [
     signal
-      ? `Genera una ficha comercial accionable en español para la empresa del workspace a partir de una señal de LinkedIn (avisos de trabajo o una publicación). No es una licitación: no hay bases, garantías, multas ni postulación. Fecha de corte ${cutoff}.`
-      : `Genera un expediente MUY completo, proactivo y accionable en español para la empresa del workspace. No lo reduzcas a resumen. Fecha de corte ${cutoff}.`,
+      ? `Genera una ficha comercial accionable en español para la empresa que usa ANTON.IA a partir de una señal de LinkedIn (avisos de trabajo o una publicación). No es una licitación: no hay bases, garantías, multas ni postulación. Fecha de corte ${cutoff}.`
+      : `Genera un expediente MUY completo, proactivo y accionable en español para la empresa que usa ANTON.IA. No lo reduzcas a resumen. Fecha de corte ${cutoff}.`,
     signal
       ? `Incluye estas secciones: ${SIGNAL_OUTLINE.join('; ')}. En «A quién contactar» propone cargos concretos de decisores para esta oferta. En «Cómo abordarlos» escribe un primer mensaje breve (máximo 90 palabras) que mencione la señal concreta. requirements son las cosas a validar con la empresa (status unknown salvo evidencia), tasks los pasos comerciales, milestones y scenarios van vacíos salvo fechas o cifras documentadas, questions son preguntas de descubrimiento para la primera conversación.`
       : `Incluye estas secciones adaptadas al tipo de oportunidad: ${(priv ? PRIVATE_OUTLINE : REPORT_OUTLINE).join('; ')}. Cada hallazgo importante debe decir consecuencia, acción, responsable sugerido, plazo y evidencia esperada. questions son consultas listas para enviar al comprador dentro del plazo de consultas.`,

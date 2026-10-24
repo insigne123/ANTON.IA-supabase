@@ -23,6 +23,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/tender-profile': profile,
   '@/lib/commercial-opportunities/company-documents': documents,
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
+  '@/components/confirm-dialog': { useConfirm: () => async () => true },
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 const { CompanyDocumentForm, CompanyDocumentRow } = dependencies['./CompanyDocuments'] = load(await compile('./CompanyDocuments.tsx'));

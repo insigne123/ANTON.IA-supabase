@@ -55,7 +55,7 @@ async function profileDiscards(client: SupabaseClient, organizationId: string) {
 export async function reconsiderWithTenderProfile(client: SupabaseClient, scope: WorkScope) {
   assertOpportunityAdmin(scope);
   const context = opportunityDb(await client.from('opportunity_company_context').select('revision').eq('organization_id', scope.organizationId).maybeSingle());
-  if (!context) throw new AuthError('Confirma primero la oferta del workspace.', 409);
+  if (!context) throw new AuthError('Confirma primero la oferta de tu empresa.', 409);
   const stored = opportunityDb(await client.from(TABLE).select('revision').eq('organization_id', scope.organizationId).maybeSingle());
   if (!stored) throw new AuthError('Guarda primero la ficha.', 409);
   const ids = (await profileDiscards(client, scope.organizationId)).filter(row => String(row.data?.profileRevision) === String(context.revision)).map(row => row.id);

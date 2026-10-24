@@ -37,6 +37,7 @@ import { TenderProfileSheet } from './TenderProfileSheet';
 import type { OpportunityFitView } from './RequirementFit';
 import { TeamOffice, TeamPicker } from './TeamOffice';
 import { InitialsAvatar } from '@/components/initials-avatar';
+import { useConfirm } from '@/components/confirm-dialog';
 import { OpportunityTicketConnection } from './OpportunityTicketConnection';
 import { CloseReasonDialog, type CloseTarget } from './CloseReasonDialog';
 import { WorkspaceCompanyFields } from './WorkspaceCompanyFields';
@@ -61,6 +62,11 @@ const MARKET_KINDS = ['tender', 'compra_agil'];
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
 const STATES: Record<string, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada', queued: 'En cola', running: 'En curso', waiting: 'Continuando', ready: 'Terminado', failed: 'No terminó' };
 const ACTIVE = ['queued', 'running', 'waiting'];
+/** The sources of «Actualizar oportunidades», as the status line names them (DISCOVERY_JOB_KINDS). */
+const SEARCH_SOURCES: Record<string, string> = { criteria: 'los criterios de búsqueda', tenders: 'licitaciones y Compra Ágil', hiring: 'avisos de trabajo', posts: 'publicaciones de LinkedIn' };
+const CURRENCIES = ['CLP', 'UF', 'USD', 'EUR'];
+/** Documents of a new opportunity go up a few at a time: one by one took a minute for five bases and the button only spun. */
+const UPLOADS_AT_ONCE = 3;
 const date = (value: string | null | undefined) => humanDate(value, true) || 'Sin fecha';
 const localDate = (value: string) => value ? new Date(value).toISOString() : null;
 /** «Hoy», «Mañana», «En 3 días», «En una semana»: the next action at 9:00 local time, as the date field writes it. */
@@ -148,8 +154,9 @@ export function OpportunityWorkWorkspace() {
   }, [load]);
   const loadDetail = useCallback(async (id: string, signal?: AbortSignal) => {
     try {
-      const value = await json(await fetch(`/api/commercial-opportunities/${id}/workspace`, { cache: 'no-store', signal }));
-      const chat = await json(await fetch(`/api/commercial-opportunities/${id}/chat`, { cache: 'no-store', signal }));
+      // The expediente and its chat do not depend on each other: they are read together.
+      const [value, chat] = await Promise.all([fetch(`/api/commercial-opportunities/${id}/workspace`, { cache: 'no-store', signal }).then(json),
+        fetch(`/api/commercial-opportunities/${id}/chat`, { cache: 'no-store', signal }).then(json)]);
       if (!signal?.aborted && selectedRef.current === id) { setDetail(value); setMessages(chat.messages || []); }
     } catch (e) { if (!signal?.aborted && selectedRef.current === id) { setDetail(null); setMessages([]); setProblem(e instanceof Error ? e.message : 'No se pudo abrir.'); } }
   }, []);
@@ -274,8 +281,8 @@ export function OpportunityWorkWorkspace() {
     try {
       const endpoint = id ? `/api/commercial-opportunities/${id}/workspace` : '/api/commercial-opportunities/workspace';
       const result = await json(await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, data }) }));
-      // The open expediente first: it is what the person is looking at, and the list takes longer.
-      if (id) await loadDetail(id); await load(); if (!quiet) setFeedback(result.jobId || result.queued ? 'Trabajo en cola. Puedes continuar y volver cuando termine.' : 'Cambios guardados.');
+      // The open expediente and the list are read again together: one after the other they were three or four trips in a row.
+      await Promise.all([id ? loadDetail(id) : null, load()]); if (!quiet) setFeedback(result.jobId || result.queued ? 'Trabajo en cola. Puedes continuar y volver cuando termine.' : 'Cambios guardados.');
       return result;
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar.'); return null; }
     finally { setBusy(false); }
@@ -383,6 +390,20 @@ export function OpportunityWorkWorkspace() {
     setDraft({ roles: (c.roles || []).join('\n'), keywords: (c.keywords || []).join('\n'), postQueries: (c.postQueries || []).join('\n'), decisionMakerTitles: (c.decisionMakerTitles || []).join('\n') }); setModal('criteria');
   };
   const field = (name: string, value: unknown) => setDraft(d => ({ ...d, [name]: value }));
+  // What a dialog opened with: closing it with something else typed (or documents chosen) asks first, instead of losing it.
+  const draftAtOpen = useRef('');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the draft of the moment the dialog opens, not each keystroke.
+  useEffect(() => { if (modal) draftAtOpen.current = JSON.stringify(draft); }, [modal]);
+  const confirm = useConfirm();
+  const closeModal = async () => {
+    if (busy) return;
+    const dirty = JSON.stringify(draft) !== draftAtOpen.current || files.length > 0;
+    if (dirty && !(await confirm({ title: '¿Descartar lo que escribiste?', description: 'Si cierras ahora, se pierde lo que escribiste en este formulario y los documentos que elegiste.',
+      confirmLabel: 'Descartar', cancelLabel: 'Seguir editando', tone: 'danger' }))) return;
+    setModal(null); setFiles([]);
+  };
+  // «Bases y anexos» of a new opportunity: how many went up of how many, while «Guardar» waits for them.
+  const [uploading, setUploading] = useState<{ done: number; total: number } | null>(null);
   // «Asignar» on a card of the pipeline: the same dialog as the page's, for that card, without opening it.
   const openQuickAssign = async (target: WorkItem) => {
     setProblem(''); setFeedback('');
@@ -408,15 +429,45 @@ export function OpportunityWorkWorkspace() {
     else {
       result = await perform('create', { requestId:draft.requestId,title: draft.title, company: draft.company, kind: draft.kind || 'private_tender', description: draft.description || '', url: draft.url || null, deadline: localDate(draft.deadline || ''), amount: draft.amount ? Number(draft.amount) : null, currency: draft.currency || 'CLP' }, null, true);
       if (result?.id) {
-        setBusy(true); const failed: string[] = [];
-        for (const file of files) { try { const body = new FormData(); body.set('file', file); await json(await fetch(`/api/commercial-opportunities/${result.id}/documents`, { method: 'POST', body })); } catch (e) { failed.push(e instanceof Error ? e.message : `«${file.name}» no se pudo subir.`); } }
-        setBusy(false); open(result.id); await load();
+        setBusy(true); const failed: string[] = []; const queue = [...files]; const createdId = String(result.id);
+        setUploading(files.length ? { done: 0, total: files.length } : null);
+        const send = async (file: File) => {
+          try { const body = new FormData(); body.set('file', file); await json(await fetch(`/api/commercial-opportunities/${createdId}/documents`, { method: 'POST', body })); }
+          catch (e) { failed.push(e instanceof Error ? e.message : `«${file.name}» no se pudo subir.`); }
+          setUploading(current => current ? { ...current, done: current.done + 1 } : current);
+        };
+        await Promise.all(Array.from({ length: Math.min(UPLOADS_AT_ONCE, queue.length) }, async () => { for (let file = queue.shift(); file; file = queue.shift()) await send(file); }));
+        setUploading(null); setBusy(false); open(createdId); await load();
         if (failed.length) setProblem(`La oportunidad quedó creada. ${failed.join(' ')} Puedes subirlos de nuevo en Documentos.`);
         else setFeedback('Oportunidad creada. Genera el informe cuando tengas todos los documentos.');
       }
     }
     if (result) { setModal(null); setFiles([]); }
   };
+  const sourceNames = (kinds: string[]) => listEs(kinds.map(kind => SEARCH_SOURCES[kind] || kind));
+  const discover = async () => {
+    const result = await perform('discover', {}, null, true) as { queued: string[]; searching: string[]; fresh: string[]; later: string[] } | null;
+    if (!result) return;
+    if (result.queued.includes('criteria')) setFeedback('Preparando los criterios de búsqueda desde tu oferta. Después buscamos en todas las fuentes; tarda unos minutos.');
+    else if (result.queued.length) setFeedback(`Buscando en ${sourceNames(result.queued)}. Las nuevas aparecen en el embudo en unos minutos.${result.fresh.length ? ` En ${sourceNames(result.fresh)} ya buscamos hace menos de una hora.` : ''}`);
+    else if (result.searching.length) setFeedback(`Ya estamos buscando en ${sourceNames(result.searching)}. Las nuevas aparecen en el embudo en unos minutos.`);
+    else setFeedback('Ya buscamos en todas las fuentes hace menos de una hora. Vuelve a intentarlo más tarde.');
+  };
+  const searching = overview?.searching || [];
+  // While a search runs the list is read every 20 s; when it ends the pipeline is read again and a line says so.
+  const wasSearching = useRef(false);
+  useEffect(() => {
+    if (searching.length) {
+      wasSearching.current = true;
+      const timer = setTimeout(() => { if (!document.hidden) void load(); }, 20_000);
+      return () => clearTimeout(timer);
+    }
+    if (!wasSearching.current) return;
+    wasSearching.current = false;
+    setFeedback('Terminó la búsqueda: lo nuevo ya está en el embudo.');
+    if (admin && view === 'pipeline' && !selected) void loadPipeline();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- each new reading of the list, not each render.
+  }, [overview]);
   const filters = admin ? [['recommended', 'Recomendadas'], ['review', 'Por revisar'], ['assigned', 'Asignadas'], ['excluded', 'No recomendadas'], ['pending', 'Por evaluar'], ['all', 'Todas']] : MEMBER_FILTERS;
   // The list starts on «recommended» (the administrator's first filter, and for a member it reads as «Mi trabajo»): a filter that is not in this person's row marks the first one.
   const shownFilter = filters.some(([key]) => key === filter) ? filter : filters[0]![0];
@@ -447,18 +498,23 @@ export function OpportunityWorkWorkspace() {
   };
   return <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 sm:p-6">
     {!selected && <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{admin ? 'Hallazgos y oportunidades recibidas, con un equipo y una siguiente acción.' : 'Tus asignaciones, el equipo de trabajo y lo que hay que hacer después.'}</p></div>
-      {admin && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={openContext}><Settings className="mr-2 h-4 w-4" />Empresa del workspace</Button><Button onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setCreateMode('upload'); setPrefill({ status: 'idle' }); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button></div>}
+      {admin && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={openContext}><Settings className="mr-2 h-4 w-4" />Tu empresa</Button><Button onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setCreateMode('upload'); setPrefill({ status: 'idle' }); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button></div>}
     </header>}
     {problem && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm"><p>{problem}</p><Button size="sm" variant="outline" onClick={() => { setProblem(''); void load(); if (selected) void loadDetail(selected); }}>Reintentar</Button></div>}
-    {feedback && <p role="status" className="rounded-xl border bg-muted/30 p-3 text-sm">{feedback}</p>}
+    {/* A notice floats at the bottom instead of pushing the page down (it moved «← Oportunidades» ≈46 px). */}
+    {feedback && <p role="status" className="fixed inset-x-4 bottom-6 z-50 mx-auto w-fit max-w-xl rounded-xl border bg-background/95 px-4 py-3 text-sm shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2">{feedback}</p>}
     {!overview && !problem && <div role="status" className="rounded-xl border p-8"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando oportunidades…</div>}
     {overview && !selected && <>
       {/* The offer confirmed is a status, not a task: one quiet line with its three small actions. Without it, asking to confirm it is the card. */}
       {admin && overview.context && <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <p className="text-xs text-muted-foreground">Oferta compartida confirmada · Búsqueda diaria {(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} · Límite mensual US$20 · US${overview.budget.spent.toFixed(2)} usados</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><span>Oferta compartida confirmada · Búsqueda diaria {(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} ·</span>
+          <span className="inline-flex items-center gap-2"><span className="tabular-nums">US${overview.budget.spent.toFixed(2)} de US${overview.budget.cap} este mes</span>
+            <span role="progressbar" aria-label="Presupuesto del mes usado" aria-valuemin={0} aria-valuemax={overview.budget.cap} aria-valuenow={Number(overview.budget.spent.toFixed(2))} className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+              <span className={cn('block h-full rounded-full', overview.budget.spent / overview.budget.cap >= 0.9 ? 'bg-destructive' : 'bg-primary/70')} style={{ width: `${Math.min(100, (overview.budget.spent / overview.budget.cap) * 100)}%` }} /></span></span>
+          {searching.length ? <span role="status" className="inline-flex items-center gap-1.5">· <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />Buscando en {sourceNames(searching)}…</span> : null}</div>
         <div className="-ml-3 flex flex-wrap items-center sm:ml-0">{(overview.context as any).criteria?.postQueries?.length ? <Button variant="ghost" size="sm" onClick={openCriteria}>Qué buscamos</Button> : null}
           <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>Ficha para licitaciones</Button>
-          {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null}</div></div>}
+          {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy || searching.length > 0} onClick={() => void discover()}>{searching.length ? 'Buscando…' : 'Actualizar oportunidades'}</Button> : null}</div></div>}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
         <Button onClick={openContext}>Confirmar oferta</Button></div>}
       {view !== 'assistant' && <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
@@ -485,7 +541,7 @@ export function OpportunityWorkWorkspace() {
       {admin && filter === 'recommended' && !search && source === 'all' && !categories.length && <StartHere items={items} onOpen={open} />}
       {items.length > 0 && <div className="space-y-8">{listGroups.map(group => <section key={group.key} aria-labelledby={`source-${group.key}`} className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><h2 id={`source-${group.key}`} className="text-lg font-semibold">{group.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{group.items.length}</span></h2><p className="text-xs text-muted-foreground">{group.note}</p></div>
-        {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
+        {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className={cn('grid gap-3', group.items.length > 1 && 'xl:grid-cols-2')}>{group.items.map(card)}</div>}
       </section>)}</div>}
       </>}
       {!(admin && (view === 'pipeline' || view === 'market')) && view !== 'assistant' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
@@ -565,9 +621,9 @@ export function OpportunityWorkWorkspace() {
           {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
           {signal && <p className="text-sm text-muted-foreground">Las señales de LinkedIn no tienen bases. Si recibiste algo de esta empresa (una invitación, un requerimiento), súbelo en <button type="button" className="underline" onClick={() => document.getElementById('op-document')?.click()}>Documentos</button>.</p>}
           {signal && <input id="op-document" type="file" multiple accept={ACCEPTED_FILES} className="sr-only" onChange={e => void upload(Array.from(e.target.files || []), () => undefined)} />}
-          <div><h2 className="mb-3 font-semibold">En el expediente</h2><DocumentList id={selected} documents={detail.documents} kind={item.kind} scanning={scanning} /></div>
+          <div><h2 className="mb-3 font-semibold">En el expediente</h2><DocumentList id={selected} documents={detail.documents} kind={item.kind} scanning={scanning} onUploadMore={() => document.getElementById('op-document')?.click()} /></div>
         </section>}
-        {tab === 'tasks' && <section className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Plan de trabajo</h2><Button variant="outline" onClick={() => { setDraft({}); setModal('task'); }}>Crear tarea</Button></div>{!detail.tasks.length && <p className="rounded-xl border p-5 text-sm text-muted-foreground">{latest ? 'Crea la primera tarea o usa «Crear tarea» en los pasos del informe.' : 'Crea la primera tarea. Cuando generes el informe, podrás convertir sus pasos en tareas con un clic.'}</p>}{detail.tasks.map(t => <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{t.title}</p><p className="mt-1 text-xs text-muted-foreground">{date(t.due_at)} · {detail.participants.find(p => p.user_id === t.owner_id)?.name || 'Sin responsable'}</p>{t.evidence && <p className="mt-2 text-sm">{t.evidence}</p>}</div><select aria-label={`Estado de ${t.title}`} value={t.status} disabled={busy} onChange={e => void perform('task', { id: t.id, title: t.title, ownerId: t.owner_id, dueAt: t.due_at, status: e.target.value, evidence: t.evidence })} className="h-10 rounded-md border bg-background px-3 text-sm">{[['pending', 'Pendiente'], ['working', 'En curso'], ['done', 'Realizada'], ['blocked', 'Bloqueada']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>)}{detail.work && <div className="flex flex-wrap items-center gap-2 border-t pt-3"><span className="text-xs text-muted-foreground">Cambiar estado:</span>{['working', 'blocked', 'submitted', ...(admin ? ['won', 'lost', 'archived'] : [])].map(state => <Button variant="outline" size="sm" key={state} disabled={busy} onClick={() => void perform('state', { state, expectedRevision: detail.work!.revision })}>{STATES[state]}</Button>)}</div>}</section>}
+        {tab === 'tasks' && <section className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Plan de trabajo</h2><Button variant="outline" onClick={() => { setDraft({}); setModal('task'); }}>Crear tarea</Button></div>{!detail.tasks.length && <p className="rounded-xl border p-5 text-sm text-muted-foreground">{latest ? 'Crea la primera tarea o usa «Crear tarea» en los pasos del informe.' : 'Crea la primera tarea. Cuando generes el informe, podrás convertir sus pasos en tareas con un clic.'}</p>}{detail.tasks.map(t => <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{t.title}</p><p className="mt-1 text-xs text-muted-foreground">{date(t.due_at)} · {detail.participants.find(p => p.user_id === t.owner_id)?.name || 'Sin responsable'}</p>{t.evidence && <p className="mt-2 text-sm">{t.evidence}</p>}</div><select aria-label={`Estado de ${t.title}`} value={t.status} disabled={busy} onChange={e => void perform('task', { id: t.id, title: t.title, ownerId: t.owner_id, dueAt: t.due_at, status: e.target.value, evidence: t.evidence })} className="h-10 rounded-md border bg-background px-3 text-sm">{[['pending', 'Pendiente'], ['working', 'En curso'], ['done', 'Realizada'], ['blocked', 'Bloqueada']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>)}</section>}
         {tab === 'contacts' && <OpportunityContacts id={selected} company={item.company_name || item.buyer_name || item.title} domain={item.company_domain} titles={detail.decisionMakerTitles || []} />}
         {tab === 'activity' && <section className="space-y-4"><h2 className="font-semibold">Actividad del equipo</h2><form onSubmit={e => { e.preventDefault(); void perform('activity', { kind: 'note', text: note, dueAt: null }).then(r => { if (r) setNote(''); }); }} className="space-y-2"><Label htmlFor="op-note">Registrar avance o nota</Label><Textarea id="op-note" value={note} onChange={e => setNote(e.target.value)} maxLength={4000} placeholder="Ej.: enviamos las consultas al comprador; esperamos respuesta el 23 de octubre." /><Button disabled={busy || !note.trim()}>Guardar avance</Button></form><ol aria-label="Actividad" className="ml-3.5 space-y-5 border-l border-border/70 pl-6">{detail.activity.map(a => { const who = (detail.members || detail.participants).find(p => p.user_id === a.actor_id)?.name || 'El sistema'; return <li key={a.id} className="relative"><InitialsAvatar name={who} size="sm" className="absolute -left-[38px] top-0 ring-4 ring-background" /><p className="text-sm leading-6">{a.body}</p><p className="text-xs text-muted-foreground">{who} · {date(a.created_at)}</p></li>; })}</ol></section>}
         {tab === 'chat' && <OpportunityChat messages={messages} pending={pendingQuestion} documentCount={detail.documents.length} busy={busy}
@@ -578,7 +634,7 @@ export function OpportunityWorkWorkspace() {
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
     {admin && <CloseReasonDialog target={closing} busy={busy} error={closing ? problem : ''} onConfirm={confirmClose} onCancel={() => setClosing(null)} />}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
-    <Dialog open={modal !== null} onOpenChange={open => { if (!open && !busy) setModal(null); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Empresa del workspace' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
+    <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>
           <WorkspaceCompanyFields draft={draft} field={field} />
@@ -586,17 +642,21 @@ export function OpportunityWorkWorkspace() {
         </>
         : modal === 'criteria' ? <>{([['roles', 'Cargos en avisos de trabajo que revelan una necesidad'], ['keywords', 'Palabras para licitaciones y compras públicas'], ['postQueries', 'Búsquedas de publicaciones en LinkedIn'], ['decisionMakerTitles', 'Cargos de quienes deciden la compra']] as const).map(([key, label]) => <div key={key}><Label htmlFor={`op-criteria-${key}`}>{label}</Label><Textarea id={`op-criteria-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} rows={key === 'postQueries' ? 5 : 4} required={key === 'postQueries'} /></div>)}</>
         : modal === 'assign' ? <>
-          {overview?.groups.length ? <div className="space-y-1.5"><p className="text-sm font-medium">Usar un equipo del workspace · opcional</p><div className="flex flex-wrap gap-2">{overview.groups.map(g => <button key={g.id} type="button" aria-pressed={draft.teamId === g.id} onClick={() => field('teamId', draft.teamId === g.id ? '' : g.id)} className={cn(filterChip(draft.teamId === g.id), 'h-9')}>{g.name}</button>)}</div><p className="text-xs text-muted-foreground">Suma a todas las personas de ese equipo.</p></div> : null}
+          {overview?.groups.length ? <div className="space-y-1.5"><p className="text-sm font-medium">Usar un equipo de la organización · opcional</p><div className="flex flex-wrap gap-2">{overview.groups.map(g => <button key={g.id} type="button" aria-pressed={draft.teamId === g.id} onClick={() => field('teamId', draft.teamId === g.id ? '' : g.id)} className={cn(filterChip(draft.teamId === g.id), 'h-9')}>{g.name}</button>)}</div><p className="text-xs text-muted-foreground">Suma a todas las personas de ese equipo.</p></div> : null}
           <div className="space-y-1.5"><p className="text-sm font-medium">¿Quién trabaja esta oportunidad?</p><p className="text-xs text-muted-foreground">Toca a cada persona; la estrella marca a quien responde por ella.</p>
             <TeamPicker members={overview?.members || []} selected={draft.participantIds || []} responsibleId={draft.responsibleId || ''} onChange={next => { field('participantIds', next.selected); field('responsibleId', next.responsibleId); }} /></div>
           <TeamOffice people={(overview?.members || []).filter(m => (draft.participantIds || []).includes(m.user_id))} responsibleId={draft.responsibleId} empty={draft.teamId ? 'Se sumará el equipo elegido.' : 'Elige a las personas y aquí verás a tu equipo.'} />
-          <Label htmlFor="op-objective">Objetivo · opcional</Label><Input id="op-objective" value={draft.objective || ''} onChange={e => field('objective', e.target.value)} placeholder="Ej.: presentar la oferta antes del cierre" maxLength={500} />
+          <div className="space-y-2"><Label htmlFor="op-objective">Objetivo · opcional</Label><Input id="op-objective" value={draft.objective || ''} onChange={e => field('objective', e.target.value)} placeholder="Ej.: presentar la oferta antes del cierre" maxLength={500} /></div>
           <div className="space-y-1.5"><p className="text-sm font-medium">Próxima acción · opcional</p><div className="flex flex-wrap items-center gap-2">{QUICK_DUE.map(([label, days]) => <button key={label} type="button" aria-pressed={draft.dueAt === dueIn(days)} onClick={() => field('dueAt', dueIn(days))} className={cn(filterChip(draft.dueAt === dueIn(days)), 'h-9')}>{label}</button>)}<Input id="op-due" type="datetime-local" aria-label="Otra fecha y hora" className="h-9 w-auto" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /></div></div>
         </>
-        : modal === 'task' ? <><Label htmlFor="op-task-title">Acción</Label><Input id="op-task-title" required value={draft.title || ''} onChange={e => field('title', e.target.value)} /><Label htmlFor="op-task-owner">Responsable</Label><select id="op-task-owner" value={draft.ownerId || ''} onChange={e => field('ownerId', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">Sin asignar</option>{detail?.participants.map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select><Label htmlFor="op-task-due">Fecha · hora local</Label><Input id="op-task-due" type="datetime-local" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /><Label htmlFor="op-task-evidence">Evidencia o resultado esperado</Label><Textarea id="op-task-evidence" value={draft.evidence || ''} onChange={e => field('evidence', e.target.value)} /></>
+        : modal === 'task' ? <>
+          <div className="space-y-2"><Label htmlFor="op-task-title">Acción</Label><Input id="op-task-title" required value={draft.title || ''} onChange={e => field('title', e.target.value)} placeholder="Ej.: pedir el certificado de antecedentes laborales" /></div>
+          <div className="space-y-2"><Label htmlFor="op-task-owner">Responsable</Label><select id="op-task-owner" value={draft.ownerId || ''} onChange={e => field('ownerId', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="">Sin asignar</option>{detail?.participants.map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select></div>
+          <div className="space-y-1.5"><p className="text-sm font-medium">Para cuándo · opcional</p><div className="flex flex-wrap items-center gap-2">{QUICK_DUE.map(([label, days]) => <button key={label} type="button" aria-pressed={draft.dueAt === dueIn(days)} onClick={() => field('dueAt', dueIn(days))} className={cn(filterChip(draft.dueAt === dueIn(days)), 'h-9')}>{label}</button>)}<Input id="op-task-due" type="datetime-local" aria-label="Otra fecha y hora" className="h-9 w-auto" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /></div></div>
+          <div className="space-y-2"><Label htmlFor="op-task-evidence">Evidencia o resultado esperado · opcional</Label><Textarea id="op-task-evidence" value={draft.evidence || ''} onChange={e => field('evidence', e.target.value)} /></div></>
         : <>
           <div role="group" aria-label="Cómo cargarla" className="flex w-full rounded-xl bg-muted p-1 sm:w-fit">{([['upload', 'Subir documento'], ['write', 'Escribir los datos']] as const).map(([key, label]) =>
-            <button key={key} type="button" aria-pressed={createMode === key} disabled={prefill.status === 'reading'} onClick={() => setCreateMode(key)} className={cn('flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:flex-none', createMode === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>
+            <button key={key} type="button" aria-pressed={createMode === key} disabled={prefill.status === 'reading'} onClick={() => setCreateMode(key)} className={cn('flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:flex-none', createMode === key ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>)}</div>
           {createMode === 'upload' ? <div className="space-y-3">
             <label htmlFor="op-prefill-file" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const dropped = Array.from(e.dataTransfer.files || []); if (dropped.length && prefill.status !== 'reading') void readDocuments(dropped); }}
               className={cn('flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-10 text-center transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-muted/40', prefill.status === 'reading' && 'cursor-wait')}>
@@ -607,20 +667,26 @@ export function OpportunityWorkWorkspace() {
               <input id="op-prefill-file" type="file" multiple className="sr-only" accept={ACCEPTED_FILES} disabled={prefill.status === 'reading'} onChange={e => { const chosen = Array.from(e.target.files || []); e.target.value = ''; void readDocuments(chosen); }} />
             </label>
             {prefill.status === 'reading' ? <p role="status" className="sr-only">Leyendo el documento</p> : null}
-            {prefill.status === 'error' ? <p role="alert" className="text-sm text-destructive">{prefill.message}</p> : null}
+            {prefill.status === 'error' ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm"><p>{prefill.message}</p>
+              <Button type="button" size="sm" variant="outline" onClick={() => setCreateMode('write')}>Escribir los datos</Button></div> : null}
             <p className="text-xs text-muted-foreground">PDF, Word, Excel, texto, fotos o un ZIP, hasta 20 MB cada documento. Todos quedan guardados con la oportunidad.</p>
           </div> : <>
             {prefill.status === 'done' ? <div role="status" className="flex gap-2 rounded-xl bg-primary/5 px-3 py-2.5 text-sm leading-6"><Sparkles className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><div className="space-y-1"><p>{(prefill.read?.length ?? 0) > 1 ? `Completamos el formulario leyendo ${prefill.read!.length} documentos${(prefill.kept ?? 0) > prefill.read!.length ? ` (los ${prefill.kept} quedan para subir con la oportunidad)` : ''}.` : `Completamos el formulario con «${prefill.name}».`} Revisa los datos antes de guardar.{prefill.missing?.length ? ` No encontramos ${listEs(prefill.missing)}.` : ''}{prefill.partial ? ((prefill.read?.length ?? 0) > 1 ? ' Algunos documentos son largos: leímos sus partes más importantes.' : ' El documento es largo: leímos su primera parte.') : ''}</p>{prefill.notes?.length ? <p className="text-xs text-muted-foreground">{prefill.notes.join(' ')}</p> : null}</div></div> : null}
             {[['title', 'Nombre de la oportunidad'], ['company', 'Cliente o entidad convocante'], ['url', 'Enlace · opcional']].map(([key, label]) => <div key={key} className="space-y-2"><Label htmlFor={`op-new-${key}`}>{label}</Label><Input id={`op-new-${key}`} type={key === 'url' ? 'url' : 'text'} required={key !== 'url'} value={draft[key] || ''} onChange={e => field(key, e.target.value)} /></div>)}
             <div className="space-y-2"><Label htmlFor="op-kind">Tipo</Label><select id="op-kind" value={draft.kind || 'private_tender'} onChange={e => field('kind', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="private_tender">Licitación privada</option><option value="proposal">Solicitud de propuesta</option><option value="quote">Solicitud de cotización</option><option value="commercial">Oportunidad comercial</option></select></div>
             <div className="space-y-2"><Label htmlFor="op-invitation">Invitación o contexto recibido</Label><Textarea id="op-invitation" rows={8} className="resize-y leading-6" value={draft.description || ''} onChange={e => field('description', e.target.value)} maxLength={40000} placeholder="Pega aquí el correo o mensaje con la invitación." /><p className="text-xs text-muted-foreground">Pega también el correo de la invitación: suele decir por qué plataforma se postula (Coupa, Ariba, WEX…) y qué hay que ingresar en ella.</p></div>
-            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem]"><div className="space-y-2"><Label htmlFor="op-new-deadline">Cierre · hora local, opcional</Label><Input id="op-new-deadline" type="datetime-local" value={draft.deadline || ''} onChange={e => field('deadline', e.target.value)} /></div><div className="space-y-2"><Label htmlFor="op-amount">Monto · opcional</Label><Input id="op-amount" type="number" min={0} value={draft.amount || ''} onChange={e => field('amount', e.target.value)} /></div><div className="space-y-2"><Label htmlFor="op-currency">Moneda</Label><Input id="op-currency" value={draft.currency || 'CLP'} onChange={e => field('currency', e.target.value)} /></div></div>
-            <div className="space-y-2"><Label htmlFor="op-new-files">Bases y anexos</Label><Input id="op-new-files" type="file" multiple accept={ACCEPTED_FILES} onChange={e => { const chosen = Array.from(e.target.files || []); e.target.value = ''; void addFiles(chosen); }} />
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem]"><div className="space-y-2"><Label htmlFor="op-new-deadline">Cierre · hora local, opcional</Label><Input id="op-new-deadline" type="datetime-local" aria-describedby="op-new-deadline-hint" value={draft.deadline || ''} onChange={e => field('deadline', e.target.value)} /><p id="op-new-deadline-hint" className="text-xs text-muted-foreground">Sin fecha no entra en los avisos de cierre.</p></div><div className="space-y-2"><Label htmlFor="op-amount">Monto · opcional</Label><Input id="op-amount" type="number" min={0} value={draft.amount || ''} onChange={e => field('amount', e.target.value)} /></div><div className="space-y-2"><Label htmlFor="op-currency">Moneda</Label><select id="op-currency" value={draft.currency || 'CLP'} onChange={e => field('currency', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{(CURRENCIES.includes(draft.currency || 'CLP') ? CURRENCIES : [draft.currency, ...CURRENCIES]).map(code => <option key={code} value={code}>{code}</option>)}</select></div></div>
+            <div className="space-y-2"><p className="text-sm font-medium" id="op-new-files-label">Bases y anexos</p>
+              <label htmlFor="op-new-files" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const dropped = Array.from(e.dataTransfer.files || []); if (dropped.length) void addFiles(dropped); }}
+                className="flex cursor-pointer flex-col items-center gap-1 rounded-2xl border border-dashed px-4 py-5 text-center transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-muted/40">
+                <FileUp className="h-5 w-5 text-primary" aria-hidden="true" /><span className="text-sm font-medium">Arrastra aquí las bases y anexos</span><span className="text-xs text-muted-foreground">o haz clic para elegirlos</span>
+                <input id="op-new-files" type="file" multiple accept={ACCEPTED_FILES} aria-labelledby="op-new-files-label" className="sr-only" onChange={e => { const chosen = Array.from(e.target.files || []); e.target.value = ''; void addFiles(chosen); }} />
+              </label>
               {files.length ? <ul className="flex flex-wrap gap-2" aria-label="Documentos que se subirán">{files.map(file => <li key={file.name} className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted py-1 pl-3 pr-1 text-xs"><span className="truncate">{file.name}</span><button type="button" className="rounded-full p-1 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Quitar ${file.name}`} onClick={() => setFiles(current => current.filter(item => item !== file))}><X className="h-3 w-3" aria-hidden="true" /></button></li>)}</ul> : null}
               <p className="text-xs text-muted-foreground">PDF, Word, Excel, fotos o un ZIP, hasta 20 MB cada documento. También puedes subirlos después en Documentos.</p></div>
           </>}
         </>}
-        {problem && modal && <p role="alert" className="text-sm text-destructive">{problem}</p>}<div className="sticky bottom-0 -mx-6 -mb-6 flex justify-end gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="outline" type="button" disabled={busy} onClick={() => setModal(null)}>Cancelar</Button>{modal === 'create' && createMode === 'upload' ? null : <Button type="submit" disabled={busy || prefill.status === 'reading'}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{modal === 'context' ? 'Confirmar oferta' : modal === 'criteria' ? 'Guardar' : modal === 'assign' ? 'Asignar y notificar' : 'Guardar'}</Button>}</div>
+        {problem && modal && <p role="alert" className="text-sm text-destructive">{problem}</p>}<div className="sticky bottom-0 -mx-6 -mb-6 flex justify-end gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="outline" type="button" disabled={busy} onClick={() => void closeModal()}>Cancelar</Button>{modal === 'create' && createMode === 'upload' ? null : <Button type="submit" disabled={busy || prefill.status === 'reading'}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{uploading ? `Subiendo ${Math.min(uploading.done + 1, uploading.total)} de ${uploading.total}…` : modal === 'context' ? 'Confirmar oferta' : modal === 'criteria' ? 'Guardar' : modal === 'assign' ? 'Asignar y notificar' : 'Guardar'}</Button>}</div>
       </form>
     </DialogContent></Dialog>
   </div>;

@@ -112,11 +112,12 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
         {suggestions.length ? `La IA revisó ${suggestions.length} ${suggestions.length === 1 ? 'oportunidad' : 'oportunidades'} en curso: ${moves ? `sugiere mover ${moves}` : 'ninguna necesita cambiar de etapa'} y deja una próxima acción para cada una.` : 'No hay oportunidades en curso para revisar.'}
       </p>}
       <PipelineRoute stops={stops} selected={selected} onSelect={select} />
-      {closed.some(s => s.count) ? <div role="group" aria-label="Fuera del embudo" className="flex flex-wrap items-center justify-center gap-1.5">
-        {closed.filter(s => s.count).map(s => <button key={s.id} type="button" aria-pressed={selected === s.id} onClick={() => select(s.id)}
-          className={cn('rounded-full px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            selected === s.id ? 'bg-foreground font-medium text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>
-          {s.label} <span className="tabular-nums">{s.count}</span></button>)}
+      {closed.some(s => s.count) ? <div role="group" aria-labelledby="pipeline-closed" className="flex flex-wrap items-center justify-center gap-2">
+        <span id="pipeline-closed" className="text-xs text-muted-foreground">Fuera del embudo</span>
+        {closed.filter(s => s.count).map(s => <button key={s.id} type="button" aria-pressed={selected === s.id} title={s.hint} onClick={() => select(s.id)}
+          className={cn('rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            selected === s.id ? 'border-foreground bg-foreground text-background' : 'bg-background text-foreground/80 hover:bg-muted hover:text-foreground')}>
+          {s.label} <span className="tabular-nums opacity-70">{s.count}</span></button>)}
       </div> : null}
 
       <div className={cn('space-y-3 transition-opacity', refreshing && 'opacity-60')} aria-live="polite" aria-busy={refreshing || loadingMore === stage.id}>
@@ -138,7 +139,7 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
             <p>{filtered ? 'Ninguna oportunidad de esta etapa coincide con la búsqueda o la fuente elegida.' : 'No hay oportunidades en esta etapa.'}</p>
             {filtered && onClearFilters ? <Button type="button" variant="link" size="sm" className="mt-1 h-auto p-0" onClick={onClearFilters}>Quitar filtros</Button> : null}
           </div>) : (
-          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <ul className={cn('grid grid-cols-1 gap-3', shown.length > 1 && 'lg:grid-cols-2')}>
             {shown.map(({ item, record, days }, index) => {
               const owner = members.find(m => m.user_id === record?.responsible_id);
               const tip = advice.get(item.id);

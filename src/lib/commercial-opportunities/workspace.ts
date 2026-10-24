@@ -3,7 +3,10 @@ import { z } from 'zod';
 /** Separate rollout from the existing opportunity and research pipelines. */
 export const opportunityWorkspaceEnabled = (env = process.env) => env.OPPORTUNITIES_WORKSPACE_ENABLED === 'true';
 export const opportunityAutomationEnabled = (env = process.env) => opportunityWorkspaceEnabled(env) && env.OPPORTUNITIES_AUTOMATION_ENABLED === 'true';
+/** The workspace's monthly budget for AI and searches: the database's reservation (opportunity_budget_reserve) stops at this, so it is the one to show. */
 export const OPPORTUNITY_MONTHLY_MICRO_USD = 20_000_000;
+/** The jobs of the daily search: the criteria first, then each source (workspace-jobs.ts). */
+export const DISCOVERY_JOB_KINDS = ['criteria', 'tenders', 'hiring', 'posts'] as const;
 export const OPPORTUNITY_BUCKET = 'opportunity-documents';
 export function opportunityLocalClock(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23' }).formatToParts(now);
@@ -48,6 +51,8 @@ export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkIt
   notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null }>;
   members: WorkspaceMember[]; groups: Array<{ id: string; name: string }>; context: Record<string, unknown> | null;
   budget: { spent: number; reserved: number; cap: number }; sourceStatus: Record<string, boolean>;
+  /** The sources searching right now (DISCOVERY_JOB_KINDS queued or running); admins only. */
+  searching?: string[];
   /** The company's documents lapsed or about to (company-documents.ts); admins only. */
   documentAlerts?: Array<{ id: string; label: string; expiresAt: string; status: 'vencido' | 'por_vencer'; text: string }> };
 
