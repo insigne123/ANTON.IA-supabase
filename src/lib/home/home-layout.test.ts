@@ -33,7 +33,7 @@ test('what is empty today takes one line, not a card: nothing waiting, no activi
   assert.match(today, /data\.queue\.length === 0 \? \(\s*<p className="flex items-center gap-2[^"]*">\s*<CheckCircle2/);
   assert.match(today, /Nada pendiente por ahora\./);
   assert.match(summary, /const quiet=Boolean\(summary\)&&METRICS\.every\(metric=>summary!\[metric\.key\]===0\)&&!summary!\.activity\.length/);
-  assert.match(summary, /if\(quiet\)return <section aria-labelledby="summary-title">[\s\S]*Hoy aún no hay actividad en este workspace\./);
+  assert.match(summary, /if\(quiet\)return <section aria-labelledby="summary-title">[\s\S]*Hoy aún no hay actividad en esta organización\./);
   // The chart (with its own empty text) is only drawn with activity.
   assert.ok(summary.indexOf('if(quiet)') < summary.indexOf('<PerformanceChart'));
 });

@@ -107,7 +107,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     faqs: [
       { q: '¿Cowork envía correos sin preguntarme?', a: 'No. Cada envío, campaña, invitación de LinkedIn o búsqueda de correo aparece como una tarjeta que apruebas tú.' },
       { q: '¿Cuánto puedo usarlo?', a: 'Hay un uso diario del asistente por persona. Si llegas al límite, Cowork te lo dice: se renueva a medianoche, hora de Chile, y lo hecho queda guardado.' },
-      { q: '¿Quién ve mis conversaciones?', a: 'Solo tú. Cowork trabaja con los contactos y datos que puedes ver en el workspace activo.' },
+      { q: '¿Quién ve mis conversaciones?', a: 'Solo tú. Cowork trabaja con los contactos y datos que puedes ver en la organización activa.' },
     ],
     related: ['hoy', 'buscar', 'campanas'],
   },
