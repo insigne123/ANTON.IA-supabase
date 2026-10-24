@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import Link from 'next/link';
 import { BellRing, ChevronRight, Loader2, Mail, RefreshCw, Target, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useSlow } from '@/hooks/use-slow';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -43,7 +44,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * `embedded`: inside «Hoy» («Tu semana»), whose header names the page; here only the week and its range.
  */
 export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) {
-  const { organizationId } = useAuth();
+  const { organizationId, user, loading: authLoading } = useAuth();
   const [week, setWeek] = useState<'current' | 'previous'>('current');
   const [role, setRole] = useState<ReportRole>(() => fromUrl('informe') === 'equipo' ? 'team' : 'personal');
   const [goalsOpen, setGoalsOpen] = useState(false);
@@ -73,6 +74,12 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
     finally { setLoading(false); }
   }, [call, organizationId, week]);
   useEffect(() => { void load(); }, [load]);
+  // A read that hangs, or one that cannot start without the organization, says so after a while (APP-02). Retrying without an
+  // organization reloads the page, which reads it again.
+  const slow = useSlow(loading && !data && !error);
+  const retry = () => { if (organizationId) void load(); else window.location.reload(); };
+  // Signed in but without an organization (its read failed): the report cannot load, and that is said at once.
+  const noOrganization = !authLoading && Boolean(user) && !organizationId;
   // The link from «Hoy» opens the editor once the report says the person is an admin.
   useEffect(() => { if (goalsAsked && data) { setGoalsAsked(false); if (data.members) setGoalsOpen(true); } }, [goalsAsked, data]);
 
@@ -126,7 +133,13 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         className={cn('rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', shown === item.id ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted')}>{item.label}</button>)}
     </div> : null}
 
-    {loading && !report ? <p role="status" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Preparando tu informe…</p> : null}
+    {noOrganization ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
+      <p role="alert" className="text-sm text-destructive">No pudimos cargar tu organización, así que tu informe no se puede preparar.</p><Button variant="outline" size="sm" onClick={retry}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>
+    </CardContent></Card> : null}
+    {loading && !report && !slow && !noOrganization ? <p role="status" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Preparando tu informe…</p> : null}
+    {slow && !noOrganization ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
+      <p role="status" className="text-sm text-muted-foreground">Tu informe está tardando más de lo normal.</p><Button variant="outline" size="sm" onClick={retry}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>
+    </CardContent></Card> : null}
     {error ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
       <p role="alert" className="text-sm text-destructive">{error}</p><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>
     </CardContent></Card> : null}

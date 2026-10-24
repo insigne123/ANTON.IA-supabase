@@ -80,6 +80,8 @@ test('the ones they work, the most pressing first, each said once', () => {
   assert.deepEqual(today.reports.lines.map(line => [line.id, line.detail]), [['later', 'El informe está listo']]);
   assert.equal(opportunitiesToday(input({ reports: [{ id: 'x', title: 'Aseo', offer: true }] })).reports.lines[0].detail, 'El borrador de oferta está listo');
   assert.equal(today.reports.total, 1);
+  // The number in the menu (APP-23): what waits, the report ready, and the one of theirs that is urgent; not the calm ones.
+  assert.equal(today.attention, today.waiting.total + today.closing.total + 1 + 1);
   const quiet = opportunitiesToday(input({ mine: [{ id: 'none', title: 'Guardias Arica', kind: 'tender', deadlineAt: null, nextActionAt: ago(0), state: 'assigned' }] }));
   assert.equal(quiet.mine.lines[0].detail, 'Próxima acción hoy');
   assert.equal(opportunitiesToday(input({ mine: [{ id: 'none', title: '', kind: 'tender', deadlineAt: null, nextActionAt: null, state: 'working' }] })).mine.lines[0].title, 'Oportunidad');
@@ -88,5 +90,6 @@ test('the ones they work, the most pressing first, each said once', () => {
 test('with nothing to act on, the card stays out of «Hoy»', () => {
   const today = opportunitiesToday(input({ waiting: waiting.filter(item => item.actorId !== DIEGO) }));
   assert.equal(today.empty, true);
+  assert.equal(today.attention, 0);
   assert.deepEqual([today.waiting.total, today.mine.total, today.reports.total, today.closing.total], [0, 0, 0, 0]);
 });
