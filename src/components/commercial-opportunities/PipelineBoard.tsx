@@ -11,6 +11,7 @@ import { PRIORITY_SORTS, comparePriority, type PrioritySort } from '@/lib/commer
 import { progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
 import { fallbackLine, opportunityRegion, opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import { humanDate } from '@/lib/commercial-opportunities/report-view';
+import { ruleFor, ruleGroups, type AssignmentRule, type RuleGroup } from '@/lib/commercial-opportunities/admin-settings';
 import { PipelineRoute, type PipelineStop } from './PipelineRoute';
 import { PriorityStars } from './PriorityStars';
 import { ProgressMarks } from './ProgressMarks';
@@ -67,7 +68,7 @@ function ClosingThisWeek({ items, onOpen }: { items: PipelineWeekItem[]; onOpen:
  * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
 export function PipelineBoard({ items, work, totals, limits, members, busy, suggestions, reviewing, summariesWaiting = false, filtered = false, loadingMore = null, refreshing = false,
-  sort = 'priority', onSort, progress, opened, week = [], onReview, onMove, onOpen, onAssign, onDiscard, onReopen, onMore, onClearFilters }: {
+  sort = 'priority', onSort, progress, opened, week = [], rules, onRules, onAssignByRules, onReview, onMove, onOpen, onAssign, onDiscard, onReopen, onMore, onClearFilters }: {
   items: WorkItem[]; work: WorkRecord[]; members: Array<{ user_id: string; name: string }>; busy: boolean;
   /** «Cierran esta semana»: what closes within seven days across the stages a team can still act on (workspace-pipeline.ts). */
   week?: PipelineWeekItem[];
@@ -92,6 +93,8 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   onDiscard?: (item: WorkItem) => void;
   /** What was put aside comes back to the ones nobody works yet. */
   onReopen?: (item: WorkItem, revision: number) => void;
+  /** The assignment rules of the workspace (OPP-06): each recommended card says who a rule gives it to, and «Asignarlas» assigns them after a look. */
+  rules?: readonly AssignmentRule[]; onRules?: () => void; onAssignByRules?: (groups: RuleGroup[]) => void;
 }) {
   const now = Date.now();
   // «Abierta hace 1 min» and «Informe listo · hace 2 h» keep counting while the board stays open.
@@ -128,6 +131,12 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   // What the AI reviews (runPipelineReview): the opportunities a team already works. Without any, there is nothing to ask.
   const inProgress = work.filter(w => ['assigned', 'working', 'blocked', 'submitted'].includes(w.state)).length;
   const moves = suggestions?.filter(s => s.move).length ?? 0;
+  // Who a rule gives each recommended one nobody works yet to: on its card, and all of them at once with «Asignarlas».
+  const memberIds = useMemo(() => new Set(members.map(member => member.user_id)), [members]);
+  const unworked = placed.filter(p => p.stage === 'recommended' && (!p.record || p.record.state === 'unassigned')).map(p => p.item);
+  const groups = rules?.length ? ruleGroups(unworked, rules, members) : [];
+  const ruled = groups.reduce((sum, group) => sum + group.ids.length, 0);
+  const firstName = (userId: string) => (members.find(member => member.user_id === userId)?.name || 'Integrante').split(' ')[0];
 
   return (
     <section aria-labelledby="pipeline-title" className="space-y-5 rounded-3xl border bg-gradient-to-b from-muted/40 to-background p-4 sm:p-6">
@@ -160,6 +169,15 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
           <h3 className="text-base font-semibold">{stage.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{count}</span></h3>
           <p className="text-xs text-muted-foreground">{stage.hint}{count > shown.length && shown.length ? ` ${shown.length === 1 ? 'Se muestra 1' : `Se muestran ${shown.length}`} de ${count}, ${sort === 'deadline' ? 'las que cierran antes' : 'las de mayor prioridad'}.` : ''}</p>
         </div>
+        {stage.id === 'recommended' && onRules ? <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+          {ruled ? <>
+            <span>{ruled === 1 ? '1 calza con tus reglas' : `${ruled} calzan con tus reglas`}</span>
+            <Button type="button" size="sm" variant="secondary" className="h-8" disabled={busy || !onAssignByRules} onClick={() => onAssignByRules?.(groups)}>
+              <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{ruled === 1 ? 'Asignarla' : 'Asignarlas'}</Button>
+          </> : rules?.length ? <span className="text-muted-foreground">Ninguna de las que se muestran calza con tus reglas.</span>
+            : <span className="text-muted-foreground">Define quién trabaja cada rubro y asígnalas en un paso.</span>}
+          <Button type="button" size="sm" variant="link" className="h-8 px-1" onClick={onRules}>{rules?.length ? 'Reglas' : 'Reglas de asignación'}</Button>
+        </p> : null}
         {shown.length > 1 && stage.id !== 'excluded' ? <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <p className="text-xs text-muted-foreground">Las estrellas dicen qué tan bien calza cada una con tu oferta.</p>
           <div role="group" aria-label="Ordenar las oportunidades" className="flex items-center gap-0.5 rounded-full border p-0.5">
@@ -185,6 +203,7 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
               const amount = amountLabel(item);
               const region = opportunityRegion(item);
               const deadline = humanDate(item.deadline_at, true);
+              const ruledTo = rules?.length && (!record || record.state === 'unassigned') ? ruleFor(item, rules, memberIds) : null;
               return (
                 <li key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border bg-background p-4 shadow-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
                   style={{ animationDelay: `${Math.min(index, 8) * 50}ms`, animationFillMode: 'both' }}>
@@ -228,8 +247,8 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
                           <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Reabrir</Button>
                       : (!record || record.state === 'unassigned') && item.data?.evaluation !== 'excluded' && onAssign
                         ? <>
-                          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => onAssign(item)} title="Elige quién la trabaja: pasa a «Asignadas» y avisamos a las personas.">
-                            <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Asignar</Button>
+                          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => onAssign(item)} title={ruledTo ? 'Tu regla la da a esta persona: revisa y confirma.' : 'Elige quién la trabaja: pasa a «Asignadas» y avisamos a las personas.'}>
+                            <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{ruledTo ? `Asignar a ${firstName(ruledTo.userId)}…` : 'Asignar'}</Button>
                           {/* On a phone it goes below, so «Asignar» and «Abrir» share the first row. */}
                           {onDiscard ? <span className="order-last basis-full sm:order-none sm:basis-auto">
                             <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => onDiscard(item)} title="Pasa a «Archivadas» con el motivo; la IA lo tendrá en cuenta.">

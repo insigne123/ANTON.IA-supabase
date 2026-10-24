@@ -3,11 +3,14 @@
 // 3 and 6 are assigned to Diego (6 closes tomorrow), 9 is recommended and nobody has it, 10 is submitted and 11 won.
 import { standsOut } from '../checks.mjs';
 const opp = n => `00000000-0000-4000-8000-${String(9510 + n).padStart(12, '0')}`;
+/** Diego, the member of the fixtures (ids.mjs). */
+const DIEGO = '00000000-0000-4000-8000-000000000012';
 const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
 const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'mark', 'decision', 'decision_reply'] };
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
 const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
 const CRITERIA = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['criteria'] };
+const SETTINGS = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['admin_settings', 'bulk', 'notification'] };
 
 /**
  * The button of the card of an opportunity, found by its title: the nearest block around the title that has that button is the card.
@@ -18,6 +21,8 @@ const inCard = (c, title, button) => c.page.getByText(title, { exact: true }).fi
   .locator(`xpath=ancestor::*[.//button[contains(normalize-space(.), "${button}")]][1]`).getByRole('button', { name: new RegExp(button) }).first();
 const open = async (c, title, button) => { await c.clickOn(inCard(c, title, button)); };
 const workOf = (c, n) => c.table('opportunity_work').find(row => row.opportunity_id === opp(n));
+/** Whether a text shows within a few seconds: a check on something that arrives with the next reading of the page. */
+const shows = (c, text) => c.page.getByText(text).filter({ visible: true }).first().waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
 const stateOf = (c, n) => workOf(c, n)?.state ?? 'unassigned';
 /** Whether «Cómo postular» in the header is the filled, main action of the page (the first button of that name: the tab comes after it). */
 const applyIsMain = c => c.page.getByRole('button', { name: 'Cómo postular' }).first().evaluate(node => /\bbg-primary\b/.test(node.className)).catch(() => null);
@@ -62,6 +67,49 @@ export default () => [
         c.check('el monto máximo quedó guardado', search.tenders?.maxAmount === 200_000_000, `máximo: ${search.tenders?.maxAmount}`);
         c.check('lo que ya estaba sigue igual', search.tenders?.minAmount === 2_000_000 && search.sources?.hiring === false);
       } },
+    ] },
+  { id: 'admin-reglas', persona: 'owner', title: 'Administrador: una regla de asignación y «Asignarla» en un paso', goal: 'Que las compras desde $5 M vayan a Diego sin elegirlo cada vez.', passWrites: [SETTINGS],
+    steps: [
+      { say: 'Abro las Recomendadas del embudo', do: async c => { await c.go('/opportunities'); await c.click({ text: 'Recomendadas' }); await c.see('Define quién trabaja cada rubro'); } },
+      { say: 'Abro «Reglas de asignación»', do: async c => { await c.click('Reglas de asignación'); await c.seeRole('dialog', /Reglas de asignación/); } },
+      { say: 'Desde $5.000.000, para Diego, y guardo', do: async c => {
+        await c.fill('Desde (CLP) · opcional', '5.000.000');
+        const person = c.page.getByRole('dialog').getByLabel('Para');
+        c.check('cada persona dice cuánto trabaja ya', await person.evaluate(node => [...node.options].some(option => / en curso$/.test(option.text))));
+        await person.selectOption(DIEGO);
+        await c.click({ role: 'button', name: 'Guardar' }); await c.see('Reglas guardadas');
+        const rules = c.table('opportunity_company_context')[0]?.admin_settings?.rules || [];
+        c.check('la regla quedó guardada', rules.length === 1 && rules[0].minAmount === 5_000_000 && rules[0].category === null, JSON.stringify(rules));
+      } },
+      { say: 'Pulso «Asignarla» y confirmo', do: async c => {
+        await c.see('1 calza con tus reglas'); c.check('la tarjeta dice a quién va', await shows(c, 'Asignar a Diego…'));
+        await c.click({ role: 'button', name: 'Asignarla' }); await c.seeRole('dialog', /Asignar 1 según tus reglas/);
+        await c.click({ role: 'button', name: 'Asignar y avisar' }); await c.see('Les avisamos por correo');
+        const work = workOf(c, 9);
+        c.check('quedó asignada a Diego como responsable', work?.state === 'assigned' && work?.responsible_id === DIEGO, `estado: ${work?.state}, responsable: ${work?.responsible_id}`);
+      } },
+    ] },
+  { id: 'admin-busqueda-guardada', persona: 'owner', title: 'Administrador: guardar una búsqueda de la Lista y que avise de las nuevas', goal: 'Enterarse en el correo de la mañana de las licitaciones nuevas de «antecedentes».', passWrites: [SETTINGS],
+    steps: [
+      { say: 'Busco «antecedentes» en la Lista', do: async c => { await c.go('/opportunities?vista=lista&etapa=all&q=antecedentes'); await c.see('Guardar esta búsqueda'); } },
+      { say: 'Guardo la búsqueda', do: async c => {
+        await c.click('Guardar esta búsqueda'); await c.see('Te avisaremos en el correo de la mañana');
+        const searches = c.table('opportunity_company_context')[0]?.admin_settings?.searches || [];
+        c.check('quedó guardada con aviso para mí', searches.length === 1 && searches[0].query === 'antecedentes' && searches[0].notify.length === 1, JSON.stringify(searches));
+        c.check('se ve como guardada', await shows(c, 'Te avisamos de las nuevas'));
+      } },
+      { say: 'Ya no quiero el aviso', do: async c => {
+        await c.click('Te avisamos de las nuevas'); await c.see('Ya no te avisamos de esta búsqueda');
+        c.check('el aviso quedó apagado', (c.table('opportunity_company_context')[0]?.admin_settings?.searches?.[0]?.notify || ['x']).length === 0);
+      } },
+    ] },
+  { id: 'admin-preparar-empresa', persona: 'owner', title: 'Administrador: «Prepara tu empresa» lleva a subir los documentos', goal: 'Saber qué falta para postular bien y llegar a donde se sube.',
+    steps: [
+      { say: 'Abro Oportunidades y leo «Prepara tu empresa»', do: async c => {
+        await c.go('/opportunities'); await c.see('Prepara tu empresa');
+        c.check('dice cuántos documentos faltan', await shows(c, /0 de 5\. Falta: Certificado F30,/));
+      } },
+      { say: 'Pulso «Subir documentos»', do: async c => { await c.click('Subir documentos'); await c.see('Documentos de la empresa'); } },
     ] },
   { id: 'admin-varias', persona: 'owner', title: 'Administrador: asignar dos recomendadas de una vez desde la Lista', goal: 'Darle a Diego las dos empresas que contratan, en un paso.', passWrites: [BULK],
     steps: [

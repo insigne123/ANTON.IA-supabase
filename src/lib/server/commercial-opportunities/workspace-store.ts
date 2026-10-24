@@ -46,20 +46,34 @@ export function opportunityDb<T>(result: { data: T; error: { code?: string; mess
   return result.data;
 }
 const COLUMNS = 'id,kind,title,company_name,buyer_name,company_domain,company_linkedin_url,url,score,reasons,deadline_at,amount,currency,data,updated_at';
-export async function workspaceMembers(client: SupabaseClient, scope: WorkScope) {
+export async function workspaceMembers(client: SupabaseClient, scope: WorkScope, options: { load?: boolean } = {}) {
   const rows = opportunityDb(await client.from('organization_members').select('user_id,role').eq('organization_id', scope.organizationId).limit(1000)) || [];
   if (!rows.length) return [];
-  const profiles = opportunityDb(await client.from('profiles').select('id,full_name,email').in('id', rows.map(r => r.user_id))) || [];
+  const [profiles, open] = await Promise.all([
+    client.from('profiles').select('id,full_name,email').in('id', rows.map(r => r.user_id)).then(result => opportunityDb(result) || []),
+    options.load ? openLoad(client, scope).catch(() => null) : null,
+  ]);
   // Whoever has no name yet (the app asks for it when they open it) is listed by their email, never as a stranger.
-  const names = new Map(profiles.map(p => [p.id, String(p.full_name || '').trim() || String(p.email || '').trim()]));
-  return rows.map(row => ({ user_id: row.user_id, role: row.role, name: names.get(row.user_id) || 'Integrante' }));
+  const names = new Map(profiles.map((p: any) => [p.id, String(p.full_name || '').trim() || String(p.email || '').trim()]));
+  return rows.map(row => ({ user_id: row.user_id, role: row.role, name: names.get(row.user_id) || 'Integrante', ...(open ? { open: open.get(row.user_id) ?? 0 } : {}) }));
+}
+/** How many opportunities in play each person works (assigned, in preparation or blocked): «Asignar» shows it beside each name (OPP-06). */
+async function openLoad(client: SupabaseClient, scope: WorkScope) {
+  const [work, participants] = await Promise.all([
+    client.from('opportunity_work').select('opportunity_id').eq('organization_id', scope.organizationId).in('state', ['assigned', 'working', 'blocked']).limit(5000).then(result => opportunityDb(result) || []),
+    client.from('opportunity_participants').select('opportunity_id,user_id').eq('organization_id', scope.organizationId).limit(10000).then(result => opportunityDb(result) || []),
+  ]);
+  const inPlay = new Set((work as any[]).map(row => String(row.opportunity_id)));
+  const load = new Map<string, number>();
+  for (const row of participants as any[]) if (inPlay.has(String(row.opportunity_id))) load.set(String(row.user_id), (load.get(String(row.user_id)) ?? 0) + 1);
+  return load;
 }
 export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkScope, options: WorkspacePageOptions = {}): Promise<WorkspaceOverview> {
   const admin = isOpportunityAdmin(scope.role);
   const period = new Date().toISOString().slice(0, 7) + '-01';
   // The reads do not depend on each other, so they go together (one after another they took ~2.7 s of the page's load);
   // only the work records wait for the list.
-  const [ids, items, counts, notifications, groups, context, budget, members, documentAlerts, searching, waiting, health] = await Promise.all([
+  const [ids, items, counts, notifications, groups, context, budget, members, documents, searching, waiting, health, competitors, assigned] = await Promise.all([
     readableOpportunityIds(client, scope),
     readWorkspacePage(client, scope, options),
     readWorkspaceCounts(client, scope, options),
@@ -69,10 +83,10 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
     admin ? client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle().then(result => opportunityDb(result)) : null,
     admin ? client.from('opportunity_budget_months').select('spent_micro_usd,reserved_micro_usd').eq('organization_id', scope.organizationId).eq('period', period).maybeSingle()
       .then(result => opportunityDb(result)) : null,
-    admin ? workspaceMembers(client, scope) : [],
-    // «Tu F30 vence en 5 días»: the company's documents lapsed or about to (none before their migration).
-    admin ? client.from('opportunity_company_documents').select('id,label,expires_at').eq('organization_id', scope.organizationId).not('expires_at', 'is', null).limit(100)
-      .then(result => result.error ? [] : companyDocumentAlerts((result.data || []).map((row: any) => ({ id: row.id, label: row.label, expiresAt: row.expires_at })))) : [],
+    admin ? workspaceMembers(client, scope, { load: true }) : [],
+    // The company's documents: «Tu F30 vence en 5 días» for the ones lapsed or about to, and which of them «Prepara tu empresa» counts (none before their migration).
+    admin ? client.from('opportunity_company_documents').select('id,label,kind,expires_at').eq('organization_id', scope.organizationId).limit(200)
+      .then(result => (result.error ? null : (result.data || []) as Array<{ id: string; label: string; kind: string; expires_at: string | null }>)) : null,
     // «Buscando en licitaciones…» while «Actualizar oportunidades» or the daily search runs; a failed read just leaves it out.
     admin ? client.from('opportunity_jobs').select('kind').eq('organization_id', scope.organizationId).in('kind', [...DISCOVERY_JOB_KINDS])
       .in('state', ['queued', 'running', 'waiting']).limit(20).then(result => result.error ? [] : [...new Set((result.data || []).map((row: any) => String(row.kind)))]) : [],
@@ -83,11 +97,17 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
     }).catch(() => null) : null,
     // How each source of the daily search went (OPP-15); a failed read leaves the strip as it was.
     admin ? readSearchHealth(client, scope.organizationId).catch(() => null) : null,
+    // «Prepara tu empresa» (OPP-05): whether the team follows a competitor and has ever been given an opportunity; unknown when not read.
+    admin ? client.from('opportunity_competitors').select('supplier_id', { count: 'exact', head: true }).eq('organization_id', scope.organizationId)
+      .then(result => (result.error ? null : Number(result.count || 0))) : null,
+    admin ? client.from('opportunity_participants').select('opportunity_id', { count: 'exact', head: true }).eq('organization_id', scope.organizationId)
+      .then(result => (result.error ? null : Number(result.count || 0) > 0)) : null,
   ]);
+  const documentAlerts = companyDocumentAlerts((documents || []).filter(row => row.expires_at).map(row => ({ id: row.id, label: row.label, expiresAt: row.expires_at })));
   const itemIds = items.map(item => item.id);
   const work = itemIds.length ? opportunityDb(await client.from('opportunity_work').select('*').eq('organization_id', scope.organizationId).in('opportunity_id', itemIds)) as WorkRecord[] : [];
   return { mode: admin ? 'management' : 'assigned', items, work: work || [], notifications: notifications.filter(n => ids === null || ids.includes(n.opportunity_id)),
-    members, groups, context, documentAlerts, ...(admin ? { searching } : {}), ...(waiting?.total ? { waiting } : {}), ...(health ? { health } : {}), ...(counts ? { counts: admin ? adminViewCounts(counts) : memberViewCounts(counts) } : {}),
+    members, groups, context, documentAlerts, ...(admin ? { searching, setup: { documentKinds: documents ? [...new Set(documents.map(row => String(row.kind)))] : [], competitors, assigned, ticket: health?.ticket ?? null } } : {}), ...(waiting?.total ? { waiting } : {}), ...(health ? { health } : {}), ...(counts ? { counts: admin ? adminViewCounts(counts) : memberViewCounts(counts) } : {}),
     budget: { spent: Number(budget?.spent_micro_usd || 0) / 1e6, reserved: Number(budget?.reserved_micro_usd || 0) / 1e6, cap: OPPORTUNITY_MONTHLY_MICRO_USD / 1e6 },
     sourceStatus: admin ? { claude: Boolean(process.env.ANTHROPIC_API_KEY), linkedin: Boolean(process.env.APIFY_TOKEN), posts: Boolean(process.env.APIFY_TOKEN && process.env.OPPORTUNITIES_POST_USD_PER_ITEM),
       jsearch: Boolean(process.env.JSEARCH_API_KEY), automation: process.env.OPPORTUNITIES_AUTOMATION_ENABLED === 'true' } : {} };

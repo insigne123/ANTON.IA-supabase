@@ -39,11 +39,28 @@ export type AlertFacts = {
   waiting?: Array<{ id: string; title: string; kind: 'ask' | 'no_go' | 'blocked'; who: string; since: string; dueAt: string | null }>;
   /** The sources of the daily search that failed two days in a row or more (source-health.ts), for whoever manages Oportunidades. */
   sources?: Array<{ label: string; days: number }>;
+  /** The company's documents that just reached one of the days they are told on (documentDue), for whoever manages Oportunidades. */
+  documents?: Array<{ label: string; daysLeft: number }>;
+  /** The new opportunities of the saved searches this person hears of (admin-settings.ts). */
+  searches?: Array<{ name: string; count: number; href: string }>;
   goal: GoalProgress | null;
   /** Today's «Contacto del día», when it is ready. */
   drop?: { id: string; items: DropItem[] } | null;
 };
-export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'source' | 'closing' | 'assigned' | 'report' | 'drop' | 'research' | 'ready' | 'goal';
+export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'source' | 'document' | 'closing' | 'assigned' | 'report' | 'search' | 'drop' | 'research' | 'ready' | 'goal';
+
+/**
+ * The days a document of the company is told on before it lapses: two weeks ahead (time to ask for a new F30), a week, the day before
+ * and the day itself; and once after it lapsed. Never every day: an F30 lasts a month, so it is about to lapse half the time.
+ */
+export const DOCUMENT_ALERT_DAYS = [15, 7, 1, 0, -1];
+/**
+ * Whether today's alert is the first since a document crossed one of those days. `gapDays` is how many days since the last alert
+ * (they go Tuesday to Friday, so a crossing on a weekend or a Monday is told on Tuesday).
+ */
+export const documentDue = (daysLeft: number, gapDays: number) => DOCUMENT_ALERT_DAYS.some(day => daysLeft <= day && day < daysLeft + Math.max(1, gapDays));
+const documentText = (item: { label: string; daysLeft: number }) => (item.daysLeft < 0 ? `Venció ${item.label}: renuévalo antes de la próxima postulación`
+  : item.daysLeft === 0 ? `${item.label} vence hoy` : item.daysLeft === 1 ? `${item.label} vence mañana` : `${item.label} vence en ${item.daysLeft} días`);
 export type AlertLine = { kind: AlertKind; text: string; href: string };
 export type DailyAlert = { subject: string; lines: AlertLine[] };
 
@@ -137,6 +154,13 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     lines.push({ kind: 'source', text, href: '/opportunities' });
   }
 
+  // A document the tenders ask for, on the days it is worth remembering (documentDue).
+  for (const document of (facts.documents || []).slice(0, 2)) {
+    const text = documentText(document);
+    lead(text);
+    lines.push({ kind: 'document', text, href: '/opportunities' });
+  }
+
   const assigned = facts.assigned || [];
   if (assigned.length) {
     const text = assigned.length === 1 ? `Te asignaron: ${assigned[0].title}` : `Te asignaron ${assigned.length.toLocaleString('es-CL')} oportunidades`;
@@ -148,6 +172,13 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     const text = closingText(facts.closing, now);
     lead(facts.closing.length === 1 ? text.split(':')[0] : text);
     lines.push({ kind: 'closing', text, href: facts.closing.length === 1 ? `/opportunities?op=${encodeURIComponent(facts.closing[0].id)}` : '/opportunities' });
+  }
+
+  // What is new in the searches the person keeps, each one opening the list with its filters.
+  for (const search of (facts.searches || []).slice(0, 3)) {
+    const text = `${search.count === 1 ? '1 nueva' : `${search.count.toLocaleString('es-CL')} nuevas`} en tu búsqueda «${search.name}»`;
+    lead(text);
+    lines.push({ kind: 'search', text, href: search.href });
   }
 
   const reports = facts.reports || [];

@@ -1,3 +1,4 @@
+import type { CompanySetupFacts } from './company-setup';
 import type { SourceHealth } from './source-health';
 import { z } from 'zod';
 
@@ -47,7 +48,7 @@ export type WorkItem = { id: string; kind: string; title: string; company_name: 
   amount: number | null; currency: string | null; data: Record<string, unknown>; updated_at: string };
 export type WorkRecord = { opportunity_id: string; revision: number; state: typeof WORK_STATES[number]; team_id: string | null;
   responsible_id: string | null; objective: string; due_at: string | null; assigned_by: string | null; updated_at: string };
-export type WorkspaceMember = { user_id: string; name: string; role: string };
+export type WorkspaceMember = { user_id: string; name: string; role: string; /** For an administrator: how many opportunities in play this person works. */ open?: number };
 export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkItem[]; work: WorkRecord[];
   notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null; /** assignment, report or task (decisions and blocks). */ kind?: string | null }>;
   members: WorkspaceMember[]; groups: Array<{ id: string; name: string }>; context: Record<string, unknown> | null;
@@ -58,6 +59,8 @@ export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkIt
   searching?: string[];
   /** The company's documents lapsed or about to (company-documents.ts); admins only. */
   documentAlerts?: Array<{ id: string; label: string; expiresAt: string; status: 'vencido' | 'por_vencer'; text: string }>;
+  /** For an administrator, what «Prepara tu empresa» checks (company-setup.ts). */
+  setup?: CompanySetupFacts;
   /** How each source of the daily search went and whose ticket it runs on (source-health.ts); admins only. */
   health?: { sources: SourceHealth[]; ticket: 'own' | 'shared' };
   /** Decisions asked and opportunities blocked, waiting for an administrator, the oldest first (waiting.ts); admins only. */

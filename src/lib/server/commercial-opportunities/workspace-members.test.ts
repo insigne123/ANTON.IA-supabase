@@ -60,3 +60,21 @@ test('a member whose profile row is missing is still listed', async () => {
   const { client } = clientWith([{ user_id: 'z', role: 'member' }], []);
   assert.deepEqual(await workspaceMembers(client, scope), [{ user_id: 'z', role: 'member', name: 'Integrante' }]);
 });
+
+test('for «Asignar», each person comes with how many opportunities in play they work; what is submitted or closed does not weigh', async () => {
+  const tables: Record<string, Row[]> = {
+    organization_members: [{ user_id: 'diego', role: 'member' }, { user_id: 'maria', role: 'member' }],
+    profiles: [{ id: 'diego', full_name: 'Diego Soto' }, { id: 'maria', full_name: 'María Paz' }],
+    opportunity_work: [{ opportunity_id: 'o1' }, { opportunity_id: 'o2' }],
+    opportunity_participants: [{ opportunity_id: 'o1', user_id: 'diego' }, { opportunity_id: 'o2', user_id: 'diego' }, { opportunity_id: 'o3', user_id: 'maria' }],
+  };
+  const states: unknown[] = [];
+  const client = { from: (table: string) => ({ select: () => {
+    const done = { data: tables[table], error: null };
+    const chain: any = { eq: () => chain, in: (column: string, values: unknown[]) => { if (column === 'state') states.push(values); return chain; }, limit: async () => done, then: (resolve: (value: unknown) => void) => resolve(done) };
+    return chain;
+  } }) };
+  const members = await workspaceMembers(client, scope, { load: true });
+  assert.deepEqual(members.map((member: { name: string; open?: number }) => [member.name, member.open]), [['Diego Soto', 2], ['María Paz', 0]]);
+  assert.deepEqual(states, [['assigned', 'working', 'blocked']]);
+});
