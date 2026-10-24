@@ -18,7 +18,7 @@ type View = 'login' | 'recover';
 type Notice = { tone: 'error' | 'success'; text: string } | null;
 
 const HEADINGS: Record<View, { title: string; description: string }> = {
-    login: { title: 'Entra a tu cuenta', description: 'Prospecta, escribe y da seguimiento desde un solo lugar.' },
+    login: { title: 'Entra a tu cuenta', description: 'Prospecta, licita y da seguimiento desde un solo lugar.' },
     recover: { title: 'Recupera tu contraseña', description: 'Te enviamos un enlace para crear una contraseña nueva.' },
 };
 

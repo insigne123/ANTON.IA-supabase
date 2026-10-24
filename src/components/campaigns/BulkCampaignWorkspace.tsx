@@ -18,7 +18,7 @@ import { firstSelection } from '@/lib/campaign-audience-selection';
 import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { profileService } from '@/lib/services/profile-service';
-import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
+import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignListStats, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 
 async function request(path: string, body?: unknown, method = 'POST') {
   const response = await fetch(`/api/campaigns/bulk${path}`, body === undefined ? { cache: 'no-store' } : {
@@ -43,7 +43,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId?: string } = {}) {
   const confirm = useConfirm();
-  const [items, setItems] = useState<BulkCampaign[]>([]);
+  const [items, setItems] = useState<Array<BulkCampaign & { stats?: CampaignListStats }>>([]);
   const [editing, setEditing] = useState(false);
   const [step, setStep] = useState(0);
   const [definition, setDefinition] = useState(initial);
@@ -222,7 +222,10 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
           <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { objectivePending.current = !profileObjective; setDefinition({ ...initial(), objective: profileObjective, provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
           {busy && <p role="status">Cargando campañas…</p>}
           {!busy && !items.length && !error && <div className="rounded-2xl border bg-card p-8"><h3 className="font-medium">Tu próxima conversación empieza aquí</h3><p className="mt-2 text-sm text-muted-foreground">Crea una campaña para tus contactos nuevos o vuelve a escribir a quienes ya conoces.</p></div>}
-          <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.definition.emails.length} destinatarios · {item.definition.messages.length} correos por persona</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>
+          <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.stats
+            // A launched campaign says how it goes (APP-10); a draft, what it will send.
+            ? `Enviada a ${item.stats.sent} de ${item.stats.recipients} · ${plural(item.stats.replied, 'respuesta', 'respuestas')}`
+            : `${plural(item.definition.emails.length, 'destinatario', 'destinatarios')} · ${plural(item.definition.messages.length, 'correo', 'correos')} por persona`}</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>
           <Link className="inline-block text-sm text-muted-foreground underline underline-offset-4" href="/campaigns/history">Ver campañas anteriores</Link>
         </> : <>
           <div className="flex flex-wrap items-center justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={async () => { if ((dirty || individual) && !(await confirm({ title: '¿Salir sin guardar?', description: 'Tienes cambios sin guardar en esta campaña.', confirmLabel: 'Salir sin guardar', tone: 'danger' }))) return; setEditing(false); setDirty(false); setIndividual(null); void run(refresh); }}>← Tus campañas</Button><span className="text-sm text-muted-foreground">{campaign ? stateLabels[campaign.status] : 'Nueva campaña'}{dirty ? ' · Sin guardar' : ''}</span></div>

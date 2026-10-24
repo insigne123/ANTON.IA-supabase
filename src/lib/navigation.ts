@@ -16,7 +16,11 @@ export type NavItem = {
   tour?: string;
   /** Active only on its own path, not on the paths below it (/saved/leads vs /saved/leads/enriched). */
   exact?: boolean;
+  /** The number beside it: what waits for the person there (APP-23, hooks/use-nav-pending.ts), and how a screen reader says it. */
+  pending?: { key: NavPendingKey; label: string };
 };
+
+export type NavPendingKey = 'conversations' | 'cowork' | 'opportunities';
 
 /** `collapsible`: folded until one of its screens is open, so the work sections fit on a laptop screen. */
 export type NavSection = { label: string; items: NavItem[]; collapsible?: boolean };
@@ -29,14 +33,14 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Centro de mando',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Hoy', tour: 'home' },
-      { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork' },
+      { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork', pending: { key: 'cowork', label: 'esperan tu aprobación' } },
     ],
   },
   {
     label: 'Prospectar',
     items: [
       { href: '/search', icon: Search, label: 'Buscar prospectos', tour: 'search' },
-      { href: '/opportunities', icon: Briefcase, label: 'Oportunidades', feature: 'opportunities' },
+      { href: '/opportunities', icon: Briefcase, label: 'Oportunidades', feature: 'opportunities', pending: { key: 'opportunities', label: 'para atender' } },
     ],
   },
   {
@@ -49,7 +53,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Seguimiento',
     items: [
-      { href: '/contacted', icon: Send, label: 'Conversaciones', tour: 'contacted' },
+      { href: '/contacted', icon: Send, label: 'Conversaciones', tour: 'contacted', pending: { key: 'conversations', label: 'por responder' } },
       { href: '/campaigns', icon: Megaphone, label: 'Campañas', tour: 'campaigns' },
       { href: '/crm', label: 'Pipeline', icon: LayoutGrid },
     ],

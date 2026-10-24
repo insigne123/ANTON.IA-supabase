@@ -15,6 +15,7 @@ import { useAdminUsageAccess } from '@/hooks/use-admin-usage-access';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/context/AuthContext';
 import { NavAccessProvider, useNavAccess } from '@/hooks/use-nav-access';
+import { useNavPending } from '@/hooks/use-nav-pending';
 import { navLabelFor } from '@/lib/navigation';
 import { ShellChromeProvider, isImmersiveScreen } from '@/components/shell-chrome';
 import { cn } from '@/lib/utils';
@@ -28,6 +29,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const fullName = useFullNamePrompt(user?.id);
   const navAccess = useNavAccess({ userId: user?.id, email: user?.email, organizationId });
   const access = useMemo(() => ({ cowork: navAccess.cowork, opportunities: navAccess.opportunities }), [navAccess.cowork, navAccess.opportunities]);
+  // What waits in Conversaciones, Cowork and Oportunidades (APP-23); on a phone, a dot on the menu button says there is something.
+  const pending = useNavPending(pathname);
+  const anyPending = (pending.conversations || 0) > 0 || access.cowork && (pending.cowork || 0) > 0 || access.opportunities && (pending.opportunities || 0) > 0;
   // The help shows the same parts of the app as the menu.
   const helpAdmin = organizationRole === 'owner' || organizationRole === 'admin' || adminUsage;
   const helpVisibility = useMemo(() => ({ opportunities: access.opportunities, admin: helpAdmin, cowork: access.cowork }),
@@ -71,11 +75,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       <ProductTourProvider userId={fullName.state === 'done' ? user?.id : undefined} onNavigate={(href) => router.push(href)}>
         <QuotaSync />
         <UsageCapture />
-        <AppSidebar access={access} adminUsage={adminUsage} />
+        <AppSidebar access={access} adminUsage={adminUsage} pending={pending} />
         <SidebarInset>
           <p className="sr-only" role="status" aria-live="polite">{workspaceAnnouncement}</p>
           <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/85 px-2 backdrop-blur-sm md:hidden">
-            <SidebarTrigger data-tour="menu" />
+            <span className="relative inline-flex">
+              <SidebarTrigger data-tour="menu" />
+              {anyPending && <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />}
+            </span>
+            {anyPending && <span className="sr-only">Hay pendientes en el menú.</span>}
             <Logo size="sm" showWordmark={false} />
             {screenLabel && <span className="min-w-0 truncate text-sm font-semibold text-foreground">{screenLabel}</span>}
             {/* A screen can add its own button here while it is open (Cowork's history, on a phone): one row less under the bar. */}

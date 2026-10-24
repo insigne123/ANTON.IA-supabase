@@ -24,11 +24,18 @@ const QUEUE_ICONS: Record<TodayQueueItem['kind'], typeof MessageSquareReply> = {
  * `afterPrimary` is what goes right under the next step (today's contact), given that step.
  */
 export function TodayPanel({ afterPrimary }: { afterPrimary?: (primary: TodayPrimary) => ReactNode } = {}) {
-  const {data,error,loading,load}=usePersonalHome<TodayResponse>('/api/home/today');
+  const {data,error,loading,slow,load}=usePersonalHome<TodayResponse>('/api/home/today');
 
   if (loading && !data) {
     return (
-      <section aria-label="Hoy" aria-busy="true" className="space-y-4">
+      <section aria-label="Hoy" aria-busy={!slow} className="space-y-4">
+        {/* The skeleton does not stay up forever (APP-02): after a while it says so and offers to retry. */}
+        {slow && <Card className="rounded-2xl" role="status">
+          <CardContent className="flex flex-col items-start gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">Tu día está tardando más de lo normal en cargar.</p>
+            <Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />Reintentar</Button>
+          </CardContent>
+        </Card>}
         <Skeleton className="h-44 rounded-2xl" />
         <Skeleton className="h-40 rounded-2xl" />
       </section>

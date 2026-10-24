@@ -25,13 +25,14 @@ import { cn } from '@/lib/utils';
 import { WorkspaceSwitcher } from '@/components/organization/WorkspaceSwitcher';
 import { useProductTour } from '@/components/onboarding/ProductTour';
 import type { NavAccess } from '@/hooks/use-nav-access';
+import type { NavPendingCounts } from '@/hooks/use-nav-pending';
 import { NAV_SECTIONS, isNavItemActive } from '@/lib/navigation';
 
 const itemClass = 'h-8 rounded-xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/80 transition-colors duration-200 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground';
 const activeItemClass = 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]';
 
 /** `access` comes from the shell, which also uses it for the help: one request for both. */
-export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;adminUsage?:boolean }) {
+export function AppSidebar({ access,adminUsage=false,pending=null }: { access: NavAccess;adminUsage?:boolean;pending?:NavPendingCounts|null }) {
   const pathname = usePathname();
   const { signOut, organizationId, organizationRole } = useAuth();
   const productTour = useProductTour();
@@ -97,6 +98,8 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
                 <SidebarMenu className="gap-0.5">
                   {section.items.map((item) => {
                     const isActive = isNavItemActive(item, pathname);
+                    // What waits there (APP-23): a quiet number beside the name, a dot on the icon when the menu is a rail.
+                    const waiting = item.pending ? pending?.[item.pending.key] ?? 0 : 0;
 
                     return (
                       <SidebarMenuItem key={item.href}>
@@ -109,6 +112,11 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
                           <Link href={item.href} onClick={closeOnPhone} aria-current={isActive ? 'page' : undefined} data-tour={item.tour}>
                             <item.icon />
                             <span>{item.label}</span>
+                            {waiting > 0 && item.pending ? <>
+                              <span aria-hidden="true" className="ml-auto min-w-5 rounded-full bg-primary/10 px-1.5 text-center text-[11px] font-semibold leading-5 tabular-nums text-primary group-data-[collapsible=icon]:hidden">{waiting > 99 ? '99+' : waiting}</span>
+                              <span aria-hidden="true" className="absolute right-1 top-1 hidden h-2 w-2 rounded-full bg-primary group-data-[collapsible=icon]:block" />
+                              <span className="sr-only">: {waiting} {item.pending.label}</span>
+                            </> : null}
                             <LinkPending />
                           </Link>
                         </SidebarMenuButton>

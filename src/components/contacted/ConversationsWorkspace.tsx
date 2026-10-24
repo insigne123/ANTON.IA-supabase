@@ -211,6 +211,15 @@ export default function ConversationsWorkspace() {
   });
   const viewCounts = Object.fromEntries(CONVERSATION_VIEWS.map((key) => [key, filtered.filter(({ row }) => matchesConversationView(row, key, plansFor(row).length > 0)).length])) as Record<ConversationView, number>;
   const visible = filtered.filter(({ row }) => matchesConversationView(row, view, plansFor(row).length > 0));
+  // On a wide screen the panel opens the most urgent one that waits for an answer (a meeting asked for, or else the first), instead of
+  // «Elige una conversación» beside it (APP-11). Once per visit, and not over a conversation the address asked for.
+  const autoOpened = useRef(false);
+  const firstWaiting = view === 'reply' ? (visible.find(({ row }) => row.reply_intent === 'meeting_request') || visible[0])?.row : undefined;
+  useEffect(() => {
+    if (autoOpened.current || loading || !wide || selected || !deepLinked.current) return;
+    autoOpened.current = true;
+    if (firstWaiting) void open(firstWaiting, 'none');
+  }, [loading, wide, selected, firstWaiting, open]);
   const hasFilters = Boolean(query || mine || provider !== 'all');
 
   async function resolve() {
@@ -396,7 +405,7 @@ export default function ConversationsWorkspace() {
               <span className="flex items-baseline justify-between gap-2"><span className="truncate font-medium">{row.name || row.email}</span><span className="shrink-0 text-xs text-foreground/70">{formatRelative(row.replied_at || row.sent_at)}</span></span>
               <span className="block truncate text-sm text-foreground/70">{row.company || row.email}</span>
               <span className="flex min-w-0 items-center gap-2"><Badge variant={conversationTone(status)} className="shrink-0">{status}</Badge><span className="truncate text-xs text-foreground/70">{row.reply_preview || row.subject || 'Contacto registrado'}</span></span>
-              <span className="block text-xs text-foreground/70">{next ? `Seguimiento ${next.index + 1} · ${date(next.dueAt)}` : row.status === 'scheduled' ? `Programado · ${date(row.scheduled_at)}` : [providerLabels[row.provider] || row.provider, `${history.length} ${history.length === 1 ? 'registro' : 'registros'}`, row.user_id === userId ? 'Mi cuenta' : 'Cuenta del equipo'].filter(Boolean).join(' · ')}</span>
+              <span className="block text-xs text-foreground/70">{next ? `Seguimiento ${next.index + 1} · ${date(next.dueAt)}` : row.status === 'scheduled' ? `Programado · ${date(row.scheduled_at)}` : [providerLabels[row.provider] || row.provider, `${history.length} ${history.length === 1 ? 'correo enviado' : 'correos enviados'}`, row.user_id === userId ? 'Mi cuenta' : 'Cuenta del equipo'].filter(Boolean).join(' · ')}</span>
             </span>
           </button></li>;
         })}
