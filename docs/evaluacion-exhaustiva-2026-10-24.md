@@ -2,7 +2,9 @@
 
 Todo lo que se puede mejorar en la app, visual y funcionalmente, con foco en **Oportunidades** y **Cowork**. Cada punto dice qué pasa, dónde se vio y qué propongo. Este documento no cambia código ni producción: es el mapa para decidir.
 
-Versión evaluada: `main` en `f6acc6b9` (con el agente de Oportunidades encendido y desplegado a las 06:41 UTC). Producción: proyecto Supabase `yfdelflsheurzaicwayi`, solo lectura.
+Versión evaluada: `main` en `f6acc6b9` (con el agente de Oportunidades encendido y desplegado a las 06:41 UTC; el código es el mismo en `f791f0af`, que solo sumó la primera versión de este documento). Producción: proyecto Supabase `yfdelflsheurzaicwayi`, solo lectura.
+
+Tiene una **segunda pasada** (misma tarde): al contrastar el documento con las pantallas y los diálogos que aún no había abierto salieron diez mejoras más (OPP-48 a OPP-52, COW-29 y APP-23 a APP-26). Están dentro de su tema, con los números siguientes.
 
 ## Cómo leer este documento
 
@@ -16,14 +18,14 @@ Versión evaluada: `main` en `f6acc6b9` (con el agente de Oportunidades encendid
 
 | Fuente | Qué cubre |
 | --- | --- |
-| Pantallas | 141 visitas (3 personas, datos completos y vacíos, 390 y 1440 px, claro y oscuro) = 528 capturas, con axe-core en cada una |
+| Pantallas | 141 visitas (3 personas, datos completos y vacíos, 390 y 1440 px, claro y oscuro) = 528 capturas, con axe-core en cada una; y, en la segunda pasada, 14 visitas más a 768 y 1024 px en siete pantallas |
 | Interacciones | 61 recorridos: cada menú, diálogo y pestaña (con flechas), el foco con Tab, lecturas que fallan, lecturas lentas de 3 s y textos tres veces más largos |
-| Uso | 23 recorridos de persona (administrador, integrante, teléfono, Cowork, borradores) más 6 propios de esta evaluación: cada sección de una oportunidad, cambio de etapa, lista, mercado público, asistente y teléfono |
+| Uso | 23 recorridos de persona (administrador, integrante, teléfono, Cowork, borradores) más 12 propios de esta evaluación: cada sección de una oportunidad, cambio de etapa, lista, mercado público, asistente y teléfono (6) y, en la segunda pasada, «Cargar oportunidad» (un `.eml`, escribir los datos, cerrar a medias), «Qué buscamos», «Empresa del workspace», «Asignar», «Crear tarea» y los diálogos en el teléfono (6, más dos en modo oscuro) |
 | Código | las pantallas de Oportunidades (la viva y la antigua), Cowork, Hoy, Pipeline y las demás, y los servidores y funciones de base de datos que las alimentan |
 | Producción | uso, fallos, tiempos y costos de 30 días; el plan de ejecución de la consulta principal; los avisos del linter de Supabase |
 | Mediciones previas | los informes con modelo real de esta carpeta (`uso-como-persona-2026-10-23.md`, `funciones-apagadas-encendidas-2026-10-24.md`) |
 
-**Límites.** (1) Nadie ha usado Cowork desde que están encendidos el harness de Haiku y la web (el último turno fue el 23 oct 13:10 UTC), así que su latencia y su calidad con el motor nuevo no tienen datos de producción. (2) El banco visual usa datos de prueba: algunas cosas que se ven raras son del banco, no de la app (están en «Lo que descarté»). (3) No probé con lector de pantalla, no medí Core Web Vitals reales ni hablé con usuarios. (4) Esta evaluación no llamó a ningún modelo: lo que dice de modelos viene de las mediciones anteriores.
+**Límites.** (1) Nadie ha usado Cowork desde que están encendidos el harness de Haiku y la web (el último turno fue el 23 oct 13:10 UTC), así que su latencia y su calidad con el motor nuevo no tienen datos de producción. (2) El banco visual usa datos de prueba: algunas cosas que se ven raras son del banco, no de la app (están en «Lo que descarté»). (3) No probé con lector de pantalla, no medí Core Web Vitals reales ni hablé con usuarios; los anchos intermedios (768 y 1024 px) solo los vi en siete pantallas y en claro. (4) Esta evaluación no llamó a ningún modelo: lo que dice de modelos viene de las mediciones anteriores.
 
 ### 1.2 Lo central, en cinco líneas
 
@@ -41,25 +43,25 @@ Versión evaluada: `main` en `f6acc6b9` (con el agente de Oportunidades encendid
 | 2 | Que Oportunidades llegue a la gente: «Me interesa», avisos por correo (asignación, decisión, bloqueo, cierres) y un bloque en «Hoy» | 0 asignaciones; el aviso diario es 100 % de prospección | M | OPP-01, OPP-02, OPP-03 |
 | 3 | La consulta de la lista, de 577 ms a 8,8 ms | 65 veces más rápida; una migración pequeña | B | OPP-35 |
 | 4 | Informes que terminan: dividir por documento, costo antes de generar, tope autorizable, tiempos reales | 8 de 15 no terminaron; 16 min de espera para enterarse | M–A | OPP-18, OPP-19 |
-| 5 | Bases sin cuatro pasos a mano (extensión de Chrome o arrastrar el ZIP) | la mayor fricción del flujo central | A | OPP-17 |
+| 5 | Documentos sin pasos a mano: las bases (extensión de Chrome o arrastrar el ZIP) y las invitaciones privadas (reenviar el correo o pegarlo) | la mayor fricción del flujo central; hoy un `.eml` se rechaza | A | OPP-17, OPP-49 |
 | 6 | Descartar con motivo y acciones masivas | ~1.200 «Por revisar» abiertas y ninguna salida | M | OPP-08, OPP-09 |
 | 7 | Lo importante sobre el pliegue: embudo compacto, ficha sin duplicados | con 900 px de alto, la primera tarjeta de trabajo empieza en y≈990 | M | OPP-39, OPP-40 |
 | 8 | Cowork con Oportunidades: herramienta con puntaje, monto y cierre; efectos aprobables; «Seguir en Cowork» | hoy son dos productos | M | COW-01, COW-02, OPP-32 |
 | 9 | Avisos de Cowork fuera de la pestaña y propuestas sin resolver | 10 esperando aprobación en 30 días; 9 con más de 2 días | M | COW-04, COW-16 |
 | 10 | Cerrar el ciclo: adjudicación automática y motivos estructurados | nadie sabe qué pasó después de «Presentada» | M | OPP-29, OPP-30 |
 | 11 | «Hoy» con estado de error, contraste de su pestaña y un solo `SegmentedControl` | la pantalla más visitada no avisa cuando falla | B–M | APP-02, APP-03, APP-04 |
-| 12 | Un solo camino para cambiar de etapa | «Plan y tareas» deja cerrar una oportunidad con un clic y sin motivo | B | OPP-31 |
+| 12 | Dos controles que engañan: un solo camino para cambiar de etapa y un «Actualizar oportunidades» que actualice | «Plan y tareas» deja cerrar una oportunidad con un clic y sin motivo; «Actualizar» no hace nada la segunda vez en el día y dice «Cambios guardados» | B | OPP-31, OPP-48 |
 
 ### 1.4 Mejoras de una tarde
 
-OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»), OPP-37 (tope mensual leído de la variable), OPP-26 (hitos sin fecha), OPP-44 (aviso que empuja la página), OPP-47 (estrellas con etiqueta), OPP-25 (acción para documentos leídos en parte), COW-27 y COW-20 (dos textos), APP-17 (placeholder cortado), APP-12 (avisos plegados en «Revisar correo»), OPP-45 (etapas cerradas con aspecto de botón).
+OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»), OPP-37 (tope mensual leído de la variable), OPP-26 (hitos sin fecha), OPP-44 (aviso que empuja la página), OPP-47 (estrellas con etiqueta), OPP-25 (acción para documentos leídos en parte), COW-27 y COW-20 (dos textos), APP-17 (placeholder cortado), APP-12 (avisos plegados en «Revisar correo»), OPP-45 (etapas cerradas con aspecto de botón), OPP-48 (la clave del botón «Actualizar» y su mensaje), OPP-52 (el texto y el espacio del diálogo «Crear tarea») y APP-26 (cabeceras apiladas hasta `lg:` y menú plegado en anchos medios).
 
 ### 1.5 Decisiones que necesito de ti
 
 1. **Seguridad (aviso privado).** Te lo entrego por chat y en un archivo fuera del repositorio. Lo que decides es si autorizas preparar, de a una y con verificación, las migraciones que haga falta. Hasta que lo pidas no toco producción.
-2. **Modelo de trabajo (OPP-01).** ¿Dejamos que un integrante diga «Me interesa» y se asigne solo, o el administrador sigue decidiendo todo?
+2. **Modelo de trabajo (OPP-01, OPP-49).** ¿Dejamos que un integrante diga «Me interesa» y se asigne solo, o el administrador sigue decidiendo todo? Y lo mismo para cargar una invitación recibida por correo: hoy solo un administrador puede.
 3. **Vocabulario (APP-05).** «Oportunidades», «Pipeline» y «Embudo» se parecen demasiado. ¿Renombramos?
-4. **Pantalla antigua de Oportunidades (OPP-38).** Apagada desde el 13 oct pero incluida en el paquete de todos. ¿La borramos?
+4. **Pantalla antigua de Oportunidades (OPP-38).** Apagada desde el 13 oct pero incluida en el paquete de todos. ¿La borramos? Antes hay que decidir qué se rescata de ella: «Me interesa» y «Descartar» (OPP-08), UNSPSC y regiones (OPP-51) y la importación mensual de proyectos SEIA, que nadie ha usado.
 5. **Tono lúdico (OPP-46).** Los personajes del informe (Mensajero, Becario, Analista, Jefe): ¿se quedan o pasan a una sola fila de pasos?
 6. **Ley 21.719 (APP-20).** ¿Se revisa con asesoría legal antes de diciembre?
 
@@ -168,6 +170,38 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 - **OPP-16 · El historial de ChileCompra se carga a mano** · Operación · **M / B**
 
   Base de «Cómo ganar», «Contratos por vencer» y «Competidores» (205 mil licitaciones, 548 mil ofertas, 50 mil proveedores): se cargó el 19 oct con `scripts/load-public-procurement.mjs`; no hay cron. Las vistas dicen «datos hasta octubre de 2026» (bien), pero se atrasarán. *Propuesta:* cron mensual (el día 2) con aviso al administrador si falla.
+
+- **OPP-48 · «Actualizar oportunidades» solo funciona una vez al día y siempre responde «Cambios guardados.»** · Funcional/Confianza · **A / B**
+
+  El botón de la franja de estado pide una búsqueda manual, pero cada trabajo se guarda con una clave por día y revisión (`daily:<día>:<revisión>:<fuente>`, única por organización) y se inserta con «ignorar duplicados». Si la búsqueda del día ya corrió (la programada o una pulsación anterior) o falló, pulsarlo no encola nada. La respuesta es la de siempre (`{ enqueued: 3 }`) y la pantalla solo reconoce `jobId` o `queued`, así que muestra «Cambios guardados.»: no dice «Buscando…», no muestra avance y no avisa cuántas llegaron. Los trabajos fallidos (19 de 70 de licitaciones en 30 días, 9 por «Compra Ágil respondió 504», y 4 de 10 de LinkedIn) se quedan en `failed`: la función que reclama trabajos solo toma los que están en cola, en espera o con el arriendo vencido. El único botón con el que un administrador podría repetirlos, no puede.
+
+  *Evidencia:* código (`workspace/route.ts`, `enqueueOpportunityDiscovery`, `opportunity_claim_job`, `perform` en `OpportunityWorkWorkspace.tsx`) y producción (`opportunity_jobs`: estados y errores de 30 días).
+
+  *Propuesta:* una clave manual con la hora (`manual:<día>:<hora>`) o reencolar solo las fuentes fallidas; «Buscando en 3 fuentes… te avisamos al terminar»; el estado por fuente de OPP-15; y un «4 oportunidades nuevas» en «Novedades» al terminar.
+
+- **OPP-49 · «Cargar oportunidad» no acepta el correo ni lee lo que se pega, y solo la puede cargar un administrador** · Funcional · **A / M**
+
+  El recuadro dice «Sube la invitación, las bases o el correo», pero un `.eml` (lo que baja Gmail) o un `.msg` (Outlook) se rechaza con «Usa un PDF, un Word, un Excel, un archivo de texto o una imagen JPG o PNG»: es la respuesta 400 del servidor y en el código no hay ningún manejo de esos formatos. La alternativa, pegar el correo en «Invitación o contexto recibido», no completa nada: la lectura con IA solo recibe archivos, así que nombre, cliente, cierre y monto se escriben a mano (en el recorrido el título siguió vacío). Además `create` y `prefill` exigen administrador: el vendedor que recibe la invitación en su correo no puede cargarla, y todo lo demás (asignar, avisar) empieza solo después de que un administrador lo haga. En producción hay 2 cargas manuales (22 y 23 oct) frente a más de 8.600 oportunidades automáticas.
+
+  *Evidencia:* navegador (`eval2-cargar-eml`, `eval2-cargar-escribir`), código (`ACCEPTED_FILES` en `OpportunityExpedient.tsx`, `workspace/prefill/route.ts`, `assertOpportunityAdmin`) y producción (`commercial_opportunities` por `kind` y origen).
+
+  *Propuesta:* aceptar `.eml` y `.msg` (el cuerpo y los adjuntos pasan a ser documentos de la oportunidad); un «Pega el correo aquí» que corra la misma lectura que un archivo; que cualquier integrante pueda cargarla y quede «Por revisar» para el administrador; y la apuesta mayor (sección 6): una dirección del workspace, o una etiqueta de Gmail u Outlook (ya conectados), a la que se reenvía la invitación y crea la oportunidad con sus adjuntos.
+
+- **OPP-50 · Cerrar «Cargar oportunidad» (o la ficha) borra lo escrito sin avisar, y el formulario de carga tiene cabos sueltos** · UX · **M / B**
+
+  Esc, clic fuera o «Cancelar» cierran el diálogo sin preguntar y el borrador desaparece: en el recorrido se escribieron título, cliente y un correo largo, se cerró con Esc y al reabrir todo estaba vacío (también lo que la IA acababa de leer de un documento). La app ya resuelve esto en otros lugares: el redactor de correos (`useComposeUnsavedGuard`) y Firmas y estilo («Hay cambios sin guardar»). La «Ficha para licitaciones» (una hoja de siete secciones) tampoco avisa: solo se bloquea mientras guarda. Además, en la carga: «Moneda» es un texto libre de hasta 8 caracteres («pesos» o «uf» se guardan tal cual; no hay CLP, UF, USD ni EUR); «Bases y anexos» es el selector nativo de archivos, distinto del recuadro de arrastre del otro modo y sin arrastrar y soltar; al crear, los documentos suben uno tras otro sin progreso («Guardar» solo gira) y, si uno falla, el mensaje nombra un archivo que la persona nunca subió («Invitación recibida.txt», que es el texto pegado); «Cierre» es opcional y una oportunidad sin fecha no entra en los avisos de cierre (ni en el aviso diario ni en «Tu semana»); y tras un error de lectura, «escribe los datos» no es un botón sino una pestaña arriba.
+
+  *Evidencia:* navegador (`eval2-cargar-cierra`, `eval2-cargar-escribir`, `eval2-telefono`; capturas a 1440 y 390 px, en claro y oscuro) y código (`privateOpportunitySchema` con `currency: text(8)`; la rama `create` de `saveModal`; `daily-alerts.ts` y `weekly-report.ts` leen `deadline_at`).
+
+  *Propuesta:* pedir confirmación al cerrar con datos («¿Descartar lo escrito?») o guardar el borrador en `sessionStorage`; moneda como lista (CLP por defecto, UF, USD, EUR); el mismo recuadro de arrastre para «Bases y anexos»; subida en paralelo con «Subiendo 2 de 5»; mensajes que digan «el texto del correo» y no un nombre interno; y un botón «Escribir los datos» dentro del error de lectura.
+
+- **OPP-51 · La búsqueda diaria no se puede acotar: LinkedIn es obligatorio, no se eligen fuentes y faltan criterios de licitación** · Producto · **M / M**
+
+  Cada día corren las licitaciones y Compra Ágil, las publicaciones de LinkedIn y, si hay cargos, los avisos de trabajo. «Qué buscamos» pide al menos una búsqueda de LinkedIn (`postQueries`: mínimo 1, casilla obligatoria), así que una empresa que solo quiere licitaciones públicas no puede apagar LinkedIn, que además falló 4 de 10 veces en 30 días. Esas fuentes de prospección concentran US$3,44 de los US$8,34 que lleva el mes (41 %): cada corrida de avisos de trabajo cuesta unos US$0,30 (10 corridas) y una de publicaciones, US$0,06, mientras que una evaluación de hasta 40 licitaciones cuesta US$0,002 y los informes sumaron US$2,85. El diálogo habla de prospección (cargos en avisos de trabajo, publicaciones, cargos de quienes deciden la compra) y deja una sola casilla para licitaciones, «Palabras para licitaciones y compras públicas». No se puede fijar monto mínimo o máximo, organismos a seguir o evitar, ni códigos UNSPSC: la pantalla antigua sí tenía UNSPSC, regiones y mínimo de avisos, y se perdieron al pasar a la nueva (como «Me interesa» y «Descartar», OPP-08). En «Empresa del workspace» lo único que se elige es «En LinkedIn, primero». Y el error de la casilla obligatoria es el aviso nativo del navegador («Completa este campo»), sin decir por qué.
+
+  *Evidencia:* código (`criteriaSchema` en `workspace-sources.ts`, `enqueueOpportunityDiscovery`, `WorkspaceCompanyFields.tsx`, la pantalla antigua `OpportunitiesWorkspace.tsx`), navegador (`eval2-criterios-empresa`) y producción (`opportunity_jobs` y `opportunity_budget_reservations` por tipo de trabajo; el mes lleva US$8,34 de US$20).
+
+  *Propuesta:* interruptores por fuente («Licitaciones», «Compra Ágil», «LinkedIn»), con su frecuencia (los avisos de trabajo no cambian cada día: semanal ahorraría ≈US$8 al mes); criterios de licitación separados de los de prospección (palabras, UNSPSC, rango de monto, regiones, organismos); y un error que diga el motivo («LinkedIn necesita al menos una frase; o apágalo en Fuentes»).
 
 ### 3.3 Preparar y postular
 
@@ -281,7 +315,7 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 
 - **OPP-38 · La pantalla antigua viaja en el paquete de todos** · Código · **M / B**
 
-  `page.tsx` importa de forma estática `OpportunitiesWorkspace` (86 KB de fuente) y `OpportunityWorkWorkspace` (81 KB) y elige una según la bandera; la antigua lleva apagada desde el 13 oct. Es parte de los 384 kB de primera carga de /opportunities, y mantener dos pantallas con pruebas que leen ambos archivos confunde (me pasó a mí). *Propuesta:* borrar la antigua con sus pruebas, o cargarla con `next/dynamic`.
+  `page.tsx` importa de forma estática `OpportunitiesWorkspace` (86 KB de fuente) y `OpportunityWorkWorkspace` (81 KB) y elige una según la bandera; la antigua lleva apagada desde el 13 oct. Es parte de los 384 kB de primera carga de /opportunities, y mantener dos pantallas con pruebas que leen ambos archivos confunde (me pasó a mí). *Propuesta:* borrar la antigua con sus pruebas, o cargarla con `next/dynamic`. *Antes de borrarla:* es la única que tiene la importación mensual de proyectos de inversión (SEIA, `/api/commercial-opportunities/projects`), los criterios UNSPSC y regiones (OPP-51) y «Me interesa» y «Descartar» (OPP-08); en producción no hay ninguna oportunidad de tipo `project`, o sea que nadie usó la importación. Hay que decidir qué se rescata y qué se retira con ella.
 
 ### 3.7 Visual y accesibilidad
 
@@ -320,6 +354,14 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 - **OPP-47 · Estrellas sin etiqueta** · Accesibilidad · **B / B**
 
   El calce se muestra como estrellas sin texto. *Propuesta:* «Calce 4 de 5».
+
+- **OPP-52 · «Crear tarea» muestra la ayuda de «Cargar oportunidad» y sus campos van pegados** · Copy/Visual · **B / B**
+
+  El diálogo de tarea (Acción, Responsable, Fecha, Evidencia) lleva bajo el título «Completa la información disponible; los datos faltantes se identificarán en el análisis.», que es el texto de «Cargar oportunidad»: la descripción cae en el último caso del condicional. Sus etiquetas, además, van sin espacio con el campo anterior (no tienen el contenedor `space-y-2` de los otros formularios) y la fecha no ofrece los atajos «Hoy», «Mañana», «En 3 días» y «En una semana» que sí tiene «Asignar». En «Asignar», «Objetivo» queda pegado al dibujo del equipo.
+
+  *Evidencia:* navegador (`eval2-asignar-tarea`, captura del diálogo) y código (`DialogDescription`, rama `modal === 'task'`).
+
+  *Propuesta:* una descripción por diálogo («Una acción concreta, con responsable y fecha»), el mismo contenedor de los demás formularios y los atajos de fecha.
 
 ---
 
@@ -398,6 +440,14 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 - **COW-17 · El modo «Autónomo» no se recuerda ni se explica a la vista** · UX · **M / B**
 
   `useState('approval')` lo reinicia en cada carga y conversación; su explicación (qué aprueba, tope de 3 pasos) vive en el `title` del selector (invisible en el teléfono). Sin confirmación la primera vez, sin marca en el hilo de qué se aprobó solo. *Propuesta:* confirmación única con la lista, chip visible en la conversación y registro «aprobado automáticamente» en el resumen.
+
+- **COW-29 · Las propuestas de Cowork se aprueban o se descartan, pero casi nunca se editan en la tarjeta** · Funcional/UX · **M / M**
+
+  De los 24 tipos de propuesta que Cowork puede mostrar, solo la tarjeta de campaña permite editar (asunto y cuerpo: «Editar correos», «Editar secuencia»). En «Aprobar y enviar» (un correo) no se puede cambiar una palabra: la tarjeta dice «Descártala y pide una nueva revisión»; la propuesta de búsqueda muestra los criterios como etiquetas que no se editan. Para quien aprueba, la salida es volver al chat y pedir otra versión: una vuelta completa por el modelo por cada cambio de coma. Varias tarjetas hablan en jerga («Al aprobar se verificará supresión, dominio, conexión y cuota de nuevo», «Revisión 3»).
+
+  *Evidencia:* código (`CoworkApproval.tsx`, `SendReview.tsx`, `ReviewParts.tsx`, `CampaignReview.tsx`). El banco solo trae una aprobación (el plan de tarea), así que las demás no tienen captura.
+
+  *Propuesta:* «Editar» en el correo y en los criterios (la edición crea una revisión nueva y la aprobación sigue atada a ella, como ya hace la campaña); «Aprobar con cambios»; y una línea en lenguaje llano: «Antes de enviar revisaremos que la persona no haya pedido no recibir correos, que tu cuenta siga conectada y que te quede cupo».
 
 ### 4.4 Tareas programadas
 
@@ -523,7 +573,11 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 
 - **APP-18 · Carga lenta sin indicador** · Estados · **B / B**
 
-  «Privacidad» y «Centro de ayuda» no muestran que cargan durante 3 s y luego cambian de golpe.
+  «Privacidad» y «Centro de ayuda» no muestran que cargan durante 3 s y luego cambian de golpe. Tampoco hay `loading.tsx` en las pantallas que se arman en el servidor (Oportunidades, Cowork, Campañas, Por escribir: solo lo tiene Administración) ni señal en el menú mientras se navega, así que la pantalla anterior se queda quieta hasta que el servidor responde. No lo medí en producción.
+
+  *Evidencia:* navegador (revisión de lecturas lentas de 3 s), código (un solo `loading.tsx` en `src/app`) y registro de compilación (esas rutas son dinámicas).
+
+  *Propuesta:* un `loading.tsx` con el esqueleto de cada pantalla y un estado «cargando» en el enlace del menú (`useLinkStatus`) o una barra fina arriba.
 
 - **APP-19 · El Centro de ayuda abre con el camino de prospección** · Producto · **B / B**
 
@@ -541,6 +595,38 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 
   Aparece en el selector («WORKSPACE»), en «Hoy» («Tus pendientes en este workspace»), en errores («No pudimos cargar tus workspaces», «Cambiando workspace…») y en Oportunidades («Empresa del workspace»). *Propuesta:* una sola palabra en español: «organización» o «espacio de trabajo».
 
+- **APP-23 · El menú no avisa de lo pendiente** · Navegación · **M / B**
+
+  Ninguna entrada del menú lleva contador ni punto (`NavItem` no tiene un campo para eso): ni «Conversaciones» (respuestas por contestar), ni «Cowork» (aprobaciones esperando: 10 en 30 días, 9 con más de 2 días), ni «Oportunidades» (asignadas a mí, decisiones pedidas, cierres de esta semana). La única señal está dentro de cada pantalla y hay que entrar para enterarse. Es el hueco que dejan OPP-02 y COW-04 (avisos por correo y Web Push) y la forma más barata de cubrirlo mientras tanto.
+
+  *Evidencia:* código (`src/lib/navigation.ts`) y capturas (el menú en las 141 visitas).
+
+  *Propuesta:* un punto o un número discreto en tres entradas (Conversaciones, Cowork, Oportunidades), calculado con las mismas consultas de «Hoy» y de «Novedades»; en el teléfono, sobre el ícono del menú.
+
+- **APP-24 · No hay buscador global ni paleta de comandos** · Funcional · **M / M**
+
+  Para encontrar una persona, una empresa, una oportunidad o una conversación hay que ir primero a la sección correcta y usar su buscador, y cada una tiene el suyo («Buscar prospectos», «Nombre o correo» en Personas, el de la lista de Oportunidades, el de las conversaciones de Cowork). No hay una paleta tipo ⌘K; los únicos atajos de teclado son los del compositor de Cowork y Ctrl/⌘+B para el menú.
+
+  *Evidencia:* código (no hay `cmdk` ni otro componente de paleta; atajos en `lib/cowork/shortcuts.ts` y `components/ui/sidebar.tsx`).
+
+  *Propuesta:* ⌘K o Ctrl+K con tres grupos (Ir a…, Buscar en mis datos, Preguntar a Cowork) que reutilice las rutas y consultas que ya existen y deje a Cowork como última opción de la lista.
+
+- **APP-25 · El peso de las pantallas principales** · Rendimiento · **M / M**
+
+  JavaScript de primera carga (gzip) según la compilación del banco con Next.js 15: Pipeline 438 kB, Por escribir 413 kB, Oportunidades 384 kB (146 kB propios), Hoy 366 kB, Firmas y estilo 338 kB, Cowork 314 kB (136 kB propios), Buscar 310 kB y Conversaciones 290 kB; lo que comparten todas pesa 103 kB. `recharts` se importa de forma estática en Pipeline y en el gráfico de «Hoy», y en las pantallas de la app hay un solo `next/dynamic` y cuatro `import()` dinámicos: los gráficos, la pantalla antigua de Oportunidades (OPP-38) y los paneles que solo se ven tras una acción viajan en la primera carga.
+
+  *Evidencia:* tabla «Route (app)» del registro de compilación del banco y código (importaciones de `recharts`, usos de `next/dynamic`).
+
+  *Propuesta:* cargar bajo demanda los gráficos, la pantalla antigua mientras exista, los paneles de Cowork (artefactos, tareas programadas, memoria) y las vistas de «Mercado público»; después, medir con datos reales (esta evaluación no midió Core Web Vitals).
+
+- **APP-26 · A 768–1100 px (tableta o ventana a medias) las pantallas se aprietan** · Visual/Responsivo · **M / B**
+
+  El banco solo miraba 390 y 1440 px, así que este tramo no tenía datos. Con 768 y 1024 px en siete pantallas aparecen cuatro cosas. (1) El menú queda fijo y abierto (16 rem, 256 px; el corte al cajón es a 767 px), de modo que a 768 px el contenido tiene 512 px, y las cabeceras pensadas para 640 px o más (`sm:flex-row`) aprietan el título y su descripción en una columna de ≈90 px: «Pipeline» ocupa 15 líneas y ≈370 px de alto antes de los filtros, y «Hoy» y «Buscar prospectos» hacen lo mismo. (2) En Buscar prospectos los resultados se parten en dos columnas dentro de ≈340 px a 1024 px (67 px de desborde: «Traer 25 más» queda fuera de la pantalla) y a 768 px el contacto guardado no muestra nombre ni cargo (solo el avatar y «Guardado»), y los demás se cortan («Paula Hen…», «Reclutamient»). (3) En Oportunidades las filas de filtros se cortan sin señal de que hay más («Comp…» a 1024 px) y la onda del embudo pisa los textos («1 cierra en menos de 7 días» sobre «Asignadas»). (4) axe repite a esos anchos el contraste de la pestaña «Hoy | Tu semana» (APP-03). Cowork, Conversaciones y Por escribir se ven bien.
+
+  *Evidencia:* navegador (`audit:visual --widths=768,1024` en `/search`, `/saved/leads/enriched`, `/contacted`, `/crm`, `/opportunities`, `/cowork` y `/dashboard`: 14 visitas, 1 desborde y 2 hallazgos de axe) y código (`use-mobile.tsx`, `SidebarProvider defaultOpen` en `app-shell.tsx`, `crm/page.tsx`).
+
+  *Propuesta:* menú plegado a íconos por debajo de ≈1100 px; cabeceras que se apilan hasta `lg:` (o consultas de contenedor); en Buscar, la lista de empresas arriba y los contactos debajo por debajo de ≈1200 px, y `min-w-0` en la tarjeta del contacto para que el nombre no dependa de la insignia; y sumar 768 y 1024 px al banco visual.
+
 ---
 
 ## 6. Apuestas más grandes (ideas que juntan varios puntos)
@@ -551,6 +637,7 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 4. **Calibración del calce.** Cada descarte, ganada y perdida con motivo ajusta «Qué buscamos» y el orden de «Recomendadas» (OPP-08, OPP-30). El historial de ChileCompra ya cargado (548 mil ofertas) permite además que «Calcular el precio» arranque con el rango ganador del comprador y del rubro (OPP-23).
 5. **Calendario compartido de cierres.** Un feed iCal o Google Calendar con los cierres, las consultas y las próximas acciones del equipo, y recordatorios a 7, 3 y 1 día (OPP-11).
 6. **Un solo asistente.** Un chat con habilidades de Prospección, Oportunidades y Cowork en lugar de tres que no se conocen (OPP-32).
+7. **Una bandeja para invitaciones.** Una dirección del workspace (o una etiqueta de Gmail u Outlook, que ya están conectados) a la que se reenvía la invitación: crea la oportunidad con el cuerpo y los adjuntos, la deja «Por revisar» y avisa al administrador. Junta OPP-49, OPP-17 y OPP-02.
 
 ---
 
@@ -565,6 +652,9 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 - **El estado vacío de la ficha** («Prepara el informe completo» con dos pasos numerados y zona para soltar archivos) y el índice «En este informe» pegajoso.
 - **El agente de Oportunidades:** 34 de 34 en el chat y 7 de 7 en el asistente con Haiku (`funciones-apagadas-encendidas-2026-10-24.md`), a ≈US$0,0007 por pregunta.
 - **Costos:** todo en Haiku; US$0,33 en 30 días de Cowork (217 llamadas); el libro de presupuesto de Oportunidades reserva antes y liquida después.
+- **«Cargar oportunidad» al leer documentos:** acepta varios documentos o un ZIP, dice cuáles leyó y cuáles dejó para subir con la oportunidad, avisa lo que no encontró («No encontramos el cierre») y reintenta sin duplicar (cada intento lleva su `requestId`).
+- **«Asignar» y «Empresa del workspace»:** diálogos ordenados por grupos, con una línea de ayuda cada uno, contador de servicios, atajos de fecha, pie fijo con la acción principal y la misma jerarquía en claro, en oscuro y en el teléfono.
+- **Confirmaciones propias:** las acciones destructivas usan `confirm({...})` de la app, no el cuadro del navegador (quedan `window.confirm` solo en las guardas de «cambios sin guardar» del redactor y de Firmas y estilo).
 
 ## 8. Lo que descarté (y por qué)
 
@@ -575,6 +665,11 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 - «Un error no se avisa» en el Centro de ayuda: es contenido estático.
 - «`mm/dd/yyyy`» en los campos de fecha: es el formato de Chromium sin configuración regional; en un navegador chileno sale `dd/mm/aaaa`.
 - «Falta la preparación» junto a «Cargando preparación» en «Tu secuencia de contacto»: es la pantalla sin parámetros; con ellos no ocurre.
+- «Esta semana no enviaste correos» junto a «Correos enviados: 3» en «Tu semana»: los envíos de prueba del banco no traen el correo del destinatario y la frase cuenta personas; en producción los 4 envíos de 60 días sí lo traen (la frase podría igualmente basarse en los envíos, no en las personas).
+- «No pudimos guardar «Invitación recibida.txt»» al crear una oportunidad en el banco: el banco no simula el almacenamiento de archivos.
+- «Vigente hasta el NaN de octubre de 2026» en «Documentos de la empresa»: el banco entrega la fecha como marca de tiempo; la columna de producción es `date` y llega como `AAAA-MM-DD`, que sí se lee bien (`documentDay` solo falla con una marca de tiempo).
+- «Please fill out this field» y «Choose Files» en los diálogos: es el Chromium del banco, en inglés; en un navegador en español salen en español.
+- «La búsqueda diaria termina a las 4 u 8 horas» (el último trabajo del día cierra a las 12:14, 13:20 o 16:05 desde el 21 oct): ese último trabajo es una lectura de documento o un análisis pedido a mano; la búsqueda del día termina en la primera hora (el 22 oct, 52 de las evaluaciones se cerraron entre las 08:00 y las 08:59).
 
 ## 9. Anexo: cómo repetirlo
 
@@ -586,4 +681,6 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
   - Rendimiento: `pg_stat_statements` (por `opportunity_workspace_list`) y `EXPLAIN (ANALYZE, BUFFERS)` de `opportunity_workspace_list_terms(<organización>, <administrador>, 'review', '', 0, '{}', '{}')`: 577 ms y 92.531 accesos; sin `opportunity_can_read`, 8,8 ms y 1.400.
   - Cowork: `cowork_runs` (profundidad 0, por estado) y conteos de `pg_stat_user_tables` con prefijo `cowork`.
   - Mantenimiento de la base: `get_advisors` de rendimiento.
+  - Segunda pasada: `opportunity_jobs` por `kind`, `state` y `error` (30 días), con las horas de término por día; `commercial_opportunities` por `kind` y `data->>'origin'`; `outbound_dispatches` (`status = 'sent'`) con `metadata->'recipient'->>'email'`; `opportunity_claim_job` (qué estados reclama); `opportunity_budget_months` y `opportunity_budget_reservations` (gasto de 30 días por tipo de trabajo).
+- **Pesos de las pantallas:** la tabla «Route (app)» de `next build` queda en el `build.log` de cada carpeta de salida del banco.
 - **Mediciones con modelo:** `scripts/evaluate-opportunities-assistant.ts` y `scripts/evaluate-opportunities-harness.ts` (solo con `--live`, llave de prueba y la guardia de gasto).
