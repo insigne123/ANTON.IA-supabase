@@ -42,9 +42,10 @@ test('while it runs, the progress says what is happening instead of the error', 
   const running = render({ state: 'running' });
   assert.match(running, /Leyendo los documentos y redactando el informe/);
   assert.doesNotMatch(running, /Intentar de nuevo|Reintentando/);
+  assert.doesNotMatch(running, /Suele tardar|minutos/, 'no time it cannot know');
 });
 
-const progress = (extra: Record<string, unknown>) => ({ read: 0, total: null, document: null, since: null, ...extra });
+const progress = (extra: Record<string, unknown>) => ({ read: 0, total: null, document: null, since: null, readSince: null, minutes: null, ...extra });
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/<!-- -->/g, '').replace(/\s+/g, ' ');
 
 test('the office says who is doing what, from what the job recorded, and what is done reads as done', () => {
@@ -102,4 +103,18 @@ test('a document read in part says what is missing and offers to upload the rest
   // While the AI reads its scanned pages there is nothing to upload yet.
   const reading = renderToStaticMarkup(React.createElement(DocumentList, { id: 'op', documents: [doc({})], scanning: ['d1'], onUploadMore: () => {} }));
   assert.doesNotMatch(reading, /Subir el resto/);
+});
+
+test('the time left comes from the size of the documents, then from the pace of the parts read, and writing is almost done (OPP-19)', () => {
+  const queued = text(render({ state: 'queued', progress: progress({ stage: 'queued', minutes: 7 }) }));
+  assert.match(queued, /Tardará unos 7 minutos\. Puedes seguir trabajando: el informe aparecerá aquí y te avisaremos\./);
+  // 8 of 26 parts in two minutes: 18 more at that pace, and the writing.
+  const reading = text(render({ state: 'running', progress: progress({ stage: 'read', read: 8, total: 26, minutes: 9, readSince: new Date(Date.now() - 120_000).toISOString() }) }));
+  assert.match(reading, /Quedan unos 8 minutos\./);
+  assert.match(text(render({ state: 'running', progress: progress({ stage: 'write', read: 26, total: 26, since: new Date().toISOString() }) })), /Falta poco\. Puedes seguir trabajando/);
+  assert.match(text(render({ state: 'running', signal: true, progress: progress({ stage: 'gather', minutes: 1 }) })), /Tardará alrededor de un minuto\. Puedes seguir trabajando: la ficha aparecerá aquí/);
+  // A report asked for before the estimate existed promises nothing.
+  const old = text(render({ state: 'running', progress: progress({ stage: 'gather' }) }));
+  assert.doesNotMatch(old, /minuto|Suele tardar/);
+  assert.match(old, /Puedes seguir trabajando: el informe aparecerá aquí y te avisaremos\./);
 });

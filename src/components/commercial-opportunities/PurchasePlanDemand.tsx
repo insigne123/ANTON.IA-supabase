@@ -77,7 +77,7 @@ export function PurchasePlanDemand({ onOpen, onCriteria }: { onOpen: (id: string
 
     {data && !data.available ? <div className="rounded-3xl border p-6 text-sm text-muted-foreground">La demanda futura estará disponible en cuanto terminemos de preparar esta función en tu organización.</div> : null}
 
-    {data?.available && reading ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Leyendo el Plan Anual de Compras de ChileCompra y eligiendo lo que calza con tu oferta. Tarda unos minutos.</p> : null}
+    {data?.available && reading ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Leyendo el Plan Anual de Compras de ChileCompra y eligiendo lo que calza con tu oferta. Es un archivo grande y puede tardar varios minutos: puedes salir y volver, la lista quedará aquí.</p> : null}
 
     {failed && !reading ? <p role="alert" className="flex gap-2 rounded-2xl bg-destructive/5 p-4 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
       {data?.matches.length

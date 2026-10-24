@@ -168,9 +168,16 @@ export function isProviderQuotaExhausted(error: unknown) {
     .test(String((error as { message?: unknown } | null)?.message ?? error ?? ''));
 }
 
-function isRetryableError(error: any) {
-  if (isProviderQuotaExhausted(error)) return false;
+/**
+ * A refusal worth asking again: the provider said no before answering (rate limit, overloaded), and a refusal is not billed.
+ * An answer that came back (refused, cut or invalid: it carries its telemetry) was paid, so asking again would pay twice;
+ * and Claude's errors are judged by their status, so «at position 4291» or «214290 tokens» in a 400 is no 429.
+ */
+export function isRetryableError(error: any) {
+  if (isProviderQuotaExhausted(error) || error?.structuredTelemetry) return false;
   const text = String(error?.message || error || '').toLowerCase();
+  const claude = /^claude_http_(\d+)/.exec(text);
+  if (claude) return ['429', '503', '529'].includes(claude[1]);
   return (
     text.includes('429') ||
     text.includes('resource exhausted') ||

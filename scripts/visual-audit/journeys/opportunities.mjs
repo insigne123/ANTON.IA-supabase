@@ -252,6 +252,8 @@ export default () => [
         c.check('«Mi trabajo» arranca marcado y se distingue de los demás', (await mine.getAttribute('aria-pressed').catch(() => null)) === 'true' && ok, `contraste ${ratio} a 1`);
       } },
       { say: 'Abro la licitación de guardias', do: async c => { await open(c, 'Servicio de guardias de seguridad para 12 sucursales', 'Abrir y trabajar'); await c.see('Empezar a gestionarla'); } },
+      // Its report reads 4 of 10 parts in two minutes: the office says what is left at that pace, not a fixed promise (OPP-19).
+      { say: 'Veo cuánto le falta al informe', do: async c => { await c.see('Lee «Bases técnicas.pdf» · parte 5 de 10'); await c.see(/Quedan unos \d+ minutos/); } },
       { say: 'Pulso Empezar a gestionarla', do: async c => {
         await c.click('Empezar a gestionarla'); await c.wait(1200);
         c.check('quedó en gestión', stateOf(c, 6) === 'working', `estado: ${stateOf(c, 6)}`);

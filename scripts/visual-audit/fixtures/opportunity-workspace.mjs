@@ -213,7 +213,10 @@ export default function workspace(ctx) {
   ];
   const jobs = [
     { id: job(2), organization_id: org, opportunity_id: opp(2), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:2', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(2), updated_at: ctx.daysAgo(2) },
-    { id: job(6), organization_id: org, opportunity_id: opp(6), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:6', state: 'running', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.minutesAgo(3), updated_at: ctx.minutesAgo(1) },
+    // A report reading its documents: 4 of 10 parts in two minutes, as the job notes it (report-progress.ts), with the estimate of its size.
+    { id: job(6), organization_id: org, opportunity_id: opp(6), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:6', state: 'running',
+      payload: { estimate: { parts: 10, minutes: 5 }, progress: { stage: 'read', read: 4, total: 10, document: 'Bases técnicas.pdf', readSince: ctx.minutesAgo(2) } },
+      result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.minutesAgo(3), updated_at: ctx.minutesAgo(1) },
     { id: job(10), organization_id: org, opportunity_id: opp(10), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:10', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(6), updated_at: ctx.daysAgo(6) },
     // This morning's search (OPP-15): the listing and LinkedIn answered; one of the two Compra Ágil searches got Mercado Público's 504.
     ...[['tenders', {}, 'ready', null], ['tenders', { keyword: 'antecedentes' }, 'ready', null], ['tenders', { keyword: 'verificación' }, 'failed', 'Compra Ágil respondió 504 (falla de Mercado Público).'], ['posts', {}, 'ready', null]]

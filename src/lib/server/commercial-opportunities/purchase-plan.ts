@@ -8,6 +8,7 @@ import { OPPORTUNITY_BUCKET, opportunityLocalClock, type WorkScope } from '@/lib
 import { assertOpportunityAdmin } from './workspace-access';
 import { createPrivateOpportunity, opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { STEPS_AT_ONCE } from '@/lib/commercial-opportunities/model-policy';
 
 const TABLE = 'opportunity_purchase_plan';
 const MAX_ZIP_BYTES = 60 * 1024 * 1024;
@@ -181,14 +182,24 @@ export async function runOpportunityDemand(client: SupabaseClient, job: Opportun
   }
   const kept = new Map<string, { fit: 'alta' | 'media'; reason: string }>();
   const offer = { offer: String(context.offer || ''), services: context.services || [], exclusions: context.exclusions || [] };
-  for (let offset = 0; offset < snapshot.lines.length; offset += PLAN_SCREEN_BATCH) {
-    if (Date.now() - started > 200_000) return { waiting: true as const };
-    const batch = snapshot.lines.slice(offset, offset + PLAN_SCREEN_BATCH);
-    const ids = new Set(batch.map(line => line.lineId));
-    const step = `plan:${snapshot.year}:${createHash('sha256').update(batch.map(line => line.lineId).join('|')).digest('hex').slice(0, 32)}`;
-    const answer = await opportunityGenerate(client, job, { step, category: 'evaluation', role: 'screen', schema: planScreenSchema, output: 8000,
-      prompt: planScreenPrompt(offer, batch) });
-    for (const match of answer.matches) if (ids.has(match.id.trim())) kept.set(match.id.trim(), { fit: match.fit, reason: match.reason.replace(/\s+/g, ' ').trim().slice(0, 300) });
+  // Four batches at a time: one by one, a whole plan took hours. A group starts while its slowest call still ends inside the route.
+  const lines = snapshot.lines, year = snapshot.year;
+  for (let offset = 0; offset < lines.length; offset += PLAN_SCREEN_BATCH * STEPS_AT_ONCE) {
+    if (Date.now() - started > 150_000) return { waiting: true as const };
+    const batches = Array.from({ length: Math.min(STEPS_AT_ONCE, Math.ceil((lines.length - offset) / PLAN_SCREEN_BATCH)) },
+      (_, index) => lines.slice(offset + index * PLAN_SCREEN_BATCH, offset + (index + 1) * PLAN_SCREEN_BATCH));
+    const outcomes = await Promise.allSettled(batches.map(batch => opportunityGenerate(client, job, {
+      step: `plan:${year}:${createHash('sha256').update(batch.map(line => line.lineId).join('|')).digest('hex').slice(0, 32)}`,
+      category: 'evaluation', role: 'screen', schema: planScreenSchema, output: 8000, prompt: planScreenPrompt(offer, batch) })));
+    // Every call ends before the job does; the first failure, in the plan's order, is the job's.
+    const failed = outcomes.find(outcome => outcome.status === 'rejected');
+    if (failed) throw (failed as PromiseRejectedResult).reason;
+    outcomes.forEach((outcome, index) => {
+      if (outcome.status !== 'fulfilled') return;
+      const ids = new Set(batches[index].map(line => line.lineId));
+      for (const match of outcome.value.matches)
+        if (ids.has(match.id.trim())) kept.set(match.id.trim(), { fit: match.fit, reason: match.reason.replace(/\s+/g, ' ').trim().slice(0, 300) });
+    });
   }
   const rows = snapshot.lines.filter(line => kept.has(line.lineId)).map(line => ({ organization_id: job.organization_id, year: snapshot!.year, line_id: line.lineId, run_id: job.id,
     institution: line.institution, institution_code: line.institutionCode, product_code: line.productCode, description: line.description, quantity: line.quantity,
