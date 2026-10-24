@@ -15,7 +15,8 @@ const fold = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').t
 /** How early a document is read: 0 names the process (invitation, particular conditions) … 6 is the law the bases quote. */
 export function prefillRank(name: string) {
   const text = fold(name);
-  if (/particular|invitacion|ficha resumen/.test(text)) return 0;
+  // The e-mail that brought the process is the invitation itself (OPP-49).
+  if (/particular|invitacion|ficha resumen|^correo |(^|\s)(eml|msg)$/.test(text)) return 0;
   if (/decreto|reglamento|normativa|\bley\b/.test(text)) return 6;
   if (/tecnic|alcance|especificacion/.test(text)) return 2;
   if (/contrato/.test(text)) return 4;
