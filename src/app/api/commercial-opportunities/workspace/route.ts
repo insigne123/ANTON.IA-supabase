@@ -14,6 +14,7 @@ import { AuthError } from '@/lib/server/auth-utils';
 import { LIST_VIEWS } from '@/lib/commercial-opportunities/list-stages';
 import { assignOpportunities, bulkSchema, discardOpportunities, moveOpportunities } from '@/lib/server/commercial-opportunities/workspace-discards';
 import { notifyBulkAssignment, readTeams } from '@/lib/server/commercial-opportunities/workspace-assignment-notice';
+import { adminSettingsInputSchema, saveAdminSettings } from '@/lib/server/commercial-opportunities/workspace-admin-settings';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
-    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria', 'pipeline_review', 'bulk']), data: z.unknown() }).strict().parse(await request.json());
+    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria', 'pipeline_review', 'bulk', 'admin_settings']), data: z.unknown() }).strict().parse(await request.json());
     if (body.action === 'notification') {
       const { id } = z.object({ id: z.string().uuid() }).strict().parse(body.data);
       opportunityDb(await auth.admin.from('opportunity_notifications').update({ read_at: new Date().toISOString() }).eq('id', id).eq('organization_id', scope.organizationId).eq('user_id', scope.userId));
@@ -62,6 +63,8 @@ export async function POST(request: Request) {
       after(() => notifyBulkAssignment(auth.admin, scope, assigned).catch(() => null));
       return opportunitiesJson(result);
     }
+    // The assignment rules and the saved searches of the team (admin-settings.ts): the settings as they are after the change.
+    if (body.action === 'admin_settings') return opportunitiesJson({ settings: await saveAdminSettings(auth.admin, scope, adminSettingsInputSchema.parse(body.data)) });
     if (body.action === 'pipeline_review') {
       // The AI's look at the opportunities in play, answered in this request (one per person and minute; a repeat reads it).
       const key = `pipeline:${scope.userId}:${new Date().toISOString().slice(0, 16)}`;

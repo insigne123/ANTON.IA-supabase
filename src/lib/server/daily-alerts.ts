@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
-import { alertEmail, composeAlert, type AlertFacts, type AlertOpportunity, type AlertPerson } from '@/lib/daily-alerts';
+import { alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
 import { preferredFullName } from '@/lib/lead-name';
@@ -9,6 +9,7 @@ import { dropPdf } from '@/lib/server/lead-drops';
 import { readWaitingOnAdmins } from '@/lib/server/commercial-opportunities/workspace-waiting';
 import { readSearchHealth } from '@/lib/server/commercial-opportunities/workspace-source-health';
 import { failingSources } from '@/lib/commercial-opportunities/source-health';
+import { matchesSearch, readAdminSettings, searchHref, type NewOpportunity } from '@/lib/commercial-opportunities/admin-settings';
 import { readPersonGoal } from '@/lib/server/weekly-goals';
 import type { SendSelf } from '@/lib/server/weekly-report';
 
@@ -141,10 +142,35 @@ async function readOpportunityNews(client: Client, scope: AlertScope, options: {
   };
   const news = { assigned: once('assignment', /^Oportunidad asignada:\s*/), reports: once('report', /^Informe (?:listo|disponible):\s*/) };
   if (!options.manager) return news;
-  const [waiting, health] = await Promise.all([readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null),
-    readSearchHealth(client, scope.organizationId, options.now).catch(() => null)]);
+  const [waiting, health, documents, searches] = await Promise.all([readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null),
+    readSearchHealth(client, scope.organizationId, options.now).catch(() => null), readDueDocuments(client, scope.organizationId, options).catch(() => []),
+    readSearchNews(client, scope, options).catch(() => [])]);
   const sources = health ? failingSources(health.sources).map(item => ({ label: item.label, days: item.failingDays })) : [];
-  return { ...news, ...(waiting ? { waiting } : {}), ...(sources.length ? { sources } : {}) };
+  return { ...news, ...(waiting ? { waiting } : {}), ...(sources.length ? { sources } : {}), ...(documents.length ? { documents } : {}), ...(searches.length ? { searches } : {}) };
+}
+
+const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00.000Z`) - Date.parse(`${from}T12:00:00.000Z`)) / 86_400_000);
+/** The company's documents that reached one of the days they are told on since the last alert (documentDue), the nearest first. */
+async function readDueDocuments(client: Client, organizationId: string, options: { now: Date; since: string }) {
+  const result: any = await client.from('opportunity_company_documents').select('label,expires_at').eq('organization_id', organizationId).not('expires_at', 'is', null).limit(200);
+  if (result.error) return [];
+  const today = dayInZone(options.now);
+  const gap = Math.max(1, dayDiff(dayInZone(new Date(options.since)), today));
+  return ((result.data || []) as any[]).map(row => ({ label: String(row.label || 'Un documento'), daysLeft: dayDiff(today, String(row.expires_at).slice(0, 10)) }))
+    .filter(item => documentDue(item.daysLeft, gap)).sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
+/** What is new since the last alert in the saved searches this person hears of (admin-settings.ts); nothing before their migration. */
+async function readSearchNews(client: Client, scope: AlertScope, options: { now: Date; since: string }) {
+  const context: any = await client.from('opportunity_company_context').select('admin_settings').eq('organization_id', scope.organizationId).maybeSingle();
+  if (context.error || !context.data) return [];
+  const mine = readAdminSettings(context.data.admin_settings).searches.filter(search => search.notify.includes(scope.userId));
+  if (!mine.length) return [];
+  const fresh: any = await client.from('commercial_opportunities').select('kind,title,company_name,buyer_name,deadline_at,evaluation:data->>evaluation,summary:data->summary->>text')
+    .eq('organization_id', scope.organizationId).gte('created_at', options.since).limit(1000);
+  if (fresh.error) return [];
+  return mine.map(search => ({ name: search.name, href: searchHref(search), count: ((fresh.data || []) as NewOpportunity[]).filter(item => matchesSearch(item, search, options.now)).length }))
+    .filter(item => item.count > 0);
 }
 
 /**
