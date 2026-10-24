@@ -76,7 +76,8 @@ export default function DashboardPage() {
           <ReconnectCard />
         </div>
 
-        <aside aria-label="Tu actividad de hoy" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
+        {/* On a wide and tall screen the week stays in view while the work scrolls; on a short one it would hide its own end (APP-01). */}
+        <aside aria-label="Tu actividad de hoy" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1 [@media(min-width:1280px)_and_(min-height:900px)]:sticky [@media(min-width:1280px)_and_(min-height:900px)]:top-6">
           <WeeklyGoalCard onEditGoals={open} />
           <HomeSummary />
           <PersonalCredits />

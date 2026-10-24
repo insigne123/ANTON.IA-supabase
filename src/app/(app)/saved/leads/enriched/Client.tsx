@@ -15,12 +15,12 @@ import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/le
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, AlertTriangle, MoreHorizontal, ArrowRight, ChevronDown, ListFilter, MailCheck, Search, Upload } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, AlertTriangle, MoreHorizontal, ArrowRight, ChevronDown, ListFilter, MailCheck, Search, Upload, ArrowDownToLine, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
 import { CompleteContactsDialog } from '@/components/enrichment/complete-contacts-dialog';
-import { savedLeadToEnriched } from '@/lib/leads-workspace/saved-enrichment';
+import { bringSavedWithEmail } from '@/lib/leads-workspace/saved-enrichment';
 import { completeSavedContacts, completionSummary, type ContactLookup } from '@/lib/leads-workspace/complete-contacts';
 import { supabase } from '@/lib/supabase';
 import { hasMeaningfulLeadResearch } from '@/lib/lead-research';
@@ -108,7 +108,9 @@ export default function EnrichedLeadsClient() {
   const [withoutEmail, setWithoutEmail] = useState<Lead[]>([]);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
-  const movingSavedRef = useRef(false);
+  // Saved contacts that already have an email: they come to this list when the person asks, not on their own (APP-13).
+  const [withEmail, setWithEmail] = useState<Lead[]>([]);
+  const [bringing, setBringing] = useState<number | null>(null);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
@@ -448,6 +450,16 @@ export default function EnrichedLeadsClient() {
     }
   }
 
+  async function bringSaved() {
+    setBringing(0);
+    const { moved, failed } = await bringSavedWithEmail(withEmail, { addDedup: items => enrichedLeadsStorage.addDedup(items), removeWhere: pred => supabaseService.removeWhere(pred) }, setBringing);
+    setBringing(null);
+    toast(failed
+      ? { variant: 'destructive', title: moved ? `Pasaron ${moved.toLocaleString('es-CL')} contactos; el resto sigue guardado` : 'No pudimos traer tus contactos', description: 'Intenta de nuevo en unos minutos.' }
+      : { title: moved === 1 ? '1 contacto pasó a «Por escribir»' : `${moved.toLocaleString('es-CL')} contactos pasaron a «Por escribir»` });
+    void loadDataRef.current();
+  }
+
   const loadData = useCallback(async () => {
     const requestId = ++loadDataRequestIdRef.current;
     setLoadError('');
@@ -462,22 +474,7 @@ export default function EnrichedLeadsClient() {
       if (loadDataRequestIdRef.current !== requestId) return;
       setEnriched(patched);
       setWithoutEmail(saved.filter(lead => !String(lead.email || '').includes('@')));
-      // Saved contacts that already have an email belong here: they come in as they are, without a search or credits (before,
-      // «Por completar» had a button for it).
-      const ready = saved.filter(lead => String(lead.email || '').includes('@'));
-      if (ready.length > 0 && !movingSavedRef.current) {
-        movingSavedRef.current = true;
-        try {
-          await enrichedLeadsStorage.addDedup(ready.map(savedLeadToEnriched));
-          const ids = new Set(ready.map(lead => lead.id));
-          await supabaseService.removeWhere(lead => ids.has(lead.id));
-          if (loadDataRequestIdRef.current === requestId) setEnriched(withCompanyFromSaved(await enrichedLeadsStorageGet(), saved));
-        } catch (error) {
-          console.error('[enriched-leads] Moving saved contacts with email failed:', error);
-        } finally {
-          movingSavedRef.current = false;
-        }
-      }
+      setWithEmail(saved.filter(lead => String(lead.email || '').includes('@')));
       setReports(getLeadReports());
       await loadNativeResearchStatuses(patched);
     } catch (error) {
@@ -1230,6 +1227,18 @@ export default function EnrichedLeadsClient() {
           </>
         )}
       />
+
+      {withEmail.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/30 px-4 py-3">
+          <p className="min-w-0 text-sm" aria-live="polite">
+            <span className="font-medium">{withEmail.length.toLocaleString('es-CL')} {withEmail.length === 1 ? 'contacto guardado ya tiene' : 'contactos guardados ya tienen'} correo.</span>{' '}
+            <span className="text-muted-foreground">{bringing === null ? 'Tráelos para escribirles, sin gastar créditos.' : `Trayendo ${bringing.toLocaleString('es-CL')} de ${withEmail.length.toLocaleString('es-CL')}…`}</span>
+          </p>
+          <Button size="sm" variant="outline" disabled={bringing !== null} onClick={() => void bringSaved()}>
+            {bringing !== null ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowDownToLine className="h-4 w-4" aria-hidden="true" />}Traerlos a «Por escribir»
+          </Button>
+        </div>
+      ) : null}
 
       {withoutEmail.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/30 px-4 py-3">

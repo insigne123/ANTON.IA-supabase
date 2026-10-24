@@ -62,3 +62,35 @@ test('the lookup after saving moves only what the classification says, marks the
   assert.match(dialog, /'Correo \+ teléfono'/);
   assert.deepEqual(Object.keys(SAVED_LOOKUP_LABELS).sort(), ['not_found', 'not_searched', 'with_email']);
 });
+
+test('saved contacts with an email come to «Por escribir» only when asked, a batch at a time, and a failure keeps the rest saved (APP-13)', async () => {
+  const { bringSavedWithEmail, BRING_SAVED_BATCH } = await import('./saved-enrichment');
+  const leads = Array.from({ length: BRING_SAVED_BATCH + 3 }, (_, index) => saved(`s${index}`, { email: `p${index}@retailandino.cl` }));
+  leads.push(saved('sin-correo'));
+  const added: string[] = [], removed: string[] = [], progress: number[] = [];
+  const store = {
+    addDedup: async (items: Array<{ id: string }>) => { added.push(...items.map(item => item.id)); },
+    removeWhere: async (pred: (lead: Lead) => boolean) => { const gone = leads.filter(pred).map(lead => lead.id); removed.push(...gone); return gone.length; },
+  };
+  assert.deepEqual(await bringSavedWithEmail(leads, store, moved => progress.push(moved)), { moved: BRING_SAVED_BATCH + 3, failed: false });
+  assert.deepEqual(progress, [BRING_SAVED_BATCH, BRING_SAVED_BATCH + 3]);
+  assert.ok(!added.includes('sin-correo') && !removed.includes('sin-correo'), 'who has no email stays saved');
+  assert.deepEqual(removed, added);
+
+  // «Por escribir» refuses the second batch: it stays saved, and the first already moved.
+  const kept: string[] = [];
+  let calls = 0;
+  const failing = {
+    addDedup: async () => { if (++calls === 2) throw new Error('timeout'); },
+    removeWhere: async (pred: (lead: Lead) => boolean) => { const gone = leads.filter(pred); kept.push(...gone.map(lead => lead.id)); return gone.length; },
+  };
+  assert.deepEqual(await bringSavedWithEmail(leads, failing), { moved: BRING_SAVED_BATCH, failed: true });
+  assert.equal(kept.length, BRING_SAVED_BATCH);
+});
+
+test('opening «Por escribir» no longer moves saved contacts by itself (APP-13)', () => {
+  const client = readFileSync('src/app/(app)/saved/leads/enriched/Client.tsx', 'utf8');
+  const load = client.slice(client.indexOf('const loadData = useCallback'), client.indexOf('}, [loadNativeResearchStatuses]);'));
+  assert.ok(load.length > 100);
+  assert.doesNotMatch(load, /addDedup|removeWhere/);
+});

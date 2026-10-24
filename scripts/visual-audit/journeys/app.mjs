@@ -47,4 +47,21 @@ export default () => [
         c.check('el borrador dice lo que va a enviar', /\d+ destinatarios? · \d+ correos? por persona/.test(draft), draft.slice(0, 160));
       } },
     ] },
+  { id: 'app-por-escribir-traer', persona: 'owner', title: 'Mirar «Por escribir» no mueve contactos; traerlos es una decisión',
+    goal: 'Pasar los contactos guardados que ya tienen correo cuando yo lo pida (APP-13).',
+    steps: [
+      { say: 'Abro Por escribir', do: async c => {
+        const withEmail = () => c.table('leads').filter(lead => String(lead.email || '').includes('@')).length;
+        const before = withEmail();
+        await c.go('/saved/leads/enriched'); await c.see(/contactos? guardados? ya tienen? correo/); await c.wait(1500);
+        c.check('abrir la pantalla no movió a nadie', before > 0 && withEmail() === before, `${before} → ${withEmail()}`);
+      } },
+      { say: 'Pulso «Traerlos a «Por escribir»»', do: async c => {
+        const enrichedBefore = c.table('enriched_leads').length;
+        await c.click({ role: 'button', name: /^Traerlos a «Por escribir»/ }); await c.see(/pasaron? a «Por escribir»/);
+        c.check('los guardados con correo dejaron la lista de guardados', !c.table('leads').some(lead => String(lead.email || '').includes('@')));
+        c.check('y llegaron a «Por escribir»', c.table('enriched_leads').length > enrichedBefore, `${enrichedBefore} → ${c.table('enriched_leads').length}`);
+        c.check('el aviso se fue', !(await c.has(/ya tienen? correo/)));
+      } },
+    ] },
 ];

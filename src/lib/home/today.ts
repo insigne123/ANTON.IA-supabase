@@ -23,7 +23,8 @@ export type TodayQueueItem = {
   occurredAt?:string;
 };
 
-export type TodayPrimary = { title: string; description: string; href: string; cta: string };
+/** `queueId`: the pending item the step is, which then leaves the list below it so it is not said twice (APP-01). */
+export type TodayPrimary = { title: string; description: string; href: string; cta: string; queueId?: string };
 
 export type TodayPlan = {
   setup: TodaySetupStep[];
@@ -119,24 +120,24 @@ export function buildTodayPlan(input: TodayInput): TodayPlan {
     });
   }
   queue.sort((a, b) => Number(b.urgent) - Number(a.urgent));
-  const visibleQueue = queue.slice(0, QUEUE_LIMIT);
+  const primary = primaryAction(input, setup, queue);
 
-  return { setup, setupDone, primary: primaryAction(input, setup, visibleQueue), queue: visibleQueue };
+  return { setup, setupDone, primary, queue: queue.filter(item => item.id !== primary.queueId).slice(0, QUEUE_LIMIT) };
 }
 
 /** One clear next step: people waiting for an answer beat everything; then what blocks sending; then writing; then finding. */
 function primaryAction(input: TodayInput, setup: TodaySetupStep[], queue: TodayQueueItem[]): TodayPrimary {
   const firstUrgent = queue.find((item) => item.urgent) || queue.find((item) => item.kind === 'reply');
-  if (firstUrgent) return { title: firstUrgent.title, description: firstUrgent.description, href: firstUrgent.href, cta: 'Abrir conversación' };
+  if (firstUrgent) return { title: firstUrgent.title, description: firstUrgent.description, href: firstUrgent.href, cta: 'Abrir conversación', queueId: firstUrgent.id };
   const blocking = setup.find((step) => !step.done && (step.id === 'profile' || step.id === 'mail'));
   if (blocking) return { title: blocking.title, description: blocking.description, href: blocking.href, cta: blocking.cta };
   const commitment = queue.find((item) => item.kind === 'commitment');
-  if (commitment) return { title: commitment.title, description: commitment.description, href: commitment.href, cta: 'Abrir conversación' };
+  if (commitment) return { title: commitment.title, description: commitment.description, href: commitment.href, cta: 'Abrir conversación', queueId: commitment.id };
   if (input.counts.readyToWrite > 0) {
     return {
       title: `Escríbeles a tus ${plural(input.counts.readyToWrite, 'contacto con correo', 'contactos con correo')}`,
       description: 'Elige a quién, revisa el borrador de la IA y envíalo desde tu correo.',
-      href: '/saved/leads/enriched', cta: 'Escribir ahora',
+      href: '/saved/leads/enriched', cta: 'Escribir ahora', queueId: queue.some(item => item.id === 'ready') ? 'ready' : undefined,
     };
   }
   if (input.counts.saved > 0) {
