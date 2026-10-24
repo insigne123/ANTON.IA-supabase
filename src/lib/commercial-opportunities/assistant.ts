@@ -15,7 +15,10 @@ export const assistantAnswerSchema = z.object({
 export type AssistantAnswer = z.infer<typeof assistantAnswerSchema>;
 export type AssistantCard = { id: string; title: string; buyer: string | null; kind: string; deadline: string | null; note: string };
 /** What is saved and shown: the answer with its cards resolved to the opportunities they name. */
-export type SavedAssistantAnswer = { answer: string; cards: AssistantCard[]; handoff: { id: string; title: string; question: string } | null; followups: string[] };
+export type SavedAssistantAnswer = { answer: string; cards: AssistantCard[]; handoff: { id: string; title: string; question: string } | null; followups: string[];
+  /** What the person thought of the answer (👍/👎), kept with it to review the assistant's quality (OPP-33). */
+  feedback?: AssistantFeedback | null };
+export type AssistantFeedback = 'up' | 'down';
 export type AssistantMessage = { id: string; requestId?: string; question: string; answer: SavedAssistantAnswer | null; created_at: string;
   /** The job of a question still without an answer: queued or running, or why it stopped. */
   job?: { state: string; error: string | null } | null };
