@@ -94,6 +94,10 @@ export default function cowork(ctx) {
   return {
     tables: {
       cowork_runs: runs, cowork_run_events: events,
+      // The model calls of those turns with their cost (Administración → «Oportunidades y Cowork»), one of them today.
+      cowork_model_calls: [...runs.slice(0, 4).map((item, index) => ({ id: ctx.uid(9450 + index), run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, role: 'coordinator',
+        output_reserved: 4000, usage: { costUsd: 0.012 + index * 0.004 }, usage_recorded_at: item.created_at, created_at: item.created_at })),
+        { id: ctx.uid(9459), run_id: runs[0].id, user_id: ctx.OWNER, organization_id: ctx.ORG, role: 'coordinator', output_reserved: 4000, usage: null, usage_recorded_at: null, created_at: ctx.minutesAgo(20) }],
       // Scheduled tasks (COWORK_SCHEDULES_ENABLED): one that fires on Mondays and ran last week, one on weekdays that was paused after failing, one monthly.
       cowork_scheduled_tasks: [
         { id: ctx.uid(9401), user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Resumen del lunes', prompt: 'Dime quién respondió esta semana y a quién escribir hoy, con el motivo de cada uno.',
