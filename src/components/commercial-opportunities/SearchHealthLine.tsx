@@ -19,10 +19,11 @@ export function SearchHealthLine({ health, now = new Date() }: { health: { sourc
   const tenders = health.sources.some(item => item.source === 'tenders' || item.source === 'compraAgil');
   return <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
     {last ? <span>{last}</span> : null}
-    {health.sources.map(item => <span key={item.source} className="inline-flex items-center gap-1.5" title={item.detail}>
-      <span aria-hidden="true" className={cn('h-1.5 w-1.5 shrink-0 rounded-full', DOT[item.state])} />
-      <span className={cn(item.state === 'failed' ? 'text-destructive' : item.state === 'ok' ? '' : 'text-foreground')}>{item.label}</span>
-      {item.state === 'ok' ? <span className="sr-only">: {item.detail}</span> : <span>· {item.detail}</span>}
+    {/* The name of a source never breaks; on a phone its reason wraps under it as text. */}
+    {health.sources.map(item => <span key={item.source} className="inline-flex max-w-full items-start gap-1.5" title={item.detail}>
+      <span aria-hidden="true" className={cn('mt-[0.45em] h-1.5 w-1.5 shrink-0 rounded-full', DOT[item.state])} />
+      <span className="min-w-0"><span className={cn('whitespace-nowrap', item.state === 'failed' ? 'text-destructive' : item.state === 'ok' ? '' : 'text-foreground')}>{item.label}</span>
+        {item.state === 'ok' ? <span className="sr-only">: {item.detail}</span> : <span> · {item.detail}</span>}</span>
     </span>)}
     {tenders && health.ticket === 'shared' ? <Link href="/connections"
       className="rounded underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Conecta el ticket de Mercado Público de tu empresa</Link> : null}

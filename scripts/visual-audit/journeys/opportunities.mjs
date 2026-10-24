@@ -46,7 +46,8 @@ export default () => [
     steps: [
       { say: 'Abro Oportunidades y miro cómo fue la búsqueda de hoy', do: async c => {
         await c.go('/opportunities'); await c.see('Última búsqueda');
-        c.check('dice qué fuente no respondió y por qué', await c.has('1 de 2 búsquedas respondieron'));
+        const told = await c.page.getByText(/1 de 2 búsquedas respondieron/i).first().waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
+        c.check('dice qué fuente no respondió y por qué', told, await c.page.locator('p', { hasText: 'Última búsqueda' }).first().innerText().catch(() => ''));
       } },
       { say: 'Pulso «Qué buscamos»', do: async c => { await c.click('Qué buscamos'); await c.seeRole('dialog', /Qué buscamos/); await c.see('Fuentes'); } },
       { say: 'Apago LinkedIn', do: async c => {

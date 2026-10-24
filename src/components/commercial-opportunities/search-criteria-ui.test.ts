@@ -73,8 +73,8 @@ test('the line under the strip says when the search last answered and, only for 
   const html = line([source('tenders', 'ok', 'Respondió hoy 08:03'), source('compraAgil', 'failed', 'Mercado Público no respondió · 2 días seguidos', null), source('posts', 'retrying', 'No respondió a la primera; reintentamos solos', null)]);
   assert.equal(text(html), 'Última búsqueda: hoy 08:03 Licitaciones : Respondió hoy 08:03 Compra Ágil · Mercado Público no respondió · 2 días seguidos LinkedIn · No respondió a la primera; reintentamos solos Conecta el ticket de Mercado Público de tu empresa');
   assert.match(html, /<span class="sr-only">: Respondió hoy 08:03<\/span>/, 'a source that answered says so only to a screen reader');
-  assert.match(html, /class="text-destructive">Compra Ágil<\/span>/, 'a failed source reads red');
-  assert.match(html, /aria-hidden="true" class="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive"/);
+  assert.match(html, /class="whitespace-nowrap text-destructive">Compra Ágil<\/span>/, 'a failed source reads red, and its name never breaks');
+  assert.match(html, /aria-hidden="true" class="mt-\[0.45em\] h-1.5 w-1.5 shrink-0 rounded-full bg-destructive"/);
   assert.match(html, /<a href="\/connections" class="[^"]*focus-visible:ring-2[^"]*">Conecta el ticket/, 'the ticket is connected in «Conexiones»');
 });
 
