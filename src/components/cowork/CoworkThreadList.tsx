@@ -20,7 +20,7 @@ const TITLE_MAX = 120;
  * `closeStyle` «dismiss» closes with an X, as in a sheet; «collapse» folds the side rail.
  */
 export function CoworkThreadList({ threads, loading, error = '', onRetry, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete, onShortcuts, onSchedules,
-  idPrefix = 'cowork-rail', closeStyle = 'collapse' }: {
+  schedules = null, idPrefix = 'cowork-rail', closeStyle = 'collapse' }: {
   idPrefix?: string;
   threads: CoworkThreadSummary[];
   loading: boolean;
@@ -37,6 +37,8 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   onShortcuts?: () => void;
   /** «Tareas programadas» from the footer; only where the account has them. */
   onSchedules?: () => void;
+  /** How many scheduled tasks are on and when the next one fires («lunes 26 de octubre, 09:00»), for the footer's «Programadas». */
+  schedules?: { active: number; next: string | null } | null;
 }) {
   const [filter, setFilter] = useState('');
   const [editing, setEditing] = useState<{ rootId: string; draft: string } | null>(null);
@@ -126,14 +128,18 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
             }
             return <li key={thread.rootId} className="group/thread relative">
               <button type="button" onClick={() => onSelect(thread.id)} aria-current={current ? 'page' : undefined}
-                title={thread.title}
+                title={`${thread.title} · ${coworkShortTime(thread.updatedAt)}`}
                 className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-[7px] text-left text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
                   manageable && 'pr-9',
                   current ? 'bg-cw-active font-medium text-cw-text' : 'text-cw-text hover:bg-cw-hover')}>
                 <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-                {flagged
-                  ? <span className={cn('flex shrink-0 items-center gap-1.5 text-[11.5px] text-cw-muted', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}><CwStatusDot tone={status.tone} pulse={working && thread.status !== 'waiting_approval'} /><span className="sr-only">{status.label}</span></span>
-                  : <span className={cn('shrink-0 text-[11.5px] text-foreground/70', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}>{coworkShortTime(thread.updatedAt)}</span>}
+                {/* Waiting for approval says so in a word: a faint dot was easy to miss. The time is in the tooltip: the groups (Hoy,
+                    Ayer…) already say when, and the title gets the room (COW-24). */}
+                {thread.status === 'waiting_approval'
+                  ? <span className={cn('shrink-0 rounded-full bg-cw-warning-soft px-1.5 py-px text-[11px] font-medium text-cw-warning', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}>Aprobar<span className="sr-only">: {status.label}</span></span>
+                  : flagged
+                    ? <span className={cn('flex shrink-0 items-center gap-1.5 text-[11.5px] text-cw-muted', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}><CwStatusDot tone={status.tone} pulse={working} /><span className="sr-only">{status.label}</span></span>
+                    : null}
               </button>
               {manageable && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -158,16 +164,21 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
         </ul>
       </div>)}
     </div>
-    <div className="flex shrink-0 items-center gap-1 border-t border-cw-border px-3 py-2">
-      {/* «Lo que Cowork recuerda» did not fit in the 256px of the list next to two icons and ran into the calendar; the dialog keeps the long name. */}
-      <CwButton variant="ghost" size="sm" className="min-w-0 flex-1 justify-start gap-2 px-2.5 text-[13px]" onClick={() => setMemoriesOpen(true)} title="Lo que Cowork recuerda">
-        <Brain aria-hidden="true" /><span className="min-w-0 truncate">Memoria</span>
-      </CwButton>
-      {onSchedules && <CwButton variant="ghost" size="icon-sm" className="shrink-0" onClick={onSchedules} aria-label="Tareas programadas" title="Tareas programadas">
-        <CalendarClock aria-hidden="true" />
+    <div className="shrink-0 space-y-0.5 border-t border-cw-border px-3 py-2">
+      {/* «Tareas programadas» by name, with how many are on and when the next one fires: an icon alone was the least visible entry (COW-19). */}
+      {onSchedules && <CwButton variant="ghost" size="sm" className="w-full justify-start gap-2 px-2.5 text-[13px]" onClick={onSchedules}
+        title={schedules?.next ? `Próxima: ${schedules.next}` : 'Tareas programadas'} aria-label={schedules?.active ? `Tareas programadas: ${schedules.active} activas${schedules.next ? `, la próxima ${schedules.next}` : ''}` : 'Tareas programadas'}>
+        <CalendarClock aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-left">Programadas</span>
+        {schedules?.active ? <span className="shrink-0 tabular-nums text-[12px] text-cw-muted">{schedules.active}</span> : null}
       </CwButton>}
-      {onShortcuts && <CwButton variant="ghost" size="icon-sm" className="hidden shrink-0 lg:inline-flex" onClick={onShortcuts}
-        aria-label="Atajos de teclado" title="Atajos de teclado"><Keyboard aria-hidden="true" /></CwButton>}
+      <div className="flex items-center gap-1">
+        {/* «Lo que Cowork recuerda» did not fit in the 256px of the list next to two icons and ran into the calendar; the dialog keeps the long name. */}
+        <CwButton variant="ghost" size="sm" className="min-w-0 flex-1 justify-start gap-2 px-2.5 text-[13px]" onClick={() => setMemoriesOpen(true)} title="Lo que Cowork recuerda">
+          <Brain aria-hidden="true" /><span className="min-w-0 truncate">Memoria</span>
+        </CwButton>
+        {onShortcuts && <CwButton variant="ghost" size="icon-sm" className="hidden shrink-0 lg:inline-flex" onClick={onShortcuts}
+          aria-label="Atajos de teclado" title="Atajos de teclado"><Keyboard aria-hidden="true" /></CwButton>}
+      </div>
     </div>
     <CoworkMemories open={memoriesOpen} onOpenChange={setMemoriesOpen} />
   </nav>;

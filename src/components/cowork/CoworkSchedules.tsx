@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { COWORK_SCHEDULE_LIMITS, coworkScheduleWhen, type CoworkScheduleFrequency } from '@/lib/cowork/schedules';
 import { coworkScheduleHint } from '@/lib/cowork/schedule-hint';
+import { COWORK_DEFAULT_TIME_ZONE, coworkZoneLabel } from '@/lib/cowork/time-zone';
 import { cn } from '@/lib/utils';
 import { CwButton } from './ui';
 
@@ -157,6 +158,8 @@ export function CoworkSchedules({ open, onOpenChange, onStarted, initialPrompt =
   const active = (tasks || []).filter(task => task.status === 'active').length;
   const full = active >= limit;
   const draft = form?.draft ?? EMPTY_DRAFT;
+  // The server keeps the organization's zone for every task: the ones already saved say which.
+  const zone = tasks?.[0]?.timeZone || COWORK_DEFAULT_TIME_ZONE;
   const set = (patch: Partial<Draft>) => setForm(current => current && { ...current, draft: { ...current.draft, ...patch } });
 
   return <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,7 +193,7 @@ export function CoworkSchedules({ open, onOpenChange, onStarted, initialPrompt =
               </select>
             </div>
             <div>
-              <label htmlFor={`${ids}-time`} className="mb-1 block text-[12.5px] font-medium text-cw-text">A las</label>
+              <label htmlFor={`${ids}-time`} className="mb-1 block text-[12.5px] font-medium text-cw-text">A las <span className="font-normal text-cw-muted">· {coworkZoneLabel(zone)}</span></label>
               <input id={`${ids}-time`} type="time" className={field} value={draft.time} required onChange={event => set({ time: event.target.value })} />
             </div>
           </div>
@@ -281,15 +284,26 @@ export function CoworkSchedules({ open, onOpenChange, onStarted, initialPrompt =
  * Whether the tasks are on for this account (the list answers `enabled`). The rail and the message box show their buttons only then, so
  * an account without the feature sees what it always saw.
  */
-export function useCoworkSchedulesAvailable() {
-  const [available, setAvailable] = useState(false);
+/**
+ * Whether the account has «Tareas programadas», how many are on and when the next one fires: the rail names them instead of
+ * hiding them behind an icon (COW-19). `refresh` reads them again, after the dialog closes.
+ */
+export function useCoworkSchedules() {
+  const [summary, setSummary] = useState<{ available: boolean; active: number; next: string | null }>({ available: false, active: 0, next: null });
+  const [version, setVersion] = useState(0);
   useEffect(() => {
     let disposed = false;
     fetch('/api/cowork/schedules', { cache: 'no-store' })
       .then(response => response.ok ? response.json() : null)
-      .then(data => { if (!disposed && data?.enabled === true) setAvailable(true); })
+      .then(data => {
+        if (disposed || data?.enabled !== true) return;
+        const active = ((data.tasks || []) as CoworkScheduledTaskView[]).filter(task => task.status === 'active' && task.nextRunAt)
+          .sort((a, b) => Date.parse(a.nextRunAt!) - Date.parse(b.nextRunAt!));
+        setSummary({ available: true, active: active.length, next: active[0] ? coworkScheduleWhen(new Date(active[0].nextRunAt!), active[0].timeZone) : null });
+      })
       .catch(() => undefined);
     return () => { disposed = true; };
-  }, []);
-  return available;
+  }, [version]);
+  const refresh = useCallback(() => setVersion(value => value + 1), []);
+  return { ...summary, refresh };
 }

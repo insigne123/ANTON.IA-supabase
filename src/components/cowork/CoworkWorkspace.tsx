@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, CornerDownRight, History, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
@@ -29,7 +30,7 @@ import { CoworkHome, type CoworkOfferDraft } from './CoworkHome';
 import { COWORK_LOW_SEARCH_QUOTA, CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkShortcuts } from './CoworkShortcuts';
-import { CoworkSchedules, useCoworkSchedulesAvailable } from './CoworkSchedules';
+import { CoworkSchedules, useCoworkSchedules } from './CoworkSchedules';
 import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
@@ -141,10 +142,14 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const [mode, setMode] = useState<CoworkExecutionMode>('approval');
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // The app's own top bar on a phone (app-shell.tsx, #shell-bar-actions), found once on the client.
+  const [phoneBar, setPhoneBar] = useState<HTMLElement | null>(null);
+  useEffect(() => { setPhoneBar(document.getElementById('shell-bar-actions')); }, []);
   /** «Atajos de teclado» (Plan 13), and whether the keys are a Mac's (read on the client: the server cannot tell). */
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // «Tareas programadas»: only where the account has them. Opened from the rail (empty) or from the message box (with the request to repeat).
-  const schedulesAvailable = useCoworkSchedulesAvailable();
+  const schedules = useCoworkSchedules();
+  const schedulesAvailable = schedules.available;
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [schedulesPrompt, setSchedulesPrompt] = useState('');
   const [mac, setMac] = useState(false);
@@ -538,7 +543,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     : {};
   const retryList = useCallback(() => { setError(''); setListVersion(value => value + 1); }, []);
   const openSchedules = useCallback((prompt: string) => { setDrawerOpen(false); setSchedulesPrompt(prompt); setSchedulesOpen(true); }, []);
-  const scheduleActions = schedulesAvailable ? { onSchedules: () => openSchedules('') } : {};
+  const scheduleActions = schedulesAvailable ? { onSchedules: () => openSchedules(''), schedules: { active: schedules.active, next: schedules.next } } : {};
   const title = useMemo(() => {
     const summary = threads.find(thread => thread.rootId === selectedRoot);
     if (summary) return summary.title;
@@ -968,7 +973,11 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     </Sheet>
 
     <div className={cn('relative flex min-w-0 flex-1 flex-col', artifactOpen && 'hidden lg:flex', artifactOpen && maximized && 'lg:hidden')}>
-      <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-cw-border px-2.5 sm:px-3">
+      {/* On a phone's home this row held only the history icon: it goes to the app's top bar instead, one row less (COW-28). */}
+      {phoneBar && !inConversation ? createPortal(<button type="button" onClick={() => setDrawerOpen(true)} aria-label="Mostrar conversaciones" title="Conversaciones"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <History className="h-4 w-4" aria-hidden="true" /></button>, phoneBar) : null}
+      <header className={cn('flex h-12 shrink-0 items-center gap-1.5 border-b border-cw-border px-2.5 sm:px-3', phoneBar && !inConversation && 'max-md:hidden')}>
         {chrome && <span className="hidden shrink-0 md:inline-flex">{chrome.start}</span>}
         <CwButton ref={listOpener} variant="ghost" size="icon-sm" className={cn(railVisible && 'lg:hidden')} aria-label="Mostrar conversaciones" title="Conversaciones"
           onClick={() => { if (isDesktop && !artifactOpen) setRailCollapsed(false); else setDrawerOpen(true); }}>
@@ -998,6 +1007,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
 
       {!inConversation
         ? <CoworkHome composer={homeComposer} threads={threads} ready={ready} loading={loading} listFailed={Boolean(listError)} onSuggestion={applySuggestion} onOpenThread={choose}
+          railVisible={isDesktop && railVisible}
           overview={overview} overviewLoading={overviewLoading} offerDraft={offerDraft} onOfferDraftChange={setOfferDraft}
           onSaveOffer={ready && !sending ? async text => {
             const sent = await post(text, null);
@@ -1126,6 +1136,6 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
     </m.div>}
     <CoworkShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} mac={mac} />
-    {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={setSchedulesOpen} initialPrompt={schedulesPrompt} onStarted={retryList} />}
+    {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={open => { setSchedulesOpen(open); if (!open) schedules.refresh(); }} initialPrompt={schedulesPrompt} onStarted={retryList} />}
   </section></CoworkExportProvider></CoworkMotion>;
 }

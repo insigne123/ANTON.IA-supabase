@@ -8,6 +8,7 @@ import { JSDOM } from 'jsdom';
 import * as presentation from '@/lib/cowork/presentation';
 import * as schedules from '@/lib/cowork/schedules';
 import * as hint from '@/lib/cowork/schedule-hint';
+import * as timeZone from '@/lib/cowork/time-zone';
 
 const require = createRequire(import.meta.url);
 const source = await readFile(new URL('./CoworkSchedules.tsx', import.meta.url), 'utf8');
@@ -22,6 +23,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/cowork/presentation': presentation,
   '@/lib/cowork/schedules': schedules,
   '@/lib/cowork/schedule-hint': hint,
+  '@/lib/cowork/time-zone': timeZone,
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
   // The dialog and the menu without portals: what matters here is what they hold.
   '@/components/ui/dialog': {
@@ -142,6 +144,8 @@ test('a new task is checked, sent without the day that does not belong to its fr
     await act(async () => view.button('Nueva tarea').click());
     const title = view.doc.querySelector<HTMLInputElement>('input[maxlength="80"]')!;
     const prompt = view.doc.querySelector<HTMLTextAreaElement>('textarea')!;
+    // «A las» says whose hour it is (COW-20).
+    assert.match(view.text(), /A las · hora de Chile/);
     await act(async () => view.button('Programar').click());
     assert.match(view.text(), /Ponle un nombre de al menos 3 letras\./);
     await view.type(title, 'Resumen del lunes');

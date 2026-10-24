@@ -492,6 +492,11 @@ test('what the agent searched or read on the web shows with its query or its sit
   assert.equal(describeCoworkObservation({ action: 'web.search', input: 'algo', result: { ok: false, sources: [], error: 'unavailable' } }).detail, '«algo» · no se pudo');
   assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}, {}, {}] } }), { count: 3, label: 'fuentes' });
   assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}] } }), { count: 1, label: 'fuente' });
+  // A page that would not open is not a search that found nothing (COW-27: «2 fuentes · sin resultados»).
+  assert.deepEqual(coworkReadFinding({ action: 'web.fetch', result: { ok: false, sources: [], error: 'url_not_allowed' } }), { count: null, label: 'no se pudo leer' });
+  assert.deepEqual(coworkReadFinding({ action: 'web.fetch', result: { ok: true, sources: [{}] } }), { count: null, label: 'leída' });
+  assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: false, sources: [], error: 'unavailable' } }), { count: null, label: 'no se pudo buscar' });
+  assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [] } }), { count: null, label: 'sin fuentes' });
 });
 
 test('the summary of a turn tells the reads on the web apart from the ones of the account', () => {

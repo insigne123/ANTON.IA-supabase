@@ -197,6 +197,13 @@ export function coworkReadFinding(payload: Record<string, unknown> | null | unde
       return { count: people, label: people === 1 ? 'contacto por escribir' : 'contactos por escribir' };
     }
   }
+  // A page that could not be read, or a search that did not run, is not a search that found nothing (COW-27: «2 fuentes · sin resultados»
+  // was a page that would not open).
+  if (action === 'web.fetch' || action === 'web.search') {
+    const ok = (result && typeof result === 'object' ? (result as { ok?: unknown }).ok : undefined);
+    if (ok === false) return { count: null, label: action === 'web.fetch' ? 'no se pudo leer' : 'no se pudo buscar' };
+    if (action === 'web.fetch') return ok === true ? { count: null, label: 'leída' } : null;
+  }
   const count = countOf(result);
   if (count === null) return null;
   const [one, many] = FINDING_NOUNS[action] || ['resultado', 'resultados'];
