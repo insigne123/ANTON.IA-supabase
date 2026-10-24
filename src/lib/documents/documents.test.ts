@@ -16,7 +16,7 @@ import { layoutSvgs } from './render-svg';
 import { documentInputSchema, runsOf, specFromInput, specFromMarkdown, type DocumentSpec } from './spec';
 import { contrast, THEMES, themePairs } from './theme';
 import { documentTool, DOCUMENT_ATTEMPTS } from './tool';
-import { rasterizePages, reviewDocumentPages } from './vision';
+import { drawsText, rasterizePages, reviewDocumentPages } from './vision';
 
 /** A measure without a font: width proportional to the text, so layouts are the same everywhere. */
 const measure: Measure = (text, font, size) => text.length * size * 0.19 * (font.bold ? 1.06 : 1) * (font.family === 'courier' ? 1.15 : 1);
@@ -274,4 +274,17 @@ test('the pages are rasterized from the PDF when the machine has pdftoppm', { sk
   assert.ok(pages && pages.length === produced.pages);
   assert.deepEqual([...pages![0].slice(0, 4)], [137, 80, 78, 71]);
   assert.ok(bodyHeight(THEMES.antonia) > 200);
+});
+
+test('a machine that draws no text is told apart from one that does, so pages with no words are never given to the reviewer', async () => {
+  assert.equal(await drawsText(async () => new Uint8Array(4_800).fill(255)), false);
+  assert.equal(await drawsText(async () => Uint8Array.from({ length: 4_800 }, (_, index) => (index % 7 === 0 ? 0 : 255))), true);
+  assert.equal(await drawsText(async () => { throw new Error('sharp is not installed'); }), false);
+});
+
+test('the pages are rasterized from the SVG previews when there is no PDF rasterizer, on a machine that draws text', { skip: !await drawsText() }, async () => {
+  const produced = await produceDocument(doc([para(40)]), { formats: ['pdf'] });
+  const pages = await rasterizePages({ svgs: produced.svgs });
+  assert.ok(pages && pages.length === produced.pages);
+  assert.deepEqual([...pages![0].slice(0, 4)], [137, 80, 78, 71]);
 });

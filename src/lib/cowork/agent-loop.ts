@@ -150,6 +150,9 @@ export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; l
   prepareBatch?: CoworkPrepareBatchInput;
   preference?: CoworkPreference;
   task?: CoworkTaskPlan;
+  /** The turn that proposed it read the open web (search, page or Investigadora): what a page says is data, but a page can try to steer the agent,
+   * so the autonomous mode does not approve it by itself (execution-policy.ts). */
+  fromWeb?: boolean;
   campaignId?: string; enrollmentId?: string; stepId?: string };
 
 function observationRunId(
@@ -1350,7 +1353,7 @@ async function runCoworkLoop(input: {
   record: (observation: CoworkObservation) => Promise<void>;
   review?: (tasks: SpecialistTask[], observations: CoworkObservation[]) => Promise<unknown>;
   proposeNote?: (leadId: string, note: string) => Promise<void>;
-  proposeSearch?: (criteria: CoworkSearchCriteria) => Promise<void>;
+  proposeSearch?: (criteria: CoworkSearchCriteria, context?: { fromWeb?: boolean }) => Promise<void>;
   proposeEffect?: (proposal: CoworkEffectProposal) => Promise<void>;
   /** The Writer: writes the emails of a `draft.write` decision and returns the turn's answer. */
   write?: (brief: CoworkWriteBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;

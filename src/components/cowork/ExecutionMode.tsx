@@ -3,7 +3,7 @@ import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 
 export const COWORK_MODE_HELP: Record<CoworkExecutionMode, string> = {
   approval: 'Antes de consultar un proveedor o cambiar algo, revisarás la propuesta.',
-  autonomous: 'Aprueba por ti búsquedas y efectos exactos dentro de topes estrictos (máximo 3 pasos automáticos y 1 búsqueda externa por hilo). Notas, envíos y campañas siempre pasan por tu revisión.',
+  autonomous: 'Aprueba por ti buscar prospectos (1 búsqueda por hilo), guardar contactos, investigar, pedir borradores, buscar un correo (usa 1 crédito) y crear campañas en pausa, con tope de 3 pasos automáticos por hilo. Lo que sale de una búsqueda en la web, los envíos, las activaciones y las notas siempre los apruebas tú.',
 };
 
 /** Compact mode picker for the composer. Native select keeps it accessible. */

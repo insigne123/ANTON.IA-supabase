@@ -3,8 +3,9 @@ export type CoworkExecutionMode = 'approval' | 'autonomous';
 /** New capabilities require an explicit policy decision, never implicit opt-in. */
 const AUTOMATIC_EFFECTS = new Set(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'campaign_create']);
 
-export function coworkEffectCanAutoApprove(mode: CoworkExecutionMode, enabled: boolean, kind: string) {
-  return mode === 'autonomous' && enabled && AUTOMATIC_EFFECTS.has(kind);
+/** `fromWeb`: the turn that proposed it read the open web. Nothing a page could have steered approves itself: the person decides, as in the other mode. */
+export function coworkEffectCanAutoApprove(mode: CoworkExecutionMode, enabled: boolean, kind: string, options: { fromWeb?: boolean } = {}) {
+  return mode === 'autonomous' && enabled && AUTOMATIC_EFFECTS.has(kind) && !options.fromWeb;
 }
 
 /** Versioned policy for capabilities that actually exist, enforced outside the model. */

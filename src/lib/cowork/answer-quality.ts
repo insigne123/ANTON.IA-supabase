@@ -34,6 +34,9 @@ const GOOGLE_SENDER = /\bGoogle\b(?=\s+(?:como|de)\s+remitente)|(?<=\b(?:desde|r
 
 const STRAY_BRAND_TAIL = /(\p{Ll}{3,})\.IA\.(?=\s|$)/gu;
 
+/** The citation tags a model that searched the web leaves in its text (24 Oct, Haiku with web_search: «…](https://…)</cite>»): the links are the citation, the tag is markup. */
+const CITE_TAGS = /<\/?cite\b[^>]*>/gi;
+
 export function polishCoworkText(text: string): string {
   return outsideCode(String(text || ''), chunk => chunk
     .replace(CODE_PATTERN, (_match, _wrap, code: string) => COWORK_GLOSSARY[code] || code)
@@ -41,6 +44,7 @@ export function polishCoworkText(text: string): string {
     .replace(CODE_EMAIL, '$1')
     .replace(ID_IN_PARENS, '')
     .replace(GOOGLE_SENDER, 'Gmail')
+    .replace(CITE_TAGS, '')
     // A brand's tail left after a word («podría ser pertinente.IA.», round 24): «ANTON.IA» stays.
     .replace(STRAY_BRAND_TAIL, '$1.'));
 }

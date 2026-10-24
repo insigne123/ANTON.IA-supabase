@@ -59,7 +59,7 @@ Apagado por defecto en el código, con pruebas, y encendido en producción para 
 
 La recomendación original era encender las tres para un piloto, mirar los borradores y recién después ampliar; el dueño decidió ampliar de una vez (24 de octubre) y por eso la lista quedó sin uso: **para volver a limitar las mejoras a unas personas se agrega `DRAFT_PILOT_USER_IDS` con sus ids**, y **para volver atrás se quita la variable de la mejora** (o se vacía la lista de las banderas). El piloto en marcha (a quién, cómo se mira y cómo se vuelve atrás): `docs/piloto-borradores-cowork-2026-10-23.md`. Un aviso: `DRAFT_ANCHOR_SPECIFICS_ENABLED` cambia el hecho contra el que la verificación de personalización busca términos; si un borrador escrito con ella encendida se vuelve a validar con ella apagada, puede no pasar esa verificación. Conviene cambiarla entre campañas, no a mitad de una.
 
-`scripts/spend-guard.mjs` queda para cualquier medición futura con llaves de prueba: `SPEND_CAP_USD=1.5 SPEND_LEDGER=<archivo> node --import ./scripts/spend-guard.mjs …`.
+`scripts/spend-guard.mjs` queda para cualquier medición futura con llaves de prueba: `SPEND_CAP_USD=1.5 SPEND_LEDGER=<archivo> node --import ./scripts/spend-guard.mjs …`. Desde el 24 de octubre cuenta también cada búsqueda web de Anthropic a US$0,01; el tope es acumulado entre ejecuciones que comparten el archivo, así que un `SPEND_CAP_USD` menor que lo ya gastado corta la primera llamada (el SDK lo muestra como «Connection error»).
 
 ## Segunda lectura, sin gastar API: una sesión de Claude Code (24 de octubre de 2026)
 

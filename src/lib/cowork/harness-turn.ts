@@ -26,6 +26,7 @@ import { coworkWithDemoNote, coworkWriteBriefSchema } from './writer';
 import { withCoworkReports } from './report-document';
 import { coworkUnseenLinks } from './web-links';
 import { coworkDelegateTool, coworkDelegationProtocol } from './subagents';
+import { coworkWebPaused, pauseCoworkWeb } from './web-breaker';
 
 /** What the model reads first: how the instructions that follow map to this turn's tools. They were written for a coordinator that answered
  * with a JSON decision, and its rules still hold; only the way of acting changes. */
@@ -55,6 +56,16 @@ export function coworkWebProtocol(web: WebSettings) {
     '- «Investiga a [empresa] / qué se sabe de [empresa] / noticias de [empresa]»: si está guardada en la cuenta, parte por lo que ya hay (research.get_existing, leads.get); luego busca en la web a qué se dedica y su tamaño, qué ha hecho en los últimos meses (contrataciones, aperturas, licitaciones, noticias) y quién decide lo que vende la persona. Responde con lo que hace, las señales recientes con su fecha y su enlace, a quién escribirle y con qué ángulo según su oferta, y lo que no encontraste. Una señal vieja o de una fuente débil se dice así, sin disfrazarla de novedad.',
     '- Al terminar de investigar, entrega igual con responder: la respuesta no se escribe como texto suelto.',
   ].join('\n');
+}
+
+/** The proposals of a turn that read the open web say so, so that the worker does not approve them by itself in the autonomous mode. */
+function coworkWebTagged(input: CoworkLoopInput, fromWeb: boolean): Partial<CoworkLoopInput> {
+  if (!fromWeb) return {};
+  const { proposeEffect, proposeSearch } = input;
+  return {
+    ...(proposeEffect ? { proposeEffect: (proposal: Parameters<NonNullable<CoworkLoopInput['proposeEffect']>>[0]) => proposeEffect({ ...proposal, fromWeb: true }) } : {}),
+    ...(proposeSearch ? { proposeSearch: (criteria: Parameters<NonNullable<CoworkLoopInput['proposeSearch']>>[0]) => proposeSearch(criteria, { fromWeb: true }) } : {}),
+  };
 }
 
 /** The tool name of a gateway action: the API admits letters, digits, underscores and hyphens. */
@@ -235,7 +246,7 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
   const stage = async (decision: unknown): Promise<ToolOutcome> => {
     await input.authorize();
     input.signal.throwIfAborted();
-    const staged = await coworkStageDecision({ ...input, writtenSeed: written }, decision, observations);
+    const staged = await coworkStageDecision({ ...input, writtenSeed: written, ...coworkWebTagged(input, webTouched) }, decision, observations);
     if (!staged.ok) return { status: 'error', message: staged.problem };
     proposed = true;
     return finished(staged.answer, 'proposal');
@@ -329,7 +340,10 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
   };
   // Each search is recorded the moment it finishes (the page shows it while the call still goes on) and once more never: the end of the call finds it done.
   const recordedWeb = new Map<string, Promise<void>>();
+  /** The turn has read the open web, its own or an Investigadora's: what it proposes after that is not approved by the autonomous mode. */
+  let webTouched = false;
   const recordWebOnce = (action: WebAction) => {
+    webTouched = true;
     let done = recordedWeb.get(action.id);
     if (!done) {
       done = recordWeb(action);
@@ -448,22 +462,29 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
  * or the model's answer), never what the person, the ledger or the access rules caused. Without this a turn ends in an error for something that
  * is nobody's doing, when the loop that has run until now can still answer.
  */
-export function coworkHarnessFallback(error: unknown, signal?: AbortSignal): boolean {
+export function coworkHarnessFallback(error: unknown, signal?: AbortSignal, options: { web?: boolean } = {}): boolean {
   if (signal?.aborted || !(error instanceof Error)) return false;
   if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.name === 'AuthError') return false;
   // The ledger's caps and a run that is no longer ours stay errors: another model would meet the same wall.
   if (/COWORK_DAILY_MODEL_BUDGET|COWORK_CONVERSATION_MODEL_BUDGET|No se pudo reservar presupuesto|no longer writable|No se pudo registrar el consumo/i.test(error.message)) return false;
+  // A request Anthropic refuses as malformed is ours to fix, except when it carried the web: the organization may not have it on, and the tools are what it refuses.
+  if (options.web && /CLAUDE_HTTP_400/i.test(error.message)) return true;
   return /CLAUDE_HTTP_(?:429|5\d\d)|credit_balance_exhausted|Missing AI provider credentials|AGENT_REFUSAL|AGENT_MAX_TOKENS|did not produce a final answer|overloaded|ECONNRESET|ETIMEDOUT|fetch failed|Connection error/i.test(error.message);
 }
 
 /** A turn of Cowork: on the harness when the worker gave it one, and with the coordinator loop behind it for a failure that is Anthropic's. */
 export async function runCoworkTurn(input: CoworkLoopInput, loop: typeof runCoworkReadLoop = runCoworkReadLoop): Promise<CoworkAnswer> {
   if (!input.harness) return loop(input);
+  // Anthropic refused the web a short while ago (web-breaker.ts): this turn works without it, and the Investigadoras with it.
+  const harness = input.harness.web && coworkWebPaused() ? { ...input.harness, web: undefined, subagents: undefined } : input.harness;
   try {
-    return await runCoworkHarnessTurn(input);
+    return await runCoworkHarnessTurn({ ...input, harness });
   } catch (error) {
-    if (!coworkHarnessFallback(error, input.signal)) throw error;
-    input.harness.onFallback?.(error instanceof Error ? error.message.slice(0, 200) : 'harness');
+    const web = Boolean(harness.web);
+    if (!coworkHarnessFallback(error, input.signal, { web })) throw error;
+    // The web was in the request and Anthropic called it malformed: the next turns do not offer it for a while, so only this one pays for finding out.
+    if (web && error instanceof Error && /CLAUDE_HTTP_400/i.test(error.message)) pauseCoworkWeb();
+    harness.onFallback?.(error instanceof Error ? error.message.slice(0, 200) : 'harness');
     return loop({ ...input, harness: undefined });
   }
 }

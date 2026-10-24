@@ -36,10 +36,10 @@ export function coworkOwnerEmail() {
 }
 
 const SENSITIVE = /(KEY|SECRET|TOKEN|PASSWORD|TICKET|EMAILS|PRICING_JSON)/;
-// What the audit decides for itself instead of reading it from production: the engine behind Cowork and its options (AUDIT_COWORK_WEB and
-// AUDIT_COWORK_SCHEDULES turn them on below, to audit what the page shows then, so the other journeys keep their baseline), and the settings of
-// what a model writes (draft improvements, signal harvest), which change no page.
-const DECIDED_BY_THE_AUDIT = /^(?:COWORK_RUNTIME|COWORK_HARNESS_[A-Z_]+|COWORK_SCHEDULES_ENABLED|DRAFT_[A-Z_]+|RESEARCH_SIGNAL_HARVEST_ENABLED)$/;
+// What the audit decides for itself instead of reading it from production: the engine behind Cowork and its options (the web, the Investigadoras,
+// the autonomous mode; AUDIT_COWORK_WEB and AUDIT_COWORK_SCHEDULES turn them on below, to audit what the page shows then, so the other journeys
+// keep their baseline), and the settings of what a model writes (draft improvements, signal harvest, the researcher), which change no page.
+const DECIDED_BY_THE_AUDIT = /^(?:COWORK_RUNTIME|COWORK_HARNESS_[A-Z_]+|COWORK_SCHEDULES_ENABLED|COWORK_WEB_[A-Z_]+|COWORK_SUBAGENT[A-Z_]*|COWORK_DOCUMENT_VISION|COWORK_AUTONOMY_ENABLED|DRAFT_[A-Z_]+|RESEARCH_SIGNAL_HARVEST_ENABLED|RESEARCH_CLAUDE_WEB_[A-Z_]+)$/;
 /** Production's plain values from apphosting.yaml: flags, models and limits. URLs, secrets and allowlists are left out. */
 export function productionFlags() {
   const text = readFileSync(path.join(ROOT, 'apphosting.yaml'), 'utf8');
@@ -57,12 +57,14 @@ export function buildEnv({ ownerId, ownerEmail }) {
   return {
     ...keep,
     ...productionFlags(),
-    // Production has the web off. AUDIT_COWORK_WEB=true audits what the page shows when it is on (the guide that offers the web, on the harness).
+    // The audit leaves the web off by default, so the journeys keep their baseline. AUDIT_COWORK_WEB=true audits what the page shows when it is on (the guide that offers the web, on the harness).
     // The harness needs the Anthropic key to be «ready» (the chips under an answer are hidden otherwise); the stand-in goes nowhere: the egress guard blocks it.
     ...(process.env.AUDIT_COWORK_WEB === 'true' ? { COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true', ANTHROPIC_API_KEY: 'audit-unused' } : {}),
     // AUDIT_COWORK_SCHEDULES=true audits the scheduled tasks (the calendar button of the rail and the message box, and their panel); production has them on
     // since 24 Oct 2026, and the default run leaves them out so the rest of the journeys keep what they were measured against.
     ...(process.env.AUDIT_COWORK_SCHEDULES === 'true' ? { COWORK_SCHEDULES_ENABLED: 'true' } : {}),
+    // AUDIT_COWORK_AUTONOMY=true audits the composer with the «Autónomo» mode picker, which production shows since 24 Oct 2026; the default run leaves it out.
+    ...(process.env.AUDIT_COWORK_AUTONOMY === 'true' ? { COWORK_AUTONOMY_ENABLED: 'true' } : {}),
     NEXT_TELEMETRY_DISABLED: '1',
     NEXT_DIST_DIR: DIST_DIR,
     APP_ENV: 'test',

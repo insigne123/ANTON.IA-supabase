@@ -122,6 +122,19 @@ async function main() {
       return response;
     },
   };
+  // The model that looks at the pages of a document (COWORK_DOCUMENT_VISION): Haiku, like the worker's, counted and, with EVAL_DEBUG, read aloud.
+  const lookAt = anthropicModel({ model: process.env.COWORK_DOCUMENT_REVIEW_MODEL?.trim() || 'claude-haiku-5-5' });
+  const reviewer: ModelClient = {
+    name: lookAt.name,
+    async complete(request) {
+      if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
+      calls += 1; current.calls += 1;
+      const response = await lookAt.complete(request);
+      current.usage = addUsage(current.usage, response.usage);
+      if (process.env.EVAL_DEBUG) console.error(`  · VISION ${JSON.stringify(response.content.map(block => block.type === 'tool_use' ? block.input : block.type)).slice(0, 1800)}`);
+      return response;
+    },
+  };
   // The descriptors of the gateway's reads; nothing here runs them (the corpus answers every read from its fixtures).
   const capabilities = coworkReadCapabilities(null as never, { userId: 'corpus', organizationId: 'corpus' }).filter(capability => capability.effect === 'read');
   const effort: Effort = settings.effort;
@@ -182,7 +195,9 @@ async function main() {
           // COWORK_WEB_ENABLED=true: the agent can search the web and read pages (each search costs 0.01 USD, counted in the report).
           ...(settings.web ? { web: settings.web } : {}),
           // COWORK_SUBAGENTS_ENABLED=true (with the web): the coordinator can hand researches to the Investigadoras; their calls and tokens are counted like its own.
-          ...(settings.web && settings.subagents ? { subagents: { settings: settings.subagents, model: counted } } : {}) }));
+          ...(settings.web && settings.subagents ? { subagents: { settings: settings.subagents, model: counted } } : {}),
+          // COWORK_DOCUMENT_VISION=true: a Haiku also looks at the pages of a document the agent reviews, as the worker wires it; its calls count against --max-calls.
+          ...(process.env.COWORK_DOCUMENT_VISION === 'true' ? { documentReviewer: reviewer } : {}) }));
       total = addUsage(total, current.usage);
       const failedChecks = outcome.checks.filter(check => !check.passed).map(check => check.label);
       outcomes.push({ id, attempt, passed: outcome.passed, failedChecks, failed: outcome.result.failed, actions: outcome.result.actions, proposal: outcome.result.proposal?.kind ?? null,

@@ -3,8 +3,10 @@
 // resolving, planning and extracting (Luna), once with only the company's own site and once with the Claude researcher added, and has a
 // Claude judge say how well the evidence would open an email to the person. No database, no sends: it reads public pages and calls the models.
 //
-// node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-sources.ts [--targets=Enaex,Besalco] [--modes=sin,con] [--out=dir]
-// Needs OPENAI_API_KEY (Luna) and ANTHROPIC_API_KEY (the researcher and the judge). With SERPER_API_KEY the research uses the search engine of
+// node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-sources.ts [--targets=Enaex,Besalco] [--modes=sin,con] [--out=dir] [--no-judge]
+// Needs OPENAI_API_KEY (Luna) and ANTHROPIC_API_KEY (the researcher and, unless --no-judge, the judge). --no-judge leaves the reading to whoever runs
+// it: results.json then holds, per company, what the researcher searched and picked, every page the research read and every fact with its date,
+// to read them one by one (is it this company or a namesake, is it recent, would it open an email). With SERPER_API_KEY the research uses the search engine of
 // production in both modes, so `sin` is what production does today and `con` is production plus the researcher: the comparison that decides
 // whether to turn the flag on. Without it the search engine is replaced by nothing, and what the run measures is what the researcher brings
 // from scratch (the lift over «only the company's site»), not whether it beats Serper.
@@ -12,7 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { gatherReportV2Research } from '../src/lib/server/research-report-v2-research';
-import { claudeWebSourcesSettings } from '../src/lib/server/claude-web-sources';
+import { claudeWebSourcesSettings, findResearchSourcesWithClaude, type ClaudeWebSourcesResult } from '../src/lib/server/claude-web-sources';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 
 if (!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY) throw new Error('OPENAI_API_KEY and ANTHROPIC_API_KEY required');
@@ -31,6 +33,7 @@ const TARGETS = [
 const names = arg('targets')?.split(',').map(value => value.trim().toLowerCase());
 const targets = names ? TARGETS.filter(target => names.includes(target.companyName.toLowerCase())) : TARGETS;
 const modes = (arg('modes')?.split(',') ?? ['sin', 'con']).filter((mode): mode is 'sin' | 'con' => mode === 'sin' || mode === 'con');
+const judging = !process.argv.includes('--no-judge');
 const outDir = resolve(arg('out') || join('.eval-research', new Date().toISOString().replace(/[:.]/g, '-')));
 mkdirSync(outDir, { recursive: true });
 
@@ -69,10 +72,13 @@ for (const target of targets) {
       sources: [], facts: [], claims: [], shortIdMap: {}, committee: [], initialGaps: [],
     } as any;
     try {
+      // What the researcher searched and picked, to read afterwards.
+      let discovered: ClaudeWebSourcesResult | null = null;
       // Without a Serper key the search engine is replaced by nothing: with `sin` the research reads the company's own site; with `con` it also reads what the researcher picked.
       const result = await gatherReportV2Research({ projection, sellerProfile: SELLER, organizationId: 'eval', language: 'es' }, {
         ...(process.env.SERPER_API_KEY ? {} : { search: async () => ({ items: [] }) as any }),
         claudeWeb: mode === 'con' ? researcher : null,
+        discover: async (input, settings) => { discovered = await findResearchSourcesWithClaude(input, settings); return discovered; },
       });
       const sourceOf = new Map(result.sources.map((source: any) => [source.id, source]));
       const facts = result.facts.map((fact: any) => {
@@ -80,15 +86,20 @@ for (const target of targets) {
         return { text: String(fact.text), source: source ? new URL(source.url).hostname.replace(/^www\./, '') : '?', date: (fact.observedAt || source?.publishedAt || null) as string | null, url: source?.url as string | undefined };
       });
       const recent = facts.filter(fact => fact.date && NOW - Date.parse(fact.date) <= 180 * DAY && Date.parse(fact.date) <= NOW + DAY);
-      const verdict = await judge(target, facts.slice(0, 40));
+      const verdict = judging ? await judge(target, facts.slice(0, 40)) : null;
       const row = {
         company: target.companyName, mode, seconds: Math.round((Date.now() - started) / 1000),
         pages: result.researchMetrics.pages, claudeWeb: (result.researchMetrics as any).claudeWeb ?? null, warnings: result.researchWarnings,
         facts: facts.length, recentFacts: recent.length, judge: verdict,
         sample: recent.slice(0, 6).map(fact => `${fact.date?.slice(0, 10)} · ${fact.source} · ${fact.text.slice(0, 140)}`),
+        // For reading by hand: the researcher's searches, picks and coverage, the pages the research read and every fact with its date and page.
+        researcher: discovered ? { model: (discovered as ClaudeWebSourcesResult).model, stopReason: (discovered as ClaudeWebSourcesResult).stopReason, queries: (discovered as ClaudeWebSourcesResult).queries,
+          picks: (discovered as ClaudeWebSourcesResult).sources, coverage: (discovered as ClaudeWebSourcesResult).coverage, usage: (discovered as ClaudeWebSourcesResult).usage } : null,
+        pagesRead: result.sources.map((source: any) => ({ url: source.url, title: source.title, publishedAt: source.publishedAt ?? null })),
+        allFacts: facts,
       };
       rows.push(row);
-      console.log(`${target.companyName.padEnd(14)} ${mode}: ${row.pages} páginas, ${row.facts} hechos (${row.recentFacts} con fecha de los últimos 6 meses), ${row.seconds}s · juez: ${verdict.senales_utiles} señales útiles, utilidad ${verdict.utilidad}/5 — ${verdict.mejor_gancho.slice(0, 110)}`);
+      console.log(`${target.companyName.padEnd(14)} ${mode}: ${row.pages} páginas, ${row.facts} hechos (${row.recentFacts} con fecha de los últimos 6 meses), ${row.seconds}s${verdict ? ` · juez: ${verdict.senales_utiles} señales útiles, utilidad ${verdict.utilidad}/5 — ${verdict.mejor_gancho.slice(0, 110)}` : ''}`);
     } catch (error) {
       console.log(`${target.companyName.padEnd(14)} ${mode}: FALLÓ ${error instanceof Error ? error.message : error}`);
       rows.push({ company: target.companyName, mode, error: String(error instanceof Error ? error.message : error) });
@@ -101,6 +112,6 @@ const average = (mode: string, pick: (row: any) => number) => {
   return mine.length ? Math.round((mine.reduce((sum, row) => sum + pick(row), 0) / mine.length) * 100) / 100 : null;
 };
 for (const mode of modes) {
-  console.log(`\n${mode}: páginas ${average(mode, row => row.pages)}, hechos ${average(mode, row => row.facts)}, hechos recientes ${average(mode, row => row.recentFacts)}, señales útiles (juez) ${average(mode, row => row.judge.senales_utiles)}, utilidad ${average(mode, row => row.judge.utilidad)}/5`);
+  console.log(`\n${mode}: páginas ${average(mode, row => row.pages)}, hechos ${average(mode, row => row.facts)}, hechos recientes ${average(mode, row => row.recentFacts)}${judging ? `, señales útiles (juez) ${average(mode, row => row.judge.senales_utiles)}, utilidad ${average(mode, row => row.judge.utilidad)}/5` : ''}`);
 }
 console.log(`\nResultados en ${outDir}`);
