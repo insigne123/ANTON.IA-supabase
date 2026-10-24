@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
+import { useMediaQuery } from '@/hooks/use-media-query';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -57,6 +58,8 @@ import { compareSheetRows } from '@/lib/unified-sheet-sort';
 type StatusFilter = 'all' | 'saved' | 'enriched' | 'sent' | 'read' | 'replied';
 type EditableKey = Exclude<keyof CustomData, 'updated_at'>;
 type ExportFormat = 'xlsx' | 'csv' | 'pdf';
+// The fixed «Acción» column casts a shadow while the table goes on beneath it, so a cut column («Ret», «Log») reads as more to scroll (APP-09).
+const EDGE_SHADOW = 'shadow-[-12px_0_12px_-12px_hsl(var(--foreground)/0.3)]';
 
 const STATUS_LABELS: Record<UnifiedStatus, string> = {
   saved: 'Guardado',
@@ -85,6 +88,14 @@ function kindLabel(kind: UnifiedRow['kind']) {
     opportunity: 'Oportunidad',
     contacted: 'Contactado',
   } as const)[kind];
+}
+
+/** What a row leads to: its conversation, a draft, or «Por escribir» where it waits for an email. The table and the phone cards share it. */
+function RowAction({ row }: { row: UnifiedRow }) {
+  if (row.kind === 'contacted') return <Button asChild size="sm" variant="outline"><Link href={`/contacted?c=${encodeURIComponent(row.sourceId)}`} aria-label={`Ver la conversación con ${row.name || 'este contacto'}`}>Ver conversación</Link></Button>;
+  if ((row.kind === 'lead_enriched' || row.kind === 'opportunity') && row.hasEmail) return <Button asChild size="sm" variant="outline"><Link href={`/contact/compose?id=${encodeURIComponent(row.sourceId)}`} aria-label={`Preparar correo para ${row.name || 'este contacto'}`}>Preparar correo</Link></Button>;
+  if (row.kind === 'lead_saved') return <Button asChild size="sm" variant="outline"><Link href="/saved/leads/enriched" aria-label={`Abrir «Por escribir», donde ${row.name || 'este contacto'} espera su correo`}>Abrir</Link></Button>;
+  return null;
 }
 
 function formatCellValue(key: ColumnKey, row: UnifiedRow) {
@@ -150,6 +161,35 @@ function EditableCell({
       {saving ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <Pencil className="ml-2 h-3.5 w-3.5 opacity-0 group-hover:opacity-60 group-focus-visible:opacity-60" />}
     </button>
   );
+}
+
+/** The contacts as cards on a phone: name, email, company and role, the status, and the same action as the table. */
+function SheetCards({ rows, loading, empty, emptyTitle, emptyAction, sharedSaves, me }: {
+  rows: UnifiedRow[]; loading: boolean; empty: boolean; emptyTitle: string; emptyAction: React.ReactNode; sharedSaves: boolean; me: string | null;
+}) {
+  if (loading && rows.length === 0) return <div className="space-y-2" aria-busy="true" aria-label="Cargando contactos">{[0, 1, 2].map(index => <div key={index} className="h-28 animate-pulse rounded-2xl bg-muted/60" />)}</div>;
+  if (empty) return <div className="flex flex-col items-center gap-2 rounded-2xl border border-border/70 px-4 py-10 text-center">
+    <FileSpreadsheet className="h-8 w-8 text-muted-foreground/70" aria-hidden="true" />
+    <p className="font-medium text-foreground">{emptyTitle}</p>
+    {emptyAction}
+  </div>;
+  return <ul className="space-y-2" aria-label="Contactos">
+    {rows.map(row => {
+      const where = [row.company, row.title].filter(Boolean).join(' · ');
+      return <li key={row.gid} className="rounded-2xl border border-border/70 bg-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate font-medium">{row.name || 'Sin nombre'}</p>
+            {sharedSaves && (row.savedBy || row.savedById) ? <p className="text-xs text-muted-foreground">{row.savedById && row.savedById === me ? 'Guardado por ti' : `Guardado por ${row.savedBy || 'otra persona del equipo'}`}</p> : null}
+          </div>
+          <StatusBadge status={row.status} />
+        </div>
+        <p className="mt-2 truncate text-sm">{row.email || <span className="text-muted-foreground">Sin correo</span>}</p>
+        {where ? <p className="truncate text-sm text-muted-foreground">{where}</p> : null}
+        <div className="mt-3 flex justify-end empty:hidden"><RowAction row={row} /></div>
+      </li>;
+    })}
+  </ul>;
 }
 
 export default function SheetPage() {
@@ -322,6 +362,21 @@ export default function SheetPage() {
   }
 
   const sharedSaves = useMemo(() => new Set(rows.map((row) => row.savedById).filter(Boolean)).size > 1, [rows]);
+  const phone = useMediaQuery('(max-width: 639px)');
+  // Whether the table goes on to the right of what shows: the «Acción» column then casts its shadow (APP-09).
+  const tableArea = useRef<HTMLDivElement>(null);
+  const [moreRight, setMoreRight] = useState(false);
+  useEffect(() => {
+    const scroller = tableArea.current?.firstElementChild as HTMLElement | null | undefined;
+    if (!scroller) return;
+    const update = () => setMoreRight(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1);
+    update();
+    scroller.addEventListener('scroll', update, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
+    return () => { scroller.removeEventListener('scroll', update); observer?.disconnect(); };
+  }, [phone]);
   // «Guardado por ti» on your own rows: two members may share a name.
   const [me, setMe] = useState<string | null>(null);
   useEffect(() => { void supabase.auth.getUser().then(({ data }) => setMe(data.user?.id ?? null)).catch(() => setMe(null)); }, []);
@@ -472,8 +527,16 @@ export default function SheetPage() {
         </Alert>
       )}
 
+      {phone ? (
+        // On a phone the table showed only «Nombre» and «Acción»: each contact is a card with who, where and how to reach (APP-09).
+        <SheetCards rows={filteredRows} loading={loading} empty={!loading && filteredRows.length === 0} sharedSaves={sharedSaves} me={me}
+          emptyTitle={loadError && rows.length === 0 ? 'Tus datos no se pudieron leer' : rows.length === 0 ? 'Tu hoja está vacía' : 'No hay filas con estos filtros'}
+          emptyAction={loadError && rows.length === 0 ? null : rows.length === 0
+            ? <Button asChild size="sm"><Link href="/leads/import"><Import className="h-4 w-4" /> Importar leads</Link></Button>
+            : <Button size="sm" variant="outline" onClick={clearFilters}>Limpiar filtros</Button>} />
+      ) : (
       <Card className="min-w-0 overflow-hidden border-border/70 shadow-sm">
-        <CardContent className="p-0 [&>div]:max-h-[70dvh] [&>div]:overscroll-contain sm:[&>div]:max-h-[calc(100dvh-15rem)]">
+        <CardContent ref={tableArea} className="p-0 [&>div]:max-h-[70dvh] [&>div]:overscroll-contain sm:[&>div]:max-h-[calc(100dvh-15rem)]">
           <Table className="min-w-max">
             <TableHeader className="sticky top-0 z-20 bg-muted/95 backdrop-blur">
               <TableRow className="hover:bg-transparent">
@@ -492,14 +555,14 @@ export default function SheetPage() {
                     </button>
                   </TableHead>
                 ))}
-                <TableHead className="sticky right-0 z-20 h-10 w-28 border-l bg-muted px-3 text-right text-foreground/70">Acción</TableHead>
+                <TableHead className={`sticky right-0 z-20 h-10 w-28 border-l bg-muted px-3 text-right text-foreground/70 transition-shadow ${moreRight ? EDGE_SHADOW : ''}`}>Acción</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading && rows.length === 0 && Array.from({ length: 7 }).map((_, rowIndex) => (
                 <TableRow key={rowIndex}>
                   {orderedVisibleColumns.map((column, columnIndex) => <TableCell key={column.key} className={`p-3 ${columnIndex === 0 ? 'sticky left-0 z-10 border-r bg-card' : ''}`}><div className="h-4 w-full animate-pulse rounded bg-muted" /></TableCell>)}
-                  <TableCell className="sticky right-0 border-l bg-card p-3"><div className="ml-auto h-8 w-20 animate-pulse rounded bg-muted" /></TableCell>
+                  <TableCell className={`sticky right-0 border-l bg-card p-3 ${moreRight ? EDGE_SHADOW : ''}`}><div className="ml-auto h-8 w-20 animate-pulse rounded bg-muted" /></TableCell>
                 </TableRow>
               ))}
 
@@ -516,14 +579,8 @@ export default function SheetPage() {
                       {index === 0 && sharedSaves && (row.savedBy || row.savedById) ? <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{row.savedById && row.savedById === me ? 'Guardado por ti' : `Guardado por ${row.savedBy || 'otra persona del equipo'}`}</span> : null}
                     </TableCell>
                   ))}
-                  <TableCell className="sticky right-0 z-10 border-l bg-card px-3 py-2 text-right group-hover:bg-muted">
-                    {row.kind === 'contacted' ? (
-                      <Button asChild size="sm" variant="outline"><Link href={`/contacted?c=${encodeURIComponent(row.sourceId)}`} aria-label={`Ver la conversación con ${row.name || 'este contacto'}`}>Ver conversación</Link></Button>
-                    ) : (row.kind === 'lead_enriched' || row.kind === 'opportunity') && row.hasEmail ? (
-                      <Button asChild size="sm" variant="outline"><Link href={`/contact/compose?id=${encodeURIComponent(row.sourceId)}`} aria-label={`Preparar correo para ${row.name || 'este contacto'}`}>Preparar correo</Link></Button>
-                    ) : row.kind === 'lead_saved' ? (
-                      <Button asChild size="sm" variant="outline"><Link href="/saved/leads/enriched" aria-label={`Abrir «Por escribir», donde ${row.name || 'este contacto'} espera su correo`}>Abrir</Link></Button>
-                    ) : null}
+                  <TableCell className={`sticky right-0 z-10 border-l bg-card px-3 py-2 text-right transition-shadow group-hover:bg-muted ${moreRight ? EDGE_SHADOW : ''}`}>
+                    <RowAction row={row} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -557,6 +614,7 @@ export default function SheetPage() {
           </Table>
         </CardContent>
       </Card>
+      )}
 
       <Dialog open={columnsOpen} onOpenChange={setColumnsOpen}>
         <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">

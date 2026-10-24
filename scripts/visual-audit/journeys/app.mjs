@@ -64,4 +64,32 @@ export default () => [
         c.check('el aviso se fue', !(await c.has(/ya tienen? correo/)));
       } },
     ] },
+  { id: 'app-tabla-telefono', persona: 'owner', viewport: 'phone', title: 'En el teléfono, la Tabla de datos dice a quién y cómo escribirle',
+    goal: 'Ver correo, empresa y cargo de cada contacto sin desplazar una tabla de lado (APP-09).',
+    steps: [
+      { say: 'Abro la Tabla de datos en el teléfono', do: async c => { await c.go('/sheet'); await c.seeRole('heading', 'Tabla de datos'); } },
+      { say: 'Leo la primera tarjeta', do: async c => {
+        const card = c.page.getByRole('list', { name: 'Contactos' }).getByRole('listitem').first();
+        const shown = await visible(card);
+        const text = (await card.innerText().catch(() => '')).replace(/\s+/g, ' ');
+        c.check('cada contacto es una tarjeta, no una fila cortada', shown && !(await c.page.getByRole('table').count()), text.slice(0, 160));
+        c.check('la tarjeta dice el correo y la empresa', /@/.test(text) && / · /.test(text), text.slice(0, 160));
+      } },
+    ] },
+  { id: 'app-tabla-sombra', persona: 'owner', title: 'En escritorio, la columna «Acción» avisa que la tabla sigue',
+    goal: 'Saber que hay más columnas a la derecha (APP-09).',
+    steps: [
+      { say: 'Abro la Tabla de datos', do: async c => { await c.go('/sheet'); await c.seeRole('heading', 'Tabla de datos'); await c.page.getByRole('table').first().waitFor({ timeout: 12000 }); await c.wait(800); } },
+      { say: 'Miro la columna «Acción»', do: async c => {
+        const head = c.page.getByRole('columnheader', { name: 'Acción' }).first();
+        const overflow = await c.page.getByRole('table').first().evaluate(table => { const box = table.parentElement; return box ? box.scrollWidth > box.clientWidth + 1 : false; });
+        const shadow = await head.evaluate(node => getComputedStyle(node).boxShadow).catch(() => 'none');
+        c.check('con columnas fuera de la vista, «Acción» lleva sombra', !overflow || shadow !== 'none', `${overflow ? 'la tabla sigue a la derecha' : 'la tabla cabe'} · ${shadow}`);
+        if (overflow) {
+          await c.page.getByRole('table').first().evaluate(table => { const box = table.parentElement; if (box) box.scrollLeft = box.scrollWidth; });
+          await c.wait(400);
+          c.check('al llegar al final, la sombra se va', (await head.evaluate(node => getComputedStyle(node).boxShadow).catch(() => '')) === 'none');
+        }
+      } },
+    ] },
 ];
