@@ -19,7 +19,8 @@ new Function('require', 'module', 'exports', entry.outputFiles[0].text)(createRe
 const { readWorkspaceOverview } = compiled.exports;
 
 const rows: Record<string, unknown> = {
-  opportunity_workspace_list: [{ id: 'op1', title: 'Servicio de traslado' }],
+  opportunity_workspace_page: [{ id: 'op1', title: 'Servicio de traslado' }],
+  opportunity_workspace_counts: [{ stage: 'open', evaluation: 'recommended', total: 3 }, { stage: 'open', evaluation: 'pending', total: 2 }, { stage: 'assigned', evaluation: 'review', total: 1 }, { stage: 'lost', evaluation: null, total: '4' }],
   opportunity_work: [{ opportunity_id: 'op1', status: 'working' }],
   opportunity_notifications: [{ id: 'n1', opportunity_id: 'op1', title: 'Informe listo', created_at: '2026-10-15T21:42:00Z', read_at: null }],
   organization_reporting_groups: [{ id: 'g1', name: 'Licitaciones' }],
@@ -29,7 +30,7 @@ const rows: Record<string, unknown> = {
   profiles: [{ id: 'u1', full_name: 'Pruebas ANTON.IA' }],
 };
 function slowClient() {
-  const state = { inFlight: 0, most: 0, order: [] as string[] };
+  const state = { inFlight: 0, most: 0, order: [] as string[], calls: [] as Array<[string, any]> };
   const answer = (name: string) => {
     state.inFlight++; state.most = Math.max(state.most, state.inFlight); state.order.push(name);
     return new Promise(resolve => setTimeout(() => { state.inFlight--; resolve({ data: rows[name] ?? null, error: null }); }, 30));
@@ -37,7 +38,7 @@ function slowClient() {
   const chain = (name: string): any => new Proxy({}, { get: (_target, key) => key === 'then'
     ? (resolve: any, reject: any) => answer(name).then(resolve, reject)
     : key === 'single' || key === 'maybeSingle' ? () => answer(name) : () => chain(name) });
-  return { state, client: { from: (table: string) => chain(table), rpc: (name: string) => chain(name) } };
+  return { state, client: { from: (table: string) => chain(table), rpc: (name: string, args?: unknown) => { state.calls.push([name, args]); return chain(name); } } };
 }
 
 test('the overview reads its parts together and still answers the same', async () => {
@@ -47,9 +48,11 @@ test('the overview reads its parts together and still answers the same', async (
   assert.ok(state.most >= 6, `at most ${state.most} reads at once`);
   assert.equal(state.order.at(-1), 'opportunity_work');
   assert.deepEqual({ ...overview, sourceStatus: undefined }, {
-    mode: 'management', items: rows.opportunity_workspace_list, work: rows.opportunity_work, notifications: rows.opportunity_notifications,
+    mode: 'management', items: rows.opportunity_workspace_page, work: rows.opportunity_work, notifications: rows.opportunity_notifications,
     members: [{ user_id: 'u1', role: 'admin', name: 'Pruebas ANTON.IA' }], groups: rows.organization_reporting_groups, context: rows.opportunity_company_context,
     budget: { spent: 2.14, reserved: 0, cap: 20 }, sourceStatus: undefined, documentAlerts: [], searching: [],
+    // The numbers of the filters, from the stages and evaluations of the database.
+    counts: { recommended: 3, review: 2, excluded: 0, assigned: 1, working: 0, submitted: 0, closed: 4 },
   });
 });
 
@@ -61,29 +64,33 @@ test('someone who is not an admin gets the assigned view without the admin reads
   assert.deepEqual(state.order.filter(name => /reporting_groups|company_context|budget|members|profiles/.test(name)), []);
 });
 
-test('a source picked reads the list with its kinds; without one, the list as it always was', async () => {
-  const { state, client } = slowClient();
-  rows.opportunity_workspace_list_kinds = [{ id: 'op2', title: 'Avisos de guardias' }];
-  const filtered = await readWorkspaceOverview(client, { organizationId: 'org', userId: 'u1', role: 'admin' }, { view: 'all', kinds: ['hiring', 'linkedin_post'] });
-  assert.deepEqual(filtered.items, [{ id: 'op2', title: 'Avisos de guardias' }]);
-  assert.ok(state.order.includes('opportunity_workspace_list_kinds') && !state.order.includes('opportunity_workspace_list'));
-});
-
-test('a line of service reads the list with its words and, before that function exists, narrows the list it already has', async () => {
+test('the view, the words, the sources and the lines of service go to the database in one read, with the same filters for the counts', async () => {
   const { state, client } = slowClient();
   const admin = { organizationId: 'org', userId: 'u1', role: 'admin' };
-  rows.opportunity_workspace_list_terms = [{ id: 'op3', title: 'Servicio de guardias' }];
-  const read = await readWorkspaceOverview(client, admin, { view: 'all', categories: ['seguridad'] });
-  assert.deepEqual(read.items, [{ id: 'op3', title: 'Servicio de guardias' }]);
-  assert.ok(state.order.includes('opportunity_workspace_list_terms') && !state.order.includes('opportunity_workspace_list'));
-  const none = slowClient();
-  rows.opportunity_workspace_list = [{ id: 'a', title: 'Servicio de guardias de seguridad' }, { id: 'b', title: 'Servicio de aseo' }];
-  delete rows.opportunity_workspace_list_terms;
-  const rpc = none.client.rpc;
-  none.client.rpc = (name: string, ...rest: unknown[]) => (name === 'opportunity_workspace_list_terms'
-    ? { then: (resolve: any) => resolve({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }) } as any : rpc(name, ...rest as []));
-  const before = await readWorkspaceOverview(none.client, admin, { view: 'all', categories: ['seguridad'] });
-  assert.deepEqual(before.items.map((item: any) => item.id), ['a'], 'without the function the list is narrowed here');
-  const plain = await readWorkspaceOverview(slowClient().client, admin, { view: 'all' });
-  assert.deepEqual(plain.items.map((item: any) => item.id), ['a', 'b'], 'no category: the list as it always was');
+  await readWorkspaceOverview(client, admin, { view: 'review', query: ' guardias ', kinds: ['tender', 'compra_agil'], categories: ['seguridad'], sort: 'deadline', page: 2 });
+  const page = state.calls.find(([name]) => name === 'opportunity_workspace_page')![1];
+  assert.deepEqual([page.p_stages, page.p_evaluations, page.p_biddable], [['open'], ['review', 'pending'], true], '«Por revisar» is what nobody works yet and can still be bid');
+  assert.deepEqual([page.p_query, page.p_kinds, page.p_sort, page.p_limit, page.p_offset], ['guardias', ['tender', 'compra_agil'], 'deadline', 100, 200]);
+  assert.ok(page.p_terms.length > 0, 'the line of service becomes its words');
+  const counts = state.calls.find(([name]) => name === 'opportunity_workspace_counts')![1];
+  assert.deepEqual([counts.p_query, counts.p_kinds, counts.p_terms, counts.p_biddable], ['guardias', ['tender', 'compra_agil'], page.p_terms, true]);
+  assert.ok(!state.calls.some(([name]) => /opportunity_workspace_list/.test(name)), 'the old lists are not called');
+  const assigned = slowClient();
+  await readWorkspaceOverview(assigned.client, admin, { view: 'working' });
+  assert.deepEqual(assigned.state.calls.find(([name]) => name === 'opportunity_workspace_page')![1].p_stages, ['working', 'blocked'], '«En preparación» holds the blocked ones too');
+});
+
+test('a member\'s filters are their own stages and their numbers; a count that fails leaves the list as it is', async () => {
+  const member = slowClient();
+  rows.opportunity_workspace_counts = [{ stage: 'assigned', evaluation: 'review', total: 2 }, { stage: 'working', evaluation: 'recommended', total: 1 }, { stage: 'won', evaluation: 'review', total: 1 }];
+  const overview = await readWorkspaceOverview(member.client, { organizationId: 'org', userId: 'u1', role: 'member' }, { view: 'blocked' });
+  assert.deepEqual(member.state.calls.find(([name]) => name === 'opportunity_workspace_page')![1].p_stages, ['blocked']);
+  assert.deepEqual(overview.counts, { all: 3, assigned: 2, working: 1, blocked: 0, done: 1 });
+  const failing = slowClient();
+  const rpc = failing.client.rpc;
+  failing.client.rpc = (name: string, args?: unknown) => (name === 'opportunity_workspace_counts'
+    ? { then: (resolve: any) => resolve({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }) } as any : rpc(name, args));
+  const without = await readWorkspaceOverview(failing.client, { organizationId: 'org', userId: 'u1', role: 'admin' }, { view: 'all' });
+  assert.equal(without.counts, undefined);
+  assert.deepEqual(without.items, rows.opportunity_workspace_page);
 });

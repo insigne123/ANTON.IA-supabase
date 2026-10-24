@@ -53,115 +53,110 @@ test('ticking the step to submit moves it to «Presentada»; a closed stage or a
   assert.equal((globalThis as any).__activity.length, 1);
 });
 
-// The pipeline's reads, recorded: every filter the page asked for reaches each query.
-function recorder(tables: Record<string, unknown[]> = {}) {
+// The pipeline's reads, recorded: each stage is a page of opportunity_workspace_page with every filter the page asked for, and the
+// numbers come from opportunity_workspace_counts.
+function recorder(options: { pages?: (args: any) => unknown[]; counts?: unknown[]; tables?: Record<string, unknown[] | { error: unknown }> } = {}) {
+  const calls: Array<[string, any]> = [];
   const queries: Array<{ table: string; calls: Array<[string, unknown[]]> }> = [];
-  const client = { from(table: string) {
-    const query = { table, calls: [] as Array<[string, unknown[]]> };
-    queries.push(query);
-    const result = () => {
-      if (table === 'opportunity_work') return { data: [{ opportunity_id: 'w1', state: 'working' }], error: null };
-      if (tables[table] && !query.calls.some(([name, args]) => name === 'select' && (args[1] as { head?: boolean } | undefined)?.head)) return { data: tables[table], error: null };
-      const head = query.calls.some(([name, args]) => name === 'select' && (args[1] as { head?: boolean } | undefined)?.head);
-      return head ? { data: null, error: null, count: 7 } : { data: [{ id: `${table}-${queries.length}`, data: { evaluation: 'recommended', summary: { text: 'Listo.' } } }], error: null };
-    };
-    const chain: any = new Proxy({}, { get(_, name) {
-      if (name === 'then') return (resolve: any, reject: any) => Promise.resolve(result()).then(resolve, reject);
-      if (name === 'maybeSingle') return async () => ({ data: null, error: null });
-      return (...args: unknown[]) => { query.calls.push([String(name), args]); return chain; };
-    } });
-    return chain;
-  } };
-  return { client, queries };
+  const client = {
+    rpc: async (name: string, args: any) => {
+      calls.push([name, args]);
+      if (name === 'opportunity_workspace_counts') return { data: options.counts ?? [], error: null };
+      return { data: options.pages ? options.pages(args) : [], error: null };
+    },
+    from(table: string) {
+      const query = { table, calls: [] as Array<[string, unknown[]]> };
+      queries.push(query);
+      const answer = () => {
+        const given = options.tables?.[table];
+        if (given && !Array.isArray(given)) return { data: null, ...given };
+        if (table === 'opportunity_work') {
+          const ids = (query.calls.find(([name, args]) => name === 'in' && args[0] === 'opportunity_id')?.[1][1] ?? []) as string[];
+          return { data: ids.map(id => ({ opportunity_id: id, state: 'working', revision: 2 })), error: null };
+        }
+        return { data: given ?? [], error: null };
+      };
+      const chain: any = new Proxy({}, { get(_, name) {
+        if (name === 'then') return (resolve: any, reject: any) => Promise.resolve(answer()).then(resolve, reject);
+        if (name === 'maybeSingle') return async () => ({ data: null, error: null });
+        return (...args: unknown[]) => { query.calls.push([String(name), args]); return chain; };
+      } });
+      return chain;
+    },
+  };
+  const pages = () => calls.filter(([name]) => name === 'opportunity_workspace_page').map(([, args]) => args);
+  return { client, calls, queries, pages };
 }
+const stageOf = (args: any) => `${args.p_stages.join('+')}${args.p_evaluations.length ? `/${args.p_evaluations.join('+')}` : ''}`;
 
-test('the pipeline reads only the sources and words asked for, as many as the page asked, and counts the ones left out', async () => {
+test('the pipeline asks for each stage with the sources, words and lines of service asked for, as many as the page asked for', async () => {
   const { readOpportunityPipeline } = await load();
-  const { client, queries } = recorder();
-  const result = await readOpportunityPipeline(client, scope, { kinds: ['hiring', 'linkedin_post'], query: 'aseo, (hospital)*', limits: { recommended: 120, found: 60 } });
-  const opportunities = queries.filter(q => q.table === 'commercial_opportunities');
-  assert.equal(opportunities.length, 6, 'the worked ones, two pages and three counts: the left-out ones are only counted');
-  for (const q of opportunities) assert.ok(q.calls.some(([name, args]) => name === 'in' && args[0] === 'kind' && JSON.stringify(args[1]) === '["hiring","linkedin_post"]'), 'every read keeps the source');
-  const ors = opportunities.flatMap(q => q.calls.filter(([name]) => name === 'or').map(([, args]) => String(args[0])));
-  assert.ok(ors.every(or => or.includes('title.ilike.*aseo hospital*') && or.includes('buyer_name.ilike.*aseo hospital*')), 'the words, without what would break the filter');
-  assert.ok(ors.filter(or => or.startsWith('and(or(deadline_at.is.null,deadline_at.gt.')).length === 5, 'still open and searched, in one «or» per read');
-  const ranges = opportunities.flatMap(q => q.calls.filter(([name]) => name === 'range').map(([, args]) => args));
-  assert.deepEqual(ranges, [[0, 119], [0, 59]]);
-  assert.deepEqual(result.limits, { found: 60, recommended: 120, excluded: 0 });
-  assert.equal(result.totals.excluded, 7);
+  const { client, pages, calls } = recorder();
+  const result = await readOpportunityPipeline(client, scope, { kinds: ['hiring', 'linkedin_post'], query: ' aseo, (hospital)* ', categories: ['seguridad'], limits: { recommended: 120, found: 60 } });
+  assert.deepEqual(pages().map(stageOf), ['assigned+working+blocked+submitted+won', 'open/recommended', 'open/review+pending'],
+    'the stages in play whole, then the two pages of what nobody works yet; what the AI left out, the lost and the archived wait to be opened');
+  assert.deepEqual(pages().map(args => args.p_limit), [600, 120, 60]);
+  for (const args of [...pages(), calls.find(([name]) => name === 'opportunity_workspace_counts')![1]]) {
+    assert.deepEqual([args.p_org, args.p_user, args.p_kinds, args.p_query, args.p_biddable], ['org', 'u1', ['hiring', 'linkedin_post'], 'aseo, (hospital)*', true], 'every read keeps the filters');
+    assert.ok(args.p_terms.includes('guardia'), 'and the words of the line of service');
+  }
+  assert.deepEqual(result.limits, { found: 60, recommended: 120, excluded: 0, lost: 0, archived: 0 });
 });
 
-test('without a search the pipeline keeps its plain filter of open opportunities', async () => {
+test('what the AI left out, the lost and the archived load when someone opens them, the last moved first', async () => {
   const { readOpportunityPipeline } = await load();
-  const { client, queries } = recorder();
-  await readOpportunityPipeline(client, scope);
-  const ors = queries.filter(q => q.table === 'commercial_opportunities').flatMap(q => q.calls.filter(([name]) => name === 'or').map(([, args]) => String(args[0])));
-  assert.ok(ors.length && ors.every(or => or.startsWith('deadline_at.is.null,deadline_at.gt.')));
-  assert.ok(!queries.some(q => q.calls.some(([name, args]) => name === 'in' && args[0] === 'kind')), 'every source');
+  const { client, pages } = recorder();
+  await readOpportunityPipeline(client, scope, { limits: { excluded: 60, lost: 60, archived: 120 } });
+  const opened = pages().filter(args => ['open/excluded', 'lost', 'archived'].includes(stageOf(args)));
+  assert.deepEqual(opened.map(args => [stageOf(args), args.p_limit, args.p_sort]), [['open/excluded', 60, 'priority'], ['lost', 60, 'recent'], ['archived', 120, 'recent']]);
 });
 
-test('a line of service filters every read with the words of its category in the title or the summary, in the same single «or»', async () => {
+test('the numbers of each stage come from the counts of the database, whatever the pages loaded', async () => {
   const { readOpportunityPipeline } = await load();
-  const orsOf = async (options: Record<string, unknown>) => {
-    const { client, queries } = recorder();
-    await readOpportunityPipeline(client, scope, options);
-    return queries.filter(q => q.table === 'commercial_opportunities').flatMap(q => q.calls.filter(([name]) => name === 'or').map(([, args]) => String(args[0])));
+  const { client } = recorder({ counts: [{ stage: 'open', evaluation: 'review', total: 1200 }, { stage: 'open', evaluation: 'pending', total: '30' }, { stage: 'open', evaluation: 'recommended', total: 55 },
+    { stage: 'open', evaluation: 'excluded', total: 3700 }, { stage: 'archived', evaluation: 'review', total: 12 }, { stage: 'archived', evaluation: 'recommended', total: 2 }, { stage: 'lost', evaluation: null, total: 1 }] });
+  const result = await readOpportunityPipeline(client, scope);
+  assert.deepEqual(result.totals, { found: 1230, recommended: 55, excluded: 3700, lost: 1, archived: 14 });
+});
+
+test('each page is the best scored first by default, or the soonest to close, or the largest; the stages in play always whole', async () => {
+  const { readOpportunityPipeline } = await load();
+  const sorts = async (sort?: string) => {
+    const { client, pages } = recorder();
+    const result = await readOpportunityPipeline(client, scope, { sort: sort as any });
+    return { result, sorts: pages().map(args => args.p_sort) };
   };
-  const only = await orsOf({ categories: ['seguridad'] });
-  assert.equal(only.length, 6, 'one «or» in each of the six reads');
-  assert.ok(only.every(or => or.includes('title.ilike.*guardia*') && or.includes('data->summary->>text.ilike.*guardia*')), 'the title and the summary line');
-  assert.equal(only.filter(or => or.startsWith('and(or(deadline_at.is.null,deadline_at.gt.')).length, 5, 'still open and in the category');
-  assert.ok(only.some(or => or.startsWith('title.ilike.*')), 'what is already worked is not cut by the deadline, only by the category');
-  // Words searched and category together: both groups inside the one «and».
-  const both = await orsOf({ categories: ['aseo'], query: 'hospital' });
-  assert.ok(both.every(or => or.includes('title.ilike.*hospital*') && or.includes('title.ilike.*servicio de aseo*')));
-  assert.ok(both.every(or => /^and\(or\(.+\),or\(.+\)(,or\(.+\))?\)$/.test(or)), 'each group is its own «or» inside one «and»');
-  // Two lines are alternatives, and an unknown one is no filter at all.
-  const two = await orsOf({ categories: ['seguridad', 'reclutamiento'] });
-  assert.ok(two.every(or => or.includes('*guardia*') && or.includes('*reclutamiento*')));
-  assert.ok((await orsOf({ categories: [] })).every(or => or.startsWith('deadline_at.is.null,')), 'none picked: the plain filter');
-});
-
-test('each page is the best scored first by default, or the soonest to close first (the ones with no deadline last) when asked, and says which', async () => {
-  const { readOpportunityPipeline } = await load();
-  const orders = async (options: Record<string, unknown>) => {
-    const { client, queries } = recorder();
-    const result = await readOpportunityPipeline(client, scope, { limits: { found: 60, recommended: 60 }, ...options });
-    const pages = queries.filter(q => q.table === 'commercial_opportunities' && q.calls.some(([name]) => name === 'range'));
-    assert.equal(pages.length, 2, 'the two pages of what nobody works yet');
-    return { result, orders: pages.map(page => page.calls.filter(([name]) => name === 'order').map(([, args]) => JSON.stringify(args))) };
-  };
-  const byScore = ['["score",{"ascending":false}]', '["id"]'];
-  const byDeadline = ['["deadline_at",{"ascending":true,"nullsFirst":false}]', ...byScore];
-  const plain = await orders({});
-  assert.deepEqual(plain.orders, [byScore, byScore]);
-  assert.equal(plain.result.sort, 'priority');
-  const soonest = await orders({ sort: 'deadline' });
-  assert.deepEqual(soonest.orders, [byDeadline, byDeadline]);
+  assert.deepEqual((await sorts()).sorts, ['priority', 'priority', 'priority']);
+  const soonest = await sorts('deadline');
+  assert.deepEqual(soonest.sorts, ['priority', 'deadline', 'deadline']);
   assert.equal(soonest.result.sort, 'deadline');
-  const unknown = await orders({ sort: 'cheapest' });
-  assert.deepEqual(unknown.orders, [byScore, byScore], 'an unknown order is the default one');
+  assert.deepEqual((await sorts('amount')).sorts, ['priority', 'amount', 'amount']);
+  assert.deepEqual((await sorts('cheapest')).sorts, ['priority', 'priority', 'priority'], 'an unknown order is the default one');
+});
+
+test('the work records of the worked cards are read a hundred ids at a time, and only theirs', async () => {
+  const { readOpportunityPipeline } = await load();
+  const worked = Array.from({ length: 250 }, (_, index) => ({ id: `w${index}`, data: { evaluation: 'recommended', summary: { text: 'Listo.' } } }));
+  const { client, queries } = recorder({ pages: args => stageOf(args).startsWith('assigned') ? worked : [{ id: `open-${stageOf(args)}`, data: { evaluation: 'review', summary: { text: 'Listo.' } } }] });
+  const result = await readOpportunityPipeline(client, scope);
+  const reads = queries.filter(query => query.table === 'opportunity_work');
+  assert.deepEqual(reads.map(query => (query.calls.find(([name]) => name === 'in')![1][1] as string[]).length), [100, 100, 50]);
+  assert.equal(result.work.length, 250);
+  assert.equal(result.items.length, 252, 'the worked ones and the two open pages');
 });
 
 test('each card of the pipeline comes with what its research and its report are doing, and a failure to read that never stops the pipeline', async () => {
   const { readOpportunityPipeline } = await load();
   const rows = [{ id: 'a', data: { evaluation: 'recommended', summary: { text: 'Listo.' } } }, { id: 'b', data: { evaluation: 'review', summary: { text: 'Listo.' } } }];
-  const { client, queries } = recorder({ commercial_opportunities: rows,
-    opportunity_jobs: [{ opportunity_id: 'a', state: 'running', updated_at: '2026-10-21T14:58:00Z' }, { opportunity_id: 'nobody', state: 'running', updated_at: '2026-10-21T14:59:00Z' }],
-    opportunity_reports: [{ opportunity_id: 'b', created_at: '2026-10-21T12:00:00Z' }] });
+  const { client, queries } = recorder({ pages: args => stageOf(args) === 'open/recommended' ? [rows[0]] : stageOf(args) === 'open/review+pending' ? [rows[1]] : [],
+    tables: { opportunity_jobs: [{ opportunity_id: 'a', state: 'running', updated_at: '2026-10-21T14:58:00Z' }, { opportunity_id: 'nobody', state: 'running', updated_at: '2026-10-21T14:59:00Z' }],
+      opportunity_reports: [{ opportunity_id: 'b', created_at: '2026-10-21T12:00:00Z' }] } });
   const result = await readOpportunityPipeline(client, scope);
   assert.deepEqual(result.progress, { a: { research: 'running', researchAt: '2026-10-21T14:58:00Z' }, b: { reportAt: '2026-10-21T12:00:00Z' } }, 'only for the cards shown');
   const jobs = queries.find(q => q.table === 'opportunity_jobs' && q.calls.some(([name, args]) => name === 'eq' && args[0] === 'kind' && args[1] === 'research'))!;
   assert.ok(jobs.calls.some(([name, args]) => name === 'eq' && args[0] === 'organization_id'), 'only the workspace\'s own');
   assert.ok(jobs.calls.some(([name, args]) => name === 'limit' && args[0] === 600), 'a bounded read');
   // The read failing leaves the cards as they were.
-  const failing: any = { from(table: string) {
-    const chain: any = new Proxy({}, { get(_, name) {
-      if (name === 'then') return (resolve: any) => resolve(table === 'opportunity_jobs' ? { data: null, error: { message: 'down' } } : { data: [], error: null, count: 0 });
-      if (name === 'maybeSingle') return async () => ({ data: null, error: null });
-      return () => chain;
-    } });
-    return chain;
-  } };
-  assert.deepEqual((await readOpportunityPipeline(failing, scope)).progress, {});
+  const failing = recorder({ pages: () => rows, tables: { opportunity_jobs: { error: { message: 'down' } } } });
+  assert.deepEqual((await readOpportunityPipeline(failing.client, scope)).progress, {});
 });

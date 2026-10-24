@@ -60,3 +60,41 @@ export function assignmentEmail(input: AssignmentEmailInput) {
     + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p>`);
   return { subject, text, html };
 }
+
+export type AssignmentDigestInput = {
+  name: string; assignedBy: string | null; appUrl: string;
+  /** What was assigned in one go, in the order the person picked them; `responsible` when the person was left in charge of it. */
+  items: Array<{ opportunityId: string; title: string; buyer: string | null; deadlineAt: string | null; responsible: boolean }>;
+};
+
+/**
+ * Several opportunities assigned in one go (the list's «Asignar» on a selection): one email with all of them instead of one per
+ * opportunity, the soonest to close first, each with its own link.
+ */
+export function assignmentDigestEmail(input: AssignmentDigestInput) {
+  const base = input.appUrl.replace(/\/$/, '');
+  const settings = `${base}/dashboard?vista=semana`;
+  const who = input.assignedBy?.trim() || 'Un administrador';
+  const greeting = input.name.trim() ? `Hola, ${input.name.trim()}` : 'Hola';
+  const closing = (at: string | null) => { const time = at ? Date.parse(at) : NaN; return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER; };
+  const items = [...input.items].sort((a, b) => closing(a.deadlineAt) - closing(b.deadlineAt));
+  const inCharge = items.filter(item => item.responsible).length;
+  const subject = `Te asignaron ${items.length} oportunidades`;
+  const intro = `${who} te asignó ${items.length} oportunidades${inCharge ? `; quedaste a cargo de ${inCharge === items.length ? 'todas' : inCharge === 1 ? 'una' : inCharge}` : ''}.`;
+  const lines = items.map(item => {
+    const title = clip(item.title.replace(/\s+/g, ' ').trim() || 'Oportunidad', 160);
+    const when = assignmentWhen(item.deadlineAt);
+    const detail = [item.buyer?.trim() || '', when ? `cierra el ${when}` : '', item.responsible ? 'a tu cargo' : ''].filter(Boolean).join(' · ');
+    return { title, detail, link: `${base}/opportunities?op=${encodeURIComponent(item.opportunityId)}` };
+  });
+  const text = [`${greeting}. ${intro}`, '', ...lines.flatMap(line => [line.title, ...(line.detail ? [line.detail] : []), line.link, '']),
+    `Te avisamos solo cuando hay algo que hacer. Los apagas en «Tu semana»: ${settings}`].join('\n');
+  const rows = lines.map(line => `<p style="margin:0;padding:10px 0;border-top:1px solid #e5e7eb;font-size:14px;line-height:21px"><a href="${escape(line.link)}" style="color:#111827;font-weight:600;text-decoration:none">${escape(line.title)}</a>`
+    + (line.detail ? `<br><span style="color:#6b7280">${escape(line.detail)}</span>` : '') + '</p>').join('');
+  const html = emailShell(`<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
+    + `<p style="margin:0 0 16px;font-size:15px;line-height:22px;color:#6b7280">${escape(intro)}</p>`
+    + `<div style="border-bottom:1px solid #e5e7eb">${rows}</div>`
+    + `<p style="margin:24px 0 0"><a href="${escape(`${base}/opportunities`)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Ver mis oportunidades</a></p>`
+    + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p>`);
+  return { subject, text, html };
+}

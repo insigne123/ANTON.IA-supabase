@@ -27,19 +27,26 @@ export const starLabel = (stars: Stars) => PRIORITY_STEPS.find(step => step.star
 /** What «Calce ★★★★☆» says in words, for the screen readers and the tooltip. */
 export const starsText = (score: number | null | undefined) => { const stars = starsFor(score); return `Calce ${stars} de 5: ${starLabel(stars).toLowerCase()}`; };
 
-/** The two ways to read thousands: by how well they fit, or by how soon they close. */
-export type PrioritySort = 'priority' | 'deadline';
+/** The ways to read thousands: by how well they fit, by how soon they close, or by how much they are worth. */
+export type PrioritySort = 'priority' | 'deadline' | 'amount';
 export const PRIORITY_SORTS: ReadonlyArray<{ id: PrioritySort; label: string; hint: string }> = [
   { id: 'priority', label: 'Prioridad', hint: 'Primero las que mejor calzan con tu oferta; con las mismas estrellas, las que cierran antes.' },
   { id: 'deadline', label: 'Cierran antes', hint: 'Primero las que cierran antes; con la misma fecha, las que mejor calzan.' },
+  { id: 'amount', label: 'Mayor monto', hint: 'Primero las de mayor monto; las que no lo informan, al final.' },
 ];
-export const parsePrioritySort = (value: unknown): PrioritySort => value === 'deadline' ? 'deadline' : 'priority';
+export const parsePrioritySort = (value: unknown): PrioritySort => value === 'deadline' || value === 'amount' ? value : 'priority';
 
-type Ranked = { id: string; score: number; days: number | null };
+type Ranked = { id: string; score: number; days: number | null; amount?: number | null };
 const byDays = (a: Ranked, b: Ranked) => (a.days ?? Number.MAX_SAFE_INTEGER) - (b.days ?? Number.MAX_SAFE_INTEGER);
-/** The order of the cards: most stars first and, among the same stars, the soonest to close; or the soonest first and, on the same day, the most stars. */
+const amountOf = (card: Ranked) => (Number.isFinite(Number(card.amount)) && card.amount !== null && card.amount !== undefined ? Number(card.amount) : -1);
+/**
+ * The order of the cards: most stars first and, among the same stars, the soonest to close; or the soonest first and, on the same day,
+ * the most stars; or the largest amount first (without one, last) and, for the same amount, the most stars.
+ */
 export function comparePriority(sort: PrioritySort) {
   return (a: Ranked, b: Ranked) => sort === 'deadline'
     ? byDays(a, b) || (b.score - a.score) || a.id.localeCompare(b.id)
-    : (starsFor(b.score) - starsFor(a.score)) || byDays(a, b) || (b.score - a.score) || a.id.localeCompare(b.id);
+    : sort === 'amount'
+      ? (amountOf(b) - amountOf(a)) || (starsFor(b.score) - starsFor(a.score)) || byDays(a, b) || a.id.localeCompare(b.id)
+      : (starsFor(b.score) - starsFor(a.score)) || byDays(a, b) || (b.score - a.score) || a.id.localeCompare(b.id);
 }

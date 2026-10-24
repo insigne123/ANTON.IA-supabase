@@ -66,10 +66,10 @@ test('the evaluation asks why an excluded one was left out and keeps it next to 
   assert.match(sources, /excludedMotive: answer\.verdict === 'excluded' \? answer\.motive \?\? null : null/);
   const page = readFileSync('src/components/commercial-opportunities/OpportunityWorkWorkspace.tsx', 'utf8');
   assert.match(page, /<AdvicePill item=\{item\}[^>]*\/>/);
-  assert.match(page, /filter === 'recommended' && !search && source === 'all' && !categories\.length && <StartHere/, 'a line of service is a filter: no suggestions over it');
+  assert.match(page, /shownFilter === 'recommended' && !search && source === 'all' && !categories\.length && <StartHere/, 'a line of service is a filter: no suggestions over it');
   assert.match(page, /bySource\(items\)\.map\(group =>/);
   assert.match(page, /listGroups\.map\(group =>/);
-  assert.match(page, /filter === 'excluded' \? <ExclusionGroups items=\{group\.items\}/);
+  assert.match(page, /shownFilter === 'excluded' \? <ExclusionGroups items=\{group\.items\}/);
   assert.match(page, /<TenderPrerequisites \/>/);
   assert.ok(TENDER_PREREQUISITES.length >= 4 && TENDER_PREREQUISITES.every(block => block.items.length >= 3));
 });

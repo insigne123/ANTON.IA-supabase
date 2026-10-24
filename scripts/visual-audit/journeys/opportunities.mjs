@@ -6,6 +6,7 @@ const opp = n => `00000000-0000-4000-8000-${String(9510 + n).padStart(12, '0')}`
 const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
 const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'mark', 'decision', 'decision_reply'] };
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
+const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
 
 /** The button of the card of an opportunity, found by its title: the nearest block around the title that has that button is the card. */
 const inCard = (c, title, button) => c.page.getByText(title, { exact: true }).filter({ visible: true }).first()
@@ -18,6 +19,54 @@ const applyIsMain = c => c.page.getByRole('button', { name: 'Cómo postular' }).
 
 export default () => [
   // ─── Administrator ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  { id: 'admin-descartar', persona: 'owner', title: 'Administrador: «No es para nosotros» desde el embudo, y deshacerlo', goal: 'Sacar la compra de Maipú de las recomendadas con su motivo, y arrepentirse.', passWrites: [BULK],
+    steps: [
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
+      { say: 'Elijo la etapa Recomendadas', do: async c => { await c.click({ text: 'Recomendadas' }); await c.see('Compra Ágil: personal administrativo de apoyo'); } },
+      { say: 'Pulso «No es para nosotros» en la tarjeta de Maipú', do: async c => { await open(c, 'Compra Ágil: personal administrativo de apoyo', 'No es para nosotros'); await c.seeRole('dialog', /No es para nosotros/); } },
+      { say: 'Elijo el motivo y archivo', do: async c => {
+        c.check('sin motivo no se puede archivar', await c.page.getByRole('button', { name: 'Archivar', exact: true }).isDisabled());
+        await c.click({ role: 'radio', name: 'El monto no conviene' });
+        await c.click({ role: 'button', name: 'Archivar' }); await c.see('Pasó a «Archivadas»');
+        c.check('quedó archivada', stateOf(c, 9) === 'archived', `estado: ${stateOf(c, 9)}`);
+        c.check('el motivo quedó en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(9) && row.kind === 'discarded' && row.data?.reason === 'monto'));
+        c.check('salió de las recomendadas', !(await c.has('Compra Ágil: personal administrativo de apoyo')));
+      } },
+      { say: 'Me arrepiento: Deshacer', do: async c => {
+        await c.click('Deshacer'); await c.see('vuelve a las que nadie trabaja');
+        c.check('volvió a las que nadie trabaja', stateOf(c, 9) === 'unassigned', `estado: ${stateOf(c, 9)}`);
+      } },
+    ] },
+  { id: 'admin-varias', persona: 'owner', title: 'Administrador: asignar dos recomendadas de una vez desde la Lista', goal: 'Darle a Diego las dos empresas que contratan, en un paso.', passWrites: [BULK],
+    steps: [
+      { say: 'Abro la Lista de recomendadas desde su dirección', do: async c => {
+        await c.go('/opportunities?vista=lista&etapa=recommended'); await c.see('Retail Andino contrata 40 vendedores para nuevas tiendas');
+        c.check('el filtro de la dirección queda marcado', (await c.page.getByRole('button', { name: /^Recomendadas/ }).first().getAttribute('aria-pressed')) === 'true');
+      } },
+      { say: 'Marco las dos empresas que contratan', do: async c => {
+        await c.click({ role: 'checkbox', name: /Retail Andino contrata/ }); await c.click({ role: 'checkbox', name: /Logística Sur busca/ });
+        await c.seeRole('region', 'Acciones con las oportunidades seleccionadas'); await c.see('2 seleccionadas');
+      } },
+      { say: 'Pulso Asignar en la barra', do: async c => { await c.click({ role: 'button', name: 'Asignar' }); await c.seeRole('dialog', /Asignar 2 oportunidades/); } },
+      { say: 'Toco a Diego y asigno', do: async c => {
+        await c.click({ role: 'button', name: /Diego Fuentes/ }); await c.click('Asignar y notificar'); await c.see('Asignamos 2');
+        c.check('las dos quedaron asignadas', stateOf(c, 0) === 'assigned' && stateOf(c, 1) === 'assigned', `estados: ${stateOf(c, 0)}, ${stateOf(c, 1)}`);
+        c.check('la selección se vació', !(await c.has('2 seleccionadas')));
+      } },
+    ] },
+  { id: 'admin-filtros-url', persona: 'owner', title: 'Administrador: los filtros viven en la dirección y «Atrás» vuelve al anterior', goal: 'Compartir «Por revisar» de la Lista y volver al filtro de antes.', passWrites: [],
+    steps: [
+      { say: 'Abro Oportunidades y paso a la Lista', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); await c.click({ role: 'button', name: 'Lista' }); await c.wait(800); } },
+      { say: 'Elijo «Por revisar»', do: async c => {
+        await c.click({ role: 'button', name: /^Por revisar/ }); await c.wait(800);
+        const url = new URL(c.page.url());
+        c.check('la dirección lleva la vista y el filtro', url.searchParams.get('vista') === 'lista' && url.searchParams.get('etapa') === 'review', url.search);
+      } },
+      { say: 'Vuelvo atrás con el navegador', do: async c => {
+        await c.page.goBack(); await c.wait(1000);
+        c.check('vuelve al filtro anterior', (await c.page.getByRole('button', { name: /^Recomendadas/ }).first().getAttribute('aria-pressed')) === 'true', new URL(c.page.url()).search);
+      } },
+    ] },
   { id: 'admin-asignar', persona: 'owner', title: 'Administrador: asignar una recomendada a Diego desde el embudo', goal: 'Que Diego tenga la Compra Ágil de Maipú con su objetivo, sin salir de la lista.', passWrites: [ACTIONS],
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },

@@ -133,3 +133,10 @@ export function cleanSummary(text: string) {
   }
   return line && !/[.!?…]$/.test(line) ? `${line}.` : line;
 }
+
+/** Where the purchase is: the region the source gave (Compra Ágil always, a tender when its detail was read), or the older column. */
+export function opportunityRegion(item: { data?: unknown; region?: unknown }) {
+  const observed = (item.data as { observed?: { region?: unknown } } | null | undefined)?.observed?.region;
+  const value = typeof observed === 'string' && observed.trim() ? observed : typeof item.region === 'string' ? item.region : '';
+  return value.trim() || null;
+}
