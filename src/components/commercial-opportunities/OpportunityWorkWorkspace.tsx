@@ -311,19 +311,20 @@ export function OpportunityWorkWorkspace() {
   const confirmClose = async (target: CloseTarget, note: string) => { if (await moveNow(target.id, target.state, target.revision, note)) setClosing(null); };
   type BulkResult = { done: string[]; skipped: number };
   // After an action on several, what is on screen is read again: the list (perform does it), and the pipeline or the open opportunity.
-  const afterBulk = (ids: string[]) => { if (selected && ids.includes(selected)) void loadDetail(selected); if (admin && view === 'pipeline' && !selected) void loadPipeline(); };
+  // The notice waits for it: «Pasó a «Archivadas»» never shows while the card (or its chip in «Cierran esta semana») is still there.
+  const afterBulk = (ids: string[]) => Promise.all([selected && ids.includes(selected) ? loadDetail(selected) : null, admin && view === 'pipeline' && !selected ? loadPipeline() : null]);
   // What was put aside comes back to the ones nobody works yet («Reabrir», or «Deshacer» right after).
   const reopen = async (ids: string[]) => {
     const result = await perform('bulk', { op: 'state', ids, state: 'unassigned' }, null, true) as BulkResult | null;
     if (!result) return;
-    afterBulk(ids);
+    await afterBulk(ids);
     setFeedback(result.done.length > 1 ? `Reabrimos ${result.done.length}: vuelven a las que nadie trabaja todavía.` : 'Reabierta: vuelve a las que nadie trabaja todavía.');
   };
   // «No es para nosotros»: to «Archivadas» with the reason, and a «Deshacer» in the notice.
   const confirmDiscard = async (target: DiscardTarget, reason: DiscardReason, note: string) => {
     const result = await perform('bulk', { op: 'discard', ids: target.ids, reason, note }, null, true) as BulkResult | null;
     if (!result) return;
-    setDiscarding(null); setPicked(new Set()); afterBulk(target.ids);
+    setDiscarding(null); setPicked(new Set()); await afterBulk(target.ids);
     const done = result.done.length;
     const left = result.skipped ? ` ${result.skipped === 1 ? 'Una ya tenía equipo y quedó como estaba' : `${result.skipped} ya tenían equipo y quedaron como estaban`}.` : '';
     setFeedback(done ? `${done === 1 ? 'Pasó' : `Pasaron ${done}`} a «Archivadas». La IA tendrá en cuenta el motivo.${left}` : 'Ya tenían equipo: quedaron como estaban.');
@@ -333,7 +334,7 @@ export function OpportunityWorkWorkspace() {
     if (to === 'unassigned') { const ids = [...picked]; setPicked(new Set()); await reopen(ids); return; }
     const result = await perform('bulk', { op: 'state', ids: [...picked], state: to }, null, true) as BulkResult | null;
     if (!result) return;
-    afterBulk([...picked]); setPicked(new Set());
+    const ids = [...picked]; setPicked(new Set()); await afterBulk(ids);
     setFeedback(`${result.done.length === 1 ? 'Movimos 1' : `Movimos ${result.done.length}`} a «${WORK_STATE_LABELS[to]}».${result.skipped ? ` ${result.skipped === 1 ? 'Una quedó como estaba' : `${result.skipped} quedaron como estaban`}: nadie las trabaja o ya estaban ahí.` : ''}`);
   };
   // «Cambiar etapa» of the administrator, in the opportunity: the closing stages ask for their reason first.
@@ -502,7 +503,7 @@ export function OpportunityWorkWorkspace() {
       const bulk = await perform('bulk', { op: 'assign', ids: many, teamId: draft.teamId || null, participantIds: draft.participantIds || [], responsibleId: draft.responsibleId || null,
         objective: draft.objective || '', dueAt: localDate(draft.dueAt || '') }, null, true) as BulkResult | null;
       if (bulk) {
-        setPicked(new Set()); afterBulk(many);
+        setPicked(new Set()); await afterBulk(many);
         setFeedback(`${bulk.done.length === 1 ? 'Asignamos 1' : `Asignamos ${bulk.done.length}`}: ya están en «Asignadas» y avisamos por correo.${bulk.skipped ? ` ${bulk.skipped === 1 ? 'Una no se pudo' : `${bulk.skipped} no se pudieron`}: estaban cerradas o cambiaron mientras tanto.` : ''}`);
       }
       result = bulk;
