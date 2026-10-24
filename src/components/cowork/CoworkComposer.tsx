@@ -7,7 +7,7 @@ import {
   coworkComposerToken, coworkInsertMention, coworkMentionName, coworkTemplateBlank, coworkTemplates, type CoworkComposerToken, type CoworkMention,
 } from '@/lib/cowork/mentions';
 import { cn } from '@/lib/utils';
-import { ExecutionMode } from './ExecutionMode';
+import { COWORK_AUTONOMOUS_NOTE, ExecutionMode } from './ExecutionMode';
 import { ComposerShortcutList, type ComposerShortcutItems, type CoworkContactOption } from './ComposerShortcuts';
 import { AnimatePresence, CwCollapse } from './motion';
 import { CwButton } from './ui';
@@ -226,6 +226,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         </div>
       </div>
     </form>
+    {canAutonomous && mode === 'autonomous' && <p className="mt-2 px-1 text-center text-[11.5px] text-cw-muted">{COWORK_AUTONOMOUS_NOTE}</p>}
     {footnote && <div className="mt-2 px-1 text-center text-[11.5px] text-foreground/70">{footnote}</div>}
   </div>;
 });

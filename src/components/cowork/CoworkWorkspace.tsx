@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDown, ArrowUp, CornerDownRight, History, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownRight, Download, History, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
+import { AutonomousConfirm } from './ExecutionMode';
+import { coworkConversationMarkdown, coworkHandoffMessage } from '@/lib/cowork/handoff';
+import { coworkUsageWarning, type CoworkUsage } from '@/lib/cowork/usage';
 import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
@@ -47,6 +50,7 @@ type ThreadState = CoworkTurnData & {
   canResearch?: boolean;
   canClarify?: boolean;
   budget?: { depth: number; maxDepth: number; exhausted: boolean };
+  usage?: CoworkUsage | null;
   continuation?: { id: string; status: string } | null;
 };
 
@@ -101,6 +105,12 @@ function returnFocusTo(opener: RefObject<HTMLElement | null>) {
   };
 }
 
+const MODE_KEY = 'cowork:execution-mode';
+const AUTONOMOUS_CONFIRMED = 'cowork:autonomous-confirmed';
+// The browser may refuse storage (a private window): then the choice lasts this visit.
+const readLocal = (key: string) => { try { return window.localStorage.getItem(key); } catch { return null; } };
+const writeLocal = (key: string, value: string) => { try { window.localStorage.setItem(key, value); } catch { /* this visit only */ } };
+
 function setWorkUrl(id: string | null, mode: 'push' | 'replace') {
   const url = new URL(window.location.href);
   if (id) url.searchParams.set('work', id); else url.searchParams.delete('work');
@@ -139,7 +149,13 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const [ready, setReady] = useState(false);
   const [searchQuota, setSearchQuota] = useState<{ remaining: number; limit: number } | null>(null);
   const [canAutonomous, setCanAutonomous] = useState(false);
-  const [mode, setMode] = useState<CoworkExecutionMode>('approval');
+  const [mode, setModeState] = useState<CoworkExecutionMode>('approval');
+  // The mode is remembered in this browser (COW-17); «Autónomo» asks once, with what it approves alone, before it is on.
+  const [confirmingAutonomous, setConfirmingAutonomous] = useState(false);
+  const setMode = useCallback((next: CoworkExecutionMode) => {
+    if (next === 'autonomous' && readLocal(AUTONOMOUS_CONFIRMED) !== '1') { setConfirmingAutonomous(true); return; }
+    setModeState(next); writeLocal(MODE_KEY, next);
+  }, []);
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   // The app's own top bar on a phone (app-shell.tsx, #shell-bar-actions), found once on the client.
@@ -270,7 +286,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       setAutoTitles(names?.autoTitles && typeof names.autoTitles === 'object' ? names.autoTitles : {});
       setSearchQuota(data.searchQuota && typeof data.searchQuota.remaining === 'number' ? data.searchQuota : null);
       setCanAutonomous(data.canAutonomous === true);
-      if (!data.canAutonomous) setMode('approval');
+      setModeState(data.canAutonomous === true && readLocal(MODE_KEY) === 'autonomous' ? 'autonomous' : 'approval');
     }).catch(problem => { if (!disposed) { setError(problem.message); setListError(problem.message); } })
       .finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
@@ -495,6 +511,25 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   }, [runs, selected, turns]);
   const [queued, setQueued, queuedMeta, bindQueued, acknowledgeQueued] = useCoworkQueue({ userId, organizationId, rootId: selectedRoot });
   clearQueued.current = () => setQueued(null);
+
+  // The conversation as a Markdown file, to keep it or show it to a colleague (COW-10). Built here, from what is on screen.
+  const downloadConversation = useCallback(() => {
+    const name = threads.find(item => item.rootId === selectedRoot)?.title || 'Conversación con Cowork';
+    const url = URL.createObjectURL(new Blob([coworkConversationMarkdown(name, turns)], { type: 'text/markdown;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = `${name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Conversación'}.md`;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, [threads, selectedRoot, turns]);
+
+  // A conversation at its limit goes on in a new one (COW-14): the new box starts with what was asked, the last answer and the files,
+  // for the person to read and finish; nothing is sent by itself.
+  const continueInNew = useCallback(() => {
+    const thread = threads.find(item => item.rootId === selectedRoot);
+    const handoff = coworkHandoffMessage(thread?.title || 'Conversación anterior', turns);
+    choose(null);
+    setMessage(handoff);
+  }, [threads, selectedRoot, turns, choose]);
 
   const renameThread = useCallback(async (rootId: string, title: string) => {
     try {
@@ -942,6 +977,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const quotaNote = searchQuota && searchQuota.remaining <= COWORK_LOW_SEARCH_QUOTA
     ? (searchQuota.remaining === 0 ? 'Ya usaste las búsquedas de prospectos de hoy.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 búsqueda' : `quedan ${searchQuota.remaining} búsquedas`} de prospectos hoy.`) : '';
   const queuedView = queued ? coworkMessageAttachments(queued) : null;
+  // When little of the assistant's use is left, it says so before the limit (COW-14, COW-15), with the way on when there is one.
+  const usageWarning = coworkUsageWarning(state?.usage);
 
   // The clip, the dropped files and their chips work the same on the home box and in a conversation.
   const fileProps = (composerId: string) => ({
@@ -989,6 +1026,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         {inConversation && status && <CwStatusPill tone={status.tone} pulse={busy} className="hidden sm:inline-flex">{status.label}</CwStatusPill>}
         {inConversation && !artifactOpen && !panelOpen && <CwButton variant="ghost" size="icon-sm" className={cn('hidden', railVisible ? '2xl:inline-flex' : 'xl:inline-flex')} onClick={() => setPanelOpen(true)} aria-label="Mostrar resumen" title="Resumen"><PanelRight aria-hidden="true" /></CwButton>}
         {inConversation && latest && !artifactOpen && <CwButton ref={summaryOpener} variant="ghost" size="icon-sm" className={railVisible ? '2xl:hidden' : 'xl:hidden'} onClick={() => setSummaryOpen(true)} aria-label="Ver resumen de la conversación" title="Resumen" aria-haspopup="dialog"><PanelRight aria-hidden="true" /></CwButton>}
+        {inConversation && turns.length > 0 && <CwButton variant="ghost" size="icon-sm" onClick={downloadConversation} aria-label="Descargar conversación" title="Descargar conversación (Markdown)"><Download aria-hidden="true" /></CwButton>}
         {/* With the list of conversations open, its own «Nueva conversación» is right there. */}
         <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden', railVisible && 'lg:hidden')} title="Nueva conversación">
           <SquarePen aria-hidden="true" /><span className="hidden sm:inline">Nueva conversación</span>
@@ -1036,6 +1074,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 decidable={latest?.run.clarificationOf === turn.run.id && turn.run.status === 'waiting_approval'}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
                 onResolve={approve => void resolve(approve, index === shownTurns.length - 1 ? latest : turn)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
+                onContinueNew={ready ? continueInNew : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
                 liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)}
                 cardStatuses={cardStatuses} earlierRows={earlierRows.get(turn.run.id)} versions={coworkTurnVersions(runs, turn.run)} onVersion={busy || sending ? null : openVersion}
@@ -1096,7 +1135,9 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                   onSendNow: pendingDecision || queuedMeta?.entry.state === 'failed' ? () => void sendQueuedNow() : null,
                   sendNowLabel: pendingDecision ? 'Reemplazar propuesta' : 'Reintentar mensaje',
                 } : null}
-                footnote="ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla." />
+                footnote={usageWarning ? <span className="text-cw-text">{usageWarning.text}{usageWarning.newConversation && ready && <>
+                  {' '}<button type="button" onClick={continueInNew} className="rounded-sm font-medium text-cw-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cw-accent">Seguir en una conversación nueva</button></>}</span>
+                  : 'ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla.'} />
             </div>
           </div>
         </>}
@@ -1125,7 +1166,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         {latest && <CoworkSidePanel closeStyle="dismiss" steps={coworkTurnProgress(latest.run, latest.events)}
           artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
           sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
-          budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setSummaryOpen(false)} />}
+          budget={state?.budget || null} usage={state?.usage || null} searchQuota={searchQuota} onClose={() => setSummaryOpen(false)} />}
       </SheetContent>
     </Sheet>
     {!openArtifact && inConversation && latest && panelOpen && <m.div key="summary" initial={summaryReturns ? 'hidden' : false} animate="shown" variants={cwPanel}
@@ -1133,9 +1174,11 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)}
         artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
         sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
-        budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
+        budget={state?.budget || null} usage={state?.usage || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
     </m.div>}
     <CoworkShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} mac={mac} />
     {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={open => { setSchedulesOpen(open); if (!open) schedules.refresh(); }} initialPrompt={schedulesPrompt} onStarted={retryList} />}
+    <AutonomousConfirm open={confirmingAutonomous} onCancel={() => setConfirmingAutonomous(false)}
+      onConfirm={() => { writeLocal(AUTONOMOUS_CONFIRMED, '1'); setConfirmingAutonomous(false); setModeState('autonomous'); writeLocal(MODE_KEY, 'autonomous'); }} />
   </section></CoworkExportProvider></CoworkMotion>;
 }

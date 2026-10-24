@@ -3,6 +3,7 @@ import {useAuth} from '@/context/AuthContext';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {dayInZone} from '@/lib/admin/chile-time';
 import {authenticatedApiFetch} from '@/lib/authenticated-api-fetch';
+import {useSlow} from '@/hooks/use-slow';
 import type {HomeScope} from '@/lib/home/scope';
 export function usePersonalHome<T>(url:string){
   const {user,organizationId,loading:authLoading}=useAuth();
@@ -22,5 +23,12 @@ export function usePersonalHome<T>(url:string){
   },[key,url,organizationId,user?.id,day]);
   useEffect(()=>{void load();return()=>active.current?.abort();},[load]);
   useEffect(()=>{const refresh=()=>setDay(dayInZone(new Date()));const timer=setInterval(refresh,30000);window.addEventListener('focus',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);};},[]);
-  return state.key===key&&key?{data:state.data,loading:state.loading,error:state.error,load}:{data:null,loading:true,error:false,load};
+  // A read that hangs, or one that cannot start because the organization never arrived, says so after a while (APP-02);
+  // retrying without an organization reloads the page, which reads it again.
+  // Signed in but without an organization (its read failed): nothing can load, and that is said at once.
+  const ready=state.key===key&&!!key,noOrganization=!authLoading&&!!user?.id&&!organizationId;
+  const slow=useSlow(!ready||(state.loading&&!state.data));
+  const retry=useCallback(()=>{if(key)return load();window.location.reload();},[key,load]);
+  if(noOrganization)return{data:null,loading:false,error:true,slow:false,load:retry};
+  return ready?{data:state.data,loading:state.loading,error:state.error,slow,load:retry}:{data:null,loading:true,error:false,slow,load:retry};
 }

@@ -758,7 +758,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // Cancellation invalidates the lease; terminal writes cannot revive it.
     const failed = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'failed',
-      p_payload: { message: coworkFailureMessage(error) },
+      // The category lets the page offer what helps: at the conversation's limit, a new conversation instead of «Reintentar» (COW-14).
+      p_payload: { message: coworkFailureMessage(error), category: coworkFailureCategory(error) },
     });
     if (failed.error) throw failed.error;
     return { claimed: true, processed: 0 };

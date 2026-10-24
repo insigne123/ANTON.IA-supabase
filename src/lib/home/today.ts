@@ -161,6 +161,11 @@ export function replyNeedsAnswer(row: { replied_at?: string | null; reply_intent
   return Date.parse(row.replied_at) > Math.max(Date.parse(row.conversation_resolved_at || '') || 0, Date.parse(row.conversation_outbound_at || '') || 0);
 }
 
+/** How many people wait for an answer: the rule of «Por responder», one per person (the number beside «Conversaciones», APP-23). */
+export function repliesWaiting(rows: Array<Parameters<typeof replyNeedsAnswer>[0] & { id?: string | null; email?: string | null }>) {
+  return new Set(rows.filter(replyNeedsAnswer).map(row => String(row.email || row.id || '').trim().toLowerCase())).size;
+}
+
 /** A commitment counts today when it is open and due before the end of the day. */
 export function commitmentDueToday(commitment: unknown, now: Date): { kind: string; title: string; dueAt: string } | null {
   if (!commitment || typeof commitment !== 'object') return null;
