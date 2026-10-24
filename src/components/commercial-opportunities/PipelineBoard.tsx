@@ -63,7 +63,7 @@ function ClosingThisWeek({ items, onOpen }: { items: PipelineWeekItem[]; onOpen:
 }
 
 /**
- * The admin's pipeline: the stages as a road (PipelineRoute), the opportunities of the stage in view below it, and what the
+ * The admin's pipeline: the stages in a row (PipelineRoute), the opportunities of the stage in view below it, and what the
  * AI suggests for each one. Moves the work shows happen on their own (pipeline.ts); here a person applies the rest. Each
  * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
