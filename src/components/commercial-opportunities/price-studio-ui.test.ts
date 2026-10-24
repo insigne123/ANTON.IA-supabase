@@ -115,3 +115,40 @@ test('the person can remove a site and a row that says nothing is not matched to
   assert.equal(priceStudio.siteKept({ id: 'x', name: '', posts: '', postHours: '', hoursMonth: '' }), false);
   assert.equal(priceStudio.siteKept(priceStudio.newSite()), true);
 });
+
+// Saved for the team (OPP-23): the study comes from the server, says who saved it, keeps its versions and can feed the economic offer.
+const study = priceStudio.cleanStudy({ profiles: [{ name: 'Guardia', headcount: '12', base: '600000' }] });
+const version = (id: string, by: string, at: string) => ({ id, created_by: by, created_at: at, updated_at: at });
+const shared = (over: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(PriceStudio, { storageKey: 'anton:price-studio:v1:u1:op-1',
+  server: { available: true, latest: { ...version('v2', 'u-camila', '2026-10-24T15:00:00.000Z'), study }, versions: [version('v2', 'u-camila', '2026-10-24T15:00:00.000Z'), version('v1', 'u-diego', '2026-10-22T13:00:00.000Z')] },
+  people: [{ user_id: 'u-camila', name: 'Camila Torres' }, { user_id: 'u-diego', name: 'Diego Fuentes' }], onSave: async () => ({ ok: true }), onOpenVersion: async () => study, ...over }));
+
+test('saved for the team: it opens on the version in use, says who saved it, and keeps the ones before', () => {
+  const page = shared();
+  assert.match(text(page), /Guardado para quien fija los precios · Camila Torres, 24 de octubre a las 12:00/);
+  assert.match(page, /value="Guardia"/, 'the study saved, not an empty one');
+  assert.match(text(page), /Versiones guardadas 2/);
+  assert.match(text(page), /24 de octubre a las 12:00 · Camila Torres en uso/);
+  assert.match(text(page), /22 de octubre a las 10:00 · Diego Fuentes Usar esta/);
+  assert.match(text(page), /Solo lo ven quien está a cargo y los administradores\./);
+  assert.doesNotMatch(text(page), /vive en tu navegador/);
+});
+
+test('a figure of the calculation goes to a line of the economic offer, with VAT when the portal takes it so', () => {
+  const net = text(shared({ offer: { lines: [{ index: 0, description: 'Servicio mensual de guardias' }], withTax: false, onUse: async () => true } }));
+  assert.match(net, /Usar en la oferta económica/);
+  assert.match(net, /Precio al mes: \$[\d.]+/);
+  assert.match(net, /Servicio mensual de guardias/);
+  assert.match(net, /Queda como precio unitario neto de esa línea/);
+  const monthly = (words: string) => Number(words.match(/Precio al mes: \$([\d.]+)/)![1].replace(/\./g, ''));
+  const gross = text(shared({ offer: { lines: [{ index: 0, description: 'Servicio mensual de guardias' }], withTax: true, onUse: async () => true } }));
+  assert.match(gross, /Queda como precio unitario con IVA de esa línea/);
+  assert.ok(Math.abs(monthly(gross) - monthly(net) * 1.19) <= 1, `${monthly(gross)} vs ${monthly(net)}`);
+  assert.doesNotMatch(text(shared()), /Usar en la oferta económica/, 'without an economic offer there is nothing to put it in');
+});
+
+test('before its table exists, the study lives in the browser as before', () => {
+  const local = text(renderToStaticMarkup(React.createElement(PriceStudio, { storageKey: 'anton:price-studio:v1:u1:op-1', server: { available: false, latest: null, versions: [] }, onSave: async () => ({ ok: true }) })));
+  assert.match(local, /Esto vive en tu navegador: no se comparte con el equipo\./);
+  assert.doesNotMatch(local, /Guardado para quien fija los precios|Versiones guardadas/);
+});

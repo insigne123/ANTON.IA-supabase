@@ -33,7 +33,7 @@ import { OpportunityContacts } from './OpportunityContacts';
 import { DecisionCallout, MemberStrip } from './MemberWork';
 import { FitProposals } from './FitProposals';
 import { PriceStudio } from './PriceStudio';
-import { studioKey } from '@/lib/commercial-opportunities/price-studio';
+import { studioKey, type PriceStudyVersion, type SavedPriceStudy, type StudioDraft } from '@/lib/commercial-opportunities/price-studio';
 import { MEMBER_FILTERS, isFinished, memberFilter, memberView, openDecision, pendingFitProposals } from '@/lib/commercial-opportunities/member-work';
 import { OpportunityChat } from './OpportunityChat';
 import { OpportunityAssistant } from './OpportunityAssistant';
@@ -76,7 +76,9 @@ import { readWorkspaceUrl, workspaceUrl, type WorkspaceView } from '@/lib/commer
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress; documentId?: string; part?: string };
 type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string; role?: string }>; activity: ActivityRow[]; tasks: OpportunityTask[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
-  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null; canPrice?: boolean; versions?: Array<{ id: string; created_at: string }> }; fit?: OpportunityFitView };
+  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null; canPrice?: boolean; versions?: Array<{ id: string; created_at: string }> }; fit?: OpportunityFitView;
+  /** «Calcular el precio» saved for whoever sets the prices (OPP-23); null for the rest of the team. */
+  priceStudy?: { available: boolean; latest: SavedPriceStudy | null; versions: PriceStudyVersion[] } | null };
 /** The kinds with bases to answer with an offer (server/commercial-opportunities/workspace-offer.ts). */
 const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
 /** The kinds with a public buyer whose history ChileCompra keeps (server/commercial-opportunities/workspace-market.ts). */
@@ -549,6 +551,33 @@ export function OpportunityWorkWorkspace() {
     else if (result && ACTIVE.includes(result.state ?? 'queued')) setFeedback('La IA está reescribiendo esa parte. Puedes seguir trabajando.');
     return Boolean(result);
   };
+  // «Calcular el precio» saved for the team as it is typed (OPP-23): on its own, without reading the expediente again.
+  const savePriceStudy = async (study: StudioDraft, base: string | null, options: { over?: boolean; fresh?: boolean } = {}) => {
+    if (!selected) return { ok: false as const, conflict: false, message: '' };
+    const response = await fetch(`/api/commercial-opportunities/${selected}/workspace`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'price_study', data: { study, base, ...options } }) }).catch(() => null);
+    const value = response ? await response.json().catch(() => ({})) : {};
+    if (!response?.ok) {
+      // Another person's newer version comes in, to see it next to this one.
+      if (response?.status === 409) void loadDetail(selected);
+      return { ok: false as const, conflict: response?.status === 409, message: value.error || 'Revisa tu conexión.' };
+    }
+    const saved = value.saved as SavedPriceStudy;
+    setDetail(current => current?.priceStudy ? { ...current, priceStudy: { ...current.priceStudy, latest: saved,
+      versions: [saved, ...current.priceStudy.versions.filter(version => version.id !== saved.id)].slice(0, 12) } } : current);
+    return { ok: true as const, saved };
+  };
+  const openPriceVersion = async (versionId: string) => {
+    try { return (await json(await fetch(`/api/commercial-opportunities/${selected}/workspace?price_version=${versionId}`, { cache: 'no-store' }))).version.study as StudioDraft; }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo abrir esa versión.'); return null; }
+  };
+  // A figure of the calculation as the unit price of one line of the economic offer, beside the prices already saved.
+  const putInOffer = async (line: number, value: number) => {
+    const latest = detail?.offer?.latest;
+    if (!latest) return false;
+    const prices = { ...Object.fromEntries(Object.entries(latest.prices).map(([key, price]) => [key, String(price)])), [String(line)]: String(value) };
+    return Boolean(await saveOfferPrices(latest.id, latest.revision, prices));
+  };
   const generate = () => { if (!detail) return; if (admin && detail.item.data.evaluation === 'excluded' && !detail.reports.length) setReconsider(true); else { setTab('summary'); void perform('research', {}, selected, true); } };
   // The question shows at once; the answer arrives in the same wait (the server answers it now) or, if a worker took it, by polling.
   const ask = (text: string) => { setTab('chat'); setPendingQuestion(text); void perform('chat', { question: text, requestId: crypto.randomUUID() }, selected, true).finally(() => setPendingQuestion(null)); };
@@ -959,7 +988,10 @@ export function OpportunityWorkWorkspace() {
             budget={{ amount: latest.report.submission?.numbers.budget ?? item.amount, includesTax: latest.report.submission?.numbers.budgetIncludesTax ?? null }} /> : null}
           onDraft={latest ? title => ask(`Prepara el borrador de «${title}» como un formulario listo para llenar y pegar en Word: el título tal como lo dan las bases, una tabla de dos columnas (Campo | Dato) con los datos de mi empresa que conoces, el texto de cada declaración o cláusula tal como lo piden las bases, y [corchetes] para lo que falte. Si no tienes el formato oficial en los fragmentos, dilo al comienzo en una frase.`) : undefined} />
           {/* The cost of an hour and the points the price is worth: for whoever sets the prices (an administrator or whoever is in charge). */}
-          {OFFER_KINDS.includes(item.kind) && detail.offer?.canPrice !== false ? <PriceStudio storageKey={studioKey(user?.id, item.id)} /> : null}
+          {OFFER_KINDS.includes(item.kind) && detail.offer?.canPrice !== false ? <PriceStudio key={item.id} storageKey={studioKey(user?.id, item.id)} server={detail.priceStudy} people={detail.members || detail.participants}
+            onSave={savePriceStudy} onOpenVersion={openPriceVersion} onMarket={MARKET_KINDS.includes(item.kind) ? () => setTab('market') : undefined}
+            offer={detail.offer?.latest?.draft.economic.lines.length ? { lines: detail.offer.latest.draft.economic.lines.map((line, index) => ({ index, description: line.description })),
+              withTax: detail.offer.latest.draft.economic.priceBasis === 'total', onUse: putInOffer } : null} /> : null}
         </div>}
         {tab === 'market' && MARKET_KINDS.includes(item.kind) && <WinPlan id={selected} />}
         {tab === 'documents' && <section className="space-y-5">

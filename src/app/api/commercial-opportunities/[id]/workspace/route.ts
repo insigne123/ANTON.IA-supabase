@@ -15,6 +15,7 @@ import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunitie
 import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { enqueueOpportunityOffer, enqueueOpportunityOfferRewrite, readOpportunityOffer, reviewOpportunityOffer, saveOpportunityOfferPart, saveOpportunityOfferPrices } from '@/lib/server/commercial-opportunities/workspace-offer';
 import { offerEditSchema, offerReviewSchema, offerRewriteSchema } from '@/lib/commercial-opportunities/offer-edits';
+import { readOpportunityPriceStudy, readOpportunityPriceVersion, saveOpportunityPriceStudy } from '@/lib/server/commercial-opportunities/workspace-price';
 import { answerFitQuestion, enqueueRequirementFit, readOpportunityFit } from '@/lib/server/commercial-opportunities/workspace-fit';
 import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { AuthError } from '@/lib/server/auth-utils';
@@ -36,20 +37,25 @@ function emailMention(admin: SupabaseClient, scope: WorkScope, id: string, users
 }
 const STATE_LABELS: Record<string, string> = { unassigned: 'sin asignar', assigned: 'asignada', working: 'en gestión', blocked: 'bloqueada', submitted: 'oferta presentada', won: 'ganada', lost: 'perdida', archived: 'archivada' };
 type Context = { params: Promise<{ id: string }> };
-export async function GET(_request: Request, context: Context) {
+export async function GET(request: Request, context: Context) {
   try { const auth = await requireOpportunityWorkspace(); const id = z.string().uuid().parse((await context.params).id);
     const scope = opportunityScope(auth);
-    // The detail checks the access first; the offer draft of the same opportunity comes with it.
+    // One version of «Calcular el precio», to bring it back (OPP-23).
+    const version = new URL(request.url).searchParams.get('price_version');
+    if (version) return opportunitiesJson({ version: await readOpportunityPriceVersion(auth.admin, scope, id, z.string().uuid().parse(version)) });
+    // The detail checks the access first; the offer draft of the same opportunity comes with it, and the price study for whoever sets the prices.
     const detail = await readOpportunityDetail(auth.admin, scope, id);
-    const [offer, fit] = await Promise.all([readOpportunityOffer(auth.admin, scope, id), readOpportunityFit(auth.admin, scope.organizationId, detail.reports?.[0]?.id)]);
-    return opportunitiesJson({ ...detail, offer: { ...offer, canPrice: canSetPrices(scope.role, scope.userId, detail.work?.responsible_id) }, fit });
+    const canPrice = canSetPrices(scope.role, scope.userId, detail.work?.responsible_id);
+    const [offer, fit, priceStudy] = await Promise.all([readOpportunityOffer(auth.admin, scope, id), readOpportunityFit(auth.admin, scope.organizationId, detail.reports?.[0]?.id),
+      canPrice ? readOpportunityPriceStudy(auth.admin, scope, id) : null]);
+    return opportunitiesJson({ ...detail, offer: { ...offer, canPrice }, fit, priceStudy });
   } catch (error) { return opportunitiesError(error); }
 }
 export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'offer_part', 'offer_review', 'offer_rewrite', 'fit', 'fit_answer', 'fit_proposal', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'offer_part', 'offer_review', 'offer_rewrite', 'price_study', 'fit', 'fit_answer', 'fit_proposal', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') {
       const input = assignmentSchema.parse(data); const before = await readParticipantIds(auth.admin, scope, id);
       const revision = await assignOpportunity(auth.admin, scope, id, input);
@@ -116,6 +122,12 @@ export async function POST(request: Request, context: Context) {
       // One part is short: written now when it can be, by the worker otherwise; the page reads the result with the opportunity.
       const done = await runQueuedOpportunityJobNow(auth.admin, scope.organizationId, `offer-part:${id}:${input.requestId}`, 'offer').catch(() => null);
       return opportunitiesJson({ jobId, state: done?.state ?? 'queued' }, done?.state === 'ready' ? 200 : 202);
+    }
+    // «Calcular el precio» saved for the team, with its versions (OPP-23); the server cleans the study.
+    if (action === 'price_study') {
+      const input = z.object({ study: z.record(z.unknown()).refine(study => JSON.stringify(study).length <= 120_000, 'El cálculo es demasiado largo.'), base: z.string().uuid().nullable(),
+        over: z.boolean().optional(), fresh: z.boolean().optional() }).strict().parse(data);
+      return opportunitiesJson({ saved: await saveOpportunityPriceStudy(auth.admin, scope, id, input) });
     }
     if (action === 'offer_prices') {
       const input = z.object({ draftId: z.string().uuid(), expectedRevision: z.number().int().nonnegative(),
