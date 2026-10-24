@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { Check, CircleSlash, LoaderCircle, PanelRightClose, ShieldCheck, TriangleAlert, X, Zap } from 'lucide-react';
 import type { CoworkArtifact, CoworkProgressStep } from '@/lib/cowork/presentation';
+import { coworkUsageLine, type CoworkUsage } from '@/lib/cowork/usage';
 import { cn } from '@/lib/utils';
 import { CoworkArtifactIcon, coworkArtifactMeta } from './CoworkTurn';
 import { AnimatePresence, cwPop, cwVariants, m } from './motion';
@@ -45,7 +46,7 @@ export const COWORK_LOW_SEARCH_QUOTA = 10;
 
 /** Right rail of the conversation: the plan as a to-do list while there is one, what came out of it and what it used. Below
  * xl it opens in a sheet, where `closeStyle` «dismiss» closes it with an X. */
-export function CoworkSidePanel({ steps, artifacts, openArtifactId, onOpenArtifact, sources, mode, budget, searchQuota, onClose,
+export function CoworkSidePanel({ steps, artifacts, openArtifactId, onOpenArtifact, sources, mode, budget, usage = null, searchQuota, onClose,
   closeStyle = 'collapse' }: {
   steps: CoworkProgressStep[];
   artifacts: CoworkArtifact[];
@@ -54,6 +55,8 @@ export function CoworkSidePanel({ steps, artifacts, openArtifactId, onOpenArtifa
   sources: string[];
   mode: 'approval' | 'autonomous';
   budget?: { depth: number; maxDepth: number; exhausted: boolean } | null;
+  /** How much of the assistant's use the conversation and the day have taken (COW-15). */
+  usage?: CoworkUsage | null;
   searchQuota: { remaining: number; limit: number } | null;
   onClose: () => void;
   closeStyle?: 'collapse' | 'dismiss';
@@ -110,6 +113,7 @@ export function CoworkSidePanel({ steps, artifacts, openArtifactId, onOpenArtifa
             {mode === 'autonomous' ? 'Modo autónomo con topes' : 'Con aprobaciones: nada cambia sin tu visto bueno'}
           </p>
           {budget?.exhausted && <p className="text-cw-muted">Llegó al tope de pasos automáticos de esta conversación: escríbele para seguir.</p>}
+          {usage && <p className="tabular-nums text-cw-muted">{coworkUsageLine(usage)}</p>}
           {searchQuota && searchQuota.remaining <= COWORK_LOW_SEARCH_QUOTA && <p className="text-cw-muted">
             {searchQuota.remaining === 0 ? 'Ya usaste las búsquedas de prospectos de hoy.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 búsqueda' : `quedan ${searchQuota.remaining} búsquedas`} de prospectos hoy.`}
           </p>}
