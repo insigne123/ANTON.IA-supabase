@@ -18,9 +18,9 @@ La causa del primer eslabón está en el prompt de la extracción: un «listado 
 
 Aparte, la corrida encontró un error real: `truncateAtWord(texto, 2000)` devolvía hasta 2.003 caracteres y un hecho del informe no admite más de 2.000, así que en una de 16 investigaciones el esquema falló al final de la síntesis, con todas las llamadas ya pagadas (PR 501).
 
-## Qué se construyó (todo apagado por defecto)
+## Qué se construyó (apagado por defecto en el código; encendido en producción desde el 24 de octubre de 2026)
 
-**1. Cosecha de señales de la investigación** (`RESEARCH_SIGNAL_HARVEST_ENABLED=true`, módulo `research-signal-harvest.ts`). Después de leer y extraer, un Claude (`claude-sonnet-5-5` por defecto, `RESEARCH_SIGNAL_HARVEST_MODEL`) lee los hechos de las páginas —nunca la web— sabiendo qué vende quien escribe y a qué cargo, y propone hasta 3 señales: un evento de los últimos 30 días, conectado de forma directa con la oferta. Cada propuesta se acepta solo si lo que dice está en los hechos que cita, con comprobaciones que no dependen del modelo:
+**1. Cosecha de señales de la investigación** (`RESEARCH_SIGNAL_HARVEST_ENABLED=true`, módulo `research-signal-harvest.ts`). Después de leer y extraer, un Claude (`claude-haiku-5-5` por defecto, `RESEARCH_SIGNAL_HARVEST_MODEL`; Sonnet y Opus están bloqueados en el código) lee los hechos de las páginas —nunca la web— sabiendo qué vende quien escribe y a qué cargo, y propone hasta 3 señales: un evento de los últimos 30 días, conectado de forma directa con la oferta. Cada propuesta se acepta solo si lo que dice está en los hechos que cita, con comprobaciones que no dependen del modelo:
 
 - la fecha es la de la página o una escrita en el hecho, y cae en la ventana;
 - cada cifra y cada nombre propio de la frase está escrito en los hechos citados (una suma o una ciudad inventada se rechaza);
@@ -29,7 +29,7 @@ Aparte, la corrida encontró un error real: `truncateAtWord(texto, 2000)` devolv
 - una conexión «indirecta» (resultados financieros, premios, un incidente) se descarta: una señal forzada es peor que ninguna;
 - no repite una señal que la extracción ya encontró.
 
-Lo que sale es una afirmación común (`dimension: signal`, apoyada en los hechos citados), así que el informe, su auditoría y el borrador la tratan como a cualquier otra. Si el modelo falla, la investigación sigue sin señales (`signal_harvest_unavailable`). Cuesta una llamada por investigación (unos 10.000 tokens de entrada y 500 de salida: US$0,03 con Sonnet; con Haiku sale mucho más barato pero junta peor varios avisos en una señal) y suma 5 a 7 segundos. Las copias guardadas de la investigación se separan por esta bandera, como con el investigador de páginas.
+Lo que sale es una afirmación común (`dimension: signal`, apoyada en los hechos citados), así que el informe, su auditoría y el borrador la tratan como a cualquier otra. Si el modelo falla, la investigación sigue sin señales (`signal_harvest_unavailable`). Cuesta una llamada por investigación (unos 5.000 a 8.000 tokens de entrada y 300 a 1.500 de salida: del orden de US$0,001 con Haiku, que es el que corre; la medida de la tabla de abajo se hizo con Sonnet, que costaba US$0,03, y Haiku junta peor varios avisos en una señal) y suma 5 a 7 segundos. Las copias guardadas de la investigación se separan por esta bandera, como con el investigador de páginas.
 
 **2. Señales en el borrador** (`DRAFT_SIGNAL_EVIDENCE_ENABLED=true`, en `buildDraftContextV2`). Cuatro cambios, todos deterministas:
 
@@ -85,9 +85,26 @@ Solo con la corrección el redactor conservaba la cifra más veces, pero con fra
 
 La cosecha (y el investigador de páginas del PR 497) corren en la investigación del informe v2 que lee páginas, `gatherReportV2Research`. Con la investigación pública compartida (`SHARED_PUBLIC_COMPANY_RESEARCH_ENABLED`, que `apphosting.yaml` no enciende hoy) la investigación sale de un artefacto guardado de la empresa y ese camino no lee páginas, así que la cosecha no corre. Las señales en el borrador (`DRAFT_SIGNAL_EVIDENCE_ENABLED`) sirven con cualquier informe v2.
 
+## Con Haiku, el modelo que corre ahora (24 de octubre de 2026)
+
+Prueba de humo de `harvestResearchSignals` con `claude-haiku-5-5` sobre los ocho informes guardados de la última corrida (llave de pruebas, sin juez: las señales las leyó una sesión de Claude Code). Siete llamadas, unos 37.000 tokens de entrada y 5.700 de salida: **US$0,0131 estimado a doble de la lista, unos US$0,007 reales**.
+
+| Empresa | Candidatos | Aceptadas | Qué entregó |
+| --- | --- | --- | --- |
+| Enaex | 17 | 3 | vacantes en Antofagasta y Atacama; Ingeniero en Entrenamiento en Calama y choferes A4; Operador de Planta en Mejillones (4x4) |
+| Sodexo Chile | 44 | 2 (y 1 repetida, descartada) | 10 vacantes de ayudante de cocina en Malloa hasta el 16 de noviembre; 10 de auxiliar de control de ventas en Coquimbo hasta el 20 de noviembre |
+| SalfaCorp | 38 | 2 | Administrador/a de Contrato (7 de octubre al 6 de noviembre); vacantes de ICEM (3 ayudantes de sondaje en Alhué, secretario/a técnico/a en Las Condes) |
+| Aguas Andinas | 75 | 2 | más de 70 ofertas vigentes; Operador de Planta de Riles en San Bernardo y El Paico |
+| Besalco | 9 | 1 | búsqueda de personal; supervisores con experiencia en movimiento de tierra |
+| Gasco | 28 | 0 | propuso 1 y la comprobación la rechazó (`no_fact_for_the_draft`): no había un evento que sirviera |
+| SMU | 69 | 0 | no propuso ninguna |
+| Ingevec | 0 | 0 | ningún hecho de los últimos 30 días |
+
+Cinco de ocho empresas con al menos una señal fechada y escrita en los hechos que cita. Las tres que no la tienen: Gasco (Haiku propuso una y la comprobación la rechazó), SMU (no propuso ninguna) e Ingevec (ningún hecho de los últimos 30 días). Es lo que le faltaba al correo de Sodexo, donde con las banderas de borradores el hecho que abría el correo era el resumen («mantiene avisos de empleo para minería») y no el detalle de las vacantes.
+
 ## Para encenderlo
 
-Orden sugerido, con una cuenta y mirando una semana: `RESEARCH_SIGNAL_HARVEST_ENABLED=true` (necesita `ANTHROPIC_API_KEY`) y después `DRAFT_SIGNAL_EVIDENCE_ENABLED=true`. La segunda cambia qué hecho abre el correo, así que conviene leer los primeros correos a mano. Para repetir la medida:
+*(Desde el 24 de octubre `apphosting.yaml` ya la enciende junto con las tres banderas de borradores, para todas las cuentas, por decisión del dueño; lo que sigue es el orden prudente que se había sugerido antes.)* Orden sugerido, con una cuenta y mirando una semana: `RESEARCH_SIGNAL_HARVEST_ENABLED=true` (necesita `ANTHROPIC_API_KEY`) y después `DRAFT_SIGNAL_EVIDENCE_ENABLED=true`. La segunda cambia qué hecho abre el correo, así que conviene leer los primeros correos a mano. Para repetir la medida:
 
 ```bash
 # Investigación → informe → correo, 8 empresas, modos: sin (solo el sitio), con (investigador de páginas), pro (con + cosecha)

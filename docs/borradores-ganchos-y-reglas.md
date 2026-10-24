@@ -1,6 +1,6 @@
 # Borradores: de dónde sale lo genérico y qué se probó (23 de octubre de 2026)
 
-La lectura de los 8 borradores guardados (ver `docs/uso-como-persona-2026-10-23.md`) dejó tres sospechas: el gancho elegido a veces no sirve para vender nada (la Fiscalía Nacional Económica en el correo a Gasco, «Renca y Talagante son comunas» en el de Aguas Andinas), el dato concreto de la investigación no llega al correo («vacantes abiertas en el norte» cuando el hecho decía Antofagasta y Atacama) y el redactor repite la misma fórmula. Esta página dice qué se midió, qué se encontró y qué quedó en el código, apagado, para que lo enciendas tú.
+La lectura de los 8 borradores guardados (ver `docs/uso-como-persona-2026-10-23.md`) dejó tres sospechas: el gancho elegido a veces no sirve para vender nada (la Fiscalía Nacional Económica en el correo a Gasco, «Renca y Talagante son comunas» en el de Aguas Andinas), el dato concreto de la investigación no llega al correo («vacantes abiertas en el norte» cuando el hecho decía Antofagasta y Atacama) y el redactor repite la misma fórmula. Esta página dice qué se midió, qué se encontró y qué quedó en el código. Las tres mejoras nacieron apagadas; **desde el 24 de octubre de 2026 están encendidas para todas las cuentas** (`apphosting.yaml`), por decisión del dueño y después de la segunda lectura que está más abajo.
 
 ## Cómo se midió
 
@@ -46,7 +46,7 @@ Comparación por pares frente al control (1 = gana la variante; la fila `base-on
 
 ## Qué quedó en el código
 
-Todo apagado por defecto, con pruebas:
+Apagado por defecto en el código, con pruebas, y encendido en producción para todas las cuentas desde el 24 de octubre:
 
 | Bandera | Qué hace | Dónde |
 | --- | --- | --- |
@@ -57,10 +57,35 @@ Todo apagado por defecto, con pruebas:
 
 **Piloto con pocas personas: `DRAFT_PILOT_USER_IDS`** (ids de usuario separados por coma, como `COWORK_HARNESS_USER_IDS` para el harness). Con la lista, las tres banderas valen solo para esas personas y todas las demás escriben exactamente como antes, digan lo que digan las banderas; vacía o ausente, cada bandera vale para todos; sola, no enciende nada. Se decide una vez por borrador (`draftFlagsForUser`, en `createDraftContext` de `native-drafts.ts`), y el contexto lleva la marca `writing.anchorSpecifics` solo cuando corresponde, de modo que el prompt del redactor y la verificación de personalización buscan los términos del mismo hecho y un contexto sin la marca es idéntico al de antes.
 
-Recomendación: encender las tres para el piloto, mirar los borradores y recién después ampliar. Para volver atrás se quita la variable (o se vacía la lista de las banderas). El piloto en marcha (a quién, cómo se mira y cómo se vuelve atrás): `docs/piloto-borradores-cowork-2026-10-23.md`. Un aviso: `DRAFT_ANCHOR_SPECIFICS_ENABLED` cambia el hecho contra el que la verificación de personalización busca términos; si un borrador escrito con ella encendida se vuelve a validar con ella apagada, puede no pasar esa verificación. Conviene cambiarla entre campañas, no a mitad de una.
+La recomendación original era encender las tres para un piloto, mirar los borradores y recién después ampliar; el dueño decidió ampliar de una vez (24 de octubre) y por eso la lista quedó sin uso: **para volver a limitar las mejoras a unas personas se agrega `DRAFT_PILOT_USER_IDS` con sus ids**, y **para volver atrás se quita la variable de la mejora** (o se vacía la lista de las banderas). El piloto en marcha (a quién, cómo se mira y cómo se vuelve atrás): `docs/piloto-borradores-cowork-2026-10-23.md`. Un aviso: `DRAFT_ANCHOR_SPECIFICS_ENABLED` cambia el hecho contra el que la verificación de personalización busca términos; si un borrador escrito con ella encendida se vuelve a validar con ella apagada, puede no pasar esa verificación. Conviene cambiarla entre campañas, no a mitad de una.
 
 `scripts/spend-guard.mjs` queda para cualquier medición futura con llaves de prueba: `SPEND_CAP_USD=1.5 SPEND_LEDGER=<archivo> node --import ./scripts/spend-guard.mjs …`.
 
+## Segunda lectura, sin gastar API: una sesión de Claude Code (24 de octubre de 2026)
+
+El dueño pidió que las pruebas las hiciera yo y que se evaluaran con sesiones de Claude Code, «para no gastar tokens evaluando». Se repitió la comparación con otro juez que no cuesta nada de API: **una sesión de Claude Code que leyó a ciegas**, sin llamar a ningún modelo, los correos que ya estaban guardados de las medidas anteriores.
+
+**Método.** 16 pares (8 empresas × 2 repeticiones): el correo que escribe producción hoy (`base-off`, sin banderas) frente al de las tres banderas (`gate-spec`). En cada par el orden quedó barajado con una semilla fija, con los hechos de la investigación a la vista; los veredictos (cuál enviaría o corregiría menos, y con qué fuerza, de 1 a 3) se guardaron **antes** de abrir la clave que dice cuál es cuál.
+
+**Resultado.** Gana el correo con las tres banderas en **11 pares**, el de hoy en **4** y hay **1 empate** (fuerza acumulada de las preferencias, 22 contra 6).
+
+| Empresa | Repetición 1 | Repetición 2 | Qué decidió |
+| --- | --- | --- | --- |
+| Enaex | banderas | banderas | nombra Antofagasta y Atacama; el de hoy solo habla de conductores |
+| Besalco | banderas | banderas | las vacantes de supervisores en movimiento de tierra frente a «búsqueda de personal» |
+| Salfacorp | banderas | banderas | la vacante de ICEM con su fecha y su lugar |
+| Ingevec | banderas | banderas | el de hoy explicaba qué es un *backlog* («conocida en el mercado como…») |
+| Gasco | banderas | banderas | el de hoy abría con la recomendación de la FNE sobre Lipigas y Abastible, sin relación con el pedido |
+| Aguas Andinas | banderas | empate | el de hoy abría con «Renca y Talagante son comunas… eso me llevó a pensar»; en la repetición 2 ninguno sirve (cortes de suministro frente a una inferencia sobre comunas) |
+| Sodexo | hoy | hoy | con las banderas el hecho que abre es el resumen («mantiene avisos de empleo para minería») y se pierde el detalle de la vacante |
+| SMU | hoy | hoy | casi un empate: el mismo gancho, el de hoy un poco más conciso |
+
+**Afirmaciones sin respaldo.** En los correos de las banderas no marqué ninguna. En los de hoy marqué tres: «eso me llevó a pensar» (un razonamiento que nadie hizo), «vuelve a poner ese tema en discusión» (una historia que ningún hecho cuenta) y «comunas donde Aguas Andinas abastece…» (se infiere que sirve a Renca y Talagante).
+
+**Lo que no prueba.** Son 16 pares y un solo juez, que además conoce el proyecto: una prueba de signos da 11 de 15 sin el empate (p ≈ 0,06 a una cola). Coincide en el sentido con la comparación por pares del juez Haiku (24 de 32 contra 15 de 32 del control) y con el conteo mecánico de ganchos no aptos (6 de 16 a 2 de 16), pero no dice cuánto mejora. **Sodexo y SMU muestran el límite**: cuando el hecho que abre es un resumen sin el dato concreto, las banderas no lo recuperan. Lo que lo arregla es que la cosecha de señales (`RESEARCH_SIGNAL_HARVEST_ENABLED`, que se enciende junto con ellas) entregue el detalle fechado: en la prueba de humo con Haiku, Sodexo recibe «10 vacantes de auxiliar de control de ventas en Coquimbo, hasta el 20 de noviembre» (`docs/senales-de-la-investigacion-al-correo.md`).
+
+**Cowork, en el mismo formato.** Las 8 conversaciones guardadas del bucle de Luna y del harness de Haiku, con las respuestas barajadas (X/Y) y la clave abierta después: **Haiku gana 5, Luna 3**. Haiku gana donde cuenta el contexto (responder a Marcela con lo que ella preguntó y lo que falta decidir, las oportunidades del día con el desglose de avisos, la búsqueda de leads con los contactos que ya hay, el costo de buscar correos antes de aprobar, y «cómo me ha ido» con tres pasos ordenados de qué mejorar); Luna gana en el saludo, que es más corto, en «mejorar este correo», donde Haiku ofrece además convertirlo en campaña sin que nadie lo pida, y en «¿a quién le escribo hoy?», donde avisa que lo que no está en ANTON.IA no se ve. Mismo sentido que la medida automática (7 de 8 contra 6 de 8), y a un costo parecido (unos US$0,007 por conversación contra US$0,006).
+
 ## Gasto
 
-La guardia estima al doble de la lista de precios de la app (para Haiku 5.5 la lista coincide con el precio publicado: US$0,10 de entrada y US$0,50 de salida por millón; para Luna es la de la app), de modo que el cálculo solo puede equivocarse hacia arriba. Todo lo de esta página (cinco brazos de la primera ronda, cuatro de la segunda, el editor Haiku, la comparación por pares y las conversaciones de Cowork de `docs/uso-como-persona-2026-10-23.md`): **estimado US$1,74, a precio de lista unos US$0,87** de los US$2 autorizados (la prueba del editor Haiku agregó US$0,14 estimados).
+La guardia estima al doble de la lista de precios de la app (para Haiku 5.5 la lista coincide con el precio publicado: US$0,10 de entrada y US$0,50 de salida por millón; para Luna es la de la app), de modo que el cálculo solo puede equivocarse hacia arriba. Todo lo de esta página (cinco brazos de la primera ronda, cuatro de la segunda, el editor Haiku, la comparación por pares y las conversaciones de Cowork de `docs/uso-como-persona-2026-10-23.md`): **estimado US$1,74, a precio de lista unos US$0,87** de los US$2 autorizados (la prueba del editor Haiku agregó US$0,14 estimados). La segunda lectura del 24 de octubre no usó API: la hizo una sesión de Claude Code; solo la prueba de humo de la cosecha de señales con Haiku gastó (US$0,013 estimados, unos US$0,007 reales) más una llamada de 18 tokens para comprobar qué nombre de modelo devuelve la API (`claude-haiku-5-5`, el mismo que busca la tabla de precios de Cowork).
