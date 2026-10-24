@@ -112,6 +112,25 @@ test('with the researcher on, the pages it picked are read before the ones the s
   assert.equal(JSON.stringify(seen[0]).includes('Ada'), false, 'the name of the person does not leave');
 });
 
+test('a page the researcher picked that is about a namesake is not read for facts, and the pages of the search engine are not held to it', async () => {
+  const pageSaying = (text: string, url: string) => parseWebEvidenceV2({ html: `<article><p>${text}</p></article>`, url, targetDomain: 'acme.example', retrievedAt: '2026-09-08T00:00:00.000Z' });
+  const extracted: string[] = [];
+  const result = await gatherReportV2Research({ projection, sellerProfile: { products: [] }, organizationId: 'org', language: 'es' }, {
+    ...withResearcher([]),
+    discover: async () => ({ sources: ['https://prensa.example/acme-nota', 'https://prensa.example/acne-nota'].map((url) => ({ url, title: 'Nota', why: 'Un hecho', date: '2026-10-17' })),
+      coverage: null, searches: 2, reads: 1, usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: 'claude-haiku-5-5', stopReason: 'final_tool' }),
+    fetchSource: async ({ url }: { url: string }) => (url.includes('acne-nota')
+      ? pageSaying('Acne abre una planta nueva y contrata 200 personas en Lima durante noviembre.', url)
+      : pageSaying('Acme presta servicios de coordinacion y soporte para equipos de operaciones de sus clientes.', url)),
+    extract: async ({ sources }: { sources: Array<{ source: { url: string } }> }) => { extracted.push(...sources.map((source) => source.source.url)); return { sources: sources.map((source) => source.source), facts: [], claimDrafts: [], results: [], failedSourceIds: [] } as any; },
+  });
+  assert.ok(extracted.includes('https://prensa.example/acme-nota'), 'the page that says the name is read');
+  assert.equal(extracted.some((url) => url.includes('acne-nota')), false, 'the page about the namesake is not');
+  assert.ok(extracted.some((url) => url.includes('source.example')), 'what the search engine ranks is still read');
+  assert.ok(result.researchWarnings.includes('claude_web_page_off_topic'));
+  assert.deepEqual(result.researchMetrics.claudeWeb, { sources: 2, searches: 2, reads: 1, offTopic: 1 });
+});
+
 test('a researcher that fails costs only the pages it would have found, and one that is off is not called', async () => {
   const order: string[] = [];
   const failing = await gatherReportV2Research({ projection, sellerProfile: { products: [] }, organizationId: 'org', language: 'es' },

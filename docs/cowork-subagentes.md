@@ -2,7 +2,7 @@
 
 **Qué falta frente a Claude Code y Claude Cowork:** ambos reparten un trabajo grande entre agentes que lo hacen a la vez y devuelven un resumen. El agente de Cowork investigaba de a una empresa por vez, con un presupuesto de 4 búsquedas para todo el turno. Con los subagentes, «investiga a Enaex, Besalco y Gasco» las reparte en tres **Investigadoras** que trabajan en paralelo, cada una con su propia web (3 búsquedas y 2 lecturas de página) y su propia conversación, y vuelven con un informe corto cada una. El coordinador solo ve esos tres párrafos, no las páginas que leyeron.
 
-**Apagado por defecto.** Necesita el agente nuevo (`COWORK_RUNTIME=harness`), la web (`COWORK_WEB_ENABLED=true`) y `COWORK_SUBAGENTS_ENABLED=true`, y la migración `20261023130000_cowork_delegate_model_calls.sql` (un rol nuevo en el libro de consumo). La migración está escrita y tiene su prueba pgTAP (corre en el CI), pero **no se ha aplicado a producción**: esa decisión es de quien despliega.
+**Encendido en producción desde el 24 de octubre de 2026** (`COWORK_SUBAGENTS_ENABLED="true"`, con el harness y la web de Cowork); en el código sigue apagado por defecto. Necesita el agente nuevo (`COWORK_RUNTIME=harness`), la web (`COWORK_WEB_ENABLED=true`) y `COWORK_SUBAGENTS_ENABLED=true`, y la migración `20261023130000_cowork_delegate_model_calls.sql` (un rol nuevo en el libro de consumo), **ya aplicada a producción** el 23 de octubre (la restricción de roles nombra `delegate`, comprobado el 24 antes de encender). Con Haiku 5.5 y las herramientas web básicas, «investiga a Besalco, Ingevec y Salfacorp y dime a cuál escribirle primero» corrió con tres Investigadoras a la vez: 6 llamadas, 8 búsquedas, 43 segundos y US$0,11, y entregó un orden con la evidencia de cada una (detalle en `docs/funciones-apagadas-encendidas-2026-10-24.md`).
 
 ## Cómo funciona
 
@@ -35,11 +35,13 @@ La respuesta con Investigadoras trae, por empresa, señales con fecha y enlace (
 
 Es una muestra de una petición, no un estudio: sirve para ver que el camino funciona de punta a punta y para estimar el costo, no para afirmar cuánto mejora la respuesta en general.
 
-## Para encenderlo
+## Para encenderlo (ya hecho en producción; sirve para otro entorno)
 
 1. Aplicar la migración (una sola, hacia adelante) y revisar esquema y registros (`cowork_model_calls_role_check` debe nombrar `delegate`).
 2. En el entorno de la aplicación: `COWORK_SUBAGENTS_ENABLED=true` (con `COWORK_RUNTIME=harness` y `COWORK_WEB_ENABLED=true`). Probarlo primero con `COWORK_HARNESS_USER_IDS` para una persona.
-3. Pedir «investiga a A, B y C» y mirar la línea de la Investigadora, los enlaces y el consumo del día.
+3. Pedir «investiga a A, B y C» y mirar la línea de la Investigadora, los enlaces y el consumo del día (las consultas están en `docs/funciones-apagadas-encendidas-2026-10-24.md`).
+
+Para apagarlo: quitar `COWORK_SUBAGENTS_ENABLED` y desplegar; el coordinador vuelve a investigar de a una empresa con su presupuesto de 4 búsquedas.
 
 ## Pruebas
 

@@ -15,15 +15,15 @@ Variables de `apphosting.yaml`, todas de ejecución (`RUNTIME`):
 | `COWORK_RUNTIME` | `harness` | El coordinador de Cowork es un Claude con herramientas |
 | `COWORK_HARNESS_MODEL` | `claude-haiku-5-5` | El modelo del harness |
 | `COWORK_SCHEDULES_ENABLED` | `true` | Tareas programadas de Cowork: cada persona decide si crea una (hasta 5 activas); sin crear ninguna, no pasa nada |
+| `COWORK_WEB_ENABLED`, `COWORK_WEB_BASIC` | `true` | **Segunda tanda (24 de octubre, tarde):** Cowork busca en la web y lee páginas (Anthropic corre ambas), con herramientas básicas y un tope por turno; US$0,01 por búsqueda, ya en la tabla de precios |
+| `COWORK_SUBAGENTS_ENABLED` | `true` | Las Investigadoras: investigan varias empresas a la vez (rol `delegate` del libro de consumo) |
+| `RESEARCH_CLAUDE_WEB_ENABLED` | `true` | Un Claude (Haiku) con la web elige las páginas que la investigación de leads lee; una página que no nombra a la empresa no se usa. Unos US$0,044 por investigación |
+| `COWORK_DOCUMENT_VISION` | `true` | Un Claude (Haiku) mira las páginas de un documento largo antes de entregarlo; si el servidor no puede dibujarlas, no mira |
+| `COWORK_AUTONOMY_ENABLED` | `true` | El modo «Autónomo» aparece en el compositor (cada conversación parte «Con aprobaciones»): guardar contactos, investigar, pedir borradores, buscar un correo (1 crédito), crear campañas en pausa y una búsqueda de prospectos, con tope de 3 pasos por hilo; un turno que leyó la web no aprueba nada solo |
 
 Ningún modelo caro: Opus, Sonnet, Fable, Sol, Terra y Astra están bloqueados en el código (`src/ai/blocked-models.ts`), y `src/lib/server/production-configuration.test.ts` comprueba que `apphosting.yaml` no nombre ninguno y que esto sea lo que dice producción.
 
-**Sigue apagado, y por qué** (cada uno es una decisión del dueño):
-
-- **La web de Claude en Cowork** (`COWORK_WEB_ENABLED`) **y los subagentes** (`COWORK_SUBAGENTS_ENABLED`, que la necesitan): la búsqueda se cobra por uso y la tabla de precios de Cowork todavía no tiene el precio de la búsqueda (`webSearchUsdPerThousand`), así que su costo quedaría sin registrar; y su calidad con Haiku no se puede evaluar sin gastar API.
-- **El investigador con la web de Claude** (`RESEARCH_CLAUDE_WEB_ENABLED`, `docs/investigacion-web-claude.md`): unos US$0,10 por investigación (con las ~60 de los últimos 30 días, del orden de US$6 al mes). Se midió contra «solo el sitio», no contra producción, que ya busca con Serper: falta compararlo con la llave de Serper para saber cuánto suma.
-- **La lectura de documentos con visión** (`COWORK_DOCUMENT_VISION`): necesita `pdftoppm` o `sharp` en el servidor, y no se comprobó que App Hosting los tenga.
-- **La autonomía** (`COWORK_AUTONOMY_ENABLED`): actuar sin que nadie apruebe.
+**Segunda tanda (24 de octubre, tarde): las cinco funciones que habían quedado apagadas se probaron y se encendieron**, por pedido del dueño («todo lo que mejore el funcionamiento que se quede»). La web de Claude en Cowork y las Investigadoras no estaban encendidas porque su costo no tenía precio en la tabla del libro y su calidad con Haiku no se había leído; el investigador de leads, porque solo se había medido contra «solo el sitio»; la visión de documentos, porque no se sabía si el servidor podía dibujar las páginas; el modo autónomo, porque actúa sin que nadie apruebe. Qué se probó, qué se encontró y qué se cambió para dejarlas seguras está en **`docs/funciones-apagadas-encendidas-2026-10-24.md`**, con las consultas para vigilarlas y la forma de apagar cada una. Lo que sigue sin medirse: el investigador contra Serper (no hay llave de Serper de prueba), el modo autónomo de punta a punta contra una base, y si la organización de Anthropic de producción tiene encendida la búsqueda web (si no la tiene, el turno cae al bucle y la web se pausa 10 minutos, ver esa página).
 
 ## Evidencia para encenderlo para todos
 
@@ -37,7 +37,7 @@ Ningún modelo caro: Opus, Sonnet, Fable, Sol, Terra y Astra están bloqueados e
 **Riesgos que se conocen:**
 
 - La función de base nueva (`cowork_reserve_model_call`) y el harness **no han atendido tráfico real**: el primer turno es su primera prueba. El harness reserva y registra con las mismas llamadas del libro de consumo que el bucle de Luna (rol `coordinator`, tope de 5 por turno), y esa parte del SQL no cambió; lo que cambió son las líneas del rol `delegate`.
-- Un error `400` de Anthropic no cae al bucle de Luna (sí lo hacen 429, 5xx, saldo, llave y rechazos); la prueba real con la API pasó los 8 casos con la misma construcción de la petición.
+- Un error `400` de Anthropic no cae al bucle de Luna (sí lo hacen 429, 5xx, saldo, llave y rechazos), **salvo que la petición llevara la web**: con la web encendida, un 400 hace que el turno siga con el bucle y que esa instancia no ofrezca la web durante 10 minutos. La prueba real con la API pasó los 8 casos con la misma construcción de la petición.
 - Las tareas programadas y la cosecha tampoco han corrido en producción. Las dos fallan hacia lo que había: la cosecha, sin señales; las tareas, sin disparar.
 
 ## Historia: el piloto del 23 de octubre
@@ -54,7 +54,7 @@ El 23 de octubre se encendieron siete variables **solo** para la cuenta del due�
 | Migración `20261023130000_cowork_delegate_model_calls` | aplicada, registrada como `20261023211042` | La función `cowork_reserve_model_call` de antes tenía exactamente el cuerpo del repositorio (md5 `c2accc77…`, 3 606 caracteres) y ahora tiene el nuevo (md5 `ffc3166c…`, 4 245); la restricción de roles tiene los 8 roles y está validada; `cowork_record_model_usage` reconoce `delegate`; permisos conservados; alertas de seguridad idénticas; registro sin errores |
 | Despliegue del 24 de octubre (00:41 UTC) | hecho | `main` en `e19bc5ce`, con las siete variables del piloto; el backend `studio` actualizado a las 00:41:36, `/login` responde 200 y sin errores en los registros de Postgres |
 
-Las dos migraciones son hacia adelante y no cambian lo que el libro hacía para los roles de antes. La tabla de tareas está vacía hasta que alguien cree una, y no hay llamadas del rol `delegate` (los subagentes siguen apagados).
+Las dos migraciones son hacia adelante y no cambian lo que el libro hacía para los roles de antes. La tabla de tareas está vacía hasta que alguien cree una, y no hubo llamadas del rol `delegate` hasta que se encendieron las Investigadoras, la tarde del 24 de octubre.
 
 Otras dos migraciones del repositorio, `create_enriched_opportunities` y `fix_enriched_opportunities`, no figuran en el registro de producción; no hacen falta y no se tocaron.
 
@@ -141,12 +141,13 @@ La referencia de los reintentos es la de antes del 24 de octubre en la misma con
 De más fino a más grueso. En todos los casos el siguiente borrador y el siguiente turno ya corren como antes, y no hace falta tocar la base:
 
 1. **Una sola mejora:** quitar su variable de `apphosting.yaml` (`DRAFT_ANCHOR_SPECIFICS_ENABLED`, `DRAFT_HOOK_FILTER_ENABLED`, `DRAFT_SIGNAL_EVIDENCE_ENABLED`, `RESEARCH_SIGNAL_HARVEST_ENABLED`, `COWORK_SCHEDULES_ENABLED`) y desplegar. Un aviso: un borrador escrito con `DRAFT_ANCHOR_SPECIFICS_ENABLED` encendida y vuelto a validar con ella apagada puede no pasar la verificación de personalización; conviene cambiarla entre campañas. Apagar las tareas programadas no borra las que alguien creó: quedan en su tabla, sin disparar.
-2. **El harness de Cowork:** quitar `COWORK_RUNTIME` y `COWORK_HARNESS_MODEL` y desplegar. Los turnos vuelven al bucle de Luna.
-3. **Todo:** quitar las siete variables y desplegar con el mismo comando (la prueba `production-configuration.test.ts` hay que actualizarla en el mismo cambio: describe lo que dice producción). Otra salida, sin cambiar el repositorio, es volver al despliegue anterior desde la consola de App Hosting (backend `studio`, «Rollouts»); después, comprobar con la consulta 1 que los coordinadores ya no corren en Haiku.
+2. **El harness de Cowork:** quitar `COWORK_RUNTIME` y `COWORK_HARNESS_MODEL` y desplegar. Los turnos vuelven al bucle de Luna (y sin harness no hay web ni Investigadoras).
+   **Las funciones de la segunda tanda** se apagan una por una quitando su variable (`COWORK_WEB_ENABLED`, `COWORK_SUBAGENTS_ENABLED`, `RESEARCH_CLAUDE_WEB_ENABLED`, `COWORK_DOCUMENT_VISION`, `COWORK_AUTONOMY_ENABLED`); la tabla está en `docs/funciones-apagadas-encendidas-2026-10-24.md`.
+3. **Todo:** quitar las variables de las dos tandas y desplegar con el mismo comando (la prueba `production-configuration.test.ts` hay que actualizarla en el mismo cambio: describe lo que dice producción). Otra salida, sin cambiar el repositorio, es volver al despliegue anterior desde la consola de App Hosting (backend `studio`, «Rollouts»); después, comprobar con la consulta 1 que los coordinadores ya no corren en Haiku.
 4. **Las migraciones no se deshacen:** son hacia adelante, no cambian lo que las funciones hacían para los roles de antes, y la tabla de tareas solo tiene lo que la gente cree. Dejarlas aplicadas es lo seguro.
 
 ## Limitar a unas personas
 
-Las dos listas del piloto siguen funcionando: con **`DRAFT_PILOT_USER_IDS`** las tres banderas de borradores valen solo para esas personas, y con **`COWORK_HARNESS_USER_IDS`** el harness corre solo para ellas y el resto sigue en el bucle de Luna. Se escriben ids de usuario (no correos) separados por coma, y `production-configuration.test.ts` exige que, si están las dos, sean las mismas personas. La cosecha de señales y las tareas programadas no tienen lista: se apagan con su variable.
+Las dos listas del piloto siguen funcionando: con **`DRAFT_PILOT_USER_IDS`** las tres banderas de borradores valen solo para esas personas, y con **`COWORK_HARNESS_USER_IDS`** el harness corre solo para ellas y el resto sigue en el bucle de Luna. Se escriben ids de usuario (no correos) separados por coma, y `production-configuration.test.ts` exige que, si están las dos, sean las mismas personas. La web de Cowork y las Investigadoras son parte del harness, así que `COWORK_HARNESS_USER_IDS` también las limita a esas personas. La cosecha de señales, las tareas programadas, el investigador de leads, la visión de documentos y el modo autónomo no tienen lista: se apagan con su variable.
 
 El id de una persona sale de `select id from auth.users where lower(email) = lower('<correo>')`.

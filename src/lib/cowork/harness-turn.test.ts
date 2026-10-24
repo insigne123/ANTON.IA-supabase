@@ -7,6 +7,7 @@ import { coworkHarnessEnabled, coworkHarnessSettings, coworkSubagentSettings, co
 import { COWORK_HARNESS_PROTOCOL, coworkHarnessFallback, coworkHarnessTelemetry, coworkReadShape, coworkToolName, runCoworkHarnessTurn, runCoworkTurn } from './harness-turn';
 import type { CoworkLoopInput, CoworkObservation } from './agent-loop';
 import { coworkLiveDraft } from './partial-json';
+import { coworkWebPaused, resumeCoworkWeb } from './web-breaker';
 
 const UUID = '00000000-0000-4000-8000-000000000021';
 const RUN = '00000000-0000-4000-8000-000000000010';
@@ -261,12 +262,12 @@ test('the settings are off unless COWORK_RUNTIME=harness, default to a Claude, a
 test('the web is off unless COWORK_WEB_ENABLED=true, has a small budget by default and looks from Chile', () => {
   assert.equal(coworkWebSettings({}), null);
   assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'yes' }), null);
-  assert.deepEqual(coworkWebSettings({ COWORK_WEB_ENABLED: 'true' }), { searches: 4, fetches: 3, maxPageTokens: 20_000, country: 'CL', timezone: 'America/Santiago' });
+  assert.deepEqual(coworkWebSettings({ COWORK_WEB_ENABLED: 'true' }), { searches: 4, fetches: 3, maxPageTokens: 20_000, basic: true, country: 'CL', timezone: 'America/Santiago' });
   assert.deepEqual(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_MAX_SEARCHES: '99', COWORK_WEB_MAX_FETCHES: '0', COWORK_WEB_COUNTRY: 'pe', COWORK_WEB_BLOCKED_DOMAINS: 'Spam.example, no es un dominio,otro.cl' }),
-    { searches: 10, fetches: 0, maxPageTokens: 20_000, blockedDomains: ['spam.example', 'otro.cl'], country: 'PE' });
+    { searches: 10, fetches: 0, maxPageTokens: 20_000, basic: true, blockedDomains: ['spam.example', 'otro.cl'], country: 'PE' });
   assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_MAX_SEARCHES: '0', COWORK_WEB_MAX_FETCHES: '0' }), null, 'a web with nothing to spend is no web');
-  assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_BASIC: 'true' })?.basic, true, 'COWORK_WEB_BASIC=true asks for the tools without dynamic filtering');
-  assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_BASIC: 'yes' })?.basic, undefined);
+  assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_BASIC: 'true' })?.basic, true, 'the tools without dynamic filtering are the default: with Haiku the dynamic ones fail');
+  assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_BASIC: 'false' })?.basic, undefined, 'COWORK_WEB_BASIC=false asks for the dynamic ones');
   assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true' })?.web, coworkWebSettings({ COWORK_WEB_ENABLED: 'true' }));
 });
 
@@ -365,6 +366,36 @@ test('with the web, the agent is offered the API\'s search, what it found is an 
   assert.doesNotMatch(plain.requests[0].system, /LA WEB/);
   assert.equal(coworkHarnessTelemetry({ ...reply('x'), usage: { ...usageOf(), webSearches: 2 } }, 5).usage.web_search_requests, 2);
   assert.equal('web_search_requests' in coworkHarnessTelemetry(reply('x'), 5).usage, false);
+});
+
+test('what a turn proposes after it read the open web says so, so the autonomous mode does not approve it by itself; without the web it does not', async () => {
+  const enrich = (text: string) => call('proponer_contactos', { action: 'lead.enrich', leadId: UUID, explicacion: text });
+  const search = call('proponer_busqueda', { action: 'prospecting.propose_search', explicacion: 'Busco 25 personas de logística en Santiago.',
+    searchCriteria: { target: 'people', titles: ['Gerente de Operaciones'], locations: ['Santiago, Chile'], industries: ['Logística'], limit: 25 } });
+  // The web first, then the proposal: the effect and the search carry it.
+  const proposals: Array<Record<string, unknown>> = [];
+  const afterWeb = new ScriptedModel([
+    reply([...sourceBlocks, call('leads_search', { consulta: 'José' })], undefined, { ...usageOf(), webSearches: 1 }),
+    reply([enrich('Busco el correo de José C. (1 crédito). Revisa y aprueba.')]),
+  ]);
+  await runCoworkHarnessTurn(base(afterWeb, { proposeEffect: async proposal => { proposals.push(proposal as never); } }, { web }).input);
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].fromWeb, true);
+  const searches: Array<{ fromWeb?: boolean } | undefined> = [];
+  const searchAfterWeb = new ScriptedModel([reply([...sourceBlocks, call('leads_search', { consulta: 'logística' })], undefined, { ...usageOf(), webSearches: 1 }), reply([search])]);
+  await runCoworkHarnessTurn(base(searchAfterWeb, { proposeSearch: async (_criteria, context) => { searches.push(context); }, message: 'Busca gerentes de operaciones de logística en Santiago' }, { web }).input);
+  assert.deepEqual(searches, [{ fromWeb: true }]);
+  // The same turn without any web read, with the web on or off: nothing is added.
+  for (const config of [{ web }, {}]) {
+    const noRead: Array<Record<string, unknown>> = [];
+    const plain = new ScriptedModel([reply([call('leads_search', { consulta: 'José' })]), reply([enrich('Busco el correo de José C. (1 crédito). Revisa y aprueba.')])]);
+    await runCoworkHarnessTurn(base(plain, { proposeEffect: async proposal => { noRead.push(proposal as never); } }, config).input);
+    assert.equal(noRead.length, 1);
+    assert.equal('fromWeb' in noRead[0], false);
+  }
+  const plainSearch: unknown[] = [];
+  await runCoworkHarnessTurn(base(new ScriptedModel([reply([search])]), { proposeSearch: async (_criteria, context) => { plainSearch.push(context); }, message: 'Busca gerentes de operaciones de logística en Santiago' }, { web }).input);
+  assert.deepEqual(plainSearch, [undefined]);
 });
 
 test('an answer with a link to a site nobody looked at goes back before the judge, and a link to a site that was seen does not', async () => {
@@ -570,6 +601,39 @@ test('a turn Anthropic could not finish goes on with the coordinator loop; what 
   const fine = new ScriptedModel([reply([answer('Todo bien.')])]);
   assert.equal((await runCoworkTurn(base(fine).input, loop)).reply, 'Todo bien.');
   assert.equal(seen.length, 2);
+});
+
+test('when Anthropic refuses the web tools the turn goes on with the loop, and the turns after it run on the harness without the web for a while', async () => {
+  resumeCoworkWeb();
+  const web = { searches: 4, fetches: 3, maxPageTokens: 20_000, basic: true };
+  const loop = (async () => ({ reply: 'Respondió el bucle de siempre.', document: null })) as never;
+  const malformed = 'CLAUDE_HTTP_400:invalid_request_error: web_search is not enabled for this organization';
+  // Without the web in the request a 400 is the request's own fault and stays an error; with it, the tools are what Anthropic may be refusing.
+  assert.equal(coworkHarnessFallback(new Error(malformed)), false);
+  assert.equal(coworkHarnessFallback(new Error(malformed), undefined, { web: true }), true);
+  assert.equal(coworkHarnessFallback(new Error('COWORK_DAILY_MODEL_BUDGET: No se pudo reservar presupuesto para continuar este trabajo.'), undefined, { web: true }), false);
+
+  const refused = new ScriptedModel([async () => { throw new Error(malformed); }]);
+  const reasons: string[] = [];
+  assert.equal((await runCoworkTurn(base(refused, {}, { web, onFallback: reason => { reasons.push(reason); } }).input, loop)).reply, 'Respondió el bucle de siempre.');
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /CLAUDE_HTTP_400/);
+  assert.equal(coworkWebPaused(), true);
+
+  // The next turn is on the harness again, with no web and no Investigadoras in its request.
+  const next = new ScriptedModel([reply([answer('Respondió el arnés, sin web.')])]);
+  assert.equal((await runCoworkTurn(base(next, {}, { web }).input, loop)).reply, 'Respondió el arnés, sin web.');
+  assert.equal(next.requests[0].serverTools, undefined);
+  assert.equal(next.requests[0].tools.some(tool => tool.name === 'delegar'), false);
+
+  // After the pause the web is offered again; a 400 in a turn that never had the web is an error, not a reason to pause it.
+  resumeCoworkWeb();
+  const back = new ScriptedModel([reply([answer('Con web otra vez.')])]);
+  assert.equal((await runCoworkTurn(base(back, {}, { web }).input, loop)).reply, 'Con web otra vez.');
+  assert.deepEqual(back.requests[0].serverTools?.map(tool => tool.name), ['web_search', 'web_fetch']);
+  const bad = new ScriptedModel([async () => { throw new Error('CLAUDE_HTTP_400:messages: text content blocks must be non-empty'); }]);
+  await assert.rejects(runCoworkTurn(base(bad).input, loop), /CLAUDE_HTTP_400/);
+  assert.equal(coworkWebPaused(), false);
 });
 
 test('the harness can be tried with a few people: COWORK_HARNESS_USER_IDS limits it, and everyone else keeps the coordinator loop', () => {

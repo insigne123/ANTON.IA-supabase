@@ -79,8 +79,10 @@ export function coworkWebSettings(env: Record<string, string | undefined> = type
   const country = (env.COWORK_WEB_COUNTRY ?? 'CL').trim().toUpperCase();
   return {
     searches, fetches, maxPageTokens: 20_000,
-    // COWORK_WEB_BASIC=true: the tools without dynamic filtering (see WebSettings.basic).
-    ...(env.COWORK_WEB_BASIC?.trim() === 'true' ? { basic: true } : {}),
+    // The tools without dynamic filtering (see WebSettings.basic), unless COWORK_WEB_BASIC=false. With Haiku, the only Claude the app runs, the dynamic
+    // ones fail: the model writes the code that filters the results, the API answers «invalid_tool_input» to every search and the turn ends «no pude
+    // consultar la web» (24 Oct, Enaex, Haiku 5.5: four searches, four errors); the basic ones answered the same question with two searches.
+    ...(env.COWORK_WEB_BASIC?.trim() === 'false' ? {} : { basic: true }),
     ...(blocked.length ? { blockedDomains: blocked } : {}),
     ...(/^[A-Z]{2}$/.test(country) ? { country, ...(country === 'CL' ? { timezone: 'America/Santiago' } : {}) } : {}),
   };

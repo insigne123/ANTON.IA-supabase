@@ -479,7 +479,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         if (proposed.error || proposed.data !== true) throw new Error('Could not prepare note review');
         waitingApproval = true;
       },
-      proposeSearch: async criteria => {
+      proposeSearch: async (criteria, context) => {
         if (clarificationOnly) throw new Error('Una aclaración no admite nuevas búsquedas externas.');
         if (process.env.COWORK_EXTERNAL_SEARCH_ENABLED !== 'true') throw new Error('External search disabled');
         if (stats.searches >= budgets.maxSearches) throw new Error('Thread search budget exhausted');
@@ -490,7 +490,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // Persisted run.mode is user input accepted by admission, never model output.
         // Database primary key permits at most one search proposal per run.
         // The flag is re-read here so revoking autonomy mid-flight stops admission.
-        const autonomous = executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true';
+        // A turn that read the open web proposes nothing that approves itself: the person decides, as in the other mode.
+        const autonomous = executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true' && !context?.fromWeb;
         // The search of an approved task's plan runs by itself while the plan has a search left (Plan 13, 4c).
         const planned = !autonomous && activeTask !== null && coworkTaskApproves(activeTask, null, { searches: 1, credits: 0 });
         if (autonomous || planned) {
@@ -708,7 +709,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // Sends, campaign changes, code execution, profile, saved-search and
         // campaign-stop effects never self-approve: they always wait for a
         // human decision. Creating a paused draft is harmless and may proceed.
-        if (coworkEffectCanAutoApprove(run.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true', proposal.kind)) {
+        if (coworkEffectCanAutoApprove(run.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true', proposal.kind, { fromWeb: proposal.fromWeb })) {
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         } else if (activeTask && coworkTaskApproves(activeTask, proposal.kind, { searches: 0, credits: taskCredits })) {

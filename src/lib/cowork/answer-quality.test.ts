@@ -10,6 +10,13 @@ test('internal codes copied from tool results become plain Spanish', () => {
   assert.equal(polishCoworkText('Enriquece a Jose (c517a22f-d087-45ae-b450-045f2abc60e1) ahora.'), 'Enriquece a Jose ahora.');
 });
 
+test('the citation tags a model leaves after searching the web are removed and the links stay', () => {
+  const links = 'Fuentes: [Meganoticias](https://www.meganoticias.cl/a) y [Pudahuel](https://www.pudahuel.cl/b).';
+  assert.equal(polishCoworkText(`${links}</cite>`), links);
+  assert.equal(polishCoworkText('\u003ccite index="1-2">Tiene 70 vacantes\u003c/cite> abiertas.'), 'Tiene 70 vacantes abiertas.');
+  assert.equal(polishCoworkAnswer({ reply: `Resumen.</cite>\n\n${links}`, document: null }).reply, `Resumen.\n\n${links}`);
+});
+
 test('fenced code blocks are left untouched', () => {
   const code = '```python\nperiod = "last_30_days"\n```';
   assert.equal(polishCoworkText(`Resultado:\n${code}`), `Resultado:\n${code}`);

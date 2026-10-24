@@ -51,7 +51,7 @@ env:
     value: "true"
     availability: [RUNTIME]
   # Fase 0 plan Cowork: búsqueda externa, investigación, borradores y versiones.
-  # Autonomía sigue desactivada (COWORK_AUTONOMY_ENABLED ausente = false).
+  # La autonomía (modo «Autónomo» del compositor) se enciende más abajo, con las demás funciones del 24 oct 2026.
   - variable: COWORK_EXTERNAL_SEARCH_ENABLED
     value: "true"
     availability: [RUNTIME]
@@ -65,8 +65,8 @@ env:
     value: "true"
     availability: [RUNTIME]
   # Fase 4: coordinación (planes/cola/especialistas) y presupuestos agregados.
-  # La autonomía general sigue desactivada (COWORK_AUTONOMY_ENABLED ausente).
-  # Todos los efectos nuevos requieren revisión humana explícita.
+  # Todos los efectos nuevos requieren revisión humana explícita; la lista de los que el modo autónomo aprueba solo está en
+  # src/lib/cowork/execution-policy.ts (AUTOMATIC_EFFECTS) y los envíos, las activaciones y las notas nunca están en ella.
   - variable: COWORK_OPERATION_LEASES_ENABLED
     value: "true"
     availability: [RUNTIME]
@@ -174,7 +174,8 @@ env:
     availability: [RUNTIME]
   # Mejoras encendidas para todas las cuentas desde el 24 oct 2026, por decisión del dueño (la evidencia está en docs/borradores-ganchos-y-reglas.md,
   # docs/senales-de-la-investigacion-al-correo.md y docs/piloto-borradores-cowork-2026-10-23.md). Ninguna usa un modelo caro: solo Haiku 5.5 y Luna
-  # (Opus y Sonnet están bloqueados en src/ai/blocked-models.ts). Siguen apagados la web de Claude, los subagentes y la lectura de documentos con visión.
+  # (Opus y Sonnet están bloqueados en src/ai/blocked-models.ts). El mismo día se encendieron la web de Claude, los subagentes, la lectura de documentos
+  # con visión y el modo autónomo, tras probarlos (docs/funciones-apagadas-encendidas-2026-10-24.md).
   # Borradores: las señales de la investigación llegan al correo, los ganchos no aptos no llegan al redactor y el hecho conserva su dato concreto.
   - variable: DRAFT_SIGNAL_EVIDENCE_ENABLED
     value: "true"
@@ -200,13 +201,44 @@ env:
   - variable: COWORK_SCHEDULES_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # La web de Claude (Anthropic corre la búsqueda y la lectura de páginas), con Haiku 5.5 y las herramientas básicas: las de filtrado dinámico fallan con
+  # Haiku («invalid_tool_input» en cada búsqueda). Una búsqueda cuesta US$0,01 y cada turno tiene su tope (4 búsquedas y 3 lecturas; las Investigadoras,
+  # 3 y 2 cada una, hasta 3 por turno); el precio de la búsqueda va en COWORK_MODEL_PRICING_JSON. Si Anthropic rechaza las herramientas web, el turno
+  # sigue con el bucle de siempre y la web se pausa 10 minutos (src/lib/cowork/web-breaker.ts).
+  - variable: COWORK_WEB_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_WEB_BASIC
+    value: "true"
+    availability: [RUNTIME]
+  # Las Investigadoras: el coordinador reparte la investigación de varias empresas y ellas buscan a la vez (el rol «delegate» del libro de consumo,
+  # migración 20261023130000 ya aplicada en producción).
+  - variable: COWORK_SUBAGENTS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  # Un Claude (Haiku) mira las páginas de un documento antes de entregarlo; sin rasterizador (pdftoppm o sharp) o sin tipografías en el servidor
+  # no mira y el documento sigue como antes: la revisión nunca lo bloquea.
+  - variable: COWORK_DOCUMENT_VISION
+    value: "true"
+    availability: [RUNTIME]
+  # El modo «Autónomo» aparece en el compositor (cada conversación parte «Con aprobaciones»): aprueba por la persona buscar prospectos (1 por hilo),
+  # guardar contactos, investigar, pedir borradores, buscar un correo (1 crédito) y crear campañas en pausa, con tope de 3 pasos por hilo. Un turno que
+  # leyó la web abierta (una búsqueda, una página o una Investigadora) no aprueba nada solo: la persona decide, como «Con aprobaciones».
+  - variable: COWORK_AUTONOMY_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  # Investigación de leads: un Claude (Haiku) con búsqueda web elige las páginas que vale la pena leer (noticias, avisos de empleo con fecha, licitaciones);
+  # la investigación las lee ella misma, y una página que no nombra a la empresa (un homónimo) no se usa. Unos US$0,05 por investigación.
+  - variable: RESEARCH_CLAUDE_WEB_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Para limitar los borradores o el harness a unas pocas personas se agregan DRAFT_PILOT_USER_IDS y COWORK_HARNESS_USER_IDS (ids de usuario separados por
   # coma; la prueba exige que sean las mismas). Para volver atrás se quita la variable de la mejora y se despliega: el siguiente borrador y el siguiente
   # turno ya corren como antes.
   # OpenAI Standard, short-context (<272K input), USD per million tokens.
   # gpt-6.1-sol checked against https://developers.openai.com/api/docs/pricing on 2026-10-07.
   - variable: COWORK_MODEL_PRICING_JSON
-    value: '{"gpt-6-luna":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":0.1,"outputUsdPerMillion":0.5,"cachedInputUsdPerMillion":0.01},"gpt-6-sol":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.2},"gpt-6.1-sol":{"version":"openai-standard-2026-10-07-short","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.1},"claude-haiku-5-5":{"version":"anthropic-standard-2026-10-06","inputUsdPerMillion":0.1,"outputUsdPerMillion":0.5,"cachedInputUsdPerMillion":0.01}}'
+    value: '{"gpt-6-luna":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":0.1,"outputUsdPerMillion":0.5,"cachedInputUsdPerMillion":0.01},"gpt-6-sol":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.2},"gpt-6.1-sol":{"version":"openai-standard-2026-10-07-short","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.1},"claude-haiku-5-5":{"version":"anthropic-standard-2026-10-24-web","inputUsdPerMillion":0.1,"outputUsdPerMillion":0.5,"cachedInputUsdPerMillion":0.01,"webSearchUsdPerThousand":10}}'
     availability: [RUNTIME]
   # Fase 3: ejecutor remoto de código. Secreto COWORK_EXECUTOR_SECRET en
   # Secret Manager (versión 3 = bearer exacto de la VM). No guardar valores

@@ -16,6 +16,7 @@ import { searchSerper } from './serper-search';
 import { publicCompanyCoverageWarnings, type PublicCompanyReference } from '@/lib/public-company-research-contracts';
 import { mergePublicCompanyProjection } from '@/lib/public-company-research-adapter';
 import { claudeWebSourcesSettings, findResearchSourcesWithClaude, type ClaudeWebSourcesSettings } from './claude-web-sources';
+import { pageMentionsCompany } from './company-mention';
 import { harvestResearchSignals, signalHarvestSettings, type SignalHarvestSettings } from './research-signal-harvest';
 
 export const REPORT_V2_RESEARCH_VERSION = `report-v2/research/1:${RESOLVE_ENTITY_V2_PROMPT_VERSION}:${PLAN_REPORT_V2_PROMPT_VERSION}:${EXTRACT_REPORT_V2_CLAIMS_PROMPT_VERSION}`;
@@ -93,7 +94,7 @@ async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Prom
 
 type ResearchRunMetrics = {
   queries: number; pages: number; elapsedMs: number;
-  claudeWeb?: { sources: number; searches: number; reads: number };
+  claudeWeb?: { sources: number; searches: number; reads: number; /** Pages it picked that did not name the company (a namesake): read, not used. Only when there were some. */ offTopic?: number };
   signalHarvest?: { candidates: number; picked: number; accepted: number; inputTokens: number; outputTokens: number };
 };
 
@@ -148,6 +149,10 @@ export async function gatherReportV2Research(input: {
   }, claudeWeb).catch(() => { warnings.push('claude_web_unavailable'); return null; }) : null;
   const fetched = new Map<string, ParsedWebEvidenceV2>();
   const attempted = new Set<string>();
+  // The pages the researcher picked, and how many of them were about someone else: a search by name also finds a namesake (SalfaCorp and Salfa), and a
+  // fact about the namesake would be read as one about this company. A page it picked must say the company's name or address to be used.
+  const picked = new Set<string>();
+  let offTopic = 0;
   const fetchOne = async (url: string) => {
     if (attempted.size >= depthBudget.maxPages || fetched.size >= depthBudget.maxPages || signal.aborted) return;
     let key: string;
@@ -156,6 +161,7 @@ export async function gatherReportV2Research(input: {
     attempted.add(key);
     try {
       const source = await (dependencies.fetchSource || fetchReportV2Source)({ url, domain, signal });
+      if (picked.has(key) && !pageMentionsCompany(source, entity.companyName, domain)) { offTopic += 1; warnings.push('claude_web_page_off_topic'); return; }
       fetched.set(source.source.id, source);
     } catch { warnings.push('source_unavailable'); }
   };
@@ -205,6 +211,7 @@ export async function gatherReportV2Research(input: {
   // each query in order, which the loop below still fills in after them.
   const found = discovery ? await discovery : null;
   const candidates: string[] = (found?.sources ?? []).map((source) => source.url).filter((url) => !/\.(?:pdf|docx?|xlsx?)(?:\?|$)/i.test(url));
+  for (const url of candidates) { try { picked.add(canonicalResearchUrl(url)); } catch { /* A malformed address is not fetched either. */ } }
   for (let rank = 0; rank < 4; rank += 1) {
     for (const search of searches) {
       const url = search?.items[rank]?.link;
@@ -221,7 +228,7 @@ export async function gatherReportV2Research(input: {
     offset += batchSize;
   }
   const sources = [...fetched.values()].slice(0, depthBudget.maxPages);
-  const claudeMetrics: Pick<ResearchRunMetrics, 'claudeWeb'> = found ? { claudeWeb: { sources: found.sources.length, searches: found.searches, reads: found.reads } } : {};
+  const claudeMetrics: Pick<ResearchRunMetrics, 'claudeWeb'> = found ? { claudeWeb: { sources: found.sources.length, searches: found.searches, reads: found.reads, ...(offTopic ? { offTopic } : {}) } } : {};
   if (!sources.length) return { ...input.projection, entity, researchWarnings: [...warnings, 'web_context_unavailable'], researchMetrics: { queries: searches.length, pages: 0, elapsedMs: Date.now() - started, ...claudeMetrics } };
   // Three sources per extraction and three extractions at a time: with 18 pages that is two rounds instead of six model
   // calls in a row, the longest part of a research (1 Oct: 22 to 303 s). Results keep the order of the sources.

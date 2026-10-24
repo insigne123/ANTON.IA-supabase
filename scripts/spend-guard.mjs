@@ -7,7 +7,8 @@
 // - It adds up the tokens each answer reports, prices them with figures twice the price list of the app (the true price is lower, never higher), and stops
 //   sending when the estimate reaches SPEND_CAP_USD (default 1.5). At the end it prints what was spent.
 // - With SPEND_LEDGER=<file> every run appends what it spent and starts from the sum of the earlier ones: the cap is for the whole session, not per run.
-// - Web search and other paid tools are not priced: a script that uses them is not covered by this guard.
+// - The web search of Anthropic's API is priced at its real fee, US$0.01 per search (10 USD per thousand), on top of the tokens; the page reads of the
+//   web fetch tool have no fee of their own. Any other paid tool is not priced: a script that uses it is not covered by this guard.
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 const PRICES = {
@@ -17,6 +18,8 @@ const PRICES = {
   anthropic: { in: 0.2, out: 1.0 },
 };
 const ALLOWED = { openai: /luna/i, anthropic: /haiku/i };
+/** US dollars per web search of Anthropic's API (10 per thousand). The only fee besides the tokens. */
+const SEARCH_USD = 0.01;
 
 export const providerOf = host => (host === 'api.openai.com' ? 'openai' : host === 'api.anthropic.com' ? 'anthropic' : null);
 export const modelAllowed = (provider, model) => ALLOWED[provider].test(String(model || ''));
@@ -26,12 +29,13 @@ export function estimateCost(provider, usage) {
   const price = PRICES[provider];
   const input = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0) + Number(usage?.cache_read_input_tokens ?? 0) + Number(usage?.cache_creation_input_tokens ?? 0);
   const output = Number(usage?.output_tokens ?? usage?.completion_tokens ?? 0);
-  return { input, output, usd: (input * price.in + output * price.out) / 1e6 };
+  const searches = Number(usage?.server_tool_use?.web_search_requests ?? 0);
+  return { input, output, searches, usd: (input * price.in + output * price.out) / 1e6 + searches * SEARCH_USD };
 }
 
-/** The usage of an Anthropic answer that came as a stream of events (the SDK streams): the input is in `message_start`, the output grows to its last `message_delta`. */
+/** The usage of an Anthropic answer that came as a stream of events (the SDK streams): the input is in `message_start`, the output and the searches grow to its last `message_delta`. */
 export function usageFromStream(text) {
-  let input = 0, cached = 0, output = 0;
+  let input = 0, cached = 0, output = 0, searches = 0;
   for (const line of String(text).split('\n')) {
     if (!line.startsWith('data:')) continue;
     try {
@@ -41,10 +45,14 @@ export function usageFromStream(text) {
         input = Number(usage.input_tokens || 0);
         cached = Number(usage.cache_read_input_tokens || 0) + Number(usage.cache_creation_input_tokens || 0);
         output = Math.max(output, Number(usage.output_tokens || 0));
-      } else if (event.type === 'message_delta') output = Math.max(output, Number(event.usage?.output_tokens || 0));
+        searches = Math.max(searches, Number(usage.server_tool_use?.web_search_requests || 0));
+      } else if (event.type === 'message_delta') {
+        output = Math.max(output, Number(event.usage?.output_tokens || 0));
+        searches = Math.max(searches, Number(event.usage?.server_tool_use?.web_search_requests || 0));
+      }
     } catch { /* a line that is not an event */ }
   }
-  return { input_tokens: input, cache_read_input_tokens: cached, output_tokens: output };
+  return { input_tokens: input, cache_read_input_tokens: cached, output_tokens: output, server_tool_use: { web_search_requests: searches } };
 }
 
 /** What the earlier runs of a ledger spent. */
@@ -75,16 +83,16 @@ export function guardedFetch(realFetch, { cap = 1.5, before = 0 } = {}) {
     } catch { /* an answer the guard cannot read: priced below as a large one */ }
     // Nothing is awaited from here on, so calls that finish together cannot overwrite each other's totals.
     const cost = estimateCost(provider, usage);
-    const entry = totals.get(`${provider}:${model}`) ?? { calls: 0, input: 0, output: 0, usd: 0 };
+    const entry = totals.get(`${provider}:${model}`) ?? { calls: 0, input: 0, output: 0, searches: 0, usd: 0 };
     entry.calls += 1;
-    if (cost.input + cost.output > 0) { entry.input += cost.input; entry.output += cost.output; entry.usd += cost.usd; spent += cost.usd; }
+    if (cost.input + cost.output > 0) { entry.input += cost.input; entry.output += cost.output; entry.searches += cost.searches; entry.usd += cost.usd; spent += cost.usd; }
     else { entry.usd += 0.01; spent += 0.01; } // An answer the guard cannot read: counted as a large one, so the estimate does not undercount.
     totals.set(`${provider}:${model}`, entry);
     return response;
   };
   guarded.state = () => ({
     capUsd: cap, estimatedUsd: Math.round((spent - before) * 10000) / 10000, earlierRunsUsd: Math.round(before * 10000) / 10000, calls,
-    byModel: Object.fromEntries([...totals].map(([key, value]) => [key, { calls: value.calls, inputTokens: value.input, outputTokens: value.output, usd: Math.round(value.usd * 10000) / 10000 }])),
+    byModel: Object.fromEntries([...totals].map(([key, value]) => [key, { calls: value.calls, inputTokens: value.input, outputTokens: value.output, webSearches: value.searches, usd: Math.round(value.usd * 10000) / 10000 }])),
   });
   return guarded;
 }

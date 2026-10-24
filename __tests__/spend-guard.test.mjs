@@ -21,9 +21,15 @@ test('only Luna on OpenAI and Haiku on Anthropic are allowed, and only those two
 });
 
 test('the usage of both providers is priced above the real price, cached tokens as new ones', () => {
-  assert.deepEqual(estimateCost('openai', { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 }), { input: 1_000_000, output: 1_000_000, usd: 1.2 });
-  assert.deepEqual(estimateCost('anthropic', { input_tokens: 500_000, cache_read_input_tokens: 500_000, output_tokens: 200_000 }), { input: 1_000_000, output: 200_000, usd: 0.4 });
+  assert.deepEqual(estimateCost('openai', { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 }), { input: 1_000_000, output: 1_000_000, searches: 0, usd: 1.2 });
+  assert.deepEqual(estimateCost('anthropic', { input_tokens: 500_000, cache_read_input_tokens: 500_000, output_tokens: 200_000 }), { input: 1_000_000, output: 200_000, searches: 0, usd: 0.4 });
   assert.equal(estimateCost('anthropic', undefined).usd, 0);
+});
+
+test('each web search is priced at its real fee on top of the tokens', () => {
+  const cost = estimateCost('anthropic', { input_tokens: 10_000, output_tokens: 1_000, server_tool_use: { web_search_requests: 3 } });
+  assert.equal(cost.searches, 3);
+  assert.equal(Math.round(cost.usd * 100000) / 100000, 0.033); // 10 000 in at 0.2 + 1 000 out at 1 per million, plus 3 searches at 0.01
 });
 
 test('a model that is not allowed is refused before anything is sent; other hosts pass untouched', async () => {
@@ -48,7 +54,7 @@ test('what each answer reports is added up, and when the estimate reaches the ca
   const state = fetcher.state();
   assert.equal(state.calls, 2);
   assert.equal(state.estimatedUsd, 0.4);
-  assert.deepEqual(state.byModel['openai:gpt-6-luna'], { calls: 2, inputTokens: 1_000_000, outputTokens: 200_000, usd: 0.4 });
+  assert.deepEqual(state.byModel['openai:gpt-6-luna'], { calls: 2, inputTokens: 1_000_000, outputTokens: 200_000, webSearches: 0, usd: 0.4 });
 });
 
 test('the usage of a streamed Anthropic answer is read from its events, and an answer the guard cannot read is counted as a large one, not as free', async () => {
@@ -57,13 +63,26 @@ test('the usage of a streamed Anthropic answer is read from its events, and an a
     'event: content_block_delta', `data: ${JSON.stringify({ type: 'content_block_delta', delta: { text: 'x' } })}`, '',
     'event: message_delta', `data: ${JSON.stringify({ type: 'message_delta', usage: { output_tokens: 400 } })}`, '',
   ].join('\n');
-  assert.deepEqual(usageFromStream(stream), { input_tokens: 3000, cache_read_input_tokens: 500, output_tokens: 400 });
+  assert.deepEqual(usageFromStream(stream), { input_tokens: 3000, cache_read_input_tokens: 500, output_tokens: 400, server_tool_use: { web_search_requests: 0 } });
   const read = guardedFetch(async () => new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
   await call(read, 'https://api.anthropic.com/v1/messages', 'claude-haiku-5-5');
   assert.equal(read.state().estimatedUsd, 0.0011); // 3 500 in at 0.2 and 400 out at 1, per million
   const unreadable = guardedFetch(async () => new Response('data: x', { status: 200, headers: { 'content-type': 'text/event-stream' } }));
   await call(unreadable, 'https://api.anthropic.com/v1/messages', 'claude-haiku-5-5');
   assert.equal(unreadable.state().estimatedUsd, 0.01);
+});
+
+test('the searches of a streamed answer are read from its last event and charged', async () => {
+  const stream = [
+    'event: message_start', `data: ${JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 1000, output_tokens: 1 } } })}`, '',
+    'event: message_delta', `data: ${JSON.stringify({ type: 'message_delta', usage: { output_tokens: 200, server_tool_use: { web_search_requests: 2 } } })}`, '',
+  ].join('\n');
+  assert.equal(usageFromStream(stream).server_tool_use.web_search_requests, 2);
+  const fetcher = guardedFetch(async () => new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+  await call(fetcher, 'https://api.anthropic.com/v1/messages', 'claude-haiku-5-5');
+  const state = fetcher.state();
+  assert.equal(state.estimatedUsd, 0.0204); // 1 000 in at 0.2 + 200 out at 1, per million, plus 2 searches at 0.01
+  assert.equal(state.byModel['anthropic:claude-haiku-5-5'].webSearches, 2);
 });
 
 test('answers that arrive together are all counted', async () => {
