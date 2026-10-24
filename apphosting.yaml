@@ -172,16 +172,10 @@ env:
   - variable: COWORK_PHONE_REVEAL_ENABLED
     value: "true"
     availability: [RUNTIME]
-  # Piloto del 23 oct 2026 (docs/borradores-ganchos-y-reglas.md y docs/uso-como-persona-2026-10-23.md): solo la cuenta del dueño.
-  # Borradores: las tres banderas valen únicamente para DRAFT_PILOT_USER_IDS (ids de usuario separados por coma); quien no está en la
-  # lista escribe como siempre. Sin esa lista las banderas valdrían para todas las cuentas: no se ponen sin ella.
-  # Cowork: el harness (el coordinador es un Claude con herramientas) con Haiku 5.5, solo para COWORK_HARNESS_USER_IDS; el resto de las
-  # cuentas sigue en el bucle de Luna. Sin web ni subagentes. Ni Opus ni Sonnet corren en la app (src/ai/blocked-models.ts).
-  # Para sumar a alguien: su id de usuario en las dos listas. Para volver atrás: quitar estas siete variables; el siguiente borrador y el
-  # siguiente turno ya corren como antes.
-  - variable: DRAFT_PILOT_USER_IDS
-    value: de3a3194-29b1-449a-828a-53608a7ebe47
-    availability: [RUNTIME]
+  # Mejoras encendidas para todas las cuentas desde el 24 oct 2026, por decisión del dueño (la evidencia está en docs/borradores-ganchos-y-reglas.md,
+  # docs/senales-de-la-investigacion-al-correo.md y docs/piloto-borradores-cowork-2026-10-23.md). Ninguna usa un modelo caro: solo Haiku 5.5 y Luna
+  # (Opus y Sonnet están bloqueados en src/ai/blocked-models.ts). Siguen apagados la web de Claude, los subagentes y la lectura de documentos con visión.
+  # Borradores: las señales de la investigación llegan al correo, los ganchos no aptos no llegan al redactor y el hecho conserva su dato concreto.
   - variable: DRAFT_SIGNAL_EVIDENCE_ENABLED
     value: "true"
     availability: [RUNTIME]
@@ -191,15 +185,24 @@ env:
   - variable: DRAFT_ANCHOR_SPECIFICS_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Investigación: un Claude (Haiku) elige, entre los hechos que la investigación ya leyó, las señales recientes que sirven de motivo para escribir;
+  # solo se aceptan las que están escritas en los hechos que citan. Cuesta del orden de US$0,001 por investigación y suma unos segundos.
+  - variable: RESEARCH_SIGNAL_HARVEST_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  # Cowork: el harness (el coordinador es un Claude con herramientas) con Haiku 5.5, y las tareas programadas (cada persona decide si crea una; hasta 5 activas).
   - variable: COWORK_RUNTIME
     value: harness
     availability: [RUNTIME]
   - variable: COWORK_HARNESS_MODEL
     value: claude-haiku-5-5
     availability: [RUNTIME]
-  - variable: COWORK_HARNESS_USER_IDS
-    value: de3a3194-29b1-449a-828a-53608a7ebe47
+  - variable: COWORK_SCHEDULES_ENABLED
+    value: "true"
     availability: [RUNTIME]
+  # Para limitar los borradores o el harness a unas pocas personas se agregan DRAFT_PILOT_USER_IDS y COWORK_HARNESS_USER_IDS (ids de usuario separados por
+  # coma; la prueba exige que sean las mismas). Para volver atrás se quita la variable de la mejora y se despliega: el siguiente borrador y el siguiente
+  # turno ya corren como antes.
   # OpenAI Standard, short-context (<272K input), USD per million tokens.
   # gpt-6.1-sol checked against https://developers.openai.com/api/docs/pricing on 2026-10-07.
   - variable: COWORK_MODEL_PRICING_JSON

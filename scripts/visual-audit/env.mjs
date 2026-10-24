@@ -36,16 +36,17 @@ export function coworkOwnerEmail() {
 }
 
 const SENSITIVE = /(KEY|SECRET|TOKEN|PASSWORD|TICKET|EMAILS|PRICING_JSON)/;
-// What production turns on only for the people of a pilot (the Cowork harness, the draft flags): the audited people are not in it, so for them the page
-// is what it was. AUDIT_COWORK_WEB=true turns the harness on below, to audit what the page shows then.
-const PILOT_ONLY = /^(?:COWORK_RUNTIME|COWORK_HARNESS_[A-Z_]+|DRAFT_[A-Z_]+)$/;
+// What the audit decides for itself instead of reading it from production: the engine behind Cowork and its options (AUDIT_COWORK_WEB and
+// AUDIT_COWORK_SCHEDULES turn them on below, to audit what the page shows then, so the other journeys keep their baseline), and the settings of
+// what a model writes (draft improvements, signal harvest), which change no page.
+const DECIDED_BY_THE_AUDIT = /^(?:COWORK_RUNTIME|COWORK_HARNESS_[A-Z_]+|COWORK_SCHEDULES_ENABLED|DRAFT_[A-Z_]+|RESEARCH_SIGNAL_HARVEST_ENABLED)$/;
 /** Production's plain values from apphosting.yaml: flags, models and limits. URLs, secrets and allowlists are left out. */
 export function productionFlags() {
   const text = readFileSync(path.join(ROOT, 'apphosting.yaml'), 'utf8');
   const flags = {};
   for (const [, name, quoted] of text.matchAll(/-\s*variable:\s*(\S+)\s*\n\s*value:\s*("[^"\n]*"|'[^'\n]*'|[^\n]*)/g)) {
     const value = quoted.trim().replace(/^["']|["']$/g, '');
-    if (SENSITIVE.test(name) || PILOT_ONLY.test(name) || /https?:\/\//.test(value) || value.startsWith('{')) continue;
+    if (SENSITIVE.test(name) || DECIDED_BY_THE_AUDIT.test(name) || /https?:\/\//.test(value) || value.startsWith('{')) continue;
     flags[name] = value;
   }
   return flags;
@@ -56,10 +57,11 @@ export function buildEnv({ ownerId, ownerEmail }) {
   return {
     ...keep,
     ...productionFlags(),
-    // Production has the harness and the web off. AUDIT_COWORK_WEB=true audits what the page shows when they are on (the guide that offers the web).
+    // Production has the web off. AUDIT_COWORK_WEB=true audits what the page shows when it is on (the guide that offers the web, on the harness).
     // The harness needs the Anthropic key to be «ready» (the chips under an answer are hidden otherwise); the stand-in goes nowhere: the egress guard blocks it.
     ...(process.env.AUDIT_COWORK_WEB === 'true' ? { COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true', ANTHROPIC_API_KEY: 'audit-unused' } : {}),
-    // AUDIT_COWORK_SCHEDULES=true audits the scheduled tasks (the calendar button of the rail and the message box, and their panel); in production they are off.
+    // AUDIT_COWORK_SCHEDULES=true audits the scheduled tasks (the calendar button of the rail and the message box, and their panel); production has them on
+    // since 24 Oct 2026, and the default run leaves them out so the rest of the journeys keep what they were measured against.
     ...(process.env.AUDIT_COWORK_SCHEDULES === 'true' ? { COWORK_SCHEDULES_ENABLED: 'true' } : {}),
     NEXT_TELEMETRY_DISABLED: '1',
     NEXT_DIST_DIR: DIST_DIR,
