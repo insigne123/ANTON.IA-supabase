@@ -30,7 +30,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const sheetOnly = format === 'pdf' && isSignalKind(item?.kind);
     if (!row && !sheetOnly) throw new AuthError('El informe aún no está disponible.', 409);
     const report = (row?.report ?? null) as OpportunityReport | null; let bytes: Uint8Array; let mime: string;
-    const opportunity = item ? { title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency } : undefined;
+    const opportunity = item ? { title: item.title, kind: item.kind, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency } : undefined;
     // The download keeps what the team marked: checks, highlights and notes with who wrote them.
     const saved = await readOpportunityReportMarks(auth.admin, scope, id);
     const marks: ExportMarks | undefined = saved.available ? { items: saved.items,

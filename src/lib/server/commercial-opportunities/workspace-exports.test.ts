@@ -19,6 +19,13 @@ test('workbook keeps scenario arithmetic as numbers, unknown taxes blank and for
  const book=XLSX.read(bytes,{type:'array'});assert.equal(book.Sheets.Requisitos.A2.t,'s');assert.equal(book.Sheets.Requisitos.A2.f,undefined);
  const rows=XLSX.utils.sheet_to_json<any[]>(book.Sheets.Escenarios,{header:1,defval:null});assert.equal(rows[1][5],null);assert.ok(Math.abs(rows[1][8]-24000)<1e-7);
 });
+test('the questions of a public tender go to its forum, not to an e-mail; anything else keeps the e-mail ready to send',async()=>{
+ const {extractText}=await import('unpdf');const read=async(kind:string)=>String((await extractText(await opportunityReportPdf(report,{title:'Aseo del museo',kind,buyer:'Museo'}),{mergePages:true})).text);
+ const tender=await read('tender');
+ assert.match(tender,/Para preguntar en el foro de la licitación en Mercado Público/);assert.match(tender,/1\. ¿Cuál es el alcance\?/);assert.doesNotMatch(tender,/Correo listo para enviar|Estimados/);
+ const received=await read('private_tender');
+ assert.match(received,/Correo listo para enviar dentro del plazo de consultas/);assert.match(received,/Estimados de Museo/);
+});
 test('unsupported PDF glyphs are not silently dropped; editable Markdown preserves them',async()=>{
  await assert.rejects(opportunityReportPdf({...report,title:'日本語'}),/caracteres/);assert.match(opportunityReportMarkdown({...report,title:'日本語'}),/日本語/);
 });

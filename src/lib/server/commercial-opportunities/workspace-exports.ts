@@ -1,6 +1,6 @@
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/workspace';
-import { IMPACT_LABELS, buyerQuestions, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
+import { IMPACT_LABELS, asksInForum, buyerQuestions, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
 import {normalizeCoworkPdfText} from '@/lib/server/cowork/file-exports';
 import { milestoneDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type MarkKind, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { KIT_SOURCE_LABELS, clampSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
@@ -10,7 +10,7 @@ const label=(v:string)=>LABELS[v]||IMPACT_LABELS[v]||statusLabel(v);
 const pdfText=(value:string)=>normalizeCoworkPdfText(value.replace(/[Σ∑](?=\s*\()/g,'sumatoria'));
 const money=(n:number)=>new Intl.NumberFormat('es-CL',{maximumFractionDigits:0}).format(n);
 /** What the export knows about the opportunity besides the report: its name, buyer, deadline and amount. */
-export type ExportOpportunity = { title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
+export type ExportOpportunity = { title: string; kind?: string | null; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
 /** What the team marked on the report, with the names of who wrote each note. */
 export type ExportMarks = { items: ReportMarks; names?: Record<string, string> };
 const markOf = (marks: ExportMarks | undefined, kind: MarkKind, text: string) => marks?.items[reportItemKey(kind, text)];
@@ -146,6 +146,8 @@ export async function opportunityReportPdf(report: OpportunityReport, opportunit
   if (buyerList.length) {
     heading(isSignalReport(report) ? 'Preguntas para la primera conversación' : 'Preguntas para el comprador');
     if (isSignalReport(report)) buyerList.forEach((q, i) => text(`${i + 1}. ${q}`));
+    // A public tender asks in its forum in Mercado Público; anything else, by e-mail to the buyer.
+    else if (asksInForum(opportunity?.kind)) { text('Para preguntar en el foro de la licitación en Mercado Público, dentro del plazo de consultas:', 10, [100, 116, 139]); buyerList.forEach((q, i) => text(`${i + 1}. ${q}`)); }
     else { text('Correo listo para enviar dentro del plazo de consultas:', 10, [100, 116, 139]); text(consultationEmail(report, { title: opportunity?.title || report.title, buyer: opportunity?.buyer }), 9); }
   }
   heading('Números');

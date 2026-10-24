@@ -72,11 +72,13 @@ export function buyerQuestions(report: Pick<OpportunityReport, 'questions'> & { 
   return kept.map(item => item.text);
 }
 
-export function consultationEmail(report: Pick<OpportunityReport, 'questions' | 'title' | 'milestones'> & { submission?: { inconsistencies?: Array<{ question: string }> } | null }, opportunity: { title: string; buyer?: string | null }) {
+type ConsultationReport = Pick<OpportunityReport, 'questions' | 'title' | 'milestones'> & { submission?: { inconsistencies?: Array<{ question: string }> } | null };
+/** A public tender takes the questions in its forum in Mercado Público, not by e-mail (OPP-22). */
+export const asksInForum = (kind?: string | null) => kind === 'tender';
+/** The e-mail to the buyer with the questions, as its subject and its text: to open it in the person's mail (OPP-22) or to copy it. */
+export function consultationDraft(report: ConsultationReport, opportunity: { title: string; buyer?: string | null }) {
   const until = reportKeyDates(report).questions;
-  return [
-    `Asunto: Consultas · ${opportunity.title}`,
-    '',
+  return { subject: `Consultas · ${opportunity.title}`, body: [
     `Estimados${opportunity.buyer ? ` de ${opportunity.buyer}` : ''}:`,
     '',
     `Junto con saludar, y dentro del plazo de consultas${until ? ` (${until})` : ''}, solicitamos aclarar los siguientes puntos:`,
@@ -86,7 +88,12 @@ export function consultationEmail(report: Pick<OpportunityReport, 'questions' | 
     'Quedamos atentos a sus respuestas.',
     '',
     'Saludos cordiales,',
-  ].join('\n');
+  ].join('\n') };
+}
+/** The same e-mail as one text, its subject on the first line: what «Copiar» and the exports carry. */
+export function consultationEmail(report: ConsultationReport, opportunity: { title: string; buyer?: string | null }) {
+  const draft = consultationDraft(report, opportunity);
+  return `Asunto: ${draft.subject}\n\n${draft.body}`;
 }
 
 const INTERNAL = [/tarifa confirmada/i, /investigaci[oó]n web del cliente/i, /recalcular con c[oó]digo/i, /f[oó]rmula param[eé]trica/i, /inventario completo de (las )?bases/i,

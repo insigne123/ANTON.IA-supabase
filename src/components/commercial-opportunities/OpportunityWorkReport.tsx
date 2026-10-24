@@ -1,17 +1,19 @@
 'use client';
 // The report as one document: the decision and what to do now on top, then requirements, plan, risks, questions and the
 // detailed analysis, with a short index. A LinkedIn signal reads as a commercial plan, not as a tender.
-import { useMemo, useState } from 'react';
-import { Award, Check, Copy, Flag, Highlighter, Hourglass, ListChecks, MessageCircleQuestion, PenLine, Phone, Upload, Users } from 'lucide-react';
+import { useMemo } from 'react';
+import { Award, Flag, Highlighter, History, Hourglass, ListChecks, MessageCircleQuestion, PenLine, Phone, Upload, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/workspace';
-import { IMPACT_LABELS, buyerQuestions, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
+import { IMPACT_LABELS, asksInForum, buyerQuestions, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
 import { milestoneDate, parseReportDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type ReminderSubject, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { RoutePath, type RouteNode } from './RoutePath';
 import { MarkedItem, ReminderMenu, useReportMarks, type MarkChange } from './ReportMarks';
 import { FitBadge, FitBar, FitQuestion, SealCard, type OpportunityFitView } from './RequirementFit';
+import { ConsultationActions } from './ConsultationActions';
+import { reportChanges } from '@/lib/commercial-opportunities/report-changes';
 import { genderCriterion, sealNote } from '@/lib/commercial-opportunities/gender-criterion';
 import { decisionWithFit, isExtraQuestionKey } from '@/lib/commercial-opportunities/requirement-fit';
 
@@ -25,8 +27,10 @@ export const SUGGESTED_QUESTIONS = {
 
 type Opportunity = { id?: string; kind?: string; code?: string | null; url?: string | null; title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
 const ROUTE_ICONS: Record<string, typeof PenLine> = { prepare: PenLine, ask: MessageCircleQuestion, submit: Upload, wait: Hourglass, decide: Award, contact: Phone };
-export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people, fit, fitBusy = false, onFit, onAnswer }: {
+export function OpportunityWorkReport({ report, previous, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people, fit, fitBusy = false, onFit, onAnswer }: {
   report: OpportunityReport & { route?: { steps: Array<{ title: string; detail: string; date: string; kind: 'prepare' | 'ask' | 'submit' | 'wait' | 'decide' | 'contact' }> } | null };
+  /** This version and the one before it, to say what changed (OPP-20); absent for the first report. */
+  previous?: { latest: { created_at: string; report: OpportunityReport }; before: { created_at: string; report: OpportunityReport } } | null;
   opportunity: Opportunity; onTask: (title: string, evidence: string) => void;
   onAsk: (question: string) => void; onContacts?: () => void;
   /** The team's marks; absent while the table does not exist, and then the report reads as before. */
@@ -36,7 +40,6 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
   /** «¿Cumplimos?»: the requirements against the company's tender profile (workspace-fit.ts); absent before its migration. */
   fit?: OpportunityFitView | null; fitBusy?: boolean; onFit?: () => void; onAnswer?: (question: string, answer: string) => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const { interactive, marks, pending, change } = useReportMarks(initialMarks, onMark);
   const itemMarks = interactive ? marks : null;
   const authorOf = (id?: string | null) => people?.find(p => p.user_id === id)?.name ?? null;
@@ -77,11 +80,6 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
     ['analysis', 'Análisis detallado', report.sections.length > 0],
     ['sources', 'Documentos leídos', report.coverage.length > 0],
   ] as Array<[string, string, boolean]>).filter(([, , shown]) => shown);
-  const copyEmail = async () => {
-    const text = consultationEmail(report, { title: opportunity.title, buyer: opportunity.buyer });
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2500); }
-    catch { window.prompt('Copia el correo de consultas', text); }
-  };
   const checklist = useMemo(() => reportChecklist(report, steps), [report, steps]);
   const progress = reportProgress(checklist, marks);
   const routeNodes: RouteNode[] = route.map((step, index) => {
@@ -102,10 +100,17 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
   const heading = (id: string, title: string, count?: number) =>
     <h3 id={`report-${id}`} className="scroll-mt-24 text-lg font-semibold">{title}{count ? <span className="ml-2 text-sm font-normal tabular-nums text-muted-foreground">{count}</span> : null}</h3>;
 
+  // What this version says that the one before did not: read first, so nobody reads it all again to find it (OPP-20).
+  const changes = previous ? reportChanges(previous.before, previous.latest) : null;
   const jump = (key: string) => document.getElementById(`mark-${key.replace(':', '-')}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   return <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_200px]">
     <article className="min-w-0 space-y-10">
+      {changes ? <section aria-labelledby="report-changes" className="rounded-2xl border bg-muted/30 px-5 py-4">
+        <h3 id="report-changes" className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Cambios desde el informe del {changes.since}</h3>
+        {changes.lines.length ? <ul className="mt-2 space-y-1.5 text-sm">{changes.lines.map((line, index) => <li key={index} className="flex gap-2"><span aria-hidden="true" className="text-muted-foreground">·</span><span>{line}</span></li>)}</ul>
+          : <p className="mt-1 text-sm text-muted-foreground">Nada importante cambió: la misma recomendación, documentos, fechas, requisitos y preguntas.</p>}
+      </section> : null}
       <section aria-labelledby="report-next" className="rounded-3xl border bg-background p-5 shadow-sm sm:p-7">
         <div className="flex flex-wrap items-center gap-2">
           <span className={cn('rounded-full px-3 py-1 text-sm font-semibold', TONES[decision.tone])}>{decision.label}</span>
@@ -226,10 +231,11 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
       {questions.length > 0 && <section aria-labelledby="report-questions" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           {heading('questions', signal ? 'Preguntas para la primera conversación' : 'Preguntas para el comprador', questions.length)}
-          {!signal && <Button variant="outline" size="sm" onClick={() => void copyEmail()}>
-            {copied ? <Check className="mr-2 h-4 w-4" aria-hidden="true" /> : <Copy className="mr-2 h-4 w-4" aria-hidden="true" />}{copied ? 'Correo copiado' : 'Copiar como correo de consultas'}</Button>}
+          {!signal && <ConsultationActions report={report} opportunity={opportunity} />}
         </div>
-        {!signal && dates.questions && <p className="text-sm text-muted-foreground">Envíalas antes del cierre de consultas: {dates.questions}.</p>}
+        {!signal && (asksInForum(opportunity.kind) || dates.questions) ? <p className="text-sm text-muted-foreground">{asksInForum(opportunity.kind)
+          ? `En Mercado Público se preguntan en el foro de la licitación${dates.questions ? `, hasta el cierre de consultas: ${dates.questions}` : ''}.`
+          : `Envíalas antes del cierre de consultas: ${dates.questions}.`}</p> : null}
         <ol className="space-y-2 text-sm">{questions.map((q, i) => <li key={i} className="rounded-xl px-1">
           <MarkedItem markKey={reportItemKey('question', q)} label={q} checkable={false} {...markProps}>
             <p className="mark-title"><span className="mr-1.5 tabular-nums text-muted-foreground">{i + 1}.</span>{q}</p>
