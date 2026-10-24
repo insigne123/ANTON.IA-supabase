@@ -294,8 +294,8 @@ export type CorpusCase = {
   campaignRetry?: boolean;
   /** Runs with lead.enrich_phone available (COWORK_PHONE_REVEAL_ENABLED). */
   phoneReveal?: boolean;
-  /** Runs for an account that sees «Oportunidades» (OPPORTUNITIES_ALLOWED_EMAILS): opportunities.list is available. */
-  opportunities?: boolean;
+  /** Runs for an account that can open «Oportunidades»: Cowork does not work it, but points there with a link. */
+  opportunitiesSection?: boolean;
   /** preference.save can be proposed (COWORK_PREFERENCES_ENABLED, Plan 12, 5). */
   preferences?: boolean;
   /** «Otra versión» (Plan 13): the answers already given to this same message, with what the person said about them. */

@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { PIPELINE_STAGES } from '@/lib/crm-types';
 import type { CoworkArtifactTableName } from '@/lib/cowork/design-brief';
-import type { CoworkHiringItem, CoworkProjectItem, CoworkTenderItem } from '@/lib/commercial-opportunities/cowork';
 import { COWORK_ARTIFACT_DATA_MAX_ROWS, type CoworkArtifactCell, type CoworkArtifactData, type CoworkArtifactTable } from './code-artifact';
 
 /**
@@ -106,30 +105,6 @@ export function coworkArtifactPipeline(leads: Array<Record<string, unknown>>, cu
   ], rows, total);
 }
 
-export function coworkArtifactOpportunities(input: { hiring: CoworkHiringItem[]; tenders: CoworkTenderItem[]; projects: CoworkProjectItem[] }): CoworkArtifactTable {
-  const rows: Row[] = [
-    ...input.tenders.filter(item => item.status !== 'dismissed').map(item => ({
-      kind: item.kind === 'compra_agil' ? 'Compra Ágil' : 'Licitación', name: text(item.title, 200), organization: text(item.buyer), region: text(item.region, 80),
-      amount: item.currency === 'CLP' || !item.currency ? num(item.amount) : null, deadline: date(item.deadlineAt), score: num(item.score), ads: null,
-      investment_musd: null, status: item.status === 'new' ? 'Nueva' : item.status === 'interested' ? 'Te interesa' : 'Convertida',
-    })),
-    ...input.hiring.filter(item => item.status !== 'dismissed').map(item => ({
-      kind: 'Empresa contratando', name: text(item.company), organization: text(item.company), region: text(item.region, 80), amount: null, deadline: null,
-      score: num(item.score), ads: num(item.ads), investment_musd: null, status: item.status === 'new' ? 'Nueva' : item.status === 'interested' ? 'Te interesa' : 'Convertida',
-    })),
-    ...input.projects.filter(item => item.status !== 'dismissed').map(item => ({
-      kind: 'Proyecto SEIA', name: text(item.title, 200), organization: text(item.owner), region: text(item.region, 80), amount: null, deadline: null,
-      score: num(item.score), ads: null, investment_musd: num(item.data.investmentMusd), status: item.status === 'new' ? 'Nueva' : item.status === 'interested' ? 'Te interesa' : 'Convertida',
-    })),
-  ];
-  return table('Oportunidades', 'Licitaciones, Compra Ágil, empresas contratando y proyectos SEIA de «Oportunidades»', [
-    { key: 'kind', label: 'Tipo', type: 'text' }, { key: 'name', label: 'Oportunidad', type: 'text' }, { key: 'organization', label: 'Organización', type: 'text' },
-    { key: 'region', label: 'Región', type: 'text' }, { key: 'amount', label: 'Monto (CLP)', type: 'money' }, { key: 'deadline', label: 'Cierre', type: 'date' },
-    { key: 'score', label: 'Puntaje', type: 'number' }, { key: 'ads', label: 'Avisos', type: 'number' },
-    { key: 'investment_musd', label: 'Inversión (MUS$)', type: 'number' }, { key: 'status', label: 'Estado', type: 'text' },
-  ], rows);
-}
-
 // ---- Loaders ----
 
 const LEAD_COLUMNS = 'id,name,title,company,email,status,industry,linkedin_url,location,city,country,created_at';
@@ -155,7 +130,7 @@ async function crmOf(client: SupabaseClient, scope: Scope) {
 }
 
 export async function loadCoworkArtifactData(client: SupabaseClient, scope: Scope, tables: CoworkArtifactTableName[],
-  options: { opportunities?: boolean; now?: Date } = {}): Promise<CoworkArtifactData> {
+  options: { now?: Date } = {}): Promise<CoworkArtifactData> {
   const out: Record<string, CoworkArtifactTable> = {};
   const now = options.now ?? new Date();
   for (const name of new Set(tables)) {
@@ -179,28 +154,6 @@ export async function loadCoworkArtifactData(client: SupabaseClient, scope: Scop
         .order('created_at', { ascending: false }).limit(200);
       if (error) throw new Error('No se pudieron leer las campañas.');
       out.campaigns = coworkArtifactCampaigns((data || []) as Array<Record<string, unknown>>);
-    } else if (name === 'opportunities') {
-      if (!options.opportunities) throw new Error('Esta cuenta no tiene «Oportunidades»: el artefacto no puede usar esa tabla.');
-      const { opportunityWorkspaceEnabled } = await import('@/lib/commercial-opportunities/workspace');
-      if (opportunityWorkspaceEnabled()) {
-        const { readWorkspaceOverview } = await import('@/lib/server/commercial-opportunities/workspace-store');
-        const member = await client.from('organization_members').select('role').eq('organization_id', scope.organizationId).eq('user_id', scope.userId).maybeSingle();
-        if (member.error || !member.data) throw new Error('No se pudo verificar el acceso a Oportunidades.');
-        const overview = await readWorkspaceOverview(client, { ...scope, role: member.data.role });
-        out.opportunities = table('Oportunidades', 'Trabajo de oportunidades permitido para esta cuenta', [
-          { key: 'title', label: 'Oportunidad', type: 'text' }, { key: 'company', label: 'Empresa', type: 'text' },
-          { key: 'kind', label: 'Tipo', type: 'text' }, { key: 'state', label: 'Estado', type: 'text' },
-        ], overview.items.map(item => ({ title: item.title, company: item.company_name || item.buyer_name || '', kind: item.kind, state: overview.work.find(w => w.opportunity_id === item.id)?.state || 'unassigned' })));
-        continue;
-      }
-      const { findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities } = await import('@/lib/server/commercial-opportunities/store');
-      const profile = await findHiringProfile(client, scope);
-      const [hiring, tenders, projects] = await Promise.all([
-        profile ? listHiringOpportunities(client, scope, { minAds: profile.minAds, now: now.toISOString() }) : Promise.resolve([]),
-        listTenderOpportunities(client, scope, { now: now.toISOString() }),
-        listProjectOpportunities(client, scope),
-      ]);
-      out.opportunities = coworkArtifactOpportunities({ hiring: hiring as CoworkHiringItem[], tenders: tenders as CoworkTenderItem[], projects: projects as CoworkProjectItem[] });
     }
   }
   return { tables: out, currency: 'CLP', timeZone: 'America/Santiago' };

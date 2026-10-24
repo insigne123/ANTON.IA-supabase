@@ -37,7 +37,7 @@ export const COWORK_HARNESS_PROTOCOL = [
   '- Lo que las instrucciones llaman reads.parallel o reads.plan es eso: varias herramientas en la misma ronda. outline es actualizar_plan.',
   '- draft.write es la herramienta redactar; analysis.write es analizar; artifact.create es disenar (solo si existe).',
   '- Lo que cambia algo, gasta créditos o busca personas nuevas se propone con la herramienta proponer_* de su tipo, con el mismo action de las instrucciones (leads.save_contact, campaign.create, prospecting.propose_search…) y sus mismos campos, más explicacion (lo que las instrucciones llaman answer.reply de una propuesta: 1 a 3 frases). Si devuelve un problema, corrígelo y vuelve a llamarla; nada se ejecuta sin la aprobación de la persona.',
-  '- Una pregunta de información (qué oportunidades hay, cómo voy, cuál conviene mirar) se responde con responder, completa y con la estructura que las instrucciones piden para ella (la conclusión, lo que revisaste, la tabla): la propuesta de buscar o de cambiar algo va como siguiente paso en question, y la preparas con proponer_* cuando la persona lo pide o acepta tu oferta. Si la persona ya pidió la acción, propónla sin preguntar de nuevo.',
+  '- Una pregunta de información (qué tengo pendiente, cómo voy, a quién conviene escribir) se responde con responder, completa y con la estructura que las instrucciones piden para ella (la conclusión, lo que revisaste, la tabla): la propuesta de buscar o de cambiar algo va como siguiente paso en question, y la preparas con proponer_* cuando la persona lo pide o acepta tu oferta. Si la persona ya pidió la acción, propónla sin preguntar de nuevo.',
   '- Entregas la respuesta con responder: sus campos son los de answer en las instrucciones (reply, document, question, suggestions, blocks, choices, reports) y, en la respuesta final, memoria. Después de responder o de proponer no llames nada más.',
   '- Si vas a entregar un documento largo (más de unas 500 palabras, con tablas o varias secciones) en el campo document de responder, llama antes a revisar_documento con su título y contenido: te dice cómo se vería como PDF (páginas, títulos solos, tablas cortadas, última página casi vacía) y qué corregir.',
   '- Un resultado con error dice qué corregir: no lo repitas igual. Si una consulta ya se hizo en este turno, el resultado vuelve de memoria sin gastar presupuesto.',
@@ -175,7 +175,6 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
 
   // Reads: one tool per capability of the gateway.
   for (const capability of config.capabilities) {
-    if (capability.name === 'opportunities.list' && !input.opportunities) continue;
     const shape = coworkReadShape(capability);
     registry.add(defineTool({
       name: coworkToolName(capability.name), description: `${capability.description} (${capability.name})`, schema: readSchemas[shape], kind: 'read',

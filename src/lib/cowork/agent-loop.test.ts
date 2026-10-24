@@ -347,31 +347,6 @@ test('a fixed read sent with periods runs once instead of costing the decision',
   assert.deepEqual(executed.sort(), ['leads.search:', 'metrics.rates:']);
 });
 
-test('a read this account does not have is left out of parallel reads, with its step, and the others run', async () => {
-  const executed: string[] = [];
-  const recorded: CoworkObservation[] = [];
-  let decisions = 0;
-  const result = await runCoworkReadLoop({
-    message: 'Muéstrame mi pipeline en un gráfico', signal: new AbortController().signal, authorize: async () => {},
-    record: async observation => { recorded.push(observation); },
-    decide: async observations => {
-      if (decisions++ > 0) {
-        assert.deepEqual(observations.map(item => item.action), ['crm.search']);
-        return answer;
-      }
-      return { action: 'reads.parallel', query: null, leadId: null, answer: null,
-        reads: [{ action: 'opportunities.list', input: '' }, { action: 'crm.search', input: '' }],
-        outline: [{ label: 'Reviso tus oportunidades', read: 'opportunities.list' }, { label: 'Reviso las etapas del CRM', read: 'crm.search' },
-          { label: 'Armo el gráfico', read: null }] };
-    },
-    execute: async (action, value) => { executed.push(`${action}:${value}`); return {}; },
-  });
-  assert.equal(result.reply, 'Un contacto encontrado.');
-  assert.deepEqual(executed, ['crm.search:']);
-  const plan = recorded.find(item => item.action === COWORK_PLAN_ACTION)?.result as { steps: Array<{ label: string }> } | undefined;
-  assert.ok(plan && !plan.steps.some(step => /oportunidades/i.test(step.label)));
-});
-
 test('effect proposals require an observed target and resolve its origin run', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const parentId = '00000000-0000-4000-8000-000000000011';

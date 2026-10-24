@@ -56,54 +56,21 @@ test('what arrived since the last visit, each source on its own; one that fails 
       { lead_id: 'l2', company_name: 'Adecco', status: 'failed', completed_at: '2026-10-05T10:00:00Z' }],
     leads: [{ id: 'l1', name: 'Carlos Ahumada' }],
   };
-  // No session can read commercial_opportunities (it has no grant nor policy for them): the worker's role counts them.
   // LinkedIn without a complete sync says nothing (agenda-read's rule).
-  const workerTables = {
-    cowork_linkedin_sweep_state: [{ last_completed_at: '2026-10-06T10:00:00Z', has_more: true }],
-    commercial_opportunities: [{ kind: 'compra_agil', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
-      { kind: 'hiring', status: 'dismissed', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
-      { kind: 'project', status: 'new', first_seen_at: '2026-09-01T11:20:00Z', organization_id: ORG },
-      { kind: 'tender', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: '00000000-0000-4000-8000-0000000000ff' }],
-  };
-  const admin = () => fakeClient(workerTables) as never;
+  const worker = fakeClient({ cowork_linkedin_sweep_state: [{ last_completed_at: '2026-10-06T10:00:00Z', has_more: true }] });
+  const admin = () => worker as never;
   const session = fakeClient(tables);
-  const since = await loadCoworkSinceLastVisit({ client: session as never, admin, opportunities: true }, scope, NOW);
+  const since = await loadCoworkSinceLastVisit({ client: session as never, admin }, scope, NOW);
   assert.equal(since?.at, '2026-10-04T15:00:00Z');
   assert.deepEqual(since?.items.map(item => item.text), [
     '1 respuesta nueva: Marcela Rojas (Constructora Andes) · 1 pide reunión',
     '1 investigación lista: Carlos Ahumada (Minera Centinela)',
-    '1 oportunidad nueva: 1 licitación o Compra Ágil',
   ]);
-  assert.equal(session.reads.includes('commercial_opportunities'), false, 'the session would get a 403');
-  // Without access to «Oportunidades» they are not read; a failing source does not take the others with it.
-  const client = fakeClient(tables, ['contacted_leads']);
-  const partial = await loadCoworkSinceLastVisit({ client: client as never, admin, opportunities: false }, scope, NOW);
+  // «Oportunidades» is not part of Cowork (the section has its own assistant): nothing of it is read.
+  assert.equal([...session.reads, ...worker.reads].some(table => table === 'commercial_opportunities' || table === 'opportunity_participants'), false);
+  // A failing source does not take the others with it.
+  const partial = await loadCoworkSinceLastVisit({ client: fakeClient(tables, ['contacted_leads']) as never, admin }, scope, NOW);
   assert.deepEqual(partial?.items.map(item => item.kind), ['research']);
-  assert.equal(client.reads.includes('commercial_opportunities'), false);
   // Never asked Cowork anything: nothing to compare with.
-  assert.equal(await loadCoworkSinceLastVisit({ client: fakeClient({}) as never, admin, opportunities: true }, scope, NOW), null);
-});
-
-test('a person who only sees what was assigned to them hears about those, never about the workspace\'s new ones', async () => {
-  const OTHER = '00000000-0000-4000-8000-0000000000ee';
-  const tables = { cowork_runs: runs };
-  const workerTables = {
-    commercial_opportunities: [
-      { id: 'o1', title: 'Servicio de guardias Municipalidad', kind: 'tender', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
-      { id: 'o2', title: 'Aseo antes de la visita', kind: 'tender', status: 'new', first_seen_at: '2026-10-01T11:20:00Z', organization_id: ORG },
-      { id: 'o3', title: 'De otra persona', kind: 'tender', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
-    ],
-    opportunity_participants: [
-      { organization_id: ORG, opportunity_id: 'o1', user_id: USER, assigned_at: '2026-10-05T11:30:00Z' },
-      { organization_id: ORG, opportunity_id: 'o2', user_id: USER, assigned_at: '2026-10-01T11:30:00Z' },
-      { organization_id: ORG, opportunity_id: 'o3', user_id: OTHER, assigned_at: '2026-10-05T11:30:00Z' },
-    ],
-  };
-  const worker = fakeClient(workerTables);
-  const since = await loadCoworkSinceLastVisit({ client: fakeClient(tables) as never, admin: () => worker as never, opportunities: 'assigned' }, scope, NOW);
-  assert.deepEqual(since?.items.map(item => item.text), ['Te asignaron una oportunidad: Servicio de guardias Municipalidad']);
-  assert.equal(worker.reads.filter(table => table === 'commercial_opportunities').length, 1, 'only the titles of what was assigned are read');
-  // Nothing assigned since the last visit: nothing is said (not the workspace\'s count either).
-  const quiet = await loadCoworkSinceLastVisit({ client: fakeClient(tables) as never, admin: () => fakeClient({ ...workerTables, opportunity_participants: [] }) as never, opportunities: 'assigned' }, scope, NOW);
-  assert.deepEqual(quiet?.items, []);
+  assert.equal(await loadCoworkSinceLastVisit({ client: fakeClient({}) as never, admin }, scope, NOW), null);
 });

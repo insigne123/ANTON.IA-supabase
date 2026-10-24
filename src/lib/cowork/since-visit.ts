@@ -1,10 +1,10 @@
 /**
  * «Desde tu última visita» (Plan 12, 5): what changed since the person last asked Cowork something, read from data that
- * already exists (replies, finished research, new opportunities, accepted invitations). Each item says what happened, with
+ * already exists (replies, finished research, accepted invitations). Each item says what happened, with
  * up to two names, and carries the request that works on it when tapped. Pure: the server reads, this words it.
  */
 
-export type CoworkSinceKind = 'replies' | 'research' | 'opportunities' | 'linkedin';
+export type CoworkSinceKind = 'replies' | 'research' | 'linkedin';
 export type CoworkSinceItem = { kind: CoworkSinceKind; count: number; text: string; prompt: string };
 /** `at` is the last visit (the person's last own turn); `items` is empty when nothing changed since. */
 export type CoworkSince = { at: string; items: CoworkSinceItem[] };
@@ -13,9 +13,6 @@ export type CoworkSinceInput = {
   /** Replies received since, without automatic ones. `meeting` marks a reply that asks for a meeting. */
   replies: Array<{ name: string | null; company: string | null; meeting: boolean }> | null;
   research: Array<{ name: string | null; company: string | null }> | null;
-  opportunities: { tenders: number; hiring: number; projects: number } | null;
-  /** For whoever only sees what was assigned to them: the opportunities that reached them since, instead of the workspace's new ones. */
-  assigned?: Array<{ title: string }> | null;
   linkedin: Array<{ name: string | null }> | null;
 };
 
@@ -60,29 +57,6 @@ export function coworkSinceItems(input: CoworkSinceInput): CoworkSinceItem[] {
       kind: 'research', count: research.length,
       text: `${research.length} ${plural(research.length, 'investigación lista', 'investigaciones listas')}: ${coworkSinceNames(research)}`,
       prompt: 'Muéstrame lo que encontraste en las investigaciones que terminaron y qué le escribirías a cada uno.',
-    });
-  }
-  const assigned = input.assigned || [];
-  if (assigned.length) {
-    const titles = coworkSinceNames(assigned.map(item => ({ name: item.title.length > 80 ? `${item.title.slice(0, 79)}…` : item.title })), 2);
-    items.push({
-      kind: 'opportunities', count: assigned.length,
-      text: `${assigned.length === 1 ? 'Te asignaron una oportunidad' : `Te asignaron ${assigned.length} oportunidades`}: ${titles}`,
-      prompt: '¿Qué oportunidades me asignaron desde mi última visita y por cuál conviene empezar?',
-    });
-  }
-  const opportunities = input.opportunities;
-  const total = opportunities ? opportunities.tenders + opportunities.hiring + opportunities.projects : 0;
-  if (opportunities && total) {
-    const parts = [
-      opportunities.tenders ? `${opportunities.tenders} ${plural(opportunities.tenders, 'licitación o Compra Ágil', 'licitaciones o Compras Ágiles')}` : null,
-      opportunities.hiring ? `${opportunities.hiring} ${plural(opportunities.hiring, 'empresa contratando', 'empresas contratando')}` : null,
-      opportunities.projects ? `${opportunities.projects} ${plural(opportunities.projects, 'proyecto SEIA', 'proyectos SEIA')}` : null,
-    ].filter(Boolean);
-    items.push({
-      kind: 'opportunities', count: total,
-      text: `${total} ${plural(total, 'oportunidad nueva', 'oportunidades nuevas')}: ${parts.join(', ')}`,
-      prompt: '¿Qué oportunidades nuevas hay desde mi última visita y cuál me conviene mirar primero?',
     });
   }
   const linkedin = input.linkedin || [];
