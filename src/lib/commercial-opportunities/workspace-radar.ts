@@ -208,17 +208,24 @@ export function bySource<T extends Pick<WorkItem, 'kind' | 'deadline_at' | 'scor
   return groups.filter(group => group.items.length > 0);
 }
 
-/** The kinds of «Novedades» a person can filter by: decisions and blocks (task), assignments and reports ready. */
-export type NewsKind = 'task' | 'assignment' | 'report';
-export const NEWS_KINDS: ReadonlyArray<readonly [NewsKind, string]> = [['task', 'Decisiones'], ['assignment', 'Asignaciones'], ['report', 'Informes']];
-export const newsKindOf = (notice: { kind?: string | null }): NewsKind => (notice.kind === 'assignment' || notice.kind === 'report' ? notice.kind : 'task');
+/**
+ * The kinds of «Novedades» a person can filter by: decisions, blocks and results (task), tasks given and notes that name the person
+ * (work, told apart by their event: «task:», «tasks:», «mention:»), assignments and reports ready.
+ */
+export type NewsKind = 'task' | 'work' | 'assignment' | 'report';
+export const NEWS_KINDS: ReadonlyArray<readonly [NewsKind, string]> = [['task', 'Decisiones'], ['work', 'Tareas y menciones'], ['assignment', 'Asignaciones'], ['report', 'Informes']];
+export const newsKindOf = (notice: { kind?: string | null; event_key?: string | null }): NewsKind =>
+  (notice.kind === 'assignment' || notice.kind === 'report' ? notice.kind : /^(task|tasks|mention):/.test(notice.event_key ?? '') ? 'work' : 'task');
+/** Where a notice opens its opportunity: tasks given on «Plan y tareas», a note that names the person on «Actividad»; the rest on the report. */
+export const newsSection = (notice: { event_key?: string | null }) =>
+  (/^mention:/.test(notice.event_key ?? '') ? 'activity' : /^tasks?:/.test(notice.event_key ?? '') ? 'tasks' : undefined);
 
 /**
  * «Novedades»: the unread notices of a kind (or all), the newest first and one per opportunity (three reports of the same tender are
  * one piece of news). `ids` are all of them, to mark as read together; `byOpportunity` the ones behind each line, to mark one line;
  * `kinds` the kinds there are, so the filter only shows when there is something to choose.
  */
-export function latestNews<T extends { id: string; opportunity_id: string; created_at: string; read_at: string | null; kind?: string | null }>(notifications: T[], kind: NewsKind | 'all' = 'all') {
+export function latestNews<T extends { id: string; opportunity_id: string; created_at: string; read_at: string | null; kind?: string | null; event_key?: string | null }>(notifications: T[], kind: NewsKind | 'all' = 'all') {
   const unread = notifications.filter(n => !n.read_at).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   const chosen = unread.filter(n => kind === 'all' || newsKindOf(n) === kind);
   const seen = new Set<string>();

@@ -67,3 +67,18 @@ test('an answer goes to whoever asked and whoever is in charge; nothing goes out
   assert.deepEqual(await notifyDecisionByEmail(fakeClient(world()), { organizationId: ORG, userId: DIEGO }, OPP, { kind: 'blocked', text: 'x' }, { send: never, env: { OPPORTUNITY_DECISION_EMAIL: 'off' } }),
     { sent: 0, skipped: 0, failed: 0 });
 });
+
+test('a note that names someone and tasks given go only to those people, and open the opportunity on the note or the tasks', async () => {
+  const mention = decisionEmail({ name: 'Ana Pérez', actor: 'Diego Fuentes', kind: 'mention', title: 'Aseo', text: '@Ana Pérez revisa el anexo 3', dueAt: null, opportunityId: OPP, appUrl: 'https://x' });
+  assert.equal(mention.subject, 'Diego Fuentes te mencionó: Aseo');
+  assert.match(mention.text, /Diego Fuentes te mencionó en una nota de esta oportunidad\./);
+  assert.match(mention.text, /Ver la nota: https:\/\/x\/opportunities\?op=00000000-0000-4000-8000-0000000000aa&seccion=actividad/);
+  const tasks = decisionEmail({ name: 'Ana', actor: 'Nicolás', kind: 'task', title: 'Aseo', text: 'Pedir referencias · Firmar', dueAt: '2026-10-27T15:00:00Z', count: 2, opportunityId: OPP, appUrl: 'https://x' });
+  assert.equal(tasks.subject, '2 tareas para ti: Aseo');
+  assert.match(tasks.text, /Nicolás te dio 2 tareas en esta oportunidad; la primera vence el martes 27 de octubre\./);
+  assert.match(tasks.text, /Ver las tareas: https:\/\/x\/opportunities\?op=00000000-0000-4000-8000-0000000000aa&seccion=tareas/);
+  assert.equal(decisionEmail({ name: '', actor: 'Nicolás', kind: 'task', title: 'Aseo', text: 'Firmar', dueAt: null, opportunityId: OPP, appUrl: 'https://x' }).subject, 'Una tarea para ti: Aseo');
+  const mail = send();
+  await notifyDecisionByEmail(fakeClient(world()), { organizationId: ORG, userId: DIEGO, role: 'member' }, OPP, { kind: 'mention', text: 'revisa', users: [ANA, DIEGO] }, { send: mail.send, env: {} });
+  assert.deepEqual(mail.sent.map(email => email.to), ['ana@grupoexpro.cl'], 'neither the administrators nor whoever wrote it');
+});

@@ -5,15 +5,17 @@ import { LIST_VIEWS } from './list-stages';
 import { parsePrioritySort, type PrioritySort } from './priority';
 import { isOpportunitySource, parseCategories, type OpportunityCategory, type OpportunitySource } from './workspace-radar';
 
-export type WorkspaceView = 'pipeline' | 'list' | 'market' | 'assistant';
+export type WorkspaceView = 'pipeline' | 'list' | 'market' | 'tasks' | 'assistant';
 export type WorkspaceUrlState = { view: WorkspaceView; filter: string; source: OpportunitySource; query: string; categories: OpportunityCategory[]; sort: PrioritySort };
-const VIEW_WORDS: Record<WorkspaceView, string> = { pipeline: 'embudo', list: 'lista', market: 'mercado', assistant: 'asistente' };
+const VIEW_WORDS: Record<WorkspaceView, string> = { pipeline: 'embudo', list: 'lista', market: 'mercado', tasks: 'tareas', assistant: 'asistente' };
+/** The part of an opportunity a link opens on (the emails of a note that names someone and of tasks given): «seccion=tareas». */
+const SECTION_WORDS: Record<string, string> = { informe: 'summary', postular: 'apply', documentos: 'documents', tareas: 'tasks', actividad: 'activity' };
 /** The member's «Presentadas y cerradas» is read on the page from everything of theirs (member-work.ts). */
 const FILTERS: readonly string[] = [...LIST_VIEWS, 'done'];
 export const WORKSPACE_URL_DEFAULTS: WorkspaceUrlState = { view: 'pipeline', filter: 'recommended', source: 'all', query: '', categories: [], sort: 'priority' };
 
 /** What an address asks for; anything unknown is the default. */
-export function readWorkspaceUrl(search: string): WorkspaceUrlState & { op: string | null } {
+export function readWorkspaceUrl(search: string): WorkspaceUrlState & { op: string | null; section: string | null } {
   const params = new URLSearchParams(search);
   const view = (Object.entries(VIEW_WORDS).find(([, word]) => word === params.get('vista'))?.[0] ?? WORKSPACE_URL_DEFAULTS.view) as WorkspaceView;
   const filter = params.get('etapa') || '';
@@ -22,6 +24,7 @@ export function readWorkspaceUrl(search: string): WorkspaceUrlState & { op: stri
     view, filter: FILTERS.includes(filter) ? filter : WORKSPACE_URL_DEFAULTS.filter,
     source: isOpportunitySource(source) ? source : 'all', query: (params.get('q') || '').slice(0, 200),
     categories: parseCategories(params.get('rubro')), sort: parsePrioritySort(params.get('orden')), op: params.get('op'),
+    section: SECTION_WORDS[params.get('seccion') || ''] ?? null,
   };
 }
 

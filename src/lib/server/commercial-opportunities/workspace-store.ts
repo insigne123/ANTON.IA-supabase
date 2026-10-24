@@ -77,7 +77,7 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
     readableOpportunityIds(client, scope),
     readWorkspacePage(client, scope, options),
     readWorkspaceCounts(client, scope, options),
-    client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at,kind')
+    client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at,kind,event_key')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).order('created_at', { ascending: false }).limit(100).then(result => opportunityDb(result) || []),
     admin ? client.from('organization_reporting_groups').select('id,name').eq('organization_id', scope.organizationId).eq('is_active', true).then(result => opportunityDb(result) || []) : [],
     admin ? client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle().then(result => opportunityDb(result)) : null,
@@ -204,7 +204,8 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
   const members = await workspaceMembers(client, scope);
   const context = opportunityDb(await client.from('opportunity_company_context').select('criteria').eq('organization_id', scope.organizationId).maybeSingle());
   return { item, work: opportunityDb(work), decisionMakerTitles: context?.criteria?.decisionMakerTitles || [], participants: members.filter(m => people.some(p => p.user_id === m.user_id)),
-    members: members.map(({ user_id, name }) => ({ user_id, name })),
+    // With their role: a note can name the administrators too, who can read it (activity-notes.ts).
+    members: members.map(({ user_id, name, role }) => ({ user_id, name, role })),
     activity: opportunityDb(activity), tasks: opportunityDb(tasks), documents: opportunityDb(documents)?.map(({ storage_path, ...doc }) => doc),
     reports: opportunityDb(reports), contacts: opportunityDb(contacts), marks,
     // A report's progress for the page's «oficina»; the payload itself never leaves the server.

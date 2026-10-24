@@ -6,7 +6,7 @@ const opp = n => `00000000-0000-4000-8000-${String(9510 + n).padStart(12, '0')}`
 /** Diego, the member of the fixtures (ids.mjs). */
 const DIEGO = '00000000-0000-4000-8000-000000000012';
 const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
-const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'mark', 'decision', 'decision_reply'] };
+const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'mark', 'decision', 'decision_reply'] };
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
 const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
 const CRITERIA = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['criteria'] };
@@ -254,7 +254,93 @@ export default () => [
       } },
     ] },
 
+  { id: 'admin-plan-tareas', persona: 'owner', title: 'Administrador: convertir el plan del informe en tareas', goal: 'Que los pasos del plan queden como tareas con responsable y fecha, sin escribirlas de a una.', passWrites: [ACTIONS],
+    steps: [
+      // The link of the email of tasks opens the opportunity on «Plan y tareas» (?seccion=tareas).
+      { say: 'Abro la licitación en «Plan y tareas»', do: async c => { await c.go(`/opportunities?op=${opp(2)}&seccion=tareas`); await c.see('Plan de trabajo'); await c.see('Agregar 4 pasos del plan'); } },
+      { say: 'Pulso «Agregar 4 pasos del plan»', do: async c => {
+        await c.click('Agregar 4 pasos del plan'); await c.seeRole('dialog', /Convertir el plan en tareas/);
+        const days = await c.page.getByRole('dialog').locator('input[type="date"]').evaluateAll(nodes => nodes.map(node => node.value));
+        c.check('cada paso trae su fecha', days.length === 4 && days.every(Boolean), days.join(', '));
+      } },
+      { say: 'Dejo fuera el primero y me quedo con la firma', do: async c => {
+        const dialog = c.page.getByRole('dialog');
+        await c.clickOn(dialog.getByRole('checkbox', { name: 'Incluir «Pedir las dos referencias de clientes»' }));
+        await dialog.getByLabel('Quién hace «Firmar la declaración jurada en el portal»').selectOption({ label: 'Camila Torres' });
+      } },
+      { say: 'Creo las tres tareas', do: async c => {
+        await c.clickOn(c.page.getByRole('dialog').getByRole('button', { name: 'Crear 3 tareas' })); await c.see('Creamos 3 tareas y avisamos a cada responsable.');
+        const created = c.table('opportunity_tasks').filter(row => row.opportunity_id === opp(2) && /^(Calcular el precio por persona|Firmar la declaración jurada en el portal|Subir la oferta al portal)/.test(row.title));
+        c.check('quedaron tres tareas, cada una con su fecha', created.length === 3 && created.every(row => row.due_at), JSON.stringify(created.map(row => [row.title, row.due_at])));
+        c.check('a Diego le avisamos una vez de sus dos tareas', c.table('opportunity_notifications').filter(row => row.user_id === DIEGO && /^2 tareas para ti/.test(row.title)).length === 1);
+        c.check('solo ofrece el paso que dejé fuera', await shows(c, 'Agregar 1 paso del plan'));
+      } },
+    ] },
+  { id: 'admin-mencion', persona: 'owner', title: 'Administrador: pedirle algo a Diego en una nota', goal: 'Que Diego revise el anexo económico y se entere sin que le escriba aparte.', passWrites: [ACTIONS],
+    steps: [
+      { say: 'Abro la actividad de la licitación', do: async c => { await c.go(`/opportunities?op=${opp(2)}&seccion=actividad`); await c.see('Actividad del equipo'); } },
+      { say: 'Escribo «@Die» y elijo a Diego', do: async c => {
+        const box = c.page.getByLabel('Registrar avance o nota');
+        await box.click(); await box.pressSequentially('Revisa el anexo económico, @Die');
+        await c.seeRole('option', 'Diego Fuentes');
+        await c.page.keyboard.press('Enter');
+        c.check('el nombre entra completo', (await box.inputValue()) === 'Revisa el anexo económico, @Diego Fuentes ', await box.inputValue());
+        await box.pressSequentially('antes del jueves.');
+      } },
+      { say: 'Guardo la nota', do: async c => {
+        await c.click('Guardar avance'); await c.see('Le avisamos a la persona que mencionaste.');
+        const row = c.table('opportunity_activity').find(item => item.opportunity_id === opp(2) && String(item.body).startsWith('Revisa el anexo económico'));
+        c.check('la nota nombra a Diego', JSON.stringify(row?.data?.mentions) === JSON.stringify([DIEGO]), JSON.stringify(row?.data));
+        c.check('Diego lo ve en Novedades', c.table('opportunity_notifications').some(item => item.user_id === DIEGO && /^Camila Torres te mencionó/.test(item.title) && /^mention:note:/.test(item.event_key)));
+      } },
+    ] },
+
   // ─── Member ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  { id: 'miembro-mis-tareas', persona: 'member', title: 'Integrante: «Mis tareas» de todas sus oportunidades, y marcar una hecha', goal: 'Ver qué tiene vencido y despacharlo sin abrir cada licitación.', passWrites: [ACTIONS, NOTIFY],
+    steps: [
+      { say: 'Abro Oportunidades', do: async c => {
+        await c.go('/opportunities'); await c.see('Mis oportunidades asignadas');
+        c.check('«Mis tareas» dice cuántas tiene', await shows(c, /^Mis tareas\s*3/));
+      } },
+      { say: 'Pulso «Mis tareas»', do: async c => {
+        await c.click({ role: 'button', name: /^Mis tareas/ }); await c.see('Vencidas');
+        await c.see('Pedir la visita a terreno de las sucursales');
+        c.check('la vencida dice cuándo venció, en rojo', await c.page.getByText(/^Venció el /).first().evaluate(node => /text-destructive/.test(node.className)).catch(() => false));
+        c.check('la dirección es la de «Mis tareas»', c.page.url().includes('vista=tareas'), c.page.url());
+      } },
+      { say: 'Marco hecha la vencida', do: async c => {
+        await c.click({ role: 'checkbox', name: 'Marcar «Pedir la visita a terreno de las sucursales» como hecha' });
+        await c.see('Hecha: «Pedir la visita a terreno de las sucursales».');
+        c.check('quedó hecha', c.table('opportunity_tasks').find(row => row.title === 'Pedir la visita a terreno de las sucursales')?.status === 'done');
+        c.check('salió de la lista', !(await shows(c, 'Vencidas')));
+      } },
+      { say: 'Abro la licitación de otra tarea', do: async c => {
+        await c.clickOn(c.page.getByRole('button', { name: 'Compra Ágil: revisión de antecedentes de postulantes', exact: true })); await c.see('Plan de trabajo');
+        c.check('abre en «Plan y tareas»', await shows(c, 'Preparar el anexo técnico'));
+      } },
+    ] },
+  { id: 'miembro-nota', persona: 'member', title: 'Integrante: leer lo que le pidieron y corregir su nota', goal: 'Responder a la mención de Camila y arreglar un dato de su propia nota.', passWrites: [ACTIONS, NOTIFY],
+    steps: [
+      { say: 'Abro Oportunidades y veo la mención en Novedades', do: async c => {
+        await c.go('/opportunities'); await c.see('Camila Torres te mencionó');
+        c.check('las menciones tienen su tipo en Novedades', await shows(c, 'Tareas y menciones'));
+      } },
+      { say: 'Abro la mención', do: async c => {
+        await c.click({ text: /^Camila Torres te mencionó/ }); await c.see('Actividad del equipo');
+        c.check('abre en la nota', await shows(c, '¿confirmas con Retail Andino que firman el certificado esta semana?'));
+      } },
+      { say: 'Corrijo mi nota', do: async c => {
+        await c.click({ role: 'button', name: 'Opciones de tu nota' }); await c.click({ role: 'menuitem', name: 'Editar' });
+        const box = c.page.getByLabel('Editar la nota');
+        await box.fill('Leí las bases: piden dos referencias y el certificado de antecedentes. El certificado llega el lunes.');
+        await c.clickOn(c.page.getByRole('button', { name: 'Guardar', exact: true }));
+        await c.see('El certificado llega el lunes.');
+        const row = c.table('opportunity_activity').find(item => item.opportunity_id === opp(2) && item.kind === 'progress');
+        c.check('la nota quedó corregida y dice que se editó', /llega el lunes/.test(row?.body) && Boolean(row?.data?.editedAt), JSON.stringify(row?.data));
+        c.check('se lee «editada»', await shows(c, /· editada/));
+      } },
+    ] },
+
   { id: 'miembro-urgente', persona: 'member', title: 'Integrante: abrir lo más urgente y empezar a gestionarlo', goal: 'Empezar la licitación de guardias, que cierra mañana.', passWrites: [ACTIONS, NOTIFY],
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Mis oportunidades asignadas'); } },
@@ -324,6 +410,14 @@ export default () => [
       { say: 'Empiezo a gestionarla', do: async c => {
         await c.click('Empezar a gestionarla'); await c.wait(1200);
         c.check('quedó en gestión', stateOf(c, 6) === 'working', `estado: ${stateOf(c, 6)}`);
+      } },
+    ] },
+  { id: 'miembro-movil-tareas', persona: 'member', viewport: 'phone', title: 'Integrante en el móvil: «Mis tareas» y la lista de una oportunidad', goal: 'Revisar qué tiene vencido desde el teléfono.', passWrites: [ACTIONS, NOTIFY],
+    steps: [
+      { say: 'Abro «Mis tareas»', do: async c => { await c.go('/opportunities?vista=tareas'); await c.see('Vencidas'); await c.see('Pedir la visita a terreno de las sucursales'); } },
+      { say: 'Abro la licitación de una tarea', do: async c => {
+        await c.clickOn(c.page.getByRole('button', { name: 'Compra Ágil: revisión de antecedentes de postulantes', exact: true })); await c.see('Plan de trabajo');
+        c.check('la tarea dice su fecha y su responsable', await shows(c, 'Preparar el anexo técnico'));
       } },
     ] },
   { id: 'admin-movil', persona: 'owner', viewport: 'phone', title: 'Administrador en el móvil: ver el embudo y abrir una', goal: 'Revisar qué hay recomendado desde el teléfono.',

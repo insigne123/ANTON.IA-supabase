@@ -50,6 +50,11 @@ import type { SetupStepId } from '@/lib/commercial-opportunities/company-setup';
 import { criteriaDraft, draftToSave, type CriteriaDraft } from '@/lib/commercial-opportunities/search-settings';
 import { CloseReasonDialog, type CloseTarget } from './CloseReasonDialog';
 import { TenderResultCallout } from './TenderResultCallout';
+import { OpportunityTasks } from './OpportunityTasks';
+import { PlanTasksDialog, type PlannedTask } from './PlanTasksDialog';
+import { MyTasks } from './MyTasks';
+import { OpportunityActivity, type ActivityRow } from './OpportunityActivity';
+import { addDays, chileDay, dayLabel, dayOfDueAt, dueAtOfDay, planTaskDrafts, type MyTask, type OpportunityTask, type TaskStatus } from '@/lib/commercial-opportunities/work-tasks';
 import type { CloseDetail, StoredResult } from '@/lib/commercial-opportunities/close-outcome';
 import { DiscardDialog, type DiscardTarget } from './DiscardDialog';
 import { AssignmentRulesDialog, RuleAssignDialog, type rulesOf } from './AssignmentRules';
@@ -62,14 +67,14 @@ import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublic
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
 import { pickPrefillFiles } from '@/lib/commercial-opportunities/prefill-package';
 import { OPPORTUNITY_SOURCES, bySource, closesLabel, inCategories, parseCategories, sourceKinds, workAdvice, type OpportunityCategory, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
-import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
+import { humanDate, reportDecision, reportNextSteps } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@/lib/commercial-opportunities/workspace';
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { readWorkspaceUrl, workspaceUrl, type WorkspaceView } from '@/lib/commercial-opportunities/workspace-url';
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress; documentId?: string };
-type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
+type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string; role?: string }>; activity: ActivityRow[]; tasks: OpportunityTask[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
   marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null; canPrice?: boolean }; fit?: OpportunityFitView };
 /** The kinds with bases to answer with an offer (server/commercial-opportunities/workspace-offer.ts). */
 const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
@@ -89,6 +94,8 @@ const localDate = (value: string) => value ? new Date(value).toISOString() : nul
 const QUICK_DUE: Array<[string, number]> = [['Hoy', 0], ['Mañana', 1], ['En 3 días', 3], ['En una semana', 7]];
 const dueIn = (days: number) => { const at = new Date(); at.setDate(at.getDate() + days); at.setHours(9, 0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, '0'); return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T09:00`; };
+/** The same quick picks for a task, which is due on a day (work-tasks.ts): «Hoy» is today in Chile. */
+const taskDay = (days: number) => addDays(chileDay(new Date()), days);
 const money = (n: number) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(n);
 /** «3,40»: the month's spending as it reads in Chile. */
 const cents = (n: number) => new Intl.NumberFormat('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
@@ -132,6 +139,11 @@ export function OpportunityWorkWorkspace() {
   const [assignFor, setAssignFor] = useState<{ id: string; title: string; revision: number } | null>(null);
   const [draft, setDraft] = useState<Record<string, any>>({}); const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState(''); const [pendingQuestion, setPendingQuestion] = useState<string | null>(null); const [messages, setMessages] = useState<any[]>([]);
+  // «Convertir el plan en tareas» (OPP-21) and «Mis tareas» (OPP-27): the preview while it is open, and this person's tasks while the view is on screen.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [myTasks, setMyTasks] = useState<MyTask[] | null>(null); const [myTasksError, setMyTasksError] = useState('');
+  // The part an opportunity opens on when it is not the report: its tasks from «Mis tareas», or what a link names (?seccion=…).
+  const openOn = useRef<string | null>(null);
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
@@ -186,7 +198,8 @@ export function OpportunityWorkWorkspace() {
   useEffect(() => { if (!feedback) { setUndo(null); return; } const timer = setTimeout(() => setFeedback(''), undo ? 9000 : 6000); return () => clearTimeout(timer); }, [feedback, undo]);
   // The filters and the open opportunity live in the address (workspace-url.ts): read when the page opens and when the browser goes back.
   useEffect(() => {
-    const read = () => { const state = readWorkspaceUrl(window.location.search); setView(state.view); setFilter(state.filter); setSource(state.source); setQuery(state.query); setSearch(state.query);
+    const read = () => { const state = readWorkspaceUrl(window.location.search); if (state.op && state.section) openOn.current = state.section;
+      setView(state.view); setFilter(state.filter); setSource(state.source); setQuery(state.query); setSearch(state.query);
       setCategories(state.categories); setSort(state.sort); setSelected(state.op); setUrlRead(true); };
     read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read);
   }, []);
@@ -217,7 +230,7 @@ export function OpportunityWorkWorkspace() {
     } catch (e) { if (!signal?.aborted && selectedRef.current === id) { setDetail(null); setMessages([]); setProblem(e instanceof Error ? e.message : 'No se pudo abrir.'); } }
   }, []);
   useEffect(() => {
-    setDetail(null); setMessages([]); setTab('summary'); setNote(''); setPendingQuestion(null); watching.current = null;
+    setDetail(null); setMessages([]); setTab(openOn.current ?? 'summary'); openOn.current = null; setNote(''); setPendingQuestion(null); setPlanOpen(false); watching.current = null;
     if (!selected) return; const controller = new AbortController(); void loadDetail(selected, controller.signal);
     // Every 8 s while a report or an answer is on its way, every 45 s otherwise, and never in a hidden tab.
     let last = Date.now();
@@ -394,8 +407,9 @@ export function OpportunityWorkWorkspace() {
     box?.scrollIntoView({ block: 'center' });
     box?.focus({ preventScroll: true });
   }, [detail]);
-  const open = (id: string, focus?: 'decision') => {
+  const open = (id: string, focus?: 'decision' | 'tasks' | 'activity') => {
     focusDecision.current = focus === 'decision' ? id : null;
+    openOn.current = focus === 'tasks' || focus === 'activity' ? focus : null;
     setProblem(''); setSelected(id);
     const next = markOpened(openedRef.current, id); setOpened(next);
     try { window.localStorage.setItem(openedKey(user?.id), JSON.stringify(next)); } catch { /* private mode: it is remembered until the page closes */ }
@@ -414,6 +428,52 @@ export function OpportunityWorkWorkspace() {
     const done = await perform('state', { state: to, expectedRevision: detail.work.revision, ...(note ? { note } : {}) }, selected, true);
     if (done) setFeedback(to === 'blocked' ? 'Avisamos a los administradores del bloqueo.' : `Pasó a «${WORK_STATE_LABELS[to]}».`);
     return Boolean(done);
+  };
+  // «Plan y tareas» (OPP-27): a tick or a stage, the owner from the row, deleting after a question; and the plan into tasks at once (OPP-21).
+  const taskStatus = (task: OpportunityTask, status: TaskStatus) => perform('task_status', { id: task.id, status }, selected, true);
+  const taskOwner = (task: OpportunityTask, ownerId: string | null) => void perform('task', { id: task.id, title: task.title, ownerId, dueAt: task.due_at, evidence: task.evidence || '' }, selected, true)
+    .then(result => { if (result && ownerId && ownerId !== user?.id) setFeedback('Le avisamos a quien ahora tiene la tarea.'); });
+  const editTask = (task: OpportunityTask) => { setDraft({ id: task.id, title: task.title, ownerId: task.owner_id || '', day: dayOfDueAt(task.due_at), evidence: task.evidence || '' }); setModal('task'); };
+  const removeTask = async (task: OpportunityTask) => {
+    if (!(await confirm({ title: '¿Eliminar la tarea?', description: `«${task.title}» sale del plan. Si ya no hace falta, también puedes marcarla como hecha.`, confirmLabel: 'Eliminar', cancelLabel: 'Cancelar', tone: 'danger' }))) return;
+    if (await perform('task_delete', { id: task.id }, selected, true)) setFeedback('Tarea eliminada.');
+  };
+  const createPlanned = async (tasks: PlannedTask[]) => {
+    const result = await perform('tasks', { tasks }, selected, true) as { created: number } | null;
+    if (!result) return;
+    setPlanOpen(false);
+    const told = tasks.some(task => task.ownerId && task.ownerId !== user?.id);
+    setFeedback(`${result.created === 1 ? 'Creamos la tarea' : `Creamos ${result.created} tareas`}${told ? ' y avisamos a cada responsable' : ''}.`);
+  };
+  // «Actividad» (OPP-28): a note that names people tells them; one's own notes can be corrected or deleted.
+  const addNote = async (text: string) => {
+    const result = await perform('activity', { kind: 'note', text, dueAt: null }, selected, true) as { mentioned?: number } | null;
+    if (result) setFeedback(result.mentioned ? `Nota guardada. ${result.mentioned === 1 ? 'Le avisamos a la persona que mencionaste' : `Les avisamos a las ${result.mentioned} personas que mencionaste`}.` : 'Nota guardada.');
+    return Boolean(result);
+  };
+  const editNote = async (id: string, text: string) => Boolean(await perform('note_edit', { id, text }, selected, true));
+  const removeNote = async (row: ActivityRow) => {
+    if (!(await confirm({ title: '¿Eliminar tu nota?', description: 'Deja de verse en la actividad para todo el equipo.', confirmLabel: 'Eliminar', cancelLabel: 'Cancelar', tone: 'danger' }))) return;
+    if (await perform('note_delete', { id: row.id }, selected, true)) setFeedback('Nota eliminada.');
+  };
+  // «Mis tareas» (OPP-27): read when the view opens and after each change; a tick marks it done, with «Deshacer».
+  const loadMyTasks = useCallback(async () => {
+    setMyTasksError('');
+    try { setMyTasks((await json(await fetch('/api/commercial-opportunities/workspace?view=tasks', { cache: 'no-store' }))).tasks || []); }
+    catch (e) { setMyTasksError(e instanceof Error ? e.message : 'No se pudieron cargar tus tareas.'); }
+  }, []);
+  useEffect(() => { if (view === 'tasks' && !selected) void loadMyTasks(); }, [view, selected, loadMyTasks]);
+  const setMyTask = async (task: MyTask, status: TaskStatus) => {
+    try {
+      await json(await fetch(`/api/commercial-opportunities/${task.opportunity.id}/workspace`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'task_status', data: { id: task.id, status } }) }));
+      return true;
+    } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar.'); return false; }
+    finally { await Promise.all([loadMyTasks(), load()]); }
+  };
+  const finishMyTask = async (task: MyTask) => {
+    if (!(await setMyTask(task, 'done'))) return;
+    setFeedback(`Hecha: «${task.title.length > 60 ? `${task.title.slice(0, 59)}…` : task.title}».`);
+    setUndo({ label: 'Deshacer', run: () => void setMyTask(task, task.status) });
   };
   const decide = async (type: 'ask' | 'no_go', text: string, dueAt: string | null) => {
     const done = await perform('decision', { type, text, dueAt }, selected, true);
@@ -566,7 +626,10 @@ export function OpportunityWorkWorkspace() {
         from ? from.id : selected, Boolean(from));
       if (result && from) setFeedback(`«${from.title.length > 70 ? `${from.title.slice(0, 69)}…` : from.title}» quedó asignada: ya está en «Asignadas».`);
     }
-    else if (modal === 'task') result = await perform('task', { title: draft.title, ownerId: draft.ownerId || null, dueAt: localDate(draft.dueAt || ''), status: 'pending', evidence: draft.evidence || '' });
+    else if (modal === 'task') {
+      result = await perform('task', { ...(draft.id ? { id: draft.id } : {}), title: draft.title, ownerId: draft.ownerId || null, dueAt: dueAtOfDay(draft.day), evidence: draft.evidence || '' }, selected, true);
+      if (result) setFeedback(draft.id ? 'Tarea actualizada.' : draft.ownerId && draft.ownerId !== user?.id ? 'Tarea creada. Le avisamos a quien la tiene.' : 'Tarea creada.');
+    }
     else {
       result = await perform('create', { requestId:draft.requestId,title: draft.title, company: draft.company, kind: draft.kind || 'private_tender', description: draft.description || '', url: draft.url || null, deadline: localDate(draft.deadline || ''), amount: draft.amount ? Number(draft.amount) : null, currency: draft.currency || 'CLP' }, null, true);
       if (result?.id) {
@@ -663,6 +726,9 @@ export function OpportunityWorkWorkspace() {
   const item = detail?.item;
   const signal = isSignalKind(item?.kind);
   const latest = detail?.reports[0];
+  // The plan of the latest report as tasks to create (OPP-21): its steps, or «Qué hacer ahora» when it has none.
+  const planDrafts = latest && detail ? planTaskDrafts(latest.report.tasks.length ? latest.report.tasks : reportNextSteps(latest.report).map(title => ({ title })),
+    { deadline: detail.item.deadline_at, responsibleId: detail.work?.responsible_id ?? null, people: detail.participants, existing: detail.tasks.map(task => task.title) }) : [];
   const newerDocuments = latest ? (detail?.documents || []).filter(d => d.source_kind === 'upload' && Date.parse(d.created_at) > Date.parse(latest.created_at)) : [];
   const links = usePublicLinks(selected, item?.kind);
   const advice = item ? workAdvice(item) : null;
@@ -699,16 +765,23 @@ export function OpportunityWorkWorkspace() {
       }} /> : null}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
         <Button onClick={openContext}>Confirmar oferta</Button></div>}
-      {view !== 'assistant' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={id => open(id)} onDecision={id => open(id, 'decision')}
+      {view !== 'assistant' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={(id, section) => open(id, section)} onDecision={id => open(id, 'decision')}
         onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
       {admin && view !== 'assistant' && overview.documentAlerts?.length ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-4 py-3 text-sm">
         <p className="min-w-0"><span className="font-medium">{overview.documentAlerts[0].text}</span>{overview.documentAlerts.length > 1 ? <span className="text-muted-foreground"> · y {overview.documentAlerts.length - 1} más por renovar</span> : null}</p>
         <Button size="sm" variant="outline" onClick={() => setProfileOpen(true)}>Ver documentos</Button></div> : null}
       {view !== 'assistant' && <TenderPrerequisites />}
-      <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{(admin ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['market', 'Mercado público'], ['assistant', 'Asistente']] as const : [['list', 'Mis oportunidades'], ['assistant', 'Asistente']] as const).map(([key, label]) => {
-        const pressed = admin || key === 'assistant' ? view === key : view !== 'assistant';
-        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', pressed ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>; })}</div>
+      {/* «Mis tareas» (OPP-27) for everyone who works: a member always sees it; an administrator once they have tasks of their own. */}
+      <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{((admin
+        ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['market', 'Mercado público'], ...(overview.myTasks?.open || view === 'tasks' ? [['tasks', 'Mis tareas']] : []), ['assistant', 'Asistente']]
+        : [['list', 'Mis oportunidades'], ['tasks', 'Mis tareas'], ['assistant', 'Asistente']]) as Array<[WorkspaceView, string]>).map(([key, label]) => {
+        const pressed = admin || key !== 'list' ? view === key : view !== 'assistant' && view !== 'tasks';
+        const late = key === 'tasks' ? overview.myTasks?.late ?? 0 : 0;
+        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', pressed ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>
+          {label}{key === 'tasks' && overview.myTasks?.open ? <span className="tabular-nums text-muted-foreground">{overview.myTasks.open}</span> : null}
+          {late ? <><span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden="true" /><span className="sr-only">, {late === 1 ? '1 vencida' : `${late} vencidas`}</span></> : null}</button>; })}</div>
       {view === 'assistant' ? <OpportunityAssistant admin={admin} threadId={assistantThread} onThread={setAssistantThread} onOpen={open} onHandoff={continueIn} />
+        : view === 'tasks' ? <MyTasks tasks={myTasks} error={myTasksError} busy={busy} onOpen={id => open(id, 'tasks')} onDone={finishMyTask} onRetry={() => void loadMyTasks()} />
         : admin && view === 'market' ? <PublicMarket onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} onProfile={() => setProfileOpen(true)} />
         : admin && view === 'pipeline' ? <>
         <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} />
@@ -758,7 +831,7 @@ export function OpportunityWorkWorkspace() {
         {pickedOpen ? <Button type="button" disabled={busy} onClick={openBulkAssign}><Users className="mr-2 h-4 w-4" aria-hidden="true" />Asignar</Button> : null}
       </ActionBar> : null}
       </>}
-      {!(admin && (view === 'pipeline' || view === 'market')) && view !== 'assistant' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
+      {!(admin && (view === 'pipeline' || view === 'market')) && view !== 'assistant' && view !== 'tasks' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
     </>}
     {selected && <>
       <Button variant="ghost" className="-ml-2 self-start" onClick={close}><ArrowLeft className="mr-2 h-4 w-4" />Oportunidades</Button>
@@ -847,9 +920,13 @@ export function OpportunityWorkWorkspace() {
           {signal && <input id="op-document" type="file" multiple accept={ACCEPTED_FILES} className="sr-only" onChange={e => void upload(Array.from(e.target.files || []), () => undefined)} />}
           <div><h2 className="mb-3 font-semibold">En el expediente</h2><DocumentList id={selected} documents={detail.documents} kind={item.kind} scanning={scanning} onUploadMore={() => document.getElementById('op-document')?.click()} /></div>
         </section>}
-        {tab === 'tasks' && <section className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Plan de trabajo</h2><Button variant="outline" onClick={() => { setDraft({}); setModal('task'); }}>Crear tarea</Button></div>{!detail.tasks.length && <p className="rounded-xl border p-5 text-sm text-muted-foreground">{latest ? 'Crea la primera tarea o usa «Crear tarea» en los pasos del informe.' : 'Crea la primera tarea. Cuando generes el informe, podrás convertir sus pasos en tareas con un clic.'}</p>}{detail.tasks.map(t => <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{t.title}</p><p className="mt-1 text-xs text-muted-foreground">{date(t.due_at)} · {detail.participants.find(p => p.user_id === t.owner_id)?.name || 'Sin responsable'}</p>{t.evidence && <p className="mt-2 text-sm">{t.evidence}</p>}</div><select aria-label={`Estado de ${t.title}`} value={t.status} disabled={busy} onChange={e => void perform('task', { id: t.id, title: t.title, ownerId: t.owner_id, dueAt: t.due_at, status: e.target.value, evidence: t.evidence })} className="h-10 rounded-md border bg-background px-3 text-sm">{[['pending', 'Pendiente'], ['working', 'En curso'], ['done', 'Realizada'], ['blocked', 'Bloqueada']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>)}</section>}
+        {tab === 'tasks' && <OpportunityTasks tasks={detail.tasks} people={detail.participants} busy={busy} planLeft={planDrafts.filter(draft => !draft.exists).length}
+          canDelete={task => admin || task.created_by === user?.id || detail.work?.responsible_id === user?.id}
+          onPlan={() => { setProblem(''); setPlanOpen(true); }} onCreate={() => { setDraft({}); setModal('task'); }} onEdit={editTask} onStatus={taskStatus} onOwner={taskOwner} onDelete={task => void removeTask(task)} />}
         {tab === 'contacts' && <OpportunityContacts id={selected} company={item.company_name || item.buyer_name || item.title} domain={item.company_domain} titles={detail.decisionMakerTitles || []} />}
-        {tab === 'activity' && <section className="space-y-4"><h2 className="font-semibold">Actividad del equipo</h2><form onSubmit={e => { e.preventDefault(); void perform('activity', { kind: 'note', text: note, dueAt: null }).then(r => { if (r) setNote(''); }); }} className="space-y-2"><Label htmlFor="op-note">Registrar avance o nota</Label><Textarea id="op-note" value={note} onChange={e => setNote(e.target.value)} maxLength={4000} placeholder="Ej.: enviamos las consultas al comprador; esperamos respuesta el 23 de octubre." /><Button disabled={busy || !note.trim()}>Guardar avance</Button></form><ol aria-label="Actividad" className="ml-3.5 space-y-5 border-l border-border/70 pl-6">{detail.activity.map(a => { const who = (detail.members || detail.participants).find(p => p.user_id === a.actor_id)?.name || 'El sistema'; return <li key={a.id} className="relative"><InitialsAvatar name={who} size="sm" className="absolute -left-[38px] top-0 ring-4 ring-background" /><p className="text-sm leading-6">{a.body}</p><p className="text-xs text-muted-foreground">{who} · {date(a.created_at)}</p></li>; })}</ol></section>}
+        {tab === 'activity' && <OpportunityActivity activity={detail.activity} members={detail.members || detail.participants} userId={user?.id ?? null} busy={busy} when={at => date(at)}
+          mentionable={(detail.members || detail.participants).filter(member => detail.participants.some(person => person.user_id === member.user_id) || member.role === 'owner' || member.role === 'admin')}
+          note={note} onNote={setNote} onAdd={addNote} onEdit={editNote} onDelete={row => void removeNote(row)} />}
         {tab === 'chat' && <OpportunityChat messages={messages} pending={pendingQuestion} documentCount={detail.documents.length} busy={busy}
           suggestions={signal ? SUGGESTED_QUESTIONS.signal : SUGGESTED_QUESTIONS.tender}
           placeholder={signal ? '¿Qué cargo debería contactar primero?' : 'Pregunta lo que quieras sobre esta licitación…'} onAsk={ask} />}
@@ -857,12 +934,14 @@ export function OpportunityWorkWorkspace() {
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
     {admin && <CloseReasonDialog target={closing} busy={busy} error={closing ? problem : ''} onConfirm={confirmClose} onCancel={() => setClosing(null)} />}
+    {detail ? <PlanTasksDialog open={planOpen} drafts={planDrafts} people={detail.participants} busy={busy} error={planOpen ? problem : ''}
+      closeLabel={detail.item.deadline_at ? dayLabel(chileDay(detail.item.deadline_at), chileDay(new Date())) : null} onConfirm={tasks => void createPlanned(tasks)} onCancel={() => setPlanOpen(false)} /> : null}
     {admin && <DiscardDialog target={discarding} busy={busy} error={discarding ? problem : ''} onConfirm={confirmDiscard} onCancel={() => setDiscarding(null)} />}
     {admin ? <AssignmentRulesDialog open={rulesOpen} rules={adminSettings.rules} members={overview?.members || []} busy={busy} error={rulesOpen ? problem : ''} onSave={saveRules} onCancel={() => setRulesOpen(false)} /> : null}
     {admin ? <RuleAssignDialog groups={ruleAssign} titles={Object.fromEntries((pipeline?.items || []).map(item => [item.id, item.title]))} busy={busy} error={ruleAssign ? problem : ''}
       onConfirm={confirmRuleAssign} onCancel={() => setRuleAssign(null)} /> : null}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
-    <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignMany ? `Asignar ${assignMany.length === 1 ? 'una oportunidad' : `${assignMany.length} oportunidades`}` : assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'Dónde buscamos y qué. La IA preparó los criterios desde tu oferta; corrígelos si algo no calza. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
+    <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignMany ? `Asignar ${assignMany.length === 1 ? 'una oportunidad' : `${assignMany.length} oportunidades`}` : assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : draft.id ? 'Editar tarea' : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'Dónde buscamos y qué. La IA preparó los criterios desde tu oferta; corrígelos si algo no calza. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>
           <WorkspaceCompanyFields draft={draft} field={field} />
@@ -880,7 +959,8 @@ export function OpportunityWorkWorkspace() {
         : modal === 'task' ? <>
           <div className="space-y-2"><Label htmlFor="op-task-title">Acción</Label><Input id="op-task-title" required value={draft.title || ''} onChange={e => field('title', e.target.value)} placeholder="Ej.: pedir el certificado de antecedentes laborales" /></div>
           <div className="space-y-2"><Label htmlFor="op-task-owner">Responsable</Label><select id="op-task-owner" value={draft.ownerId || ''} onChange={e => field('ownerId', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="">Sin asignar</option>{detail?.participants.map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select></div>
-          <div className="space-y-1.5"><p className="text-sm font-medium">Para cuándo · opcional</p><div className="flex flex-wrap items-center gap-2">{QUICK_DUE.map(([label, days]) => <button key={label} type="button" aria-pressed={draft.dueAt === dueIn(days)} onClick={() => field('dueAt', dueIn(days))} className={cn(filterChip(draft.dueAt === dueIn(days)), 'h-9')}>{label}</button>)}<Input id="op-task-due" type="datetime-local" aria-label="Otra fecha y hora" className="h-9 w-auto" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /></div></div>
+          {/* A task is due on a day (OPP-27): the quick ones, or any other in the calendar. */}
+          <div className="space-y-1.5"><p className="text-sm font-medium">Para cuándo · opcional</p><div className="flex flex-wrap items-center gap-2">{QUICK_DUE.map(([label, days]) => <button key={label} type="button" aria-pressed={draft.day === taskDay(days)} onClick={() => field('day', draft.day === taskDay(days) ? '' : taskDay(days))} className={cn(filterChip(draft.day === taskDay(days)), 'h-9')}>{label}</button>)}<Input id="op-task-due" type="date" aria-label="Otra fecha" className="h-9 w-auto" value={draft.day || ''} onChange={e => field('day', e.target.value)} /></div></div>
           <div className="space-y-2"><Label htmlFor="op-task-evidence">Evidencia o resultado esperado · opcional</Label><Textarea id="op-task-evidence" value={draft.evidence || ''} onChange={e => field('evidence', e.target.value)} /></div></>
         : <>
           <div role="group" aria-label="Cómo cargarla" className="flex w-full rounded-xl bg-muted p-1 sm:w-fit">{([['upload', 'Subir documento'], ['write', 'Escribir los datos']] as const).map(([key, label]) =>

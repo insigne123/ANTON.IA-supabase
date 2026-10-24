@@ -9,9 +9,10 @@ type Row = Record<string, any>;
 
 /**
  * Who hears about it: a decision, a proposal not to apply or a block goes to the administrators and whoever is in charge; an answer, to
- * whoever asked and whoever is in charge. Never to the person who did it.
+ * whoever asked and whoever is in charge; a note or tasks, to the people named or given them. Never to the person who did it.
  */
-async function recipients(client: SupabaseClient, scope: WorkScope, id: string, kind: DecisionNoticeKind, asker: string | null) {
+async function recipients(client: SupabaseClient, scope: WorkScope, id: string, kind: DecisionNoticeKind, asker: string | null, users?: string[]) {
+  if (users) return [...new Set(users.filter(user => user && user !== scope.userId))];
   const work = await client.from('opportunity_work').select('responsible_id').eq('organization_id', scope.organizationId).eq('opportunity_id', id).maybeSingle();
   const responsible = (work.data as Row | null)?.responsible_id ? String((work.data as Row).responsible_id) : null;
   if (kind === 'reply') return [...new Set([asker, responsible].filter((user): user is string => Boolean(user) && user !== scope.userId))];
@@ -25,12 +26,12 @@ async function recipients(client: SupabaseClient, scope: WorkScope, id: string, 
  * OPPORTUNITY_DECISION_EMAIL=off stops them all.
  */
 export async function notifyDecisionByEmail(client: SupabaseClient, scope: WorkScope, id: string,
-  input: { kind: DecisionNoticeKind; text: string; dueAt?: string | null; asker?: string | null },
+  input: { kind: DecisionNoticeKind; text: string; dueAt?: string | null; asker?: string | null; users?: string[]; count?: number },
   deps: { send?: Send; appUrl?: string; env?: Record<string, string | undefined> } = {}) {
   const env = deps.env ?? process.env;
   const result = { sent: 0, skipped: 0, failed: 0 };
   if (env.OPPORTUNITY_DECISION_EMAIL === 'off') return result;
-  const to = await recipients(client, scope, id, input.kind, input.asker ?? null);
+  const to = await recipients(client, scope, id, input.kind, input.asker ?? null, input.users);
   if (!to.length) return result;
   const [item, people] = await Promise.all([
     client.from('commercial_opportunities').select('title').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle(),
@@ -48,7 +49,7 @@ export async function notifyDecisionByEmail(client: SupabaseClient, scope: WorkS
     if (!address || isTestAddress(address) || !readAlertsEmail(profile?.signatures)) { result.skipped++; continue; }
     try {
       const email = decisionEmail({ name: String(profile?.full_name || '').trim(), actor: actorName, kind: input.kind, title: String((item.data as Row).title || ''),
-        text: input.text, dueAt: input.dueAt ?? null, opportunityId: id, appUrl });
+        text: input.text, dueAt: input.dueAt ?? null, opportunityId: id, appUrl, ...(input.count ? { count: input.count } : {}) });
       const sent = await send({ userId: user, to: address, ...email });
       if (sent.ok) result.sent++; else result.failed++;
     } catch {

@@ -15,6 +15,7 @@ import { LIST_VIEWS } from '@/lib/commercial-opportunities/list-stages';
 import { assignOpportunities, bulkSchema, discardOpportunities, moveOpportunities } from '@/lib/server/commercial-opportunities/workspace-discards';
 import { notifyBulkAssignment, readTeams } from '@/lib/server/commercial-opportunities/workspace-assignment-notice';
 import { adminSettingsInputSchema, saveAdminSettings } from '@/lib/server/commercial-opportunities/workspace-admin-settings';
+import { countMyOpportunityTasks, readMyOpportunityTasks } from '@/lib/server/commercial-opportunities/workspace-tasks';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
@@ -24,6 +25,8 @@ export async function GET(request: Request) {
     // Where they came from (licitaciones, Compra Ágil, LinkedIn, recibidas) and the words searched: the pipeline and the list alike.
     const source = z.enum(OPPORTUNITY_SOURCES.map(item => item.id) as [OpportunitySource, ...OpportunitySource[]]).catch('all').parse(params.get('source') || 'all');
     const categories = parseCategories(params.get('category'));
+    // «Mis tareas» (OPP-27): what this person has to do across the opportunities they work.
+    if (params.get('view') === 'tasks') return opportunitiesJson({ tasks: await readMyOpportunityTasks(auth.admin, scope) });
     if (params.get('view') === 'pipeline') {
       assertOpportunityAdmin(scope);
       const limit = z.coerce.number().int().min(0).max(PIPELINE_MAX).optional().catch(undefined);
@@ -34,9 +37,11 @@ export async function GET(request: Request) {
     // The list's filters are the stages of the pipeline (list-stages.ts); an unknown one reads everything this person can see.
     const options = z.object({ view: z.enum(LIST_VIEWS).catch('all'), query: z.string().max(200).catch(''), page: z.coerce.number().int().min(0).max(1000).catch(0) })
       .parse({ view: params.get('view') || 'all', query: params.get('query') || '', page: params.get('page') || '0' });
-    const overview = await readWorkspaceOverview(auth.admin, scope, { ...options, kinds: sourceKinds(source), categories, sort: parsePrioritySort(params.get('sort')) });
+    // How many of «Mis tareas» there are (and late) name the view; a failed count leaves it without a number.
+    const [overview, myTasks] = await Promise.all([readWorkspaceOverview(auth.admin, scope, { ...options, kinds: sourceKinds(source), categories, sort: parsePrioritySort(params.get('sort')) }),
+      countMyOpportunityTasks(auth.admin, scope).catch(() => null)]);
     // The company offer is confirmed by its admin, never borrowed from the operator's personal profile.
-    return opportunitiesJson({ ...overview, suggestion: null });
+    return opportunitiesJson({ ...overview, ...(myTasks ? { myTasks } : {}), suggestion: null });
   } catch (error) { return opportunitiesError(error); }
 }
 export async function POST(request: Request) {
