@@ -62,7 +62,7 @@ export default () => [
   { id: 'cowork-uso', persona: 'owner', title: 'Saber cuánto del uso del asistente llevo, antes de chocar con el tope',
     goal: 'Ver el uso de la conversación y el del día en el resumen (COW-15).',
     steps: [
-      { say: 'Abro la conversación de Sodexo', do: async c => { await c.go(`/cowork?work=${run(1)}`); await c.see('sí está reclutando en volumen'); } },
+      { say: 'Abro la conversación de Sodexo', do: async c => { await c.go(`/cowork?work=${run(7)}`); await c.see('sí está reclutando en volumen'); } },
       { say: 'Abro el resumen de la conversación', do: async c => {
         await c.click({ role: 'button', name: 'Ver resumen de la conversación' });
         await c.see('Uso del asistente');
