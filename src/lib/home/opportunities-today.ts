@@ -32,6 +32,9 @@ export type OpportunitiesToday = {
   closing: OpportunitySection & { href: string };
   /** Nothing to show: the card stays out of «Hoy». */
   empty: boolean;
+  /** What asks for the person now, for the number beside «Oportunidades» in the menu (APP-23): what waits for an answer, the reports
+   * ready, the ones closing without a team (administrators) and their own that are urgent. */
+  attention: number;
 };
 
 /** The recommended ones by closing date, the soonest first (lib/commercial-opportunities/workspace-url.ts). */
@@ -70,9 +73,10 @@ export function opportunitiesToday(input: OpportunitiesTodayInput): Opportunitie
   const waiting = section(asked.map(item => waitingLine(item, now, admin)));
   // An opportunity already in «waiting» is said there once.
   const said = new Set(asked.map(item => item.id));
-  const mine = section([...input.mine].filter(item => !said.has(item.id)).map(item => ({ item, due: dueOf(item, now) }))
+  const mineLines = [...input.mine].filter(item => !said.has(item.id)).map(item => ({ item, due: dueOf(item, now) }))
     .sort((a, b) => a.due[0] - b.due[0] || a.due[1] - b.due[1] || a.item.title.localeCompare(b.item.title, 'es'))
-    .map(({ item }) => mineLine(item, now)));
+    .map(({ item }) => mineLine(item, now));
+  const mine = section(mineLines);
   const reports = section(input.reports.filter((item, index, all) => all.findIndex(other => other.id === item.id) === index)
     .map(item => ({ id: item.id, title: clean(item.title), detail: item.offer ? 'El borrador de oferta está listo' : 'El informe está listo', urgent: false, href: href(item.id) })));
   const closing = section(admin ? [...input.closingWithoutTeam].filter(item => valid(item.deadlineAt)).sort((a, b) => Date.parse(a.deadlineAt) - Date.parse(b.deadlineAt))
@@ -80,5 +84,6 @@ export function opportunitiesToday(input: OpportunitiesTodayInput): Opportunitie
   return {
     admin, waiting, mine, reports, closing: { ...closing, href: CLOSING_THIS_WEEK_HREF },
     empty: !waiting.total && !mine.total && !reports.total && !closing.total,
+    attention: waiting.total + reports.total + closing.total + mineLines.filter(line => line.urgent).length,
   };
 }

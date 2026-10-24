@@ -136,6 +136,21 @@ export type BulkCampaign = {
 };
 export type CampaignDelivery = { draft_id: string; status: string; completed_at: string | null; error_message: string | null };
 
+/** How a launched campaign goes, for its row in «Tus campañas» (APP-10): who got its first e-mail and who answered after it went out. */
+export type CampaignListStats = { recipients: number; sent: number; replied: number };
+
+export function campaignListStats(campaign: Pick<BulkCampaign, 'recipients' | 'approved_at'>, sentDraftIds: Set<string>,
+  replies: Array<{ email?: string | null; replied_at?: string | null }>): CampaignListStats {
+  const since = Date.parse(campaign.approved_at || '') || 0;
+  const answered = new Set(replies.filter(row => (Date.parse(row.replied_at || '') || 0) >= since).map(row => String(row.email || '').trim().toLowerCase()));
+  const recipients = campaign.recipients || [];
+  return {
+    recipients: recipients.length,
+    sent: recipients.filter(person => person.messages.some(message => sentDraftIds.has(message.draftId))).length,
+    replied: recipients.filter(person => answered.has(person.email.trim().toLowerCase())).length,
+  };
+}
+
 const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 export function matchAudience(person: AudiencePerson, criteria: AudienceCriteria, now = Date.now()): string[] | null {
   if (criteria.enrichedOnly && !person.enriched) return null;

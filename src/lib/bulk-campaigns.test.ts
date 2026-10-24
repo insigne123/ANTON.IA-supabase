@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AI_RANK_CANDIDATE_LIMIT, SENIORITY_LEVELS, audiencePersonStatus, seniorityLabel, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
+import { AI_RANK_CANDIDATE_LIMIT, SENIORITY_LEVELS, audiencePersonStatus, campaignListStats, seniorityLabel, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
 
 const person: AudiencePerson = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', title: 'Operaciones', country: 'Chile', industry: '', size: '11-50', seniority: 'Manager', leadRef: 'lead', contacted: false, lastSentAt: null, replied: false, blockedReason: null, reasons: [], enriched: true };
 test('audience excludes prior contacts and missing industry evidence', () => {
@@ -146,4 +146,15 @@ test('«Nivel del cargo» chooses the codes the contacts carry, and the reason n
   assert.ok(matchAudience(manager, { ...defaultAudience, seniorities: ['manager', 'director'] })?.includes('Nivel: Gerente'));
   assert.equal(matchAudience(manager, { ...defaultAudience, seniorities: ['director'] }), null);
   assert.equal(matchAudience(manager, { ...defaultAudience, seniorities: ['gerente'] }), null, 'the Spanish word never matched the stored code: that is why it is a list');
+});
+
+test('a launched campaign says how it goes: who got its first e-mail and who answered after the launch (APP-10)', () => {
+  const recipient = (email: string, ...drafts: string[]) => ({ email, name: email, messages: drafts.map(draftId => ({ draftId })) }) as unknown as CampaignRecipient;
+  const campaign = { approved_at: '2026-10-20T12:00:00Z', recipients: [recipient('ana@cliente.cl', 'd1', 'd2'), recipient('Bruno@Cliente.cl', 'd3', 'd4'), recipient('carla@cliente.cl', 'd5', 'd6')] };
+  assert.deepEqual(campaignListStats(campaign, new Set(['d1', 'd3', 'd4']), [
+    { email: 'BRUNO@cliente.cl', replied_at: '2026-10-21T09:00:00Z' },
+    // Before the launch: an answer to something else.
+    { email: 'carla@cliente.cl', replied_at: '2026-10-19T09:00:00Z' },
+  ]), { recipients: 3, sent: 2, replied: 1 });
+  assert.deepEqual(campaignListStats({ approved_at: null, recipients: [] }, new Set(), []), { recipients: 0, sent: 0, replied: 0 });
 });
