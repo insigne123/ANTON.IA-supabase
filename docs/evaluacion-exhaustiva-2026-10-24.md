@@ -85,7 +85,7 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 
   Un integrante solo ve lo que un administrador le asigna (`opportunity_can_read` exige ser administrador o participante) y su pantalla se reduce a «Mis oportunidades | Asistente». Con 0 asignaciones en 11 días, las 28 personas habilitadas (31 miembros) encuentran «Aún no tienes oportunidades en esta vista. Las oportunidades que te asigne un administrador aparecerán aquí…»: una sala vacía, sin nada que hacer y sin mirar el radar. El cuello de botella es la persona que revisa ~1.200 «Por revisar» y asigna a mano.
 
-  *Evidencia:* código (SQL y `OpportunityWorkWorkspace.tsx:483`) y producción (`opportunity_work` = 0, `opportunity_participants` = 0).
+  *Evidencia:* código (SQL y `OpportunityWorkWorkspace.tsx:483`) y producción (`opportunity_work` = 0, `opportunity_participants` = 0). La pantalla antigua tenía «Me interesa» para cualquier integrante (ver OPP-08); se perdió en el cambio.
 
   *Propuesta:* (a) «Recomendadas» de solo lectura para integrantes con «Me interesa» (se asigna sola y avisa al administrador); (b) «Pedir que me asignen una»; (c) un estado vacío con tres pasos y qué esperar; (d) reglas de asignación (OPP-06).
 
@@ -132,6 +132,8 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
   En «Por revisar» y «Recomendadas» una oportunidad sin equipo solo ofrece «Asignar» y «Abrir». Las acciones del servidor son asignar, actividad, tarea, estado, informe, chat, vínculo, reconsiderar, marca, oferta, precios, calce, decisión… ninguna descarta. Quedan ~1.200 licitaciones «Por revisar» abiertas (de 1.768) y ~55 «Recomendadas»; las que no calzan se acumulan hasta que cierran, y la IA no aprende qué no sirve.
 
   *Evidencia:* código (`/api/commercial-opportunities/workspace`) y producción (inventario).
+
+  *Contexto:* la pantalla antigua sí tenía «Me interesa» y «Descartar» (estados nueva, te interesa, descartada y convertida; Plan 15) y se perdieron al pasar a la nueva: en producción las 8.979 filas siguen en `new` y ninguna tiene `claimed_by`. Restaurarlo es volver a usar una columna y una API que ya existen.
 
   *Propuesta:* «No es para nosotros» con motivo en una línea (precio, región, rubro, ya participamos, no hay plazo) que alimente «Qué buscamos» y la mande a «Archivadas».
 
@@ -327,7 +329,7 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 
 - **COW-01 · Cowork no sabe de Oportunidades como producto** · Producto · **A / M**
 
-  La guía «Lo que puedo hacer por ti» (7 grupos y web), los 6 chips de inicio y «Para hoy» no traen nada de licitaciones, Compra Ágil ni cierres. Para GrupoExpro, Cowork y Oportunidades son dos productos. *Propuesta:* chips y guía de Oportunidades para quien tiene acceso, `@` de oportunidades en el compositor, y una herramienta `opportunities.list` con puntaje, monto, etapa, equipo y orden por cierre.
+  La guía «Lo que puedo hacer por ti» (7 grupos y web), los 6 chips de inicio y «Para hoy» no traen nada de licitaciones, Compra Ágil ni cierres. Para GrupoExpro, Cowork y Oportunidades son dos productos. *Propuesta:* chips y guía de Oportunidades para quien tiene acceso, `@` de oportunidades en el compositor, y una herramienta `opportunities.list` con puntaje, monto, etapa, equipo y orden por cierre. Hoy devuelve como máximo 5 de cada tipo (empresas que contratan, licitaciones y proyectos del SEIA) y sus campos `status` y `mine` son del modelo antiguo (siempre «nueva» y falso, porque la pantalla nueva ya no los cambia).
 
 - **COW-02 · Cowork no puede actuar sobre Oportunidades** · Producto · **A / M**
 
