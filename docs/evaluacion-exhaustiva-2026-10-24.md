@@ -435,7 +435,7 @@ OPP-31 (quitar la fila «Cambiar estado»), APP-03 (contraste de «Tu semana»),
 
 - **COW-25 · Sugerencias sin licitaciones** · Producto · **M / M**
 
-  «Para hoy» (2 sugerencias de prospección) no incluye «2 licitaciones cierran esta semana sin equipo» ni «tienes una decisión pendiente».
+  «Para hoy» (2 sugerencias de prospección) no incluye «2 licitaciones cierran esta semana sin equipo» ni «tienes una decisión pendiente». La agenda que Cowork lee para «¿Qué toca hoy?» (`agenda.ts`) tiene diez tipos de ítem (reunión pedida, respuesta interesada, aprobación, lead enfriado, rebote…) y ninguno es una licitación que cierra ni una decisión del equipo.
 
 - **COW-26 · Los chips no cambian con el contexto** · UX · **B / B**
 
