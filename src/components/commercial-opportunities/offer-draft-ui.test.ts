@@ -7,12 +7,18 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as offerDraft from '@/lib/commercial-opportunities/offer-draft';
 import * as offerAnnexes from '@/lib/commercial-opportunities/offer-annexes';
+import * as offerEdits from '@/lib/commercial-opportunities/offer-edits';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+const passthrough = ({ children }: { children?: React.ReactNode }) => React.createElement(React.Fragment, null, children);
 const dependencies: Record<string, unknown> = {
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
+  // The menu of a part, open: its items are read as the page would show them.
+  '@/components/ui/dropdown-menu': { DropdownMenu: passthrough, DropdownMenuTrigger: passthrough, DropdownMenuSeparator: () => null,
+    DropdownMenuContent: ({ children }: any) => React.createElement('div', { role: 'menu' }, children),
+    DropdownMenuItem: ({ children }: any) => React.createElement('div', { role: 'menuitem' }, children) },
   '@/components/ui/button': { Button: ({ asChild, variant, size, children, ...props }: any) => asChild ? children : React.createElement('button', props, children) },
   '@/components/ui/input': { Input: (props: any) => React.createElement('input', props) },
   '@/components/ui/label': { Label: ({ children, ...props }: any) => React.createElement('label', props, children) },
@@ -20,6 +26,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
   '@/lib/commercial-opportunities/offer-draft': offerDraft,
   '@/lib/commercial-opportunities/offer-annexes': offerAnnexes,
+  '@/lib/commercial-opportunities/offer-edits': offerEdits,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 const { OfferDraft } = load(await compile('./OfferDraft.tsx'));
@@ -126,4 +133,53 @@ test('whoever does not set the prices reads them with their totals, but cannot t
   assert.match(text(reader), /Neto/, 'the totals are still there');
   assert.match(reader, /value="7000000"/, 'and so is the price that was typed');
   assert.match(text(reader), /\$168\.000\.000/, 'with its subtotal');
+});
+
+const ANA = [{ user_id: 'u-ana', name: 'Ana Soto' }];
+const editing = { onSavePart: async () => true, onRewritePart: async () => true, onReview: async () => true, people: ANA };
+
+test('each part can be rewritten, by hand or asking the AI; an edited one says who, and the AI\'s text stays to go back to (OPP-24)', () => {
+  const edited = { ...saved, draft: { ...saved.draft, edits: {
+    'technical:0': { text: 'Hemos prestado servicios a 4 hospitales de la región.', by: 'u-ana', at: '2026-10-24T15:00:00.000Z' },
+    'compliance:0': { text: 'Cumplimos con 14 auxiliares.', by: 'u-ana', at: '2026-10-24T15:10:00.000Z', ai: true } } } };
+  const html = render({ offer: { available: true, latest: edited }, ...editing });
+  const page = text(html);
+  assert.match(page, /Hemos prestado servicios a 4 hospitales de la región\./);
+  assert.doesNotMatch(page, /Hemos prestado servicios a \[clientes del sector salud\]/, 'the AI\'s text only when asked for');
+  assert.match(page, /Editada por Ana Soto · 24 de octubre a las 12:00/);
+  assert.match(page, /Reescrita por la IA a pedido de Ana Soto · 24 de octubre a las 12:10/);
+  assert.match(html, /aria-label="Editar la sección «Experiencia»"/);
+  assert.match(html, /aria-label="Más acciones de la respuesta a «Dotación mínima de 12 auxiliares»"/);
+  assert.match(page, /Pedir cambios a la IA/);
+  assert.match(page, /Volver al texto de la IA/);
+  assert.match(page, /Antes de enviar, completa 2 datos marcados/, 'what is left to fill in is counted on the text as the team left it');
+  assert.doesNotMatch(text(render({ ...editing })), /Volver al texto de la IA|Editada por/, 'a part as the AI wrote it has nothing to go back to');
+});
+
+test('«Revisado por»: whoever is in charge marks it; a change after the review asks for another look; the rest of the team reads it', () => {
+  const none = text(render({ ...editing }));
+  assert.match(none, /Antes de presentarla, revísala completa y márcala como revisada\. Marcar como revisada/);
+  const member = text(render({ ...editing, canPrice: false }));
+  assert.match(member, /Aún no la revisa quien está a cargo\./);
+  assert.doesNotMatch(member, /Marcar como revisada/);
+  const reviewed = { ...saved, draft: { ...saved.draft, review: { by: 'u-ana', at: '2026-10-24T16:00:00.000Z' } } };
+  const holds = text(render({ ...editing, offer: { available: true, latest: reviewed } }));
+  assert.match(holds, /Revisado por Ana Soto el 24 de octubre a las 13:00/);
+  assert.doesNotMatch(holds, /Marcar como revisada|cambió después/);
+  const changed = { ...reviewed, draft: { ...reviewed.draft, edits: { letter: { text: 'Otra carta.', by: 'u-ana', at: '2026-10-24T17:00:00.000Z' } } } };
+  assert.match(text(render({ ...editing, offer: { available: true, latest: changed } })), /Revisado por Ana Soto el 24 de octubre a las 13:00; cambió después Marcar como revisada/);
+});
+
+test('a rewrite on its way waits on its part only; one that did not finish says why; the versions before keep their Word', () => {
+  const now = new Date().toISOString();
+  const html = render({ ...editing, versionHref: (id: string) => `/api/commercial-opportunities/op-1/export?doc=offer&format=docx&version=${id}`,
+    offer: { available: true, latest: saved, versions: [{ id: 'old-1', created_at: '2026-10-15T15:00:00Z' }] },
+    partJobs: [{ id: 'j1', part: 'technical:0', state: 'running', error: null, created_at: now },
+      { id: 'j2', part: 'compliance:0', state: 'blocked', error: 'Otra persona cambió esta parte antes de que la IA la reescribiera.', created_at: now }] });
+  const page = text(html);
+  assert.match(html, /role="status"[^>]*><svg[^>]*><\/svg>La IA está reescribiendo la sección «Experiencia»…/);
+  assert.match(page, /No se pudo reescribir la respuesta a «Dotación mínima de 12 auxiliares»: Otra persona cambió esta parte/);
+  assert.doesNotMatch(page, /Preparando otra versión/, 'a part is not a new version of the draft');
+  assert.match(html, /href="\/api\/commercial-opportunities\/op-1\/export\?doc=offer&amp;format=docx&amp;version=old-1"/);
+  assert.match(page, /Versiones anteriores: 15 de octubre a las 12:00 \(Word\)/);
 });

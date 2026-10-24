@@ -13,7 +13,8 @@ import {opportunitiesJson} from '@/lib/server/commercial-opportunities/responses
 import { opportunityExportName } from '@/lib/commercial-opportunities/export-file-name';
 import { offerDraftMarkdown } from '@/lib/commercial-opportunities/offer-draft';
 import { clampSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
-import { readOpportunityOffer } from '@/lib/server/commercial-opportunities/workspace-offer';
+import { readOpportunityOffer, readOpportunityOfferVersion } from '@/lib/server/commercial-opportunities/workspace-offer';
+import { withOfferEdits } from '@/lib/commercial-opportunities/offer-edits';
 import { loadTenderProfile } from '@/lib/server/commercial-opportunities/tender-profile-read';
 
 export const dynamic = 'force-dynamic'; export const maxDuration = 60;
@@ -22,7 +23,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
     const params = new URL(request.url).searchParams;
-    if (params.get('doc') === 'offer') return await offerExport(auth.admin, scope, id, z.enum(['docx', 'md']).parse(params.get('format') || 'docx'), params.get('annex') === null ? undefined : z.coerce.number().int().min(0).max(40).parse(params.get('annex')));
+    if (params.get('doc') === 'offer') return await offerExport(auth.admin, scope, id, z.enum(['docx', 'md']).parse(params.get('format') || 'docx'), params.get('annex') === null ? undefined : z.coerce.number().int().min(0).max(40).parse(params.get('annex')),
+      params.get('version') === null ? undefined : z.string().uuid().parse(params.get('version')));
     const format = z.enum(['pdf', 'md', 'docx', 'xlsx', 'zip']).parse(params.get('format') || 'pdf');
     const row = opportunityDb(await auth.admin.from('opportunity_reports').select('report').eq('organization_id', scope.organizationId).eq('opportunity_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle());
     const item = opportunityDb(await auth.admin.from('commercial_opportunities').select('kind,title,buyer_name,company_name,company_domain,company_linkedin_url,url,score,reasons,deadline_at,amount,currency,data,updated_at').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle());
@@ -81,9 +83,11 @@ function download(bytes: Uint8Array, mime: string, name: string, format: string)
  * «Tu oferta» in Word or Markdown: the latest draft with the prices the team typed, compared with the budget of the bases. The Word is
  * the formal document the team fills in (offer-docx.ts); `annex` asks for one form of the bases on its own.
  */
-async function offerExport(client: Parameters<typeof readOpportunityOffer>[0], scope: Parameters<typeof readOpportunityOffer>[1], id: string, format: 'docx' | 'md', annex?: number) {
-  const offer = await readOpportunityOffer(client, scope, id);
-  if (!offer.latest) throw new AuthError('Aún no hay un borrador de oferta.', 409);
+async function offerExport(client: Parameters<typeof readOpportunityOffer>[0], scope: Parameters<typeof readOpportunityOffer>[1], id: string, format: 'docx' | 'md', annex?: number, version?: string) {
+  // The latest version, or an older one by its id; with the parts the team rewrote (OPP-24).
+  const found = version ? await readOpportunityOfferVersion(client, scope, id, version) : (await readOpportunityOffer(client, scope, id)).latest;
+  if (!found) throw new AuthError(version ? 'Esa versión del borrador ya no está.' : 'Aún no hay un borrador de oferta.', version ? 404 : 409);
+  const offer = { latest: { ...found, draft: withOfferEdits(found.draft) } };
   if (annex !== undefined && !offer.latest.draft.annexes?.[annex]) throw new AuthError('Ese formulario no está en el borrador de la oferta.', 404);
   const [itemRow, reportRow, profile] = await Promise.all([
     client.from('commercial_opportunities').select('title,buyer_name,company_name,amount,deadline_at,data').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle(),

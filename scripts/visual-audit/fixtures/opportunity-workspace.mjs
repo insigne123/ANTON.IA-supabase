@@ -221,6 +221,23 @@ export default function workspace(ctx) {
     { id: report(20), organization_id: org, opportunity_id: opp(10), job_id: job(10), content_hash: 'fx-hash-10-first', profile_revision: 2, created_by: ctx.OWNER, created_at: ctx.daysAgo(9),
       report: { ...tenderReport, title: 'Servicios de contact center para atención ciudadana · Servicio de Registro Civil', recommendation: 'conditional', coverage: tenderReport.coverage.slice(0, 2), questions: tenderReport.questions.slice(0, -1) } },
   ];
+  // «Tu oferta» of the tender in preparation (OPP-24): the AI's draft as it came, one day old; the team edits it and marks it reviewed.
+  const offers = [{ id: ctx.uid(9680), organization_id: org, opportunity_id: opp(2), report_id: report(2), job_id: null, created_by: ctx.OWNER, prices: {}, revision: 0,
+    created_at: ctx.daysAgo(1), updated_at: ctx.daysAgo(1), draft: {
+      summary: 'Ofrecemos verificar los antecedentes laborales y judiciales de cada persona externa con informe en 48 horas, con [N.º de años] de experiencia en el retail.',
+      technical: [
+        { heading: 'Experiencia en verificación de antecedentes', criterion: 'Experiencia del oferente', weight: '40 %', body: 'Hemos verificado antecedentes para [N.º de clientes] empresas del retail, con [N.º de verificaciones] informes al año.', evidence: [] },
+        { heading: 'Plazo de entrega de informes', criterion: 'Plazo de entrega', weight: '30 %', body: 'Entregamos cada informe dentro de 48 horas hábiles desde la solicitud.', evidence: [] },
+      ],
+      compliance: [
+        { requirement: 'Informe por persona en un plazo máximo de 48 horas', answer: 'Cumplimos: cada informe sale en 48 horas hábiles.', evidence: [] },
+        { requirement: 'Confidencialidad de los datos personales (Ley 19.628)', answer: '[confirmar si cumplimos: acuerdo de confidencialidad firmado]', evidence: [] },
+      ],
+      economic: { lines: [{ description: 'Verificación de antecedentes por persona', unit: 'persona', quantity: 180, notes: 'Incluye antecedentes laborales y judiciales.', evidence: [] }],
+        priceBasis: 'net', validity: '60 días corridos', paymentTerms: '30 días desde la factura', notes: [] },
+      letter: '[nombre de la empresa] presenta su oferta para el servicio de verificación de antecedentes del personal externo de la Municipalidad de Providencia y declara conocer y aceptar las bases y sus anexos.',
+      missing: ['Certificado de antecedentes laborales de la empresa (F30) vigente'],
+    } }];
   const jobs = [
     { id: job(2), organization_id: org, opportunity_id: opp(2), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:2', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(2), updated_at: ctx.daysAgo(2) },
     // A report reading its documents: 4 of 10 parts in two minutes, as the job notes it (report-progress.ts), with the estimate of its size.
@@ -260,6 +277,7 @@ export default function workspace(ctx) {
       opportunity_tasks: tasks,
       opportunity_documents: documents,
       opportunity_reports: reports,
+      opportunity_offer_drafts: offers,
       opportunity_jobs: jobs,
       opportunity_notifications: notifications,
       opportunity_company_context: [context],
