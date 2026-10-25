@@ -75,13 +75,15 @@ export function coworkWriterTurn(deps: {
   generate: Generate;
   recordUsage: (reservationId: string | undefined, telemetry: StructuredTelemetry) => Promise<unknown>;
   record: (event: { action: typeof COWORK_AGENT_ACTION; input: ''; result: CoworkAgentStep }) => Promise<void>;
-  liveDraft: { push: (text: string) => void; review: () => void; adjust?: () => void; flush: () => Promise<void> } | null;
+  liveDraft: { push: (text: string) => void; review: () => void; adjust?: () => void; holdFromNow?: () => void; flush: () => Promise<void> } | null;
   timeLeft: () => number;
   models: CoworkWriterModels;
   efforts?: CoworkWriterEfforts;
   onCall?: (call: { model: string; durationMs: number }) => void;
 }) {
   return async (brief: CoworkWriteBrief, observations: CoworkObservation[]): Promise<CoworkAnswer> => {
+    // The Reviewer often changes the emails (7 of the 10 written in production between 1 and 20 Oct): they show once, when final.
+    deps.liveDraft?.holdFromNow?.();
     const output = await runCoworkWriter({
       request: deps.request, brief, userContext: deps.userContext, observations, now: new Date(),
       generate: async ({ role, schema, systemPrompt, prompt, stream, fix }) => {

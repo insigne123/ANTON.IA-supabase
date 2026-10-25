@@ -110,3 +110,14 @@ Se calificó también la primera respuesta de cada turno corregido, con el mismo
 - **Se ve más tarde:** la respuesta aparece cuando termina el turno, no cuando empieza a escribirse. En una respuesta limpia son unos 2 s más, más lo que tarde la revisión.
 - **El chequeo de cifras puede quedarse con la primera de más:** si la corrección trae una cifra que sí era correcta pero no aparece literal en las lecturas, se descarta. El motivo queda registrado (`new_figures`).
 - **La Jueza sigue siendo un modelo:** la calibración con Jev (`docs/cowork-jev.md`) mostró que sirve bien para una falla y mal como veredicto general. Ese trabajo va en el PR siguiente.
+
+## 25 oct 2026: texto en vivo, correos retenidos
+
+- **Medido en producción, solo lectura, 30 días (93 turnos completados):**
+  - la Jueza está apagada desde el 29 de septiembre (`COWORK_JUDGE_ENABLED=false`); ese día revisó 5 respuestas y corrigió 3;
+  - en las respuestas comunes nada cambia el texto después de escrito: la Jueza no corre, y la corrección de cierre ocurrió 0 de 70 veces en la medición de arriba;
+  - la Redactora escribió correos en 10 turnos y la Revisora cambió el texto en 7.
+- **Qué cambia:**
+  - `COWORK_ANSWER_HOLD_ENABLED` pasa a `false`: la respuesta común se ve mientras se escribe, porque esperar unos 48 s sin ver nada ya no compra una revisión;
+  - cuando la Redactora empieza, el borrador pasa a retenido (`holdFromNow()` en `live-draft.ts`): los correos se muestran una sola vez, cuando la Revisora terminó, con la misma línea de fase de siempre.
+- **Si la Jueza vuelve a encenderse**, conviene volver a `COWORK_ANSWER_HOLD_ENABLED=true` para que su corrección no reemplace un texto que ya se leyó.
