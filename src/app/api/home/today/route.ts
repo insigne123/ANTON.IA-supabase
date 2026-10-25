@@ -6,6 +6,8 @@ import {homeScope} from '@/lib/home/scope';
 import {preferredFullName} from '@/lib/lead-name';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 import { buildTodayPlan, commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 
 export const dynamic = 'force-dynamic';
@@ -19,8 +21,10 @@ export async function GET(request:Request) {
     const own = <T extends { eq: (column: string, value: string) => T }>(query: T) =>
       query.eq('organization_id', organizationId).eq('user_id', user.id);
 
-    const [profileRes, tokensRes, savedRes, enrichedRes, sentRes, repliedRes, commitmentsRes] = await Promise.all([
+    const [profileRes, company, tokensRes, savedRes, enrichedRes, sentRes, repliedRes, commitmentsRes] = await Promise.all([
       supabase.from('profiles').select('company_name,company_domain,full_name,job_title,signatures').eq('id', user.id).maybeSingle(),
+      // With a «Ficha de la empresa», the offer is the team's: nobody is asked to write it in «Perfil».
+      readCompanyFields(supabase, organizationId),
       // Tokens are service-only; only which providers are connected leaves this route (as /api/integrations/store-token does).
       getSupabaseAdminClient().from('provider_tokens').select('provider').eq('user_id', user.id),
       own(supabase.from('leads').select('id', { count: 'exact', head: true })),
@@ -35,7 +39,7 @@ export async function GET(request:Request) {
     const firstSend=await own(supabase.from('outbound_dispatches').select('id',{count:'exact',head:true})).eq('status','sent').eq('channel','email');
     if(firstSend.error)throw Error('No pudimos comprobar tu primer envío.');
 
-    const form = mapProfileToForm(profileRes.data as any);
+    const form = mapProfileToForm(withCompanyProfile(profileRes.data as any, company));
     const hasOffer = [form.valueProposition, form.description, form.services].some((value) => String(value || '').trim().length > 0);
     const contactedEmails = new Set((sentRes.data || []).map((row: any) => String(row.email || '').trim().toLowerCase()).filter(Boolean));
     const enrichedEmails = [...new Set((enrichedRes.data || []).map((row: any) => String(row.email || '').trim().toLowerCase()).filter(Boolean))];

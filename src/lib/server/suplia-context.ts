@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { normalizeSellerProfile } from '@/lib/server/seller-profile';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 
 export type SupliaAppContext = {
   user: {
@@ -183,7 +185,7 @@ export async function buildSupliaContext(auth: AuthContext): Promise<SupliaAppCo
   const userId = auth.user.id;
   const organizationId = auth.organizationId;
 
-  const [profileRes, tokenRes, leadsRes, contactedRes, campaignsRes, missionsRes, exceptionsRes, repliedRes, memoriesRes] = await Promise.all([
+  const [profileRes, tokenRes, leadsRes, contactedRes, campaignsRes, missionsRes, exceptionsRes, repliedRes, memoriesRes, company] = await Promise.all([
     admin.from('profiles').select('*').eq('id', userId).maybeSingle(),
     admin.from('provider_tokens').select('provider').eq('user_id', userId),
     admin.from('leads').select('*', { count: 'exact', head: true }).eq('organization_id', organizationId),
@@ -193,10 +195,12 @@ export async function buildSupliaContext(auth: AuthContext): Promise<SupliaAppCo
     admin.from('antonia_exceptions').select('*', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('status', 'open'),
     admin.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('organization_id', organizationId).not('replied_at', 'is', null),
     admin.from('suplia_memories').select('memory_type, key, value').eq('organization_id', organizationId).eq('status', 'approved').order('updated_at', { ascending: false }).limit(8),
+    readCompanyFields(admin, organizationId),
   ]);
 
   const providers = new Set((tokenRes.data || []).map((row: any) => String(row.provider || '').toLowerCase()));
-  const profile = (profileRes.data as Record<string, unknown> | null) || null;
+  // «Ficha de la empresa» (APP-06): the company's offer, said once by its admins, over the person's own.
+  const profile = withCompanyProfile((profileRes.data as Record<string, unknown> | null) || null, company);
   const contacted = safeCount(contactedRes);
   const replied = safeCount(repliedRes);
 

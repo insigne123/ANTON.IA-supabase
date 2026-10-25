@@ -12,6 +12,8 @@ import { assertOpportunityRead } from './workspace-access';
 import { addOpportunityActivity, opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { loadCompanyForModel } from './tender-profile-read';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 
 /** The kinds with bases to answer: public tenders, Compra Ágil and the purchases a company receives (private). */
 export const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
@@ -67,14 +69,15 @@ export async function runOpportunityOffer(client: SupabaseClient, job: Opportuni
   const id = job.opportunity_id!;
   await assertOpportunityRead(client, scope, id);
   if (typeof job.payload.part === 'string') return rewriteOfferPart(client, job, id);
-  const [itemRow, contextRow, reportRow, profileRow] = await Promise.all([
+  const [itemRow, contextRow, reportRow, profileRow, company] = await Promise.all([
     client.from('commercial_opportunities').select('kind,title,buyer_name,company_name,deadline_at,amount,currency,data').eq('organization_id', job.organization_id).eq('id', id).single(),
     client.from('opportunity_company_context').select('offer,services,territories,exclusions').eq('organization_id', job.organization_id).maybeSingle(),
     client.from('opportunity_reports').select('id,report').eq('organization_id', job.organization_id).eq('opportunity_id', id).eq('id', job.payload.reportId).maybeSingle(),
     client.from('profiles').select('company_profile,signatures').eq('id', job.requested_by).maybeSingle(),
+    readCompanyFields(client, job.organization_id),
   ]);
   const ficha = await loadCompanyForModel(client, job.organization_id, { legal: true });
-  const item = opportunityDb(itemRow); const context = opportunityDb(contextRow); const saved = opportunityDb(reportRow); const profile = opportunityDb(profileRow);
+  const item = opportunityDb(itemRow); const context = opportunityDb(contextRow); const saved = opportunityDb(reportRow); const profile = withCompanyProfile(opportunityDb(profileRow), company);
   if (!item) throw new AuthError('No encontramos esa oportunidad.', 404);
   if (!context) throw new AuthError('Un administrador debe confirmar primero la oferta de la empresa.', 409);
   if (!saved) throw new AuthError('El informe cambió. Prepara el borrador de nuevo.', 409);
@@ -155,11 +158,12 @@ export async function saveOpportunityOfferPrices(client: SupabaseClient, scope: 
 
 /** The company as the model reads it for the offer: what an administrator confirmed, «Perfil» and the «Ficha para licitaciones». */
 async function offerCompany(client: SupabaseClient, job: OpportunityJob) {
-  const [contextRow, profileRow] = await Promise.all([
+  const [contextRow, profileRow, company] = await Promise.all([
     client.from('opportunity_company_context').select('offer,services,territories,exclusions').eq('organization_id', job.organization_id).maybeSingle(),
     client.from('profiles').select('company_profile,signatures').eq('id', job.requested_by).maybeSingle(),
+    readCompanyFields(client, job.organization_id),
   ]);
-  const context = opportunityDb(contextRow); const profile = opportunityDb(profileRow);
+  const context = opportunityDb(contextRow); const profile = withCompanyProfile(opportunityDb(profileRow), company);
   if (!context) throw new AuthError('Un administrador debe confirmar primero la oferta de la empresa.', 409);
   const ficha = await loadCompanyForModel(client, job.organization_id, { legal: true });
   return { offer: String(context.offer || ''), services: context.services || [], territories: context.territories || [], exclusions: context.exclusions || [],

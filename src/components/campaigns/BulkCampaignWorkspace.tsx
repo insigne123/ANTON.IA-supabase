@@ -17,7 +17,7 @@ import { describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAtt
 import { firstSelection } from '@/lib/campaign-audience-selection';
 import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
-import { profileService } from '@/lib/services/profile-service';
+import { companyProfileService } from '@/lib/services/company-profile-service';
 import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignListStats, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 
@@ -88,7 +88,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   const objectivePending = useRef(false);
   useEffect(() => {
     let disposed = false;
-    profileService.getCurrentProfile().then(profile => { if (!disposed) setProfileObjective(campaignObjectiveFromProfile(mapProfileToForm(profile))); })
+    companyProfileService.getSellingProfile().then(profile => { if (!disposed) setProfileObjective(campaignObjectiveFromProfile(mapProfileToForm(profile))); })
       .catch(() => undefined);
     return () => { disposed = true; };
   }, []);

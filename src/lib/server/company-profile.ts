@@ -34,6 +34,22 @@ export async function readCompanyProfile(client: SupabaseClient, organizationId:
   return { fields: companyProfileFields(row.fields), revision: Number(row.revision) || 1, reviewedAt: row.reviewed_at ?? null, reviewedBy };
 }
 
+/**
+ * The company part every reader lays over a person's profile (withCompanyProfile): drafts, replies, research, Cowork and
+ * Oportunidades. Null when there is no profile with an offer, or it cannot be read now: a reader never fails for it.
+ */
+export async function readCompanyFields(client: SupabaseClient, organizationId: string | null | undefined): Promise<CompanyProfileFields | null> {
+  if (!organizationId) return null;
+  try {
+    const { data, error } = await client.from('organization_company_profile').select('fields').eq('organization_id', organizationId).maybeSingle();
+    if (error || !data) return null;
+    const fields = companyProfileFields((data as { fields?: unknown }).fields);
+    return companyProfileHasOffer(fields) ? fields : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether the person may edit it: an owner or an admin of the organization, checked with the server's client. */
 export async function canEditCompanyProfile(client: SupabaseClient, scope: Scope) {
   const { data, error } = await client.from('organization_members').select('role')

@@ -5,6 +5,7 @@ import { requireCoworkWorkerAccess } from './access';
 import { coworkProfilePatchSchema, hashCoworkProfilePatch, type CoworkProfilePatch } from '@/lib/cowork/profile-proposal';
 import { buildProfileUpdate, mapProfileToForm, normalizeCompanyWebsite } from '@/lib/profile/profile-mappings';
 import { sanitizeCoworkSignature } from './signature';
+import { readCompanyFields } from '@/lib/server/company-profile';
 
 /** Fase 4: owner profile update with human review. The proposal pins the exact
  * field values plus the profile's updated_at; execution refuses drift. Only
@@ -30,6 +31,9 @@ async function readOwnProfile(client: ReturnType<typeof getSupabaseAdminClient>,
   };
 }
 
+const COMPANY_PATCH_KEYS = ['companyName', 'sector', 'website', 'description', 'services', 'valueProposition', 'proofPoints',
+  'targetRoles', 'targetIndustries', 'targetCompanySize', 'targetLocations'] as const satisfies ReadonlyArray<keyof CoworkProfilePatch>;
+
 export async function stageCoworkProfileUpdate(
   scope: { userId: string; organizationId: string },
   runId: string,
@@ -39,7 +43,11 @@ export async function stageCoworkProfileUpdate(
   const signature = parsed.signature ? sanitizeCoworkSignature(parsed.signature.html) : null;
   const client = getSupabaseAdminClient();
   await requireCoworkWorkerAccess(client, scope);
-  const current = await readOwnProfile(client, scope.userId);
+  const [current, company] = await Promise.all([readOwnProfile(client, scope.userId), readCompanyFields(client, scope.organizationId)]);
+  // With a «Ficha de la empresa», the company part is the team's: a change here would be hidden behind it.
+  if (company && COMPANY_PATCH_KEYS.some(key => parsed[key] !== undefined && parsed[key] !== '')) {
+    throw new Error('Lo que la empresa es, vende y a quién le vende viene de la ficha de la empresa: la editan los dueños y administradores en Administración → Empresa. Aquí puedo cambiar tu nombre, tu cargo o tu firma.');
+  }
   const form = mapProfileToForm(current);
   const next = { ...form };
   const set = (key: keyof typeof next, value: string | undefined) => {

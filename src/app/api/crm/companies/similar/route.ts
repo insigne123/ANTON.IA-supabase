@@ -3,6 +3,8 @@ import { generateStructured } from '@/ai/openai-json';
 import { AuthError, handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 import { companiesModel } from '@/lib/server/companies-model';
 import { resolveSimilar, similarAnswerSchema, similarPrompt, similarRequestSchema } from '@/lib/companies/similar';
 
@@ -19,8 +21,12 @@ export async function POST(req: NextRequest) {
     const auth = await requireAuth();
     const body = similarRequestSchema.safeParse(await req.json().catch(() => null));
     if (!body.success) throw new AuthError('Solicitud no válida.', 400);
-    const profile: any = await getSupabaseAdminClient().from('profiles').select('signatures,full_name,company_name').eq('id', auth.user.id).maybeSingle();
-    const form = mapProfileToForm((profile.data || {}) as any);
+    const admin = getSupabaseAdminClient();
+    const [profile, company]: [any, Awaited<ReturnType<typeof readCompanyFields>>] = await Promise.all([
+      admin.from('profiles').select('signatures,full_name,company_name').eq('id', auth.user.id).maybeSingle(),
+      readCompanyFields(admin, auth.organizationId),
+    ]);
+    const form = mapProfileToForm(withCompanyProfile((profile.data || {}) as any, company));
     const seller = {
       company: String(form.companyName || profile.data?.company_name || '').trim(),
       offer: [form.valueProposition, form.description, form.services].map(value => String(value || '').trim()).filter(Boolean).join('. '),

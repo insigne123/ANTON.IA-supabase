@@ -9,6 +9,8 @@ import {
   type DropCandidate, type DropCriteria, type DropItem, type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
@@ -107,9 +109,13 @@ async function teamOf(client: Client, organizationId: string) {
   ]);
   if (members.error || saved.error) throw new LeadDropsError('No pudimos leer el equipo.', 503);
   const memberIds = (members.data || []).map((row: any) => String(row.user_id));
-  const profiles: any = memberIds.length ? await client.from('profiles').select('id,full_name,company_name,company_domain,job_title,signatures').in('id', memberIds) : { data: [] };
+  const [profiles, company]: [any, Awaited<ReturnType<typeof readCompanyFields>>] = await Promise.all([
+    memberIds.length ? client.from('profiles').select('id,full_name,company_name,company_domain,job_title,signatures').in('id', memberIds) : { data: [] },
+    readCompanyFields(client, organizationId),
+  ]);
   if (profiles.error) throw new LeadDropsError('No pudimos leer los perfiles.', 503);
-  const byId = new Map<string, any>(((profiles.data || []) as any[]).map(row => [String(row.id), row]));
+  // With a «Ficha de la empresa», its ideal customer is everyone's (a field it leaves empty keeps the person's).
+  const byId = new Map<string, any>(((profiles.data || []) as any[]).map(row => [String(row.id), withCompanyProfile(row, company)]));
   const rank = (id: string) => ['owner', 'admin'].includes(String((members.data || []).find((row: any) => String(row.user_id) === id)?.role)) ? 0 : 1;
   const team: string[] = memberIds.slice().sort((a: string, b: string) => rank(a) - rank(b));
   const savedRows = ((saved.data || []) as any[]).map(row => ({ title: row.title, industry: row.organization_industry }));

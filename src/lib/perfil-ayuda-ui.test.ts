@@ -39,11 +39,13 @@ test('Perfil waits for the saved profile before reading the site, uses the palet
   assert.match(card, /const canRun = !loading && /);
   assert.match(card, /disabled=\{running \|\| loading\}/);
   assert.match(card, /'Cargando tu perfil…'/);
-  assert.match(page, /<ProfileIcpSummary profile=\{profile\} dirty=\{isDirty\} onEdit=\{\(\) => focusField\('targetRoles'\)\} \/>/);
+  // With a «Ficha de la empresa» the summary reads it and has nothing to edit here.
+  assert.match(page, /<ProfileIcpSummary profile=\{effective\} dirty=\{isDirty\} onEdit=\{companyActive \? undefined : \(\) => focusField\('targetRoles'\)\} \/>/);
   assert.match(page, /<Alert variant="warning"/);
   for (const file of ['src/app/(app)/profile/page.tsx', 'src/components/profile/ProfileAutofillCard.tsx',
     'src/components/profile/ProfileCompleteness.tsx', 'src/components/profile/ProfileSuggestionDialog.tsx',
-    'src/components/profile/ProfileIcpSummary.tsx']) {
+    'src/components/profile/ProfileIcpSummary.tsx', 'src/components/profile/ProfileSections.tsx', 'src/components/profile/CompanyProfileReadOnly.tsx',
+    'src/components/admin/CompanyProfileEditor.tsx']) {
     assert.doesNotMatch(read(file), /\b(amber|emerald|red|green|yellow|orange|rose|sky|blue)-\d{2,3}\b/, `${file} has no raw colors`);
   }
   const summary = read('src/components/profile/ProfileIcpSummary.tsx');
@@ -56,9 +58,11 @@ test('Perfil waits for the saved profile before reading the site, uses the palet
 test('Perfil lets a person confirm the ideal customer ANTON.IA filled in without editing it', () => {
   const page = read('src/app/(app)/profile/page.tsx');
   // «Guardar cambios» only shows with edits; a suggested ideal customer someone agrees with needs its own way to say so.
-  assert.match(page, /\{isDirty \|\| \(icpSuggested && !isLoading && !loadError\) \? \(/);
+  // Not with a «Ficha de la empresa»: then the ideal customer is the team's, not the person's to confirm.
+  assert.match(page, /const confirmIcp = icpSuggested && !companyActive;/);
+  assert.match(page, /\{isDirty \|\| \(confirmIcp && !isLoading && !loadError\) \? \(/);
   assert.match(page, /isDirty \? 'Guardar cambios' : 'Confirmar'/);
-  assert.match(page, /const confirming = icpSuggested && !isDirty;/);
+  assert.match(page, /const confirming = confirmIcp && !isDirty;/);
   assert.match(page, /title: 'Cliente ideal confirmado'/);
   assert.match(page, /confírmalo abajo/);
 });

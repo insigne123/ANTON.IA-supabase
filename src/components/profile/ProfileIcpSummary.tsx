@@ -15,7 +15,8 @@ const SHOWN = 3;
 export function ProfileIcpSummary({ profile, dirty, onEdit }: {
   profile: Parameters<typeof icpSummary>[0];
   dirty: boolean;
-  onEdit: () => void;
+  /** Where its fields are; without it (the «Ficha de la empresa» keeps them) there is nothing to edit here. */
+  onEdit?: () => void;
 }) {
   const { defined, rows } = icpSummary(profile);
   return (
@@ -32,9 +33,11 @@ export function ProfileIcpSummary({ profile, dirty, onEdit }: {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant={defined ? 'ghost' : 'outline'} size="sm" className="rounded-xl" onClick={onEdit}>
-            {defined ? 'Editar' : 'Definir mi cliente ideal'}
-          </Button>
+          {onEdit ? (
+            <Button type="button" variant={defined ? 'ghost' : 'outline'} size="sm" className="rounded-xl" onClick={onEdit}>
+              {defined ? 'Editar' : 'Definir mi cliente ideal'}
+            </Button>
+          ) : null}
           {defined && !dirty ? (
             <Button asChild variant="outline" size="sm" className="rounded-xl">
               <Link href="/search">Buscar prospectos<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
