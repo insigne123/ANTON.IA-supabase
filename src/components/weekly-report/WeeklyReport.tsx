@@ -17,6 +17,7 @@ import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import { goalSentence, paceSentence } from '@/lib/weekly-goals';
 import { REPORT_ROLES, activeGoal, deltaText, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeeklyReport as Report } from '@/lib/weekly-report';
+import { chipClass } from '@/components/ui/chip';
 
 type Response = { report: Report; email: boolean; alerts?: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; yago?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
 /** ?informe=equipo opens «Equipo»; ?metas=1 also opens the goals editor, for an admin (the link from «Meta de la semana»). */
@@ -122,15 +123,15 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         {/* Embedded, the toggle beside it already says which week: only the range goes here. */}
         <p className={cn('text-sm text-muted-foreground', !embedded && 'mt-1')}>{report ? (embedded ? report.week.label : `${report.week.which === 'current' ? 'Esta semana' : 'La semana pasada'} · ${report.week.label}`) : 'Tu semana en un vistazo.'}</p>
       </div>
-      <div role="group" aria-label="Semana" className="flex self-start rounded-full border p-0.5">
-        {(['current', 'previous'] as const).map(value => <Button key={value} size="sm" variant={week === value ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={week === value} onClick={() => setWeek(value)}>
-          {value === 'current' ? 'Esta semana' : 'Semana pasada'}</Button>)}
+      <div role="group" aria-label="Semana" className="flex flex-wrap gap-1.5 self-start">
+        {(['current', 'previous'] as const).map(value => <button key={value} type="button" className={chipClass(week === value)} aria-pressed={week === value} onClick={() => setWeek(value)}>
+          {value === 'current' ? 'Esta semana' : 'Semana pasada'}</button>)}
       </div>
     </header>
 
     {roles.length > 1 ? <div role="group" aria-label="Informe" className="flex flex-wrap gap-2">
       {REPORT_ROLES.filter(item => roles.includes(item.id)).map(item => <button key={item.id} type="button" aria-pressed={shown === item.id} onClick={() => setRole(item.id)}
-        className={cn('rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', shown === item.id ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted')}>{item.label}</button>)}
+        className={chipClass(shown === item.id)}>{item.label}</button>)}
     </div> : null}
 
     {noOrganization ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">

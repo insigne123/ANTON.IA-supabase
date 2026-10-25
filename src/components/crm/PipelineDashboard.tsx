@@ -1,17 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { ArrowDownRight, ArrowRight, ArrowUpRight, ChevronDown, Minus, Sparkles } from 'lucide-react';
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceLine, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { Button } from '@/components/ui/button';
-import { ChartContainer, ChartTooltipContent } from '@/components/ui/chart';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DEAL_CURRENCY_NAME, dealTotals, dealTrendText, formatDealValue, formatDealValueShort } from '@/lib/crm-deal-values';
 import type { PipelineStage } from '@/lib/crm-types';
 import {
-  DASHBOARD_ORIGINS, DASHBOARD_PERIODS, buildPipelineDashboard, filterPipelineRows, pipelineOwners, trendText,
+  DASHBOARD_ORIGINS, DASHBOARD_PERIODS, buildPipelineDashboard, filterPipelineRows, pipelineOwners, sharePercent as percent, trendText,
   type DashboardOrigin, type DashboardPeriod, type Trend,
 } from '@/lib/pipeline-dashboard';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
@@ -19,10 +18,10 @@ import { cn } from '@/lib/utils';
 
 /**
  * The pipeline as a CRM panel (Plan 11, PR 4a), after the reference the user shared: figures with their comparison, the
- * open pipeline by stage (a donut), how far each stage gets, contacts per month against their recent average, the new
+ * open pipeline by stage (bars with their names), how far each stage gets, contacts per month against their recent average, the new
  * leads of 13 months, and sentences that read it. One filter row scopes everything below it. The stage colors are the
  * ordinal ramp of the primary blue (--pipeline-stage-1..6); every chart has its table. With the value of each deal
- * (CRM_DEAL_VALUES_ENABLED, PR 4c) it also adds up the open pipeline and what was won, and the donut can show amounts.
+ * (CRM_DEAL_VALUES_ENABLED, PR 4c) it also adds up the open pipeline and what was won, and the open pipeline can show amounts.
  */
 const STAGE_COLOR: Record<PipelineStage, string> = {
   inbox: 'hsl(var(--pipeline-stage-1))', qualified: 'hsl(var(--pipeline-stage-2))', contacted: 'hsl(var(--pipeline-stage-3))',
@@ -31,10 +30,10 @@ const STAGE_COLOR: Record<PipelineStage, string> = {
 };
 const PERIOD_KEY = 'anton.crm.period';
 const number = new Intl.NumberFormat('es-CL');
-// A share that rounds to 0 % or 100 % but is not: one contact out of 553 reads «<1 %», not «0 %».
-// Room for the y-axis labels of the largest value («200» was cut to «'00» by a negative margin and a fixed width).
-const axisWidth = (values: number[]) => Math.max(28, number.format(Math.max(0, ...values)).length * 8 + 10);
-const percent = (value: number | null) => (value === null ? '—' : value > 0 && value < 0.005 ? '<1 %' : value > 0.995 && value < 1 ? '>99 %' : `${Math.round(value * 100)} %`);
+// The two charts bring recharts, the heaviest library of the screen: it arrives once they show, not with the page (APP-25).
+const chartLoading = () => <div className="h-[230px] w-full animate-pulse rounded-xl bg-muted/40" aria-hidden="true" />;
+const ContactedChart = dynamic(() => import('./PipelineCharts').then(module => module.ContactedChart), { ssr: false, loading: chartLoading });
+const NewLeadsChart = dynamic(() => import('./PipelineCharts').then(module => module.NewLeadsChart), { ssr: false, loading: chartLoading });
 
 export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now, dealValues = false }: {
   rows: UnifiedRow[];
@@ -161,34 +160,18 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
           ) : undefined}
           table={<DataTable head={['Etapa', byValue ? 'Monto' : 'Leads', '% del abierto']}
             rows={donut.map(slice => [slice.label, byValue && deals ? formatDealValue(slice.value, deals.currency) : number.format(slice.value), percent(slice.share)])} />}>
-          <div className="grid items-center gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="relative mx-auto aspect-square w-full max-w-[240px]">
-              <ChartContainer config={{}} className="aspect-square h-full w-full" aria-label={`Pipeline abierto por etapa: ${donut.map(slice => `${slice.label} ${show(slice.value)}`).join(', ')}`}>
-                <PieChart>
-                  <Tooltip cursor={false} content={<ChartTooltipContent hideIndicator formatter={(value, name) => <StageReadout name={String(name)} value={Number(value)} total={donutTotal} format={show} />} />} />
-                  <Pie data={donut.filter(slice => slice.value > 0)} dataKey="value" nameKey="label" rootTabIndex={-1} innerRadius="62%" outerRadius="92%" stroke="hsl(var(--card))" strokeWidth={2}
-                    isAnimationActive={false} onClick={(slice: { stage?: PipelineStage }) => slice?.stage && onOpenStage(slice.stage)} className="cursor-pointer">
-                    {donut.filter(slice => slice.value > 0).map(slice => (
-                      <Cell key={slice.stage} fill={STAGE_COLOR[slice.stage]} aria-label={`${slice.label}: ${show(slice.value)} (${percent(slice.share)})`} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ChartContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-2xl font-semibold text-foreground">{show(donutTotal)}</span>
-                <span className="text-xs text-muted-foreground">{byValue ? 'abierto' : 'abiertos'}</span>
-              </div>
-            </div>
-            <ul className="space-y-1" aria-label="Etapas">
+          {/* The open pipeline as bars with their names, not a ring: the same numbers, read at a glance (APP-08). */}
+          <ul className="space-y-1" aria-label={`Pipeline abierto por etapa: ${show(donutTotal)} ${byValue ? 'abierto' : 'abiertos'}`}>
               {donut.map(slice => (
                 <li key={slice.stage}>
                   <button type="button" onClick={() => onOpenStage(slice.stage)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: STAGE_COLOR[slice.stage] }} aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate text-foreground">{slice.label}</span>
-                    {pending?.[slice.stage] ? <span className="rounded-full bg-primary/10 px-1.5 text-[11px] font-medium text-primary">{pending[slice.stage]} por confirmar</span> : null}
-                    <span className="tabular-nums text-foreground">{show(slice.value)}</span>
-                    <span className="w-11 text-right tabular-nums text-xs text-muted-foreground">{percent(slice.share)}</span>
+                    className="relative flex w-full items-center gap-2 overflow-hidden rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    {/* One hue, its length the share: six blues side by side could not be told apart (APP-08). */}
+                    <span aria-hidden="true" className="absolute inset-y-1 left-0 rounded-md bg-primary/10" style={{ width: `${Math.max(slice.value > 0 ? 2 : 0, Math.round((slice.share ?? 0) * 100))}%` }} />
+                    <span className="relative min-w-0 flex-1 truncate text-foreground">{slice.label}</span>
+                    {pending?.[slice.stage] ? <span className="relative rounded-full bg-primary/10 px-1.5 text-[11px] font-medium text-primary">{pending[slice.stage]} por confirmar</span> : null}
+                    <span className="relative tabular-nums text-foreground">{show(slice.value)}</span>
+                    <span className="relative w-11 text-right tabular-nums text-xs text-muted-foreground">{percent(slice.share)}</span>
                   </button>
                 </li>
               ))}
@@ -196,7 +179,6 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
                 <li className="px-2 pt-1 text-xs text-muted-foreground">Ningún lead abierto tiene valor todavía: escríbelo en su detalle.</li>
               ) : null}
             </ul>
-          </div>
         </ChartCard>
 
         <ChartCard title="Avance por etapa" subtitle="Cuántos llegaron a cada etapa y qué parte siguió a la siguiente"
@@ -230,36 +212,12 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
         <ChartCard title="Contactos por mes" subtitle={panel.contactedThreshold === null ? 'Correos de primer contacto enviados cada mes'
           : `La línea es tu promedio de los 3 meses anteriores: ${number.format(panel.contactedThreshold)} por mes`}
           table={<DataTable head={['Mes', 'Contactados', 'Respondieron', 'Tasa']} rows={panel.months.slice(-6).map(month => [month.label, number.format(month.contacted), number.format(month.replied), percent(month.responseRate)])} />}>
-          <ChartContainer config={{ contacted: { label: 'Contactados', color: 'hsl(var(--primary))' } }} className="aspect-auto h-[230px] w-full"
-            aria-label={`Contactos por mes: ${panel.months.slice(-6).map(month => `${month.label} ${month.contacted}`).join(', ')}`}>
-            <BarChart data={panel.months.slice(-6)} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={axisWidth(panel.months.slice(-6).map(month => Math.max(month.contacted, panel.contactedThreshold ?? 0)))} />
-              <Tooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent indicator="line"
-                formatter={(value, _name, item) => <MonthReadout contacted={Number(value)} replied={Number(item?.payload?.replied || 0)} />} />} />
-              {panel.contactedThreshold !== null ? (
-                // The subtitle names the line; a label inside the plot would sit on the latest bar.
-                <ReferenceLine y={panel.contactedThreshold} stroke="hsl(var(--muted-foreground))" strokeWidth={1} />
-              ) : null}
-              <Bar dataKey="contacted" fill="var(--color-contacted)" radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false} />
-            </BarChart>
-          </ChartContainer>
+          <ContactedChart months={panel.months.slice(-6)} threshold={panel.contactedThreshold} />
         </ChartCard>
 
         <ChartCard title="Contactos nuevos, últimos 13 meses" subtitle="Personas que entraron al pipeline cada mes"
           table={<DataTable head={['Mes', 'Contactos nuevos']} rows={panel.months.map(month => [month.label, number.format(month.newLeads)])} />}>
-          <ChartContainer config={{ newLeads: { label: 'Contactos nuevos', color: 'hsl(var(--primary))' } }} className="aspect-auto h-[230px] w-full"
-            aria-label={`Contactos nuevos por mes: ${panel.months.map(month => `${month.label} ${month.newLeads}`).join(', ')}`}>
-            <AreaChart data={panel.months} margin={{ top: 16, right: 12, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval="preserveStartEnd" minTickGap={16} />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={axisWidth(panel.months.map(month => month.newLeads))} />
-              <Tooltip cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1 }} content={<ChartTooltipContent indicator="line" />} />
-              <Area dataKey="newLeads" type="monotone" stroke="var(--color-newLeads)" strokeWidth={2} fill="var(--color-newLeads)" fillOpacity={0.1}
-                dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: 'hsl(var(--card))' }} isAnimationActive={false} />
-            </AreaChart>
-          </ChartContainer>
+          <NewLeadsChart months={panel.months} />
         </ChartCard>
       </div>
     </div>
@@ -329,25 +287,6 @@ function DataTable({ head, rows }: { head: string[]; rows: string[][] }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function StageReadout({ name, value, total, format = number.format }: { name: string; value: number; total: number; format?: (value: number) => string }) {
-  return (
-    <span className="flex w-full items-baseline justify-between gap-3">
-      <span className="text-muted-foreground">{name}</span>
-      <span className="font-semibold tabular-nums text-foreground">{format(value)} <span className="font-normal text-muted-foreground">({percent(total ? value / total : 0)})</span></span>
-    </span>
-  );
-}
-
-function MonthReadout({ contacted, replied }: { contacted: number; replied: number }) {
-  return (
-    <span className="grid w-full gap-0.5">
-      <span className="flex justify-between gap-3"><span className="text-muted-foreground">Contactados</span><span className="font-semibold tabular-nums text-foreground">{number.format(contacted)}</span></span>
-      <span className="flex justify-between gap-3"><span className="text-muted-foreground">Respondieron</span>
-        <span className="tabular-nums text-foreground">{number.format(replied)}{contacted ? ` (${percent(replied / contacted)})` : ''}</span></span>
-    </span>
   );
 }
 

@@ -28,7 +28,9 @@ test('with everything set up, the primary step moves from finding to completing 
   const ready = buildTodayPlan(base({ counts: { saved: 0, withEmail: 94, readyToWrite: 94, sent: 0 } }));
   assert.equal(ready.primary.href, '/saved/leads/enriched');
   assert.match(ready.primary.title, /94 contactos con correo/);
-  assert.equal(ready.queue.at(-1)?.kind, 'ready');
+  // The step is the ready item: it is not said again in the list (APP-01).
+  assert.equal(ready.primary.queueId, 'ready');
+  assert.equal(ready.queue.some((item) => item.kind === 'ready'), false);
   // The first send step points to the contacts that can be written to.
   assert.equal(ready.setup.find((step) => step.id === 'first_send')?.href, '/saved/leads/enriched');
 });
@@ -43,8 +45,9 @@ test('people waiting for an answer beat setup, and a meeting request goes first'
   }));
   assert.equal(plan.primary.href, conversationHref('c2'));
   assert.match(plan.primary.title, /Luis Rojas pidió una reunión/);
-  assert.deepEqual(plan.queue.map((item) => item.id), ['reply:c2', 'reply:c1']);
-  assert.equal(plan.queue[1]?.href, '/contacted?c=c1');
+  // The meeting request is the step above; the list keeps the rest (APP-01).
+  assert.deepEqual(plan.queue.map((item) => item.id), ['reply:c1']);
+  assert.equal(plan.queue[0]?.href, '/contacted?c=c1');
 });
 
 test('overdue commitments are urgent; the ready item needs a mailbox; the queue is short', () => {
@@ -52,13 +55,15 @@ test('overdue commitments are urgent; the ready item needs a mailbox; the queue 
     commitments: [{ id: 'c3', name: 'Ana', company: 'X', kind: 'call', title: 'Llamar', dueAt: '2026-10-01T09:00:00-03:00' }],
     counts: { saved: 0, withEmail: 10, readyToWrite: 10, sent: 2 },
   }));
-  assert.equal(plan.queue[0]?.kind, 'commitment');
-  assert.equal(plan.queue[0]?.urgent, true);
   assert.equal(plan.primary.href, '/contacted?c=c3');
+  assert.equal(plan.primary.queueId, 'commitment:c3');
+  assert.equal(plan.queue.some((item) => item.kind === 'commitment'), false, 'the overdue commitment is the step, not a row too');
+  assert.equal(plan.queue[0]?.kind, 'ready');
   assert.equal(buildTodayPlan(base({ mailProviders: [], counts: { saved: 0, withEmail: 10, readyToWrite: 10, sent: 0 } }))
     .queue.some((item) => item.kind === 'ready'), false);
   const many = buildTodayPlan(base({ replies: Array.from({ length: 9 }, (_, index) => ({ id: `r${index}`, name: `P${index}`, company: '', intent: 'positive', repliedAt: '2026-10-01T10:00:00Z' })) }));
   assert.equal(many.queue.length, 6);
+  assert.equal(many.queue.some((item) => item.id === many.primary.queueId), false);
 });
 
 test('«por responder» follows the conversations rule; commitments count until the end of the day', () => {
@@ -77,7 +82,7 @@ test('«por responder» follows the conversations rule; commitments count until 
 test('a historical pending reply keeps its date and uses an initial instead of pretending to know a masked surname',()=>{
   const reply={id:'old',name:'Daniela Ma***o',company:'Demo',intent:'positive',repliedAt:'2026-03-01T10:00:00Z'};
   const plan=buildTodayPlan(base({replies:[reply]}));assert.match(plan.primary.title,/Daniela M\./);assert.doesNotMatch(plan.primary.title,/\*\*/);
-  assert.equal(plan.queue[0].occurredAt,reply.repliedAt);
+  assert.match(plan.primary.description,/^Pendiente desde 1 mar 2026\./);assert.equal(plan.queue.length,0,'the only reply is the step above');
   assert.equal(commitmentDueToday({dueAt:'2026-10-02T03:00:00Z'},NOW),null,'next Chile midnight is tomorrow, even if UTC changed first');
 });
 

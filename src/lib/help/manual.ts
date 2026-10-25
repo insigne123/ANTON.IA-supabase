@@ -578,6 +578,15 @@ export const FIRST_EMAIL_PATH: Array<{ section: string; title: string; text: str
   { section: 'conversaciones', title: 'Responde y cierra', text: 'Contesta en el mismo hilo y cierra cada conversación.' },
 ];
 
+/** «Tu camino a la primera licitación» (APP-19): the same idea for Oportunidades, for whoever has it. Every step is in its section. */
+export const FIRST_TENDER_PATH: Array<{ section: string; title: string; text: string }> = [
+  { section: 'oportunidades', title: 'Confirma qué vendes', text: 'Quien administra confirma la oferta: la IA busca cada mañana.' },
+  { section: 'oportunidades', title: 'Revisa las recomendadas', text: 'Las estrellas dicen cuánto calza; el informe, si conviene.' },
+  { section: 'oportunidades', title: 'Arma el equipo', text: 'Quien administra asigna; cada uno ve sus tareas y fechas.' },
+  { section: 'oportunidades', title: 'Sube las bases', text: 'La IA las lee y revisa los requisitos con tu ficha.' },
+  { section: 'oportunidades', title: 'Prepara la oferta', text: 'Un borrador por criterio y lo que pagaron otros.' },
+];
+
 /** The questions people ask the most, as [section, question] of the manual. */
 export const POPULAR_QUESTIONS: Array<[string, string]> = [
   ['creditos', 'Me quedé sin créditos. ¿Qué hago?'],
