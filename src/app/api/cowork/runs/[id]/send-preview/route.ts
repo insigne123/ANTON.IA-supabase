@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { getCoworkRun } from '@/lib/server/cowork/runs';
@@ -9,6 +10,7 @@ import { resolveCoworkSender } from '@/lib/server/cowork/sender';
 import { stripHtmlToText } from '@/lib/email-outbound';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { coworkEmailReviewMode, loadCoworkEmailReviewSeller, reviewCoworkEmail } from '@/lib/server/cowork/email-review';
+import { CoworkSendEditRefused, coworkSendEditSchema, coworkSendEditable, editCoworkSendProposal } from '@/lib/server/cowork/send-edit';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
@@ -29,9 +31,13 @@ export async function GET(req: NextRequest, context: Context) {
     if (!proposal || proposal.action !== 'cowork.effect' || proposal.kind !== 'send_email') {
       return NextResponse.json({ error: 'No hay propuesta de envío en este trabajo.' }, { status: 409, headers });
     }
+    // The proposal's own row says what is approved: after an edit in the card (COW-29) it points to the new revision.
+    const row = await getSupabaseAdminClient().from('cowork_effect_proposals').select('target_id')
+      .eq('run_id', state.run.id).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
+    const targetId = String(row.data?.target_id || proposal.targetId || '');
     let approved: ReturnType<typeof parseCoworkSendTarget>;
     try {
-      approved = parseCoworkSendTarget(String(proposal.targetId || ''));
+      approved = parseCoworkSendTarget(targetId);
     } catch {
       return NextResponse.json({ error: 'La propuesta de envío no es válida.' }, { status: 409, headers });
     }
@@ -57,10 +63,27 @@ export async function GET(req: NextRequest, context: Context) {
       subject: draft.content.subject, text, review,
       from: sender.email, provider: sender.provider,
       revision: draft.revision, versionId: draft.versionId, matches,
+      editable: matches && await coworkSendEditable(auth, state.run.id, targetId),
       label: String(proposal.label || ''),
     }, { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     return NextResponse.json({ error: 'No se pudo cargar la vista previa.' }, { status: 503, headers });
+  }
+}
+
+/** «Editar» in the card (COW-29): saves the corrected subject and body and moves the proposal to that version. */
+export async function PATCH(req: NextRequest, context: Context) {
+  try {
+    const auth = await requireCoworkAccess();
+    const id = z.string().uuid().parse((await context.params).id);
+    const body = coworkSendEditSchema.parse(await req.json());
+    return NextResponse.json(await editCoworkSendProposal(auth, id, body), { headers });
+  } catch (error) {
+    if (error instanceof AuthError) return handleAuthError(error);
+    if (error instanceof CoworkSendEditRefused) return NextResponse.json({ error: error.message }, { status: error.status, headers });
+    const invalid = error instanceof z.ZodError || error instanceof SyntaxError;
+    return NextResponse.json({ error: invalid ? 'El correo necesita asunto y cuerpo, dentro del largo permitido.' : 'No se pudo guardar el cambio del correo.' },
+      { status: invalid ? 400 : 503, headers });
   }
 }

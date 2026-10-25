@@ -44,9 +44,9 @@ export function ProfileReview({ runId, onApprove, onReject, resolving }: {
       </ReviewField>)}
     </ReviewFields>
     <ReviewNote ok={preview.matches && preview.fresh}>{!preview.matches
-      ? 'Los valores cambiaron desde la propuesta. Descártala y pide una nueva revisión.'
+      ? 'Los valores cambiaron desde la propuesta. Descártala y pídele a Cowork una nueva.'
       : !preview.fresh
-        ? 'Tu perfil cambió desde la revisión. Descártala y pide una nueva revisión.'
+        ? 'Tu perfil cambió después de la propuesta. Descártala y pídele a Cowork una nueva.'
         : 'Coincide con la propuesta. Al aprobar se aplicarán exactamente estos valores.'}</ReviewNote>
     <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Aprobar y actualizar" disabled={!preview.matches || !preview.fresh} resolving={resolving} />
   </div>;
