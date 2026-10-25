@@ -104,3 +104,32 @@ export function savedLeadToEnriched(lead: Lead): EnrichedLead {
     createdAt: new Date().toISOString(),
   } as EnrichedLead;
 }
+
+/** How many saved contacts with an email one step brings to «Por escribir». */
+export const BRING_SAVED_BATCH = 200;
+
+/**
+ * Brings the saved contacts that already have an email to «Por escribir», when the person asks for it (APP-13: before, opening
+ * the screen moved them on its own). A batch leaves the saved list only after «Por escribir» took it in (or already had it), so a
+ * failure keeps the rest saved, as they were.
+ */
+export async function bringSavedWithEmail(leads: Lead[], store: {
+  addDedup: (items: EnrichedLead[]) => Promise<unknown>;
+  removeWhere: (pred: (lead: Lead) => boolean) => Promise<number>;
+}, onProgress?: (moved: number) => void): Promise<{ moved: number; failed: boolean }> {
+  const ready = leads.filter(lead => String(lead.email || '').includes('@'));
+  let moved = 0;
+  for (let start = 0; start < ready.length; start += BRING_SAVED_BATCH) {
+    const batch = ready.slice(start, start + BRING_SAVED_BATCH);
+    try {
+      await store.addDedup(batch.map(savedLeadToEnriched));
+      const ids = new Set(batch.map(lead => lead.id));
+      await store.removeWhere(lead => ids.has(lead.id));
+    } catch {
+      return { moved, failed: true };
+    }
+    moved += batch.length;
+    onProgress?.(moved);
+  }
+  return { moved, failed: false };
+}

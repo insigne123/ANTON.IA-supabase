@@ -24,6 +24,7 @@ import { flowStage } from '@/lib/pipeline-flow';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 import { loadUnifiedRows, unifiedFailureText } from '@/lib/unified-sheet-data';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
+import { SEGMENT_TRACK, chipClass, segmentClass } from '@/components/ui/chip';
 
 type CrmView = 'panel' | 'board' | 'companies';
 
@@ -190,32 +191,27 @@ export default function CRMPage() {
                     <div className="min-w-0">
                         <DocumentTitle title="Pipeline" />
                         <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
-                        <p className="mt-0.5 text-sm text-foreground/70">Prioriza oportunidades y mueve cada contacto a su siguiente etapa.</p>
+                        <p className="mt-0.5 text-sm text-foreground/70">Prioriza tus contactos y mueve cada uno a su siguiente etapa.</p>
                         <p className="mt-1 flex items-center gap-1.5 text-xs text-foreground/70">
                             <Sparkles className="h-3.5 w-3.5" />
                             Los envíos y las respuestas proponen cambios de etapa; nada se mueve hasta que los aceptes.
                         </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
-                        <div role="group" aria-label="Vista del pipeline" className="flex rounded-full border p-0.5">
-                            <Button size="sm" variant={view === 'panel' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'panel'} onClick={() => chooseView('panel')}>
-                                <BarChart3 className="h-4 w-4" /> Panel
-                            </Button>
-                            <Button size="sm" variant={view === 'board' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'board'} onClick={() => chooseView('board')}>
-                                <LayoutGrid className="h-4 w-4" /> Tablero
-                            </Button>
-                            <Button size="sm" variant={view === 'companies' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'companies'} onClick={() => chooseView('companies')}>
-                                <Building2 className="h-4 w-4" /> Empresas
-                            </Button>
+                        <div role="group" aria-label="Vista del pipeline" className={SEGMENT_TRACK}>
+                            <button type="button" className={segmentClass(view === 'panel')} aria-pressed={view === 'panel'} onClick={() => chooseView('panel')}>
+                                <BarChart3 className="h-4 w-4" aria-hidden="true" /> Panel
+                            </button>
+                            <button type="button" className={segmentClass(view === 'board')} aria-pressed={view === 'board'} onClick={() => chooseView('board')}>
+                                <LayoutGrid className="h-4 w-4" aria-hidden="true" /> Tablero
+                            </button>
+                            <button type="button" className={segmentClass(view === 'companies')} aria-pressed={view === 'companies'} onClick={() => chooseView('companies')}>
+                                <Building2 className="h-4 w-4" aria-hidden="true" /> Empresas
+                            </button>
                         </div>
-                        {view === 'board' && <Button
-                            variant={focusMode ? 'secondary' : 'outline'}
-                            size="sm"
-                            onClick={() => setFocusMode((current) => !current)}
-                            aria-pressed={focusMode}
-                        >
-                            <Focus className="h-4 w-4" /> {focusMode ? 'Ver todo' : 'Enfocar etapa'}
-                        </Button>}
+                        {view === 'board' && <button type="button" className={chipClass(focusMode)} onClick={() => setFocusMode((current) => !current)} aria-pressed={focusMode}>
+                            <Focus className="h-4 w-4" aria-hidden="true" /> {focusMode ? 'Ver todo' : 'Enfocar etapa'}
+                        </button>}
                         <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => void loadData()} disabled={loading} aria-label="Actualizar pipeline">
                             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                         </Button>

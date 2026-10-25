@@ -20,6 +20,7 @@ const dependencies: Record<string, unknown> = {
   '@/components/ui/card': { Card: tag('section'), CardContent: tag('div'), CardHeader: tag('div'), CardTitle: tag('div') },
   '@/components/ui/skeleton': { Skeleton: tag('div') },
   '@/components/ui/table': { Table: tag('table'), TableBody: tag('tbody'), TableCell: tag('td'), TableHead: tag('th'), TableHeader: tag('thead'), TableRow: tag('tr') },
+  '@/components/ui/chip': { chipClass: (on: boolean) => (on ? 'chip chip-on' : 'chip') },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
 };
 const exports: any = {};

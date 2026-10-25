@@ -37,3 +37,16 @@ test('each source of the sheet falls back on its own, so one failure does not em
   assert.match(page, /compareSheetRows\(a, b, sortKey, sortDirection\)/);
   assert.doesNotMatch(page, /sortKey\.toLowerCase\(\)\.includes\('at'\)/);
 });
+
+test('on a phone each contact is a card; on a desktop «Acción» casts a shadow while the table goes on (APP-09)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync('src/app/(app)/sheet/page.tsx', 'utf8');
+  assert.match(page, /const phone = useMediaQuery\('\(max-width: 639px\)'\);/);
+  assert.match(page, /\{phone \? \(\s*\/\/[^\n]*\n\s*<SheetCards rows=\{filteredRows\}/);
+  // The table and the cards lead to the same place.
+  assert.equal((page.match(/<RowAction row=\{row\} \/>/g) || []).length, 2);
+  assert.match(page, /setMoreRight\(scroller\.scrollLeft \+ scroller\.clientWidth < scroller\.scrollWidth - 1\)/);
+  // Found when the table appears, also after the first render.
+  assert.match(page, /const tableArea = useCallback\(\(node: HTMLDivElement \| null\) => setScroller/);
+  assert.equal((page.match(/\$\{moreRight \? EDGE_SHADOW : ''\}/g) || []).length, 3, 'the header, the rows and the loading rows');
+});

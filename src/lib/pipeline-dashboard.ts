@@ -93,6 +93,8 @@ function lastMonths(now: number, count: number) {
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 const percent = (value: number) => `${Math.round(value * 100)} %`;
+/** A share for a table or a chart: one contact out of 553 reads «<1 %», not «0 %»; no share reads «—». */
+export const sharePercent = (value: number | null) => (value === null ? '—' : value > 0 && value < 0.005 ? '<1 %' : value > 0.995 && value < 1 ? '>99 %' : `${Math.round(value * 100)} %`);
 
 export function buildPipelineDashboard(rows: UnifiedRow[], options: { now?: number; period?: DashboardPeriod } = {}): PipelineDashboard {
   const now = options.now ?? Date.now();
