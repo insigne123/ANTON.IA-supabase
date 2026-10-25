@@ -19,6 +19,7 @@ import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { profileService } from '@/lib/services/profile-service';
 import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignListStats, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
+import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 
 async function request(path: string, body?: unknown, method = 'POST') {
   const response = await fetch(`/api/campaigns/bulk${path}`, body === undefined ? { cache: 'no-store' } : {
@@ -235,8 +236,8 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
               <h2 className="text-xl font-semibold">¿A quién quieres contactar?</h2>
               <p className="text-sm text-muted-foreground">Las campañas usan tus leads guardados enriquecidos, con los datos de cargo, empresa e industria de Apollo.</p>
               <div className="space-y-2"><Label htmlFor="campaign-name">Nombre de campaña</Label><Input id="campaign-name" value={definition.name} disabled={busy} onChange={event => change({ name: event.target.value })} placeholder="Primer contacto · Logística" /></div>
-              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Modo de búsqueda de audiencia">
-                {(['ai', 'manual'] as const).map(mode => <Button key={mode} variant={audienceMode === mode ? 'secondary' : 'ghost'} disabled={busy} onClick={() => { setAudienceMode(mode); setSearched(false); setPeople([]); setRankMeta(null); }}>{mode === 'ai' ? 'Describir lead ideal con IA' : 'Filtros manuales'}</Button>)}
+              <div className={`${SEGMENT_TRACK} grid w-full grid-cols-2`} role="group" aria-label="Modo de búsqueda de audiencia">
+                {(['ai', 'manual'] as const).map(mode => <button key={mode} type="button" className={segmentClass(audienceMode === mode)} aria-pressed={audienceMode === mode} disabled={busy} onClick={() => { setAudienceMode(mode); setSearched(false); setPeople([]); setRankMeta(null); }}>{mode === 'ai' ? 'Describir lead ideal con IA' : 'Filtros manuales'}</button>)}
               </div>
               {audienceMode === 'ai' ? <>
                 <div className="space-y-2"><Label htmlFor="audience-description">Describe tu lead ideal</Label><Textarea id="audience-description" disabled={busy} value={definition.description} onChange={event => change({ description: event.target.value })} placeholder="Necesito contactar leads con cargo suficiente para decidir una compra, de empresas de seguridad en Chile" /><Button variant="outline" disabled={busy || definition.description.trim().length < 10} onClick={() => void run(rankAudience)}>Buscar leads ideales</Button></div>

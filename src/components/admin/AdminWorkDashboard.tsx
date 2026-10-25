@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { WorkReport } from '@/lib/admin/work';
 import { cn } from '@/lib/utils';
+import { chipClass } from '@/components/ui/chip';
 
 type Report = WorkReport & { days: number; period: { from: string; to: string } };
 const PERIODS = [7, 30, 90] as const;
@@ -148,7 +149,7 @@ export function AdminWorkDashboard() {
         <RefreshCw className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" /></Button>
     </PageHeader>
     <div role="group" aria-label="Período" className="mb-5 flex flex-wrap gap-1.5">
-      {PERIODS.map(value => <Button key={value} type="button" size="sm" variant={days === value ? 'secondary' : 'ghost'} aria-pressed={days === value} className={cn(days === value && 'font-semibold')} onClick={() => setDays(value)}>{value} días</Button>)}
+      {PERIODS.map(value => <button key={value} type="button" aria-pressed={days === value} className={chipClass(days === value)} onClick={() => setDays(value)}>{value} días</button>)}
     </div>
     {error ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm"><p>{error}</p>
       <Button type="button" variant="outline" size="sm" onClick={() => void load()}>Reintentar</Button></div> : null}

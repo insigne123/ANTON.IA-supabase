@@ -71,6 +71,8 @@ export async function GET(request:Request) {
       ...plan,
       partial: (enrichedRes.data || []).length >= READY_SCAN_LIMIT || (sentRes.data||[]).length>=5000 || (repliedRes.data||[]).length>=200 || (commitmentsRes.data||[]).length>=200,
       firstName: String(form.name || '').trim().split(/\s+/)[0] || '',
+      // «Tu cuenta está lista» says it the first week only; after that the line is noise (APP-01).
+      newAccount: Date.parse(String((user as { created_at?: string }).created_at || '')) > now.getTime() - 7 * 86_400_000,
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     return requestAuthErrorResponse(error)||handleAuthError(error);
