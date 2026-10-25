@@ -59,4 +59,7 @@ test('a search finds what was asked and what was answered, one line per conversa
 test('the snippet shows the words around what was found', () => {
   assert.equal(coworkSearchSnippet('Corto y claro', 'claro'), 'Corto y claro');
   assert.equal(coworkSearchSnippet(`${'a '.repeat(60)}palabra${' b'.repeat(60)}`, 'palabra', 10), '…a a a a a palabra b b b b b…');
+  // As it reads on screen, not its Markdown.
+  assert.equal(coworkSearchSnippet('Sí está **reclutando**, sobre todo en minería.\n\n- **Qué hace:** [Somos Sodexo](https://cl.sodexo.com) lo dice.', 'minería', 200),
+    'Sí está reclutando, sobre todo en minería. Qué hace: Somos Sodexo lo dice.');
 });

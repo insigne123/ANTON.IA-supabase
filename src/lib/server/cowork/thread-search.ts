@@ -6,9 +6,14 @@ export const COWORK_SEARCH_MIN = 3;
 
 export type CoworkThreadMatch = { rootId: string; snippet: string };
 
+/** An answer as it reads on screen: a link by its words, no bold marks, list dashes or headings. */
+function plainText(text: string) {
+  return text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^\s*(?:[-*+]|\d+\.|#{1,6})\s+/gm, '').replace(/[*_`>]+/g, '');
+}
+
 /** The words around what was found, so the list can show where it is. */
 export function coworkSearchSnippet(text: string, term: string, room = 48) {
-  const clean = text.replace(/\s+/g, ' ').trim();
+  const clean = plainText(text).replace(/\s+/g, ' ').trim();
   const at = clean.toLocaleLowerCase('es').indexOf(term.toLocaleLowerCase('es'));
   if (at < 0) return clean.slice(0, room * 2);
   const start = Math.max(0, at - room), end = Math.min(clean.length, at + term.length + room);
