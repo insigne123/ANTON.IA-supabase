@@ -41,7 +41,9 @@ export type CoworkDraftSink = (text: string, progress: CoworkDraftProgress) => P
  *
  * With `hold`, no text is written: only which phase the answer is in (writing, reviewing,
  * adjusting; phases never go back) and how far its cards got, so the page shows the work and
- * the answer appears once, when it is final.
+ * the answer appears once, when it is final. `holdFromNow()` turns that on in the middle of a
+ * turn: the Writer's emails are held while an ordinary answer streams (the Reviewer changes them
+ * often; nothing changes an ordinary answer once it is written).
  */
 export function coworkDraftWriter(sink: CoworkDraftSink, options: {
   intervalMs?: number; now?: () => number; onDisabled?: (reason: unknown) => void; hold?: boolean;
@@ -56,7 +58,7 @@ export function coworkDraftWriter(sink: CoworkDraftSink, options: {
   let inflight: Promise<void> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let reviewing = false;
-  const hold = options.hold === true;
+  let hold = options.hold === true;
   let phase: CoworkDraftPhase | null = null;
   const advance = (next: CoworkDraftPhase) => {
     if (phase && COWORK_DRAFT_PHASES.indexOf(next) <= COWORK_DRAFT_PHASES.indexOf(phase)) return false;
@@ -137,6 +139,14 @@ export function coworkDraftWriter(sink: CoworkDraftSink, options: {
     adjust() {
       if (disabled || !hold || (!latest && pending === null)) return;
       if (advance('adjusting')) schedule();
+    },
+    /** From here on the answer is held: no more text travels, only the phase (writing) and the cards. */
+    holdFromNow() {
+      if (hold) return;
+      hold = true;
+      if (disabled || (!latest && pending === null)) return;
+      advance('writing');
+      schedule();
     },
     get held() { return hold; },
     /** Writes the latest state if it is not written yet (the end of a decision). */

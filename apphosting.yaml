@@ -89,10 +89,12 @@ env:
   - variable: COWORK_STREAMING_ENABLED
     value: "true"
     availability: [RUNTIME]
-  # Una sola respuesta: se muestra cuando ya pasó la revisión, sin texto que después cambie a la
-  # vista (docs/cowork-una-respuesta.md). En "false" vuelve el texto en vivo.
+  # Texto en vivo (25 oct): con la Jueza apagada nada cambia una respuesta común después de escrita,
+  # así que se ve mientras se escribe. Los correos de la Redactora se retienen igual hasta que la
+  # Revisora termina: en producción cambió 7 de 10 (docs/cowork-una-respuesta.md). En "true" se
+  # retiene todo, como antes.
   - variable: COWORK_ANSWER_HOLD_ENABLED
-    value: "true"
+    value: "false"
     availability: [RUNTIME]
   - variable: COWORK_WRITER_ENABLED
     value: "true"

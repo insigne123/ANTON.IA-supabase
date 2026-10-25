@@ -33,7 +33,7 @@ function harness(replies: unknown[], timeLeft = () => 90_000, adjust = true, eff
     recordUsage: async id => { log.push(`usage:${id}`); },
     record: async event => { log.push(`step:${event.result.agent}:${event.result.state}`); },
     liveDraft: { push: text => { pushed.push(text); }, review: () => { log.push('review'); }, ...(adjust ? { adjust: () => { log.push('adjust'); } } : {}),
-      flush: async () => { log.push('flush'); } },
+      holdFromNow: () => { log.push('hold'); }, flush: async () => { log.push('flush'); } },
     timeLeft, models: { writer: 'writer-model', reviewer: 'reviewer-model' }, efforts,
   });
   return { write, log, pushed, options };
@@ -43,8 +43,9 @@ test('the Writer streams into the live draft and the Reviewer reads it, each und
   const h = harness([draft, { verdict: 'ok', issues: [] }]);
   const answer = await h.write(brief, []);
   assert.deepEqual(answer, { reply: draft.reply, document: null, question: draft.question, blocks: draft.blocks, suggestions: draft.suggestions });
+  // The emails are held from the start (the Reviewer often changes them), while an ordinary answer streams.
   assert.deepEqual(h.log, [
-    'step:writer:working', 'reserve:writer', 'flush', 'usage:call-writer', 'step:writer:done',
+    'hold', 'step:writer:working', 'reserve:writer', 'flush', 'usage:call-writer', 'step:writer:done',
     'review', 'step:reviewer:working', 'reserve:reviewer', 'flush', 'usage:call-reviewer', 'step:reviewer:done',
   ]);
   // What the page shows while the Writer writes is its reply, read like a coordinator answer.

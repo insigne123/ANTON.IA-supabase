@@ -100,6 +100,34 @@ test('the page reads its own draft; odd progress reads as no cards', async () =>
   assert.equal(await readCoworkRunDraft(auth({ ...row, text: '', progress: { cards: [], phase: 'thinking' } }), 'r1'), null);
 });
 
+test('an ordinary answer streams; once the Writer starts, its emails are held: no more text or titles, only the phase', async () => {
+  const frozen = () => 0;
+  const writes: Array<{ text: string; progress: unknown }> = [];
+  const writer = coworkDraftWriter(async (text, progress) => { writes.push({ text, progress }); return true; }, { intervalMs: 1, now: frozen });
+  assert.equal(writer.held, false);
+  // Nothing shown yet: holding has nothing to write until the emails come.
+  const quiet = coworkDraftWriter(async (text, progress) => { writes.push({ text, progress }); return true; }, { intervalMs: 1, now: frozen });
+  quiet.holdFromNow();
+  await pause(10);
+  assert.equal(writes.length, 0);
+  assert.equal(quiet.held, true);
+  writer.push(answer('Revisé tus contactos'));
+  await writer.flush();
+  assert.deepEqual(writes, [{ text: 'Revisé tus contactos', progress: { cards: [] } }]);
+  writer.holdFromNow();
+  await writer.flush();
+  writer.push(answer('Te dejo el correo a Felipe.', ',"blocks":[{"type":"email_draft","title":"Correo a Felipe","body":"Hola'));
+  await writer.flush();
+  writer.adjust();
+  await writer.flush();
+  assert.equal(writer.held, true);
+  assert.deepEqual(writes.slice(1), [
+    { text: '', progress: { cards: [], phase: 'writing' } },
+    { text: '', progress: { cards: [{ type: 'email_draft', title: null, parts: 1 }], phase: 'writing' } },
+    { text: '', progress: { cards: [{ type: 'email_draft', title: null, parts: 1 }], phase: 'adjusting' } },
+  ]);
+});
+
 test('held, no text or card title travels: only the phase and how far each card got, and a phase never goes back', async () => {
   // A frozen clock: after the first write every change waits for the interval, so what is written depends on the calls,
   // never on how busy the machine is (with the real clock, a slow millisecond between review() and adjust() wrote both).
