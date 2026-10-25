@@ -34,6 +34,7 @@ import { COWORK_LOW_SEARCH_QUOTA, CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkShortcuts } from './CoworkShortcuts';
 import { CoworkSchedules, useCoworkSchedules } from './CoworkSchedules';
+import { CoworkSavedPrompts, useCoworkSavedPrompts } from './CoworkSavedPrompts';
 import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
@@ -170,6 +171,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const schedulesAvailable = schedules.available;
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [schedulesPrompt, setSchedulesPrompt] = useState('');
+  // «Pedidos guardados» (COW-06): offered with «/» once the table exists; saved from the message box.
+  const savedPrompts = useCoworkSavedPrompts(true);
+  const [savedPromptsOpen, setSavedPromptsOpen] = useState(false);
+  const [savedPromptsDraft, setSavedPromptsDraft] = useState('');
   const [mac, setMac] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   // Below xl the summary has no room beside the chat: it opens in a sheet.
@@ -610,6 +615,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     : {};
   const retryList = useCallback(() => { setError(''); setListVersion(value => value + 1); }, []);
   const openSchedules = useCallback((prompt: string) => { setDrawerOpen(false); setSchedulesPrompt(prompt); setSchedulesOpen(true); }, []);
+  const openSavedPrompts = useCallback((prompt: string) => { setSavedPromptsDraft(prompt); setSavedPromptsOpen(true); }, []);
+  const promptProps = savedPrompts.available
+    ? { savedPrompts: savedPrompts.prompts, onSavePrompt: () => openSavedPrompts(message) }
+    : {};
   const scheduleActions = schedulesAvailable ? { onSchedules: () => openSchedules(''), schedules: { active: schedules.active, next: schedules.next } } : {};
   const title = useMemo(() => {
     const summary = threads.find(thread => thread.rootId === selectedRoot);
@@ -1025,7 +1034,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
     placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Enviar mensaje" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
-    searchContacts={ready ? searchContacts : null} onMention={addMention} templates onSchedule={schedulesAvailable ? () => openSchedules(message) : null}
+    searchContacts={ready ? searchContacts : null} onMention={addMention} templates {...promptProps} onSchedule={schedulesAvailable ? () => openSchedules(message) : null}
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
   return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className={cn('cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] max-md:-mx-4 max-md:-my-4 max-md:h-[calc(100dvh-3rem)] max-md:rounded-none max-md:border-0 max-md:shadow-none md:h-[calc(100dvh-5.5rem)]', chrome && 'md:h-dvh md:rounded-none md:border-0 md:shadow-none')}>
@@ -1150,7 +1159,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 && <CoworkQuickActions id="cowork-quick-actions" onPick={followUp} />}
               <CoworkComposer ref={composer} id="cowork-followup" value={message} onChange={setMessage} onSubmit={() => void submit()}
                 placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"
-                searchContacts={ready ? searchContacts : null} onMention={addMention} templates onSchedule={schedulesAvailable ? () => openSchedules(message) : null}
+                searchContacts={ready ? searchContacts : null} onMention={addMention} templates {...promptProps} onSchedule={schedulesAvailable ? () => openSchedules(message) : null}
                 onStop={active && !pendingDecision && latestIsCurrent ? () => void cancel() : null} stopping={cancelling}
                 canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
                 {...fileProps('cowork-followup')}
@@ -1209,6 +1218,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         budget={state?.budget || null} usage={state?.usage || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
     </m.div>}
     <CoworkShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} mac={mac} />
+    {savedPrompts.available && <CoworkSavedPrompts open={savedPromptsOpen} onOpenChange={setSavedPromptsOpen} draft={savedPromptsDraft} prompts={savedPrompts.prompts} onChanged={savedPrompts.refresh} />}
     {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={open => { setSchedulesOpen(open); if (!open) schedules.refresh(); }} initialPrompt={schedulesPrompt} onStarted={retryList} />}
     <AutonomousConfirm open={confirmingAutonomous} onCancel={() => setConfirmingAutonomous(false)}
       onConfirm={() => { writeLocal(AUTONOMOUS_CONFIRMED, '1'); setConfirmingAutonomous(false); setModeState('autonomous'); writeLocal(MODE_KEY, 'autonomous'); }} />

@@ -1,6 +1,6 @@
 'use client';
 
-import type { CoworkStarter } from '@/lib/cowork/starters';
+import type { CoworkTemplateItem } from '@/lib/cowork/saved-prompts';
 import { cn } from '@/lib/utils';
 import { cwPop, cwVariants, m } from './motion';
 import { CoworkIcon } from './ui';
@@ -10,13 +10,13 @@ export type CoworkContactOption = { id: string; name: string; title: string | nu
 
 export type ComposerShortcutItems =
   | { kind: 'mention'; items: CoworkContactOption[]; loading: boolean; failed: boolean }
-  | { kind: 'template'; items: CoworkStarter[] };
+  | { kind: 'template'; items: CoworkTemplateItem[] };
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]?.toUpperCase()).join('');
 
 /**
- * The list above the composer while a shortcut is typed (plan 2, V6): saved contacts after «@», templates
- * after «/». Focus stays in the text: the arrows move through the list, Enter or Tab picks, Escape closes;
+ * The list above the composer while a shortcut is typed (plan 2, V6): saved contacts after «@», the saved requests and the
+ * templates after «/» (COW-06). Focus stays in the text: the arrows move through the list, Enter or Tab picks, Escape closes;
  * a click picks too. Only a moving pointer changes the active option: a list that opens under a resting
  * one keeps the first, so Enter picks what the arrows show. The text box names this list and its active option (aria-controls and
  * aria-activedescendant), so screen readers follow the arrows.
@@ -49,6 +49,7 @@ export function ComposerShortcutList({ id, list, active, onPick, onHover }: {
             className={cn('flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2', index === active ? 'bg-cw-accent-soft' : 'hover:bg-cw-hover')}>
             <CoworkIcon name={starter.icon} className="h-4 w-4 shrink-0 text-cw-accent" />
             <span className="min-w-0 flex-1 truncate text-[13.5px] text-cw-text">{starter.title}</span>
+            {starter.note && <span className={cn('shrink-0 text-[11.5px]', index === active ? 'text-cw-text' : 'text-cw-muted')}>{starter.note}</span>}
           </li>)}
       </ul>
       : <p role="status" className="px-3.5 pb-2.5 pt-0.5 text-[13px] text-cw-muted">{empty}</p>}

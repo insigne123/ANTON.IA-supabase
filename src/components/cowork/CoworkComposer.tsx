@@ -1,11 +1,12 @@
 'use client';
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { ArrowUp, CalendarClock, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, Bookmark, CalendarClock, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import {
   coworkComposerToken, coworkInsertMention, coworkMentionName, coworkTemplateBlank, coworkTemplates, type CoworkComposerToken, type CoworkMention,
 } from '@/lib/cowork/mentions';
+import { coworkSavedTemplates, type CoworkSavedPrompt } from '@/lib/cowork/saved-prompts';
 import { cn } from '@/lib/utils';
 import { COWORK_AUTONOMOUS_NOTE, ExecutionMode } from './ExecutionMode';
 import { ComposerShortcutList, type ComposerShortcutItems, type CoworkContactOption } from './ComposerShortcuts';
@@ -44,8 +45,11 @@ type Props = {
   /** «@» lists these saved contacts (V6); the picked one is reported so the message can carry its ID. */
   searchContacts?: ((query: string) => Promise<CoworkContactOption[]>) | null;
   onMention?: ((mention: CoworkMention) => void) | null;
-  /** «/» at the start lists the home's templates (V6). */
+  /** «/» at the start lists the home's templates (V6), after the saved requests (COW-06). */
   templates?: boolean;
+  savedPrompts?: CoworkSavedPrompt[];
+  /** «Pedidos guardados» (COW-06): offered once there is a request to keep, or there are saved ones to manage. */
+  onSavePrompt?: (() => void) | null;
   /** «Programar este pedido» (scheduled tasks): offered once there is a request to repeat, only where the account has the tasks. */
   onSchedule?: (() => void) | null;
 };
@@ -57,7 +61,7 @@ const SEARCH_WAIT_MS = 150;
 export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function CoworkComposer({
   id, value, onChange, onSubmit, placeholder, ready, sending, submitLabel, onStop, stopping = false,
   canAutonomous = false, mode, onModeChange, onToggleFiles, filesOpen = false, attachments, hasAttachments = false, attaching = false, onDropFiles,
-  queued, footnote, size = 'regular', searchContacts = null, onMention = null, templates = false, onSchedule = null,
+  queued, footnote, size = 'regular', searchContacts = null, onMention = null, templates = false, savedPrompts = [], onSavePrompt = null, onSchedule = null,
 }, ref) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -72,7 +76,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
   const selectAfter = useRef<{ start: number; end: number } | null>(null);
   const shortcut = token && dismissed !== token.start && ((token.kind === 'mention' && searchContacts) || (token.kind === 'template' && templates)) ? token : null;
   const list: ComposerShortcutItems | null = !shortcut ? null : shortcut.kind === 'template'
-    ? { kind: 'template', items: coworkTemplates(shortcut.query) }
+    ? { kind: 'template', items: [...coworkSavedTemplates(savedPrompts, shortcut.query), ...coworkTemplates(shortcut.query)] }
     : { kind: 'mention', items: found.query === shortcut.query ? found.items : [], loading: found.query !== shortcut.query || found.loading, failed: found.failed };
   const count = list?.items.length ?? 0;
 
@@ -207,6 +211,11 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         {onToggleFiles && <CwButton size="icon-sm" variant="ghost" onClick={onToggleFiles} aria-expanded={filesOpen}
           aria-label={filesOpen ? 'Ocultar archivos' : 'Adjuntar archivos'} title="Adjuntar archivos" disabled={sending}>
           <Paperclip aria-hidden="true" />
+        </CwButton>}
+        {onSavePrompt && (value.trim().length >= 10 || savedPrompts.length > 0) && <CwButton size="icon-sm" variant="ghost" onClick={onSavePrompt} disabled={sending}
+          aria-label={value.trim().length >= 10 ? 'Guardar este pedido' : 'Pedidos guardados'}
+          title={value.trim().length >= 10 ? 'Guardar este pedido: luego lo usas escribiendo «/»' : 'Pedidos guardados'}>
+          <Bookmark aria-hidden="true" />
         </CwButton>}
         {onSchedule && value.trim().length >= 10 && <CwButton size="icon-sm" variant="ghost" onClick={onSchedule} disabled={sending}
           aria-label="Programar este pedido" title="Programar este pedido: Cowork lo hará solo, cuando tú elijas">
