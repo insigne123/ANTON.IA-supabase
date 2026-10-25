@@ -72,9 +72,9 @@ test('the settings give the hidden conversations and the names; without the tabl
     { root_run_id: FOLLOW, user_id: USER, organization_id: ORG, title: null, hidden_at: '2026-10-03T00:00:00Z' },
     { root_run_id: 'other', user_id: 'someone-else', organization_id: ORG, title: 'Ajeno', hidden_at: '2026-10-03T00:00:00Z' },
   ] });
-  assert.deepEqual(await readCoworkThreadSettings(client, scope), { available: true, hiddenRootIds: [FOLLOW], titles: { [ROOT]: 'Clínicas' } });
+  assert.deepEqual(await readCoworkThreadSettings(client, scope), { available: true, hiddenRootIds: [FOLLOW], titles: { [ROOT]: 'Clínicas' }, pinnedRootIds: [], pinsAvailable: true });
   const missing = fakeClient({}, { error: { code: 'PGRST205', message: "Could not find the table 'public.cowork_thread_settings'" } });
-  assert.deepEqual(await readCoworkThreadSettings(missing.client, scope), { available: false, hiddenRootIds: [], titles: {} });
+  assert.deepEqual(await readCoworkThreadSettings(missing.client, scope), { available: false, hiddenRootIds: [], titles: {}, pinnedRootIds: [], pinsAvailable: false });
   const broken = fakeClient({}, { error: { code: '57014', message: 'canceling statement due to statement timeout' } });
   await assert.rejects(readCoworkThreadSettings(broken.client, scope));
 });
@@ -83,7 +83,7 @@ test('renaming checks the conversation is yours and a root, then the server writ
   const user = fakeClient(runs());
   const admin = fakeClient({ cowork_thread_settings: [] });
   const saved = await updateCoworkThread(user.client, admin.client, scope, ROOT, { title: '  Clínicas  ' }, NOW);
-  assert.deepEqual(saved, { rootRunId: ROOT, title: 'Clínicas', hiddenAt: null });
+  assert.deepEqual(saved, { rootRunId: ROOT, title: 'Clínicas', hiddenAt: null, pinnedAt: null });
   assert.deepEqual(admin.log[0].row, { root_run_id: ROOT, user_id: USER, organization_id: ORG, updated_at: NOW.toISOString(), title: 'Clínicas' });
   await assert.rejects(updateCoworkThread(user.client, admin.client, scope, FOLLOW, { title: 'x' }, NOW), (error: unknown) => error instanceof CoworkThreadError && error.code === 'NOT_FOUND');
   const stranger = fakeClient(runs());
@@ -133,8 +133,8 @@ test('the route, the list and the workspace wire rename and delete, and hide the
   assert.match(route, /requireCoworkAccess\(\)/);
   assert.match(route, /ACTIVE: \{ status: 409/);
   const list = readFileSync('src/app/api/cowork/runs/route.ts', 'utf8');
-  assert.match(list, /listCoworkRuns\(auth, \{ hiddenRootIds: threads\.hiddenRootIds \}\)/);
-  assert.match(list, /threads: \{ available: threads\.available, titles: threads\.titles, autoTitles \}/);
+  assert.match(list, /listCoworkRuns\(auth, \{ hiddenRootIds: threads\.hiddenRootIds, pinnedRootIds: threads\.pinnedRootIds \}\)/);
+  assert.match(list, /threads: \{ available: threads\.available, titles: threads\.titles, autoTitles, pinned: threads\.pinnedRootIds, pinsAvailable: threads\.pinsAvailable \}/);
   // The names Cowork gave each conversation (Plan 13) come from the worker's table, scoped to the person.
   assert.match(list, /loadCoworkThreadTitles\(getSupabaseAdminClient\(\), \{ userId: auth\.user\.id, organizationId: auth\.organizationId \}, rootIds\)/);
   // Best effort, also when the service client cannot be made: a missing key never takes the list down.
@@ -149,4 +149,36 @@ test('the route, the list and the workspace wire rename and delete, and hide the
   assert.match(workspace, /groupCoworkThreads\(runs, \{ \.\.\.autoTitles, \.\.\.threadNames\.titles \}\)/);
   assert.match(workspace, /<ToastAction altText="Deshacer la eliminación"/);
   assert.equal((workspace.match(/\{\.\.\.threadActions\}/g) || []).length, 2, 'the rail and the phone drawer');
+});
+
+test('pinned conversations come first in their order, a hidden one is not pinned, and before the column exists the rest still reads (COW-12)', async () => {
+  const OTHER = '00000000-0000-4000-8000-0000000000a3';
+  const { client } = fakeClient({ cowork_thread_settings: [
+    { root_run_id: ROOT, user_id: USER, organization_id: ORG, title: null, hidden_at: null, pinned_at: '2026-10-02T00:00:00Z' },
+    { root_run_id: OTHER, user_id: USER, organization_id: ORG, title: null, hidden_at: null, pinned_at: '2026-10-03T00:00:00Z' },
+    { root_run_id: FOLLOW, user_id: USER, organization_id: ORG, title: null, hidden_at: '2026-10-03T00:00:00Z', pinned_at: '2026-10-04T00:00:00Z' },
+  ] });
+  const read = await readCoworkThreadSettings(client, scope);
+  assert.deepEqual(read.pinnedRootIds, [OTHER, ROOT], 'the latest pinned first; a deleted one is not');
+  // Before 20261024230000: the select with pinned_at fails, the one without it answers.
+  let calls = 0;
+  const old: any = { from: () => {
+    const builder: any = { select: (columns: string) => { builder.columns = columns; return builder; }, eq: () => builder, order: () => builder, limit: () => builder,
+      then: (resolve: (value: unknown) => void) => { calls += 1; resolve(/pinned_at/.test(builder.columns)
+        ? { data: null, error: { code: '42703', message: 'column cowork_thread_settings.pinned_at does not exist' } }
+        : { data: [{ root_run_id: ROOT, title: 'Clínicas', hidden_at: null }], error: null }); } };
+    return builder;
+  } };
+  assert.deepEqual(await readCoworkThreadSettings(old, scope), { available: true, hiddenRootIds: [], titles: { [ROOT]: 'Clínicas' }, pinnedRootIds: [], pinsAvailable: false });
+  assert.equal(calls, 2);
+
+  const user = fakeClient(runs());
+  const admin = fakeClient({ cowork_thread_settings: [] });
+  const pinned = await updateCoworkThread(user.client, admin.client, scope, ROOT, { pinned: true }, NOW);
+  assert.equal(pinned.pinnedAt, NOW.toISOString());
+  assert.deepEqual(admin.log[0].row, { root_run_id: ROOT, user_id: USER, organization_id: ORG, updated_at: NOW.toISOString(), pinned_at: NOW.toISOString() });
+  const unpinned = await updateCoworkThread(user.client, admin.client, scope, ROOT, { pinned: false }, NOW);
+  assert.equal(unpinned.pinnedAt, null);
+  const noColumn = fakeClient({}, { error: { code: 'PGRST204', message: "Could not find the 'pinned_at' column of 'cowork_thread_settings' in the schema cache" } });
+  await assert.rejects(updateCoworkThread(user.client, noColumn.client, scope, ROOT, { pinned: true }, NOW), (error: unknown) => error instanceof CoworkThreadError && error.code === 'UNAVAILABLE');
 });

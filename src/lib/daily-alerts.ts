@@ -46,8 +46,10 @@ export type AlertFacts = {
   goal: GoalProgress | null;
   /** Today's «Contacto del día», when it is ready. */
   drop?: { id: string; items: DropItem[] } | null;
+  /** Conversations of Cowork whose proposal waits for the person (COW-04): every day while they wait, as the decisions above. */
+  coworkApprovals?: number;
 };
-export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'source' | 'document' | 'closing' | 'assigned' | 'report' | 'search' | 'drop' | 'research' | 'ready' | 'goal';
+export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'approval' | 'source' | 'document' | 'closing' | 'assigned' | 'report' | 'search' | 'drop' | 'research' | 'ready' | 'goal';
 
 /**
  * The days a document of the company is told on before it lapses: two weeks ahead (time to ask for a new F30), a week, the day before
@@ -146,6 +148,9 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     lines.push({ kind: 'decision', text, href: `/opportunities?op=${encodeURIComponent(item.id)}` });
   }
   if (waiting.length > 2) lines.push({ kind: 'decision', text: `Y ${plural(waiting.length - 2, 'oportunidad más espera', 'oportunidades más esperan')} tu respuesta`, href: '/opportunities' });
+
+  // What Cowork proposed and waits for the person's approval: outside the tab nothing said so (COW-04).
+  if (facts.coworkApprovals) lines.push({ kind: 'approval', text: facts.coworkApprovals === 1 ? 'Una propuesta de Cowork espera tu aprobación' : `${facts.coworkApprovals} propuestas de Cowork esperan tu aprobación`, href: '/cowork' });
 
   // A source of the search that keeps failing: a radar with nothing new looked the same as a broken one.
   for (const source of (facts.sources || []).slice(0, 2)) {

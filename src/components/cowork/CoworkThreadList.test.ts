@@ -132,3 +132,15 @@ test('every conversation that waits for approval goes first, under its own headi
   assert.match(text, /^.*Esperan tu aprobación · 2 Correos para clientes 2 .*Correos para clientes 3 .*Hoy Correos para clientes 1/);
   assert.doesNotMatch(render({ threads: [thread(1)] }), /Esperan tu aprobación/, 'no heading when nothing waits');
 });
+
+test('pinned conversations stay on top under what waits, in the order they were pinned, and the menu pins or unpins (COW-12)', () => {
+  const old = new Date(Date.now() - 40 * 86_400_000).toISOString();
+  const threads = [thread(1), { ...thread(2), updatedAt: old }, thread(3), { ...thread(4), status: 'waiting_approval' as const }];
+  const html = render({ threads, pinnedRootIds: [thread(3).rootId, thread(2).rootId], onPin: () => {}, onRename: async () => true });
+  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  assert.match(text, /Esperan tu aprobación · 1 Correos para clientes 4 .*Fijadas Correos para clientes 3 .*Correos para clientes 2 .*Hoy Correos para clientes 1/);
+  assert.match(text, /Quitar de fijadas/, 'a pinned one offers to unpin');
+  assert.match(text, /Fijar arriba/, 'the others offer to pin');
+  assert.doesNotMatch(render({ threads, pinnedRootIds: [] }), /Fijadas/, 'no pins, no group');
+  assert.doesNotMatch(render({ threads, onRename: async () => true }), /Fijar arriba/, 'without pins on the server, no menu item');
+});

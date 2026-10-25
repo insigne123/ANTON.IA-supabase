@@ -182,3 +182,12 @@ test('what is new in a saved search reaches whoever asked to hear of it, with th
   assert.equal(alert.subject, '3 nuevas en tu búsqueda «“guardias” · Seguridad»');
   assert.deepEqual(alert.lines, [{ kind: 'search', text: '3 nuevas en tu búsqueda «“guardias” · Seguridad»', href: '/opportunities?vista=lista&q=guardias&rubro=seguridad' }]);
 });
+
+test('what Cowork proposed and waits for approval is said every day while it waits, with the way to it (COW-04)', () => {
+  const now = new Date('2026-10-21T11:00:00Z');
+  const two = composeAlert(facts({ coworkApprovals: 2 }), now);
+  assert.ok(two?.lines.some(line => line.kind === 'approval' && line.text === '2 propuestas de Cowork esperan tu aprobación' && line.href === '/cowork'));
+  const one = composeAlert(facts({ coworkApprovals: 1 }), now);
+  assert.ok(one?.lines.some(line => line.text === 'Una propuesta de Cowork espera tu aprobación'));
+  assert.ok(!(composeAlert(facts({ coworkApprovals: 0 }), now)?.lines || []).some(line => line.kind === 'approval'));
+});

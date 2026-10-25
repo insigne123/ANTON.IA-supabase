@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
-import { Brain, CalendarClock, Keyboard, LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Brain, CalendarClock, Keyboard, LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
   coworkDateBucket, coworkShortTime, coworkStatusCopy, isCoworkActive, type CoworkThreadSummary,
@@ -20,7 +20,7 @@ const TITLE_MAX = 120;
  * `closeStyle` «dismiss» closes with an X, as in a sheet; «collapse» folds the side rail.
  */
 export function CoworkThreadList({ threads, loading, error = '', onRetry, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete, onShortcuts, onSchedules,
-  schedules = null, idPrefix = 'cowork-rail', closeStyle = 'collapse' }: {
+  schedules = null, idPrefix = 'cowork-rail', closeStyle = 'collapse', pinnedRootIds = [], onPin, onSearch }: {
   idPrefix?: string;
   threads: CoworkThreadSummary[];
   loading: boolean;
@@ -33,6 +33,12 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   onClose: () => void;
   onRename?: (rootId: string, title: string) => Promise<boolean>;
   onDelete?: (thread: CoworkThreadSummary) => void;
+  /** The pinned conversations (COW-12), latest pinned first: they go on top, under what waits for approval. */
+  pinnedRootIds?: string[];
+  /** «Fijar arriba» / «Quitar de fijadas»; only once the server keeps pins. */
+  onPin?: (rootId: string, pinned: boolean) => void;
+  /** Search in what was asked and answered (COW-09); without it the box filters by name only. */
+  onSearch?: (term: string, signal: AbortSignal) => Promise<Array<{ rootId: string; snippet: string }>>;
   /** «Atajos de teclado» (Plan 13), from the footer; on a desktop, where there is a keyboard. */
   onShortcuts?: () => void;
   /** «Tareas programadas» from the footer; only where the account has them. */
@@ -46,20 +52,43 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   const [memoriesOpen, setMemoriesOpen] = useState(false);
   const skipBlurSave = useRef(false);
   const term = filter.trim().toLocaleLowerCase('es');
+  // What the conversations say, from the server, a moment after the person stops typing (COW-09).
+  const [found, setFound] = useState<{ term: string; snippets: Map<string, string> }>({ term: '', snippets: new Map() });
+  useEffect(() => {
+    if (!onSearch || term.length < 3) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      onSearch(term, controller.signal).then(matches => {
+        if (!controller.signal.aborted) setFound({ term, snippets: new Map(matches.map(match => [match.rootId, match.snippet])) });
+      }).catch(() => {
+        // The names still filter; the list stops saying it is searching.
+        if (!controller.signal.aborted) setFound({ term, snippets: new Map() });
+      });
+    }, 300);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [onSearch, term]);
+  const snippets = found.term === term ? found.snippets : null;
+  // Until the server answers, an empty list is not «no match» yet.
+  const searching = Boolean(onSearch) && term.length >= 3 && found.term !== term;
   const groups = useMemo(() => {
     const now = new Date();
     // What waits for the person's approval goes first, all of it, so a proposal in an older conversation is not forgotten (COW-16).
     const waiting = { label: 'Esperan tu aprobación', items: [] as CoworkThreadSummary[] };
-    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [waiting];
+    // The recurring ones the person pinned («Licitaciones del lunes») stay on top, whatever their date (COW-12).
+    const pinned = { label: 'Fijadas', items: [] as CoworkThreadSummary[] };
+    const pins = new Map(pinnedRootIds.map((rootId, index) => [rootId, index]));
+    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [waiting, pinned];
     for (const thread of threads) {
-      if (term && !thread.title.toLocaleLowerCase('es').includes(term)) continue;
+      if (term && !thread.title.toLocaleLowerCase('es').includes(term) && !snippets?.has(thread.rootId)) continue;
       if (thread.status === 'waiting_approval') { waiting.items.push(thread); continue; }
+      if (pins.has(thread.rootId)) { pinned.items.push(thread); continue; }
       const label = coworkDateBucket(thread.updatedAt, now);
       const group = result.find(item => item.label === label);
       if (group) group.items.push(thread); else result.push({ label, items: [thread] });
     }
+    pinned.items.sort((a, b) => (pins.get(a.rootId) ?? 0) - (pins.get(b.rootId) ?? 0));
     return result.filter(group => group.items.length > 0);
-  }, [threads, term]);
+  }, [threads, term, pinnedRootIds, snippets]);
 
   const save = async () => {
     if (!editing || !onRename || saving) return;
@@ -82,7 +111,8 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
         ? <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Cerrar conversaciones" title="Cerrar"><X aria-hidden="true" /></CwButton>
         : <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar conversaciones" title="Ocultar"><PanelLeftClose aria-hidden="true" /></CwButton>}
     </div>
-    {threads.length > 6 && <div className="px-3 pb-2">
+    {/* The box searches what was said too (COW-09), so it is worth it from a few conversations, not only from seven. */}
+    {threads.length > 3 && <div className="px-3 pb-2">
       <label htmlFor={`${idPrefix}-filter`} className="sr-only">Buscar conversaciones</label>
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cw-faint" aria-hidden="true" />
@@ -100,10 +130,12 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
         <p className="text-[13px] font-medium leading-5 text-cw-text">Aún no tienes conversaciones</p>
         <p className="mt-0.5 text-[12.5px] leading-5 text-cw-muted">Lo que le pidas a Cowork queda aquí para retomarlo.</p>
       </div>}
-      {term && threads.length > 0 && groups.length === 0 && <div className="space-y-1.5 px-3 py-2">
-        <p className="text-[13px] leading-5 text-cw-muted">Ninguna conversación coincide con «{filter.trim()}».</p>
-        <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
-      </div>}
+      {term && threads.length > 0 && groups.length === 0 && (searching
+        ? <p role="status" className="flex items-center gap-2 px-3 py-2 text-[13px] text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Buscando en tus conversaciones…</p>
+        : <div className="space-y-1.5 px-3 py-2">
+          <p className="text-[13px] leading-5 text-cw-muted">Ninguna conversación coincide con «{filter.trim()}».</p>
+          <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
+        </div>)}
       {groups.map(group => <div key={group.label} className="mt-3 first:mt-1">
         <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}{group.label === 'Esperan tu aprobación' ? <span className="tabular-nums"> · {group.items.length}</span> : null}</h2>
         <ul className="space-y-px">
@@ -112,7 +144,10 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
             const current = selectedThreadId === thread.rootId;
             const working = isCoworkActive(thread.status);
             const flagged = working || thread.status === 'failed';
-            const manageable = Boolean(onRename || onDelete);
+            const manageable = Boolean(onRename || onDelete || onPin);
+            const isPinned = pinnedRootIds.includes(thread.rootId);
+            // Found in what was said, not in the name: the line where it is goes under the name.
+            const snippet = term && !thread.title.toLocaleLowerCase('es').includes(term) ? snippets?.get(thread.rootId) : undefined;
             if (editing?.rootId === thread.rootId) {
               return <li key={thread.rootId} className="px-1 py-0.5">
                 <label htmlFor={`${idPrefix}-rename`} className="sr-only">Nombre de la conversación</label>
@@ -135,7 +170,8 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
                 className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-[7px] text-left text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
                   manageable && 'pr-9',
                   current ? 'bg-cw-active font-medium text-cw-text' : 'text-cw-text hover:bg-cw-hover')}>
-                <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+                <span className="min-w-0 flex-1"><span className="block truncate">{thread.title}</span>
+                  {snippet ? <span className="block truncate text-[11.5px] font-normal text-cw-muted">{snippet}</span> : null}</span>
                 {/* Waiting for approval says so in a word: a faint dot was easy to miss. The time is in the tooltip: the groups (Hoy,
                     Ayer…) already say when, and the title gets the room (COW-24). */}
                 {thread.status === 'waiting_approval'
@@ -155,6 +191,10 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
                   {onRename && <DropdownMenuItem onSelect={() => setEditing({ rootId: thread.rootId, draft: thread.title })}
                     className="gap-2 rounded-lg px-2.5 py-2 text-[13px] focus:bg-cw-hover focus:text-cw-text">
                     <Pencil className="h-4 w-4 text-cw-muted" aria-hidden="true" />Renombrar
+                  </DropdownMenuItem>}
+                  {onPin && <DropdownMenuItem onSelect={() => onPin(thread.rootId, !isPinned)}
+                    className="gap-2 rounded-lg px-2.5 py-2 text-[13px] focus:bg-cw-hover focus:text-cw-text">
+                    {isPinned ? <PinOff className="h-4 w-4 text-cw-muted" aria-hidden="true" /> : <Pin className="h-4 w-4 text-cw-muted" aria-hidden="true" />}{isPinned ? 'Quitar de fijadas' : 'Fijar arriba'}
                   </DropdownMenuItem>}
                   {onDelete && <DropdownMenuItem disabled={working} onSelect={() => onDelete(thread)}
                     className="gap-2 rounded-lg px-2.5 py-2 text-[13px] text-cw-danger focus:bg-cw-danger-soft focus:text-cw-danger data-[disabled]:text-cw-muted">

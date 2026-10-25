@@ -13,8 +13,10 @@ export const COWORK_THREAD_TITLE_MAX = 120;
 type Client = { from: (table: string) => any };
 type Scope = { userId: string; organizationId: string };
 
-export type CoworkThreadSettings = { available: boolean; hiddenRootIds: string[]; titles: Record<string, string> };
-export type CoworkThreadSetting = { rootRunId: string; title: string | null; hiddenAt: string | null };
+export type CoworkThreadSettings = { available: boolean; hiddenRootIds: string[]; titles: Record<string, string>;
+  /** Pinned conversations, the latest pinned first (COW-12); empty until the column exists (20261024230000). */
+  pinnedRootIds: string[]; pinsAvailable: boolean };
+export type CoworkThreadSetting = { rootRunId: string; title: string | null; hiddenAt: string | null; pinnedAt: string | null };
 
 export class CoworkThreadError extends Error {
   constructor(readonly code: 'NOT_FOUND' | 'ACTIVE' | 'UNAVAILABLE') { super(code); }
@@ -26,10 +28,17 @@ export function isMissingThreadSettingsTable(error: unknown) {
   return code === 'PGRST205' || code === '42P01' || /cowork_thread_settings/.test(String(message || '')) && /(does not exist|could not find)/i.test(String(message || ''));
 }
 
+/** The column of the pins is not there yet (Postgres «undefined column», or PostgREST not knowing it). */
+export function isMissingPinColumn(error: unknown) {
+  const { code, message } = (error || {}) as { code?: string; message?: string };
+  return code === '42703' || code === 'PGRST204' || /pinned_at/.test(String(message || '')) && /(does not exist|could not find)/i.test(String(message || ''));
+}
+
 export const coworkThreadChangeSchema = z.object({
   title: z.string().max(400).nullable().optional(),
   hidden: z.boolean().optional(),
-}).strict().refine((change) => change.title !== undefined || change.hidden !== undefined, { message: 'Nada que cambiar' });
+  pinned: z.boolean().optional(),
+}).strict().refine((change) => change.title !== undefined || change.hidden !== undefined || change.pinned !== undefined, { message: 'Nada que cambiar' });
 
 /** A name as it is stored: spaces collapsed and trimmed, at most 120 characters; empty goes back to the first message. */
 export function normalizeCoworkThreadTitle(value: string | null | undefined): string | null {
@@ -41,21 +50,27 @@ export function normalizeCoworkThreadTitle(value: string | null | undefined): st
 
 /** The person's names and hidden conversations, read with their own session (RLS: own rows, with Cowork access). */
 export async function readCoworkThreadSettings(client: Client, scope: Scope): Promise<CoworkThreadSettings> {
-  const { data, error } = await client.from('cowork_thread_settings')
-    .select('root_run_id,title,hidden_at')
+  const read = (columns: string) => client.from('cowork_thread_settings').select(columns)
     .eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
     .order('updated_at', { ascending: false }).limit(1000);
+  let pinsAvailable = true;
+  let { data, error } = await read('root_run_id,title,hidden_at,pinned_at');
+  // Before the pins migration the names and the hidden ones still read as always.
+  if (error && isMissingPinColumn(error)) { pinsAvailable = false; ({ data, error } = await read('root_run_id,title,hidden_at')); }
   if (error) {
-    if (isMissingThreadSettingsTable(error)) return { available: false, hiddenRootIds: [], titles: {} };
+    if (isMissingThreadSettingsTable(error)) return { available: false, hiddenRootIds: [], titles: {}, pinnedRootIds: [], pinsAvailable: false };
     throw error;
   }
   const hiddenRootIds: string[] = [];
   const titles: Record<string, string> = {};
-  for (const row of (data || []) as Array<{ root_run_id: string; title: string | null; hidden_at: string | null }>) {
+  const pins: Array<{ rootId: string; at: string }> = [];
+  for (const row of (data || []) as Array<{ root_run_id: string; title: string | null; hidden_at: string | null; pinned_at?: string | null }>) {
     if (row.hidden_at) hiddenRootIds.push(row.root_run_id);
     if (row.title) titles[row.root_run_id] = row.title;
+    if (row.pinned_at && !row.hidden_at) pins.push({ rootId: row.root_run_id, at: row.pinned_at });
   }
-  return { available: true, hiddenRootIds, titles };
+  const pinnedRootIds = pins.sort((a, b) => b.at.localeCompare(a.at)).map(pin => pin.rootId);
+  return { available: true, hiddenRootIds, titles, pinnedRootIds, pinsAvailable };
 }
 
 /** Renames or hides one conversation. `client` is the person's session (ownership checks); `admin` writes the row. */
@@ -83,12 +98,13 @@ export async function updateCoworkThread(client: Client, admin: Client, scope: S
   };
   if (title !== undefined) row.title = title;
   if (change.hidden !== undefined) row.hidden_at = change.hidden ? now.toISOString() : null;
+  if (change.pinned !== undefined) row.pinned_at = change.pinned ? now.toISOString() : null;
   const { data, error } = await admin.from('cowork_thread_settings')
     .upsert(row, { onConflict: 'root_run_id' })
-    .select('root_run_id,title,hidden_at').single();
+    .select(change.pinned !== undefined ? 'root_run_id,title,hidden_at,pinned_at' : 'root_run_id,title,hidden_at').single();
   if (error) {
-    if (isMissingThreadSettingsTable(error)) throw new CoworkThreadError('UNAVAILABLE');
+    if (isMissingThreadSettingsTable(error) || change.pinned !== undefined && isMissingPinColumn(error)) throw new CoworkThreadError('UNAVAILABLE');
     throw error;
   }
-  return { rootRunId: data.root_run_id, title: data.title ?? null, hiddenAt: data.hidden_at ?? null };
+  return { rootRunId: data.root_run_id, title: data.title ?? null, hiddenAt: data.hidden_at ?? null, pinnedAt: data.pinned_at ?? null };
 }
