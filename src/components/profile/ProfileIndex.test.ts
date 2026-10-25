@@ -20,9 +20,15 @@ test('the index of «Perfil» names its five parts, jumps to each and marks the 
   assert.deepEqual([...html.matchAll(/href="#([a-z]+-heading)"/g)].map(match => match[1]), PROFILE_INDEX.map((item: { id: string }) => item.id));
   assert.match(html, /href="#identity-heading" aria-current="location" class="chip chip-on">Tú</);
   assert.equal((html.match(/aria-current/g) || []).length, 1);
-  // Every part it names is a heading of the page: the links to /profile#icp-heading keep working.
+  // Every part it names is a heading of the page, with or without a «Ficha de la empresa»: the links to /profile#icp-heading keep working.
   const page = await readFile(new URL('../../app/(app)/profile/page.tsx', import.meta.url), 'utf8');
-  for (const id of ['identity', 'company', 'offer', 'icp']) assert.match(page, new RegExp(`<Section id="${id}"`));
+  assert.match(page, /<Section id="identity"/);
+  for (const file of ['./ProfileSections.tsx', './CompanyProfileReadOnly.tsx']) {
+    const parts = await readFile(new URL(file, import.meta.url), 'utf8');
+    for (const id of ['company', 'offer', 'icp']) assert.match(parts, new RegExp(`<Section id="${id}"`), `${file} has «${id}»`);
+  }
+  assert.match(page, /<CompanyProfileReadOnly /);
+  assert.match(page, /<CompanySections\b/);
   assert.match(page, /<div id="security-heading" className="scroll-mt-28"><PasswordChangeForm \/><\/div>/);
   assert.match(page, /<ProfileIndex \/>/);
 });

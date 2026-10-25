@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Briefcase, Coins, LayoutDashboard, Users, UsersRound, ChartNoAxesCombined } from 'lucide-react';
+import { Briefcase, Building2, Coins, LayoutDashboard, Users, UsersRound, ChartNoAxesCombined } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
@@ -10,6 +10,7 @@ const adminNavigation = [
   { href: '/dashboard/admin', label: 'Uso y resultados', icon: ChartNoAxesCombined, exact: true },
   { href: '/dashboard/admin/users', label: 'Personas', icon: Users },
   { href: '/dashboard/admin/teams', label: 'Equipos', icon: UsersRound },
+  { href: '/dashboard/admin/company', label: 'Empresa', icon: Building2 },
   { href: '/dashboard/admin/work', label: 'Oportunidades y Cowork', icon: Briefcase },
   { href: '/dashboard/admin/credits', label: 'Créditos', icon: Coins },
 ];

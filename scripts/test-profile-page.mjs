@@ -57,7 +57,7 @@ const ICP = {
   method: 'Cuenta a cada persona contactada una vez.',
 };
 
-async function open(respond) {
+async function open(respond, { company = null } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/profile', runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
   window.process = { env: { NODE_ENV: 'test' } };
@@ -73,6 +73,8 @@ async function open(respond) {
   window.fetch = async (url, options = {}) => {
     // «Lo que dicen tus resultados» loads on its own: answered apart so the profile calls keep their order.
     if (String(url) === '/api/icp') { icpCalls.push(String(url)); return ok(ICP); }
+    // «Ficha de la empresa» (APP-06): none unless the scenario gives one.
+    if (String(url) === '/api/company-profile') return ok({ profile: company, canEdit: false });
     calls.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
     return respond(calls.length);
   };
@@ -169,4 +171,28 @@ const ok = (data) => ({ ok: true, status: 200, json: async () => data });
   } finally { app.close(); }
 }
 
-console.log('PASS: Perfil reads the site from the work email, proposes with sources, applies only what was checked and saves the new fields. DOM only, not visual certification.');
+// 4. The organization keeps a «Ficha de la empresa»: the company part is read only, and the person picks what they sell.
+{
+  const company = { revision: 2, reviewedAt: '2026-10-20T12:00:00Z', reviewedBy: 'Camila Torres', fields: {
+    companyName: 'GrupoExpro', website: 'grupoexpro.com', sector: '', description: '', valueProposition: 'Cubrimos peaks con personal listo.',
+    services: 'Servicios transitorios: personal temporal\nOutsourcing (BPO): procesos de apoyo', painPoints: '', differentiators: '', proofPoints: '',
+    referenceClients: '', targetRoles: 'Gerente de Personas', targetIndustries: 'Retail', targetCompanySize: '', targetLocations: 'Chile' } };
+  const app = await open(() => ok(AUTOFILL), { company });
+  try {
+    await app.waitFor(() => app.text().includes('Viene de la ficha de la empresa'), 'the company part');
+    assert.match(app.text(), /La revisó Camila Torres/);
+    assert.equal(app.field('services'), null, 'what the company sells is not edited here');
+    assert.equal(app.field('ai-website'), null, 'nor completed with AI');
+    assert.doesNotMatch(app.text(), /Tu perfil: \d+ de \d+/, 'nor counted as the person\'s to complete');
+    app.doc.getElementById('company-service-1').click();
+    await app.waitFor(() => app.text().includes('Cambios sin guardar'), 'a pick is a change');
+    app.button('Guardar cambios').click();
+    await app.waitFor(() => globalThis.__profile.updates.length === 1, 'saved');
+    const saved = JSON.parse(JSON.stringify(globalThis.__profile.updates[0]));
+    assert.deepEqual(saved.signatures.profile_extended.companyServices, ['Outsourcing (BPO): procesos de apoyo']);
+    assert.equal(saved.full_name, 'Ana Pérez', 'the name stays the person\'s');
+    assert.equal(saved.company_name, '', 'and their own company part is not overwritten with the ficha');
+  } finally { app.close(); }
+}
+
+console.log('PASS: Perfil reads the site from the work email, proposes with sources, applies only what was checked and saves the new fields; with a company profile it reads it and keeps the person\'s picks. DOM only, not visual certification.');

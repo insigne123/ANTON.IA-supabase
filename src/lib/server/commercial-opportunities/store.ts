@@ -17,6 +17,8 @@ import { generateTenderTerms, type PerfilOffer, type TenderTerms } from './searc
 import type { HiringSearchProfile, HiringStore, HiringSyncSource } from './sync';
 import type { TenderStore } from './tender-sync';
 import type { ProjectStore } from './project-import';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 
 /**
  * Reads and writes of «Oportunidades» (plan 8, phase 3). The tables have no member grants: every call here runs with the
@@ -61,13 +63,17 @@ export async function findHiringProfile(client: SupabaseClient, scope: Scope) {
 export type PerfilForOpportunities = PerfilOffer & { regions: string[] };
 
 /**
- * What the person's «Perfil» says for «Oportunidades» (Plan 15): what they sell (with the organization's offer when their
- * own is empty), their services and sector, and the regions of «Tu cliente ideal». Any failure reads as an empty Perfil.
+ * What the person's «Perfil» says for «Oportunidades» (Plan 15): what they sell (the company profile's when there is one, else
+ * theirs, with the organization's offer when their own is empty), their services and sector, and the regions of «Tu cliente ideal». Any failure reads as an empty Perfil.
  */
 export async function readPerfilForOpportunities(client: SupabaseClient, scope: Scope): Promise<PerfilForOpportunities> {
   try {
-    const { data } = await client.from('profiles').select('*').eq('id', scope.userId).maybeSingle();
-    const person = (data as Record<string, unknown> | null) || null;
+    const [{ data }, company] = await Promise.all([
+      client.from('profiles').select('*').eq('id', scope.userId).maybeSingle(),
+      readCompanyFields(client, scope.organizationId),
+    ]);
+    // «Ficha de la empresa» (APP-06): what the company sells, said once by its admins, over the person's own.
+    const person = withCompanyProfile((data as Record<string, unknown> | null) || null, company);
     const details = profileOfferDetails(person);
     const signatures = person?.signatures;
     const extended = signatures && typeof signatures === 'object' && !Array.isArray(signatures) ? (signatures as Record<string, unknown>).profile_extended : null;

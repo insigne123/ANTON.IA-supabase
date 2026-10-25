@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 import { analyzeIcp, type IcpDeclared, type IcpLead, type IcpTouch } from '@/lib/cowork/icp';
 
 type Scope = { userId: string; organizationId: string };
@@ -42,8 +44,9 @@ export async function readCoworkIcp(client: SupabaseClient, scope: Scope, value:
     }
     return { rows, complete: false };
   }
-  const [profile, touches, leads, enriched, stages] = await Promise.all([
+  const [profile, company, touches, leads, enriched, stages] = await Promise.all([
     client.from('profiles').select('company_name,signatures').eq('id', userId).maybeSingle(),
+    readCompanyFields(client, organizationId),
     scan<Record<string, string | null>>('contacted_leads', 'id,lead_id,email,role,industry,country,city,sent_at,replied_at,reply_intent,bounced_at'),
     scan<Record<string, string | null>>('leads', 'id,title,industry,country,city'),
     // «Por escribir» counts too; a contact enriched from a saved one keeps its id and stands for it.
@@ -53,7 +56,7 @@ export async function readCoworkIcp(client: SupabaseClient, scope: Scope, value:
   if (profile.error) throw new Error('No se pudo leer tu perfil para analizar tu cliente ideal.');
   const covered = new Set(enriched.rows.flatMap(row => row.source_saved_lead_id ? [row.source_saved_lead_id] : []));
   const analysis = analyzeIcp({
-    declared: icpDeclaredFromProfile(profile.data),
+    declared: icpDeclaredFromProfile(withCompanyProfile(profile.data, company)),
     touches: touches.rows.map((row): IcpTouch => ({
       id: String(row.id), leadId: row.lead_id || null, email: row.email || null, role: row.role || null, industry: row.industry || null,
       country: row.country || null, city: row.city || null, sentAt: row.sent_at || null, repliedAt: row.replied_at || null,

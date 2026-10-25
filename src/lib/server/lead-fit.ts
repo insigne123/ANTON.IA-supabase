@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateStructured } from '@/ai/openai-json';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 import {
   LEAD_FIT_BATCH, LEAD_FIT_MODEL, LEAD_FIT_SYSTEM, LeadFitAnswerSchema, leadFitFacts, leadFitKey, leadFitOutcomeStats, leadFitPrompt,
   leadFitResearch, normalizeLeadFitAssessment, type LeadFitFactor, type LeadFitLead, type LeadFitOutcomeRow, type LeadFitProfile,
@@ -116,10 +118,11 @@ export async function assessLeadFit(admin: SupabaseClient, scope: Scope, stage: 
   const response: LeadFitResponse = { results: {}, needsProfile: false, limited: false, failed: false };
   if (!people.size) return response;
 
-  const [kept, profileRow] = await Promise.all([
+  const [kept, profileRow, company] = await Promise.all([
     admin.from('lead_fit_assessments').select('lead_key,stage,probability,summary,factors,model,input_hash,updated_at')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).in('lead_key', [...people.keys()]),
     admin.from('profiles').select('full_name,job_title,company_name,company_domain,signatures').eq('id', scope.userId).maybeSingle(),
+    readCompanyFields(admin, scope.organizationId),
   ]);
   if (kept.error) throw new Error('No se pudieron leer las probabilidades guardadas.');
   if (profileRow.error) throw new Error('No se pudo leer tu perfil.');
@@ -130,7 +133,7 @@ export async function assessLeadFit(admin: SupabaseClient, scope: Scope, stage: 
     if (row.stage === stage) hashes.set(row.lead_key, row.input_hash);
   }
 
-  const profile = leadFitProfile(profileRow.data);
+  const profile = leadFitProfile(withCompanyProfile(profileRow.data, company));
   if (!leadFitProfileDefined(profile)) { response.needsProfile = true; return response; }
   if (!options.score || !leadFitEnabled()) return response;
 

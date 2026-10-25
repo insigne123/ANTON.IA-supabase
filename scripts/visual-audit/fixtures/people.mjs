@@ -50,6 +50,8 @@ export default function people(ctx) {
         { id: ctx.MEMBER, email: ctx.memberEmail, full_name: 'Diego Fuentes', avatar_url: null, job_title: 'Ejecutivo de ventas', company_name: 'Yago QA', company_domain: 'yago-qa.cl',
           default_mail_provider: null, signature: null, signatures: {}, company_profile: {}, created_at: '2025-03-01T00:00:00Z', updated_at: ctx.daysAgo(20) },
       ],
+      // «Ficha de la empresa» (APP-06): none yet, as in most organizations; the journeys app-ficha-* make or seed one.
+      organization_company_profile: [],
       organization_invites: [
         { id: ctx.uid(21), organization_id: ctx.ORG, email: 'valentina.rios@yago-qa.cl', role: 'member', token: null, token_hash: createHash('sha256').update(AUDIT_INVITE_TOKEN, 'utf8').digest('hex'), invited_by: ctx.OWNER,
           created_at: ctx.daysAgo(2), expires_at: ctx.daysAhead(5), accepted_at: null, accepted_by: null, revoked_at: null, revoked_by: null },

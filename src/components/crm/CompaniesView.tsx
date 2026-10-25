@@ -14,7 +14,7 @@ import { similarSearchError } from '@/lib/companies/similar';
 import { PIPELINE_STAGES } from '@/lib/crm-types';
 import { searchCompanies } from '@/lib/leads-client';
 import { companySearchHref } from '@/lib/search/company-prefill';
-import { profileService } from '@/lib/services/profile-service';
+import { companyProfileService } from '@/lib/services/company-profile-service';
 import { cn } from '@/lib/utils';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
@@ -67,7 +67,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
 
   useEffect(() => {
     let alive = true;
-    profileService.getProfile().then(profile => { if (alive) setTargetRoles(targetRolesOf(profile?.signatures)); }).catch(() => undefined);
+    companyProfileService.getSellingProfile().then(profile => { if (alive) setTargetRoles(targetRolesOf(profile?.signatures)); }).catch(() => undefined);
     return () => { alive = false; };
   }, []);
 

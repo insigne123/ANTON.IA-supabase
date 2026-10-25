@@ -90,6 +90,8 @@ function makeActions({ page, supabase, state }) {
 
 async function runJourney(browser, built, supabase, journey, index) {
   supabase.reset('full');
+  // `seed(tables, ctx)`: what a journey needs that the full dataset does not have (a state the app only reaches after another journey).
+  journey.seed?.(supabase.store.tables, built.ctx);
   const viewport = VIEWPORTS[journey.viewport || 'desktop'];
   // --scheme=dark: the journeys run as someone whose system is dark (the app follows it); by default they run light, as always.
   const context = await browser.newContext({ viewport, locale: 'es-CL', timezoneId: 'America/Santiago', reducedMotion: 'reduce', colorScheme: args.scheme === 'dark' ? 'dark' : 'light' });

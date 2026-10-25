@@ -134,4 +134,53 @@ export default () => [
         }
       } },
     ] },
+  { id: 'app-ficha-empresa-admin', persona: 'owner', title: 'Administración: armar la ficha de la empresa con lo que el equipo ya escribió',
+    goal: 'Dejar una sola ficha de lo que vende la empresa, partiendo de la oferta de alguien del equipo (APP-06).',
+    passWrites: [{ pattern: /^\/api\/company-profile$/ }],
+    steps: [
+      { say: 'Abro Administración → Empresa', do: async c => {
+        await c.go('/dashboard/admin/company'); await c.seeRole('heading', 'Ficha de la empresa');
+        const nav = c.page.getByRole('navigation', { name: 'Administración' });
+        c.check('«Empresa» está en el menú de Administración y marcada', (await nav.getByRole('link', { name: 'Empresa' }).getAttribute('aria-current')) === 'page');
+        c.check('sin ficha, dice que cada persona escribe desde su Perfil', await c.see('Todavía no hay ficha').then(() => true, () => false));
+      } },
+      { say: 'Uso lo que escribió Camila', do: async c => {
+        await c.see('Lo que el equipo ya escribió');
+        await c.click('Usar lo que escribió Camila Torres'); await c.wait(400);
+        const services = await c.page.locator('textarea#services').inputValue().catch(() => '');
+        c.check('los productos de Camila quedan en la ficha', /Verificación de antecedentes/.test(services), services.slice(0, 120));
+      } },
+      { say: 'Guardo la ficha', do: async c => {
+        await c.click('Guardar ficha'); await c.see(/Revisada por Camila Torres/, { timeout: 15000 });
+        const row = c.table('organization_company_profile')[0];
+        c.check('queda una ficha, revisada por quien la guardó', Boolean(row) && row.revision === 1 && /Verificación de antecedentes/.test(row.fields?.services || ''), JSON.stringify(row || {}).slice(0, 200));
+        c.check('sin cambios, ya no pide guardar', !(await c.has('Cambios sin guardar')));
+      } },
+    ] },
+  { id: 'app-ficha-empresa-perfil', persona: 'member', title: 'Integrante: mi Perfil lee la ficha de la empresa y elijo lo que vendo',
+    goal: 'Ver lo que vende la empresa sin poder cambiarlo por error, y marcar los productos que ofrezco yo (APP-06).',
+    seed: (tables, ctx) => {
+      tables.organization_company_profile = [{ organization_id: ctx.ORG, revision: 2, reviewed_at: ctx.daysAgo(10), reviewed_by: ctx.OWNER, updated_at: ctx.daysAgo(10), updated_by: ctx.OWNER,
+        fields: { companyName: 'Yago QA', website: 'yago-qa.cl', sector: 'Software para RR. HH.',
+          services: 'Verificación de antecedentes: revisión de candidatos en minutos\nAlertas judiciales: avisos de causas nuevas\nReportes de cumplimiento: respaldo para auditorías',
+          valueProposition: 'Reducimos de días a minutos la revisión de cada candidato, con trazabilidad para auditorías.',
+          targetRoles: 'Gerente de Personas, Jefe de Reclutamiento', targetIndustries: 'Retail, Logística', targetLocations: 'Chile' } }];
+    },
+    steps: [
+      { say: 'Abro Perfil', do: async c => {
+        await c.go('/profile'); await c.see('Viene de la ficha de la empresa');
+        c.check('dice quién la revisó', await c.has(/La revisó Camila Torres/));
+        c.check('lo de la empresa no se edita aquí', !(await c.page.locator('textarea#services').count()) && !(await c.page.locator('input#companyName').count()));
+        c.check('mi nombre sí', await c.page.locator('input#name').isEditable().catch(() => false));
+        c.check('no ofrece completar con IA lo que ya está en la ficha', !(await c.page.locator('#profile-ai-title').count()));
+      } },
+      { say: 'Marco lo que vendo y guardo', do: async c => {
+        await c.clickOn(c.page.getByRole('checkbox', { name: /Alertas judiciales/ })); await c.see('Cambios sin guardar');
+        await c.click('Guardar cambios'); await c.see('Perfil guardado', { timeout: 15000 });
+        const mine = c.table('profiles').find(row => row.full_name === 'Diego Fuentes');
+        const picked = mine?.signatures?.profile_extended?.companyServices || [];
+        c.check('queda guardado que vendo «Alertas judiciales»', picked.length === 1 && /Alertas judiciales/.test(picked[0]), JSON.stringify(picked));
+        c.check('mi cargo sigue siendo el mío', mine?.job_title === 'Ejecutivo de ventas', String(mine?.job_title));
+      } },
+    ] },
 ];

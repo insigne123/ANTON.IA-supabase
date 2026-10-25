@@ -8,6 +8,8 @@ import { canonicalSha256 } from '@/lib/messaging-contracts';
 import { IcpRulesV2Schema, type IcpRulesV2 } from '@/qualification/icp-gate';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { commaItems, lineItems, offerItems } from '@/lib/profile/profile-lists';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 
 export const REPORT_V2_SELLER_CONFIGURATION_VERSION = 'report-v2/seller-configuration/1';
 
@@ -152,10 +154,11 @@ export function normalizeSellerProfile(value: unknown): DraftSellerProfileV2 {
 const SELLER_PROFILE_COLUMNS = 'full_name,job_title,company_name,company_domain,signatures';
 
 /**
- * The person's own offer, or, while they have not written one, the offer of an owner or admin of the same organization.
- * A draft without an offer is blocked (draft-context-v2.ts, `seller_profile_incomplete`): in production 25 of 28 people
- * of the main organization had none, so nobody but the admin could draft. The sender stays the person: name and role are
- * always theirs, and filling «Perfil» replaces the borrowed offer (docs/ia-medida.md).
+ * The offer of the organization's «Ficha de la empresa» when it has one (APP-06), with the person's name and role and the
+ * products they sell; else the person's own offer, or, while they have not written one, the offer of an owner or admin of the
+ * same organization. A draft without an offer is blocked (draft-context-v2.ts, `seller_profile_incomplete`): in production
+ * 25 of 28 people of the main organization had none, so nobody but the admin could draft. The sender stays the person: name
+ * and role are always theirs, and filling «Perfil» replaces the borrowed offer (docs/ia-medida.md).
  */
 export async function loadSellerProfile(
   userId: string,
@@ -165,13 +168,13 @@ export async function loadSellerProfile(
   let personal: DraftSellerProfileV2;
   try {
     const client = admin || getSupabaseAdminClient();
-    const { data, error } = await client
-      .from('profiles')
-      .select(SELLER_PROFILE_COLUMNS)
-      .eq('id', userId)
-      .maybeSingle();
+    const [{ data, error }, company] = await Promise.all([
+      client.from('profiles').select(SELLER_PROFILE_COLUMNS).eq('id', userId).maybeSingle(),
+      readCompanyFields(client, organizationId),
+    ]);
     if (error) throw error;
-    personal = normalizeSellerProfile(data || {});
+    personal = normalizeSellerProfile(withCompanyProfile(data || {}, company));
+    if (company && hasUsableDraftSellerOfferV2(personal)) return personal;
   } catch (error) {
     console.warn('[seller-profile] profile unavailable; using a neutral profile:', error);
     return normalizeSellerProfile({});
@@ -247,13 +250,13 @@ export async function loadReportV2SellerConfiguration(input: {
       products: sharedProducts,
     };
   } else {
-    const { data: personal, error: personalError } = await admin
-      .from('profiles')
-      .select('full_name,job_title,company_name,company_domain,signatures')
-      .eq('id', input.userId)
-      .maybeSingle();
+    const [{ data: personal, error: personalError }, company] = await Promise.all([
+      admin.from('profiles').select('full_name,job_title,company_name,company_domain,signatures').eq('id', input.userId).maybeSingle(),
+      readCompanyFields(admin, input.organizationId),
+    ]);
     if (personalError) throw personalError;
-    sellerProfile = reportV2ProfileFromPersonal(normalizeSellerProfile(personal || {}));
+    // «Ficha de la empresa» (APP-06) over the person's own, as every draft reads it.
+    sellerProfile = reportV2ProfileFromPersonal(normalizeSellerProfile(withCompanyProfile(personal || {}, company)));
   }
 
   const rawIcp = Object.keys(object(settings?.icp)).length > 0

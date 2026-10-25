@@ -47,7 +47,7 @@ import { ToastAction } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
 import { activeFilterChips, idealCustomerStarter, savedLeadsToast, searchStartersFor, type ActiveFilterChip, type SearchStarter } from '@/lib/search/search-guidance';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
-import { profileService } from '@/lib/services/profile-service';
+import { companyProfileService } from '@/lib/services/company-profile-service';
 import { FilterRelaxHint } from '@/components/search/SearchGuidance';
 import { ProfileSearchProblemAlert } from '@/components/search/ProfileSearchProblemAlert';
 import {
@@ -612,7 +612,7 @@ export default function SearchPage() {
   const [idealCustomerChecked, setIdealCustomerChecked] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    profileService.getProfile()
+    companyProfileService.getSellingProfile()
       .then((data) => { if (!cancelled) setIdealCustomer(idealCustomerStarter(mapProfileToForm(data))); })
       .catch(() => undefined)
       .finally(() => { if (!cancelled) setIdealCustomerChecked(true); });

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { loadReportV2SellerConfiguration, sellerProfileInternals } from '@/lib/server/seller-profile';
+import { loadReportV2SellerConfiguration, loadSellerProfile, sellerProfileInternals } from '@/lib/server/seller-profile';
+import { buildProfileUpdate, createEmptyProfileForm } from '@/lib/profile/profile-mappings';
 
 function adminFixture(rows: Record<string, { data: unknown; error?: unknown }>) {
   const calls: string[] = [];
@@ -125,4 +126,23 @@ test('rollout remains part of synthesis identity until transactional delivery pr
     hashes.push(configuration.synthesisContextHash);
   }
   assert.equal(new Set(hashes).size, 3);
+});
+
+test('with a company profile, every draft sells what the company sells, signed by the person (APP-06)', async () => {
+  const personal = buildProfileUpdate({ ...createEmptyProfileForm(), name: 'Camila R.', role: 'Ejecutiva comercial', companyName: 'Yago',
+    services: 'Mi servicio propio', valueProposition: 'Mi propia versión de la oferta' });
+  const company = { services: 'AXIS: consultas judiciales en el PJUD', valueProposition: 'Revisamos antecedentes laborales en minutos.', companyName: 'Yago SpA',
+    proofPoints: 'Procesa 1.000 personas en unos 30 minutos.' };
+  const admin = adminFixture({ profiles: { data: personal }, organization_company_profile: { data: { fields: company } } });
+  const seller = await loadSellerProfile('user', 'org', admin);
+  assert.equal(seller.name, 'Camila R.');
+  assert.equal(seller.jobTitle, 'Ejecutiva comercial');
+  assert.equal(seller.companyName, 'Yago SpA');
+  assert.match(JSON.stringify(seller), /Revisamos antecedentes laborales en minutos/);
+  assert.doesNotMatch(JSON.stringify(seller), /Mi propia versión|Mi servicio propio/);
+  // No owner's offer is borrowed: the company profile already says it.
+  assert.equal(admin.calls.includes('organization_members'), false);
+  // Without a company profile, the person's own offer, as before.
+  const own = await loadSellerProfile('user', 'org', adminFixture({ profiles: { data: personal } }));
+  assert.match(JSON.stringify(own), /Mi propia versión de la oferta/);
 });

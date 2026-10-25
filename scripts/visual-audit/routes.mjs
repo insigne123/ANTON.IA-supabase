@@ -41,6 +41,7 @@ export function routeList(ctx) {
     app('/dashboard/admin/users', 'Usuarios', { gate: 'admin' }),
     app(`/dashboard/admin/users/${ctx.MEMBER}`, 'Detalle de usuario', { gate: 'admin' }),
     app('/dashboard/admin/teams', 'Equipos', { gate: 'admin' }),
+    app('/dashboard/admin/company', 'Ficha de la empresa', { gate: 'admin' }),
     app('/dashboard/admin/work', 'Oportunidades y Cowork', { gate: 'admin' }),
     app('/dashboard/admin/credits', 'Créditos del equipo', { gate: 'admin' }),
     app('/ayuda', 'Centro de ayuda'),

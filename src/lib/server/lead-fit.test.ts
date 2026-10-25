@@ -45,6 +45,13 @@ test('without an offer nor a customer in «Perfil» nothing is estimated, and th
   assert.equal(model.prompts.length, 0);
 });
 
+test('with a «Ficha de la empresa», its offer and customer count though the person wrote none (APP-06)', async () => {
+  const admin = fakeAdmin({ profiles: [{ company_name: 'Yago', signatures: {} }],
+    organization_company_profile: [{ fields: { services: 'AXIS: consultas judiciales', targetRoles: 'Gerente de Personas', targetIndustries: 'Retail' } }] });
+  const result = await assessLeadFit(admin.client, SCOPE, 'search', [ANA], { score: false }, fakeModel(scoreAll).deps);
+  assert.equal(result.needsProfile, false);
+});
+
 test('people whose facts changed are estimated in one call, starting from their previous stage, and kept', async () => {
   const admin = fakeAdmin({ profiles: [PROFILE], lead_fit_assessments: [kept('li:linkedin.com/in/ana', 'search', 55)], contacted_leads: [] });
   const model = fakeModel(scoreAll);

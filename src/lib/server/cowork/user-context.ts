@@ -6,6 +6,8 @@ import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { commaItems } from '@/lib/profile/profile-lists';
 import { bookingProvider, readBookingPreference } from '@/lib/booking-link';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -91,10 +93,14 @@ export async function loadCoworkUserContext(client: SupabaseClient, scope: Scope
   try {
     const userId = z.string().uuid().parse(scope.userId);
     // select('*') like the shared app context: older offer fields differ between workspaces.
-    const { data, error } = await client.from('profiles').select('*').eq('id', userId).maybeSingle();
+    const [{ data, error }, company] = await Promise.all([
+      client.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      readCompanyFields(client, scope.organizationId),
+    ]);
     if (error) return null;
-    const profile = (data as Record<string, unknown> | null) || null;
-    if (profile && profile.id !== userId) return null;
+    if (data && (data as Record<string, unknown>).id !== userId) return null;
+    // «Ficha de la empresa» (APP-06): the company's offer, said once by its admins, over the person's own.
+    const profile = withCompanyProfile((data as Record<string, unknown> | null) || null, company);
     const [organization, memories, mailbox] = await Promise.all([
       profileOffer(profile) ? null : readOrganizationOffer(client, scope.organizationId),
       options.memories === false ? [] : loadCoworkMemories(client, { userId, organizationId: scope.organizationId }),

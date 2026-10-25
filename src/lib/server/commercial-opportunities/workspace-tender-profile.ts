@@ -11,6 +11,8 @@ import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { downloadOpportunitySource } from './workspace-download';
 import { webPageBody } from './workspace-documents';
 import { loadTenderProfile } from './tender-profile-read';
+import { withCompanyProfile } from '@/lib/profile/company-profile';
+import { readCompanyFields } from '@/lib/server/company-profile';
 
 const TABLE = 'opportunity_tender_profile';
 /** The motives of a discard that the profile can disprove: something «required» or out of «scale». */
@@ -103,18 +105,21 @@ async function websiteText(domain: string | null, download = downloadOpportunity
 
 /** The worker's side: what the admins wrote about the company, its website and the offer, read once by the model. */
 export async function runTenderProfileSuggestion(client: SupabaseClient, job: OpportunityJob, options: { download?: typeof downloadOpportunitySource } = {}) {
-  const [context, leaders, current, organization] = await Promise.all([
+  const [context, leaders, current, organization, company] = await Promise.all([
     client.from('opportunity_company_context').select('offer,services,territories,exclusions').eq('organization_id', job.organization_id).maybeSingle().then(opportunityDb),
     client.from('organization_members').select('user_id').eq('organization_id', job.organization_id).in('role', ['owner', 'admin']).limit(10).then(opportunityDb),
     loadTenderProfile(client, job.organization_id),
     client.from('organizations').select('name').eq('id', job.organization_id).maybeSingle().then(opportunityDb),
+    readCompanyFields(client, job.organization_id),
   ]);
   const ids = ((leaders || []) as Array<{ user_id: string }>).map(row => row.user_id);
   // A personal «Perfil» may describe another company (a consultant who administers the workspace): only the ones whose
   // company is the workspace's are read, and the website only from them. In production a Yago admin of GrupoExpro
   // filled GrupoExpro's profile with Yago's name and products.
   const companyName = String(organization?.name || '').trim() || null;
-  const profiles = (ids.length ? ((opportunityDb(await client.from('profiles').select('company_name,company_domain,company_profile,signatures').in('id', ids))) || []) as any[] : [])
+  // The «Ficha de la empresa», when there is one, is what the admins wrote for everyone: it is read instead of their profiles.
+  const profiles = (company ? [withCompanyProfile({}, company)] as any[]
+    : ids.length ? ((opportunityDb(await client.from('profiles').select('company_name,company_domain,company_profile,signatures').in('id', ids))) || []) as any[] : [])
     .filter(row => sameCompany(row.company_name, companyName));
   const domain = profiles.map(row => String(row.company_domain || '').trim()).find(Boolean) || null;
   const written = profiles.map(row => {
