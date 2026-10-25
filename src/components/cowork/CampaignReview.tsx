@@ -149,7 +149,7 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
         {(preview.emails || []).length > 0 && <ReviewField label="Correos"><ReviewChips values={preview.emails} /></ReviewField>}
       </ReviewFields>
       <ReviewNote ok={!blocked}>{blocked
-        ? 'La campaña cambió desde la propuesta. Descártala y pide una nueva revisión.'
+        ? 'La campaña cambió desde la propuesta. Descártala y pídele a Cowork una nueva.'
         : preview.kind === 'campaign_activate'
           ? 'Al aprobar empiezan los envíos según su calendario. Antes se verifican de nuevo audiencia, bajas y cada mensaje.'
           : 'Al aprobar se detienen los envíos que faltan. Lo que ya se envió no se revierte.'}</ReviewNote>

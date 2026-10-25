@@ -36,7 +36,7 @@ export function CodeReview({ runId, onApprove, onReject, resolving }: {
     <ReviewPaper mono>{preview.code}</ReviewPaper>
     <ReviewNote ok={preview.matches}>{preview.matches
       ? 'Coincide con la propuesta. Al aprobar se ejecutará exactamente este código.'
-      : 'El código cambió desde la propuesta. Descártala y pide una nueva revisión.'}</ReviewNote>
+      : 'El código cambió desde la propuesta. Descártala y pídele a Cowork una nueva.'}</ReviewNote>
     <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Aprobar y ejecutar" disabled={!preview.matches} resolving={resolving} />
   </div>;
 }
