@@ -290,7 +290,11 @@ export type CoworkProposalView = {
 export function coworkProposalView(run: Pick<CoworkRun, 'status'>, events: CoworkEvent[]): CoworkProposalView | null {
   const request = events.slice().reverse().find(event => event.kind === 'approval.requested');
   if (!request) return null;
-  const payload = request.payload || {};
+  // «Editar criterios» (COW-29): a search shows the criteria as the person left them, which are the ones the approval runs.
+  const edited = request.payload?.action === 'prospecting.search'
+    ? events.slice().reverse().find(event => event.kind === 'proposal.edited' && event.sequence > request.sequence && event.payload?.kind === 'search')
+    : undefined;
+  const payload = edited?.payload?.criteria ? { ...request.payload, criteria: edited.payload.criteria, edited: true } : request.payload || {};
   const kinds = new Set(events.filter(event => event.sequence > request.sequence).map(event => event.kind));
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed' && event.sequence > request.sequence)?.payload;
   const failed = kinds.has('run.failed');

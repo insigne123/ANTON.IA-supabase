@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronLeft, ChevronRight, Copy, PencilLine, RefreshCw, ThumbsDown, ThumbsUp, X } from 'lucide-react';
+import { CalendarClock, Check, ChevronLeft, ChevronRight, Copy, PencilLine, RefreshCw, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { COWORK_FEEDBACK_REASONS, type CoworkFeedback, type CoworkFeedbackReason, type CoworkTurnVersions } from '@/lib/cowork/turn-actions';
 import { cn } from '@/lib/utils';
 import { CwButton } from './ui';
@@ -11,8 +11,13 @@ import { CwButton } from './ui';
  * versions side by side and 👍 / 👎. They sit where the eye already is: under your message and under the answer.
  */
 
-/** Your last message, editable in place: «Enviar» asks again with the new words, «Cancelar» (or Esc) leaves it as it was. */
-export function CoworkEditMessage({ initial, onSend, onCancel }: { initial: string; onSend: (text: string) => Promise<boolean>; onCancel: () => void }) {
+/**
+ * A message of yours, editable in place: «Enviar» asks again with the new words, «Cancelar» (or Esc) leaves it as it was. An
+ * earlier one (COW-08) asks again from there: what followed stays in the previous version.
+ */
+export function CoworkEditMessage({ initial, onSend, onCancel, note = 'Cowork responde de nuevo a tu mensaje editado.' }: {
+  initial: string; onSend: (text: string) => Promise<boolean>; onCancel: () => void; note?: string;
+}) {
   const [text, setText] = useState(initial);
   const [sending, setSending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -45,7 +50,7 @@ export function CoworkEditMessage({ initial, onSend, onCancel }: { initial: stri
       }}
       className="block w-full resize-none bg-transparent px-2 py-1.5 text-[15px] leading-[1.55] text-cw-text outline-none placeholder:text-cw-faint focus-visible:outline-none" />
     <div className="flex flex-wrap items-center justify-end gap-2 px-1 pt-1">
-      <p id={hint} className="mr-auto text-[12px] text-cw-muted">Cowork responde de nuevo a tu mensaje editado.</p>
+      <p id={hint} className="mr-auto text-[12px] text-cw-muted">{note}</p>
       <CwButton size="sm" variant="ghost" onClick={onCancel} disabled={sending}>Cancelar</CwButton>
       <CwButton size="sm" variant="primary" onClick={() => void send()} disabled={!changed || sending}>{sending ? 'Enviando…' : 'Enviar'}</CwButton>
     </div>
@@ -77,16 +82,18 @@ function IconAction({ label, pressed, onClick, children, disabled = false }: { l
 }
 
 /**
- * Under a finished answer: copy, 👍 / 👎 (👎 asks, in one click, what was missing) and «Otra versión» on the latest one.
+ * Under a finished answer: copy, 👍 / 👎 (👎 asks, in one click, what was missing), «Otra versión» on the latest one and
+ * «Programar» (COW-18): the same request, repeated by Cowork when the person chooses.
  * Always in view under the latest answer, on hover under the older ones; on touch screens always.
  */
-export function CoworkAnswerActions({ text, latest, rating, onFeedback, onRegenerate }: {
+export function CoworkAnswerActions({ text, latest, rating, onFeedback, onRegenerate, onSchedule = null }: {
   text: string;
   latest: boolean;
   /** What you already said about this answer. */
   rating: 'up' | 'down' | null;
   onFeedback: ((feedback: CoworkFeedback) => Promise<boolean>) | null;
   onRegenerate: (() => void) | null;
+  onSchedule?: (() => void) | null;
 }) {
   const [copied, setCopied] = useState(false);
   const [shown, setShown] = useState<'up' | 'down' | null>(rating);
@@ -119,6 +126,9 @@ export function CoworkAnswerActions({ text, latest, rating, onFeedback, onRegene
       </>}
       {onRegenerate && <CwButton size="xs" variant="ghost" className="ml-1 h-8 px-2 text-[13px]" onClick={onRegenerate} title="Pedir otra versión de esta respuesta">
         <RefreshCw aria-hidden="true" />Otra versión
+      </CwButton>}
+      {onSchedule && <CwButton size="xs" variant="ghost" className="h-8 px-2 text-[13px]" onClick={onSchedule} title="Que Cowork repita este pedido solo, cuando tú elijas">
+        <CalendarClock aria-hidden="true" />Programar
       </CwButton>}
       <span role="status" className="ml-2 text-[12.5px] text-cw-muted">{thanks ? 'Gracias, nos ayuda a mejorar Cowork.' : ''}</span>
     </div>
