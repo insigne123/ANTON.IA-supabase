@@ -32,8 +32,9 @@ test('a quick step answers with what it did', async () => {
   assert.deepEqual(await POST(), { body: { woken: true, processed: 1 }, status: 200 });
 });
 
-test('a long step gets an answer at 25 s and keeps running; a second wake finds it busy', async () => {
+test('a long step gets an answer at 25 s and keeps running; with one drain at a time, a second wake finds it busy', async () => {
   mock.timers.enable({ apis: ['setTimeout'] });
+  process.env.COWORK_WAKE_CONCURRENCY = '1';
   try {
     const { POST } = await load();
     let finish: (value: { processed: number }) => void = () => {};
@@ -49,6 +50,31 @@ test('a long step gets an answer at 25 s and keeps running; a second wake finds 
     await new Promise(resolve => setImmediate(resolve));
     (globalThis as any).__queue = async () => ({ processed: 0 });
     assert.deepEqual(await POST(), { body: { woken: true, processed: 0 }, status: 200 });
+  } finally {
+    delete process.env.COWORK_WAKE_CONCURRENCY;
+    mock.timers.reset();
+  }
+});
+
+test('by default two drains run at once, so a new message does not wait behind another long step (COW-21)', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const { POST } = await load();
+    const finishes: Array<(value: { processed: number }) => void> = [];
+    let started = 0;
+    (globalThis as any).__queue = () => { started += 1; return new Promise(resolve => { finishes.push(resolve); }); };
+    const first = POST();
+    const second = POST();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(started, 2, 'the second wake takes the next step now');
+    assert.deepEqual(await POST(), { body: { woken: false, busy: true }, status: 202 }, 'a third waits for one of them');
+    mock.timers.tick(25_000);
+    assert.equal((await first).status, 202);
+    assert.equal((await second).status, 202);
+    finishes.forEach(finish => finish({ processed: 0 }));
+    await new Promise(resolve => setImmediate(resolve));
+    (globalThis as any).__queue = async () => ({ processed: 0 });
+    assert.deepEqual(await POST(), { body: { woken: true, processed: 0 }, status: 200 }, 'both were released');
   } finally {
     mock.timers.reset();
   }
