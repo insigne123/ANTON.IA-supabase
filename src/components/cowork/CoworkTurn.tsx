@@ -322,7 +322,9 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
           ? <CoworkEditMessage initial={coworkEditableText(run.message)} onCancel={() => {
             setEditing(false);
             requestAnimationFrame(() => editOpener.current?.querySelector('button')?.focus());
-          }} onSend={async text => { const sent = await onEdit(text); if (sent) setEditing(false); return sent; }} />
+          }} onSend={async text => { const sent = await onEdit(text); if (sent) setEditing(false); return sent; }}
+            note={latest ? undefined : run.parent_run_id ? 'Cowork responde de nuevo desde aquí. Lo que siguió queda en la versión anterior.'
+              : 'Se abre como una conversación nueva; esta queda en tu lista.'} />
           : <div className="flex w-full items-start justify-end gap-1">
             {onEdit && !version && <div ref={editOpener} className="mt-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-within:opacity-100">
               <CoworkEditButton onClick={() => setEditing(true)} />

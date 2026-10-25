@@ -851,12 +851,18 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
    * anew, and the previous one leaves the list.
    */
   async function replaceLatest(text: string) {
-    if (!latest) return false;
-    const old = latest.run;
+    return latest ? replaceTurn(latest.run, text, true) : false;
+  }
+
+  /**
+   * Asks a turn again: a sibling of it, so the conversation goes on from there and what followed stays in the previous version
+   * (COW-08). The first message of a single-turn conversation leaves the list; an earlier first message opens a new one.
+   */
+  async function replaceTurn(old: CoworkRun, text: string, last: boolean) {
     setReplacing(old.id);
     const sent = await post(text, old.parent_run_id ?? null);
     if (!sent) { setReplacing(null); return false; }
-    if (!old.parent_run_id && threadNames.available) {
+    if (!old.parent_run_id && last && threadNames.available) {
       setHiddenRoots(current => new Set(current).add(old.id));
       request(`/api/cowork/threads/${old.id}`, { method: 'DELETE' })
         .catch(() => setHiddenRoots(current => { const next = new Set(current); next.delete(old.id); return next; }));
@@ -875,6 +881,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     && (!proposal || proposal.state === 'discarded');
   const canRegenerate = settled && latest?.run.status === 'completed' && !proposal;
   const editLatest = async (text: string) => Boolean(latest) && replaceLatest(coworkEditedMessage(latest!.run.message, text));
+  // An earlier message of yours (COW-08): once nothing runs or waits on you in the conversation.
+  const idle = Boolean(latest && latestIsCurrent && ready && !sending && !optimistic && !queued && !busy && !pendingDecision);
+  const editEarlier = (turn: { run: CoworkRun }) => idle && !turn.run.automatic && ['completed', 'failed', 'cancelled'].includes(turn.run.status)
+    ? (text: string) => replaceTurn(turn.run, coworkEditedMessage(turn.run.message, text), false) : null;
   const regenerate = () => { if (latest) void replaceLatest(latest.run.message); };
   /** A version opens where its conversation went on. */
   const openVersion = (id: string) => choose(coworkVersionLeaf(runs, id));
@@ -1099,7 +1109,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
                 liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)}
                 cardStatuses={cardStatuses} earlierRows={earlierRows.get(turn.run.id)} versions={coworkTurnVersions(runs, turn.run)} onVersion={busy || sending ? null : openVersion}
-                onEdit={index === shownTurns.length - 1 && canEdit ? editLatest : null}
+                onEdit={index === shownTurns.length - 1 ? (canEdit ? editLatest : null) : editEarlier(turn)}
                 onRegenerate={index === shownTurns.length - 1 && canRegenerate ? regenerate : null}
                 onFeedback={feedback => sendFeedback(turn.run.id, feedback)}
                 onSchedule={index === shownTurns.length - 1 && schedulesAvailable ? () => openSchedules(coworkDisplayMessage(turn.run.message)) : null} />)}

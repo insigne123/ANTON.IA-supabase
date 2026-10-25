@@ -221,6 +221,20 @@ export default () => [
         c.check('sigue esperando mi aprobación', await c.page.getByRole('button', { name: 'Buscar contactos' }).count() === 1);
       } },
     ] },
+  { id: 'cowork-editar-anterior', persona: 'owner', title: 'Corregir un mensaje anterior, no solo el último',
+    goal: 'Ver que cada mensaje propio se puede editar y qué pasa con lo que siguió (COW-08).',
+    steps: [
+      { say: 'Abro la conversación de esta semana', do: async c => { await c.go(`/cowork?work=${run(5)}`); await c.see('Aquí va una versión más directa'); await c.wait(1500); } },
+      { say: 'Edito mi primer mensaje', do: async c => {
+        const buttons = c.page.getByRole('button', { name: 'Editar mensaje' });
+        c.check('mi primer mensaje y el último se pueden editar', await buttons.count() === 2, `${await buttons.count()} botones`);
+        await buttons.first().click({ force: true });
+        await c.see('Se abre como una conversación nueva; esta queda en tu lista.');
+        c.check('el texto queda listo para cambiar', await c.page.getByLabel('Edita tu mensaje').inputValue() === '¿A quién le escribo esta semana?');
+        await c.page.keyboard.press('Escape');
+        await c.notSee('Se abre como una conversación nueva');
+      } },
+    ] },
   { id: 'cowork-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: retomar la investigación con la web',
     goal: 'Leer la respuesta y sus fuentes en una pantalla angosta.',
     steps: [

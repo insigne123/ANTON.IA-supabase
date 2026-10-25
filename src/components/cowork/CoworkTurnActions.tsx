@@ -11,8 +11,13 @@ import { CwButton } from './ui';
  * versions side by side and 👍 / 👎. They sit where the eye already is: under your message and under the answer.
  */
 
-/** Your last message, editable in place: «Enviar» asks again with the new words, «Cancelar» (or Esc) leaves it as it was. */
-export function CoworkEditMessage({ initial, onSend, onCancel }: { initial: string; onSend: (text: string) => Promise<boolean>; onCancel: () => void }) {
+/**
+ * A message of yours, editable in place: «Enviar» asks again with the new words, «Cancelar» (or Esc) leaves it as it was. An
+ * earlier one (COW-08) asks again from there: what followed stays in the previous version.
+ */
+export function CoworkEditMessage({ initial, onSend, onCancel, note = 'Cowork responde de nuevo a tu mensaje editado.' }: {
+  initial: string; onSend: (text: string) => Promise<boolean>; onCancel: () => void; note?: string;
+}) {
   const [text, setText] = useState(initial);
   const [sending, setSending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -45,7 +50,7 @@ export function CoworkEditMessage({ initial, onSend, onCancel }: { initial: stri
       }}
       className="block w-full resize-none bg-transparent px-2 py-1.5 text-[15px] leading-[1.55] text-cw-text outline-none placeholder:text-cw-faint focus-visible:outline-none" />
     <div className="flex flex-wrap items-center justify-end gap-2 px-1 pt-1">
-      <p id={hint} className="mr-auto text-[12px] text-cw-muted">Cowork responde de nuevo a tu mensaje editado.</p>
+      <p id={hint} className="mr-auto text-[12px] text-cw-muted">{note}</p>
       <CwButton size="sm" variant="ghost" onClick={onCancel} disabled={sending}>Cancelar</CwButton>
       <CwButton size="sm" variant="primary" onClick={() => void send()} disabled={!changed || sending}>{sending ? 'Enviando…' : 'Enviar'}</CwButton>
     </div>
