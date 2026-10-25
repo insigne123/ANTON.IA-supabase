@@ -5,6 +5,7 @@ import { memoryValueText, profileOffer, profileOfferDetails, readOrganizationOff
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { commaItems } from '@/lib/profile/profile-lists';
+import { bookingProvider, readBookingPreference } from '@/lib/booking-link';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -66,6 +67,8 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
     ? (signatures as Record<string, unknown>).profile_extended : null;
   const locations = items(commaItems(extended && typeof extended === 'object' && !Array.isArray(extended)
     ? (extended as Record<string, unknown>).targetLocations : null), 5, 80);
+  // «Tu agenda» (booking-link.ts): what a reply to a meeting request offers; «never» keeps it out of Cowork too.
+  const booking = readBookingPreference(signatures);
   return {
     fullName: text(profile?.full_name), jobTitle: text(profile?.job_title) || text(details.role),
     companyName: text(profile?.company_name), companyDomain: text(profile?.company_domain),
@@ -77,12 +80,13 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
     ...(roles.length || industries.length || locations.length
       ? { idealCustomer: { ...(roles.length ? { roles } : {}), ...(industries.length ? { industries } : {}), ...(locations.length ? { locations } : {}) } }
       : {}),
+    ...(booking && booking.mode !== 'never' && booking.url ? { booking: { url: booking.url, provider: bookingProvider(booking.url), mode: booking.mode } } : {}),
   };
 }
 
 /** Read once per run, before the first decision: the person as «Perfil» stores them plus what they approved for ANTON.IA to
  * remember, with the same offer rule as app.context (own profile first, then the organization settings). Own profile only: no
- * email, signatures or tokens. Any failure returns null and the model falls back to profile.get and app.context. */
+ * email, signatures or tokens (only the agenda link kept next to them). Any failure returns null and the model falls back to profile.get and app.context. */
 export async function loadCoworkUserContext(client: SupabaseClient, scope: Scope, options: { memories?: boolean; mailbox?: boolean } = {}): Promise<CoworkUserContext | null> {
   try {
     const userId = z.string().uuid().parse(scope.userId);

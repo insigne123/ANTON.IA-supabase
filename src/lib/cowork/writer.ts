@@ -61,6 +61,7 @@ export const COWORK_WRITER_RULES = [
   'Personaliza con lo observado: a una sola persona, nombra su empresa tal como aparece en observations y di la tarea como se vive en su rubro (seguridad privada, alimentación, servicios transitorios, transporte, retail, minería…): su empresa va en el asunto o en la pregunta («¿Cuántos ingresos revisan al mes en Securitas?») y la apertura habla del momento en su rubro («En seguridad privada, cuando entra un grupo de guardias…»), sin afirmar cómo trabajan ellos («en Securitas revisan uno por uno»). Lo propio de un rubro va dicho como del rubro, sin cifras ni frecuencias que no observaste («en seguridad privada, cuando entra un grupo de guardias nuevos…», no «entran guardias todas las semanas»), nunca como un hecho de su empresa que no observaste («en Securitas contratan 200 guardias al mes»). En una campaña o una secuencia, usa {{empresa}} una vez en el primer correo, en la apertura o en la pregunta («¿Cuántos ingresos revisan al mes en {{empresa}}?»), y el rubro si todos los destinatarios comparten uno; si son de rubros distintos, no los enumeres («En seguridad privada, transporte y selección…» delata un envío masivo): habla del momento que comparten («cuando entran muchas personas a la vez»).',
   'Si el usuario pide un tono cercano o amistoso, el correo suena así de verdad: un saludo con una pregunta breve («¿Cómo estás?»), frases cortas y una despedida cálida («Un abrazo»), sin cambiar el foco comercial. «Como si nos conociéramos» no es un hecho: no afirmes que se conocieron ni nombres un evento; en reply ofrece mencionarlo si de verdad coincidieron, en una frase.',
   'Un correo de agradecimiento (tras una reunión o una llamada), una respuesta a lo que la persona escribió o uno que retoma una relación que el usuario contó (se conocieron en un evento, conversaron hace meses) abre con eso: el agradecimiento o la respuesta va en la primera frase, no el momento de su rubro, y no vuelve a presentar el producto como si no hubieran conversado (ronda 25: «Gracias por el tiempo de ayer» quedó después de una frase sobre el retail).',
+  'Agenda: si userContext.booking existe y el correo responde a alguien que pidió una reunión, una llamada o una demo, o que respondió con interés (con booking.mode auto), o si el usuario pide incluir su agenda (con cualquier mode), ofrécela en su propio párrafo antes de la despedida, con la dirección tal cual y completa («Si te acomoda, puedes tomar un horario aquí: https://…»), en vez de proponer días u horas que no conoces. Con booking.mode on_request, solo si el usuario la pide. Nunca en un primer correo en frío ni en una secuencia.',
   'Nada de relleno ni plantillas: sin [corchetes], sin «espero que estés bien», sin superlativos («el mejor», «líder», «revolucionario»), sin cifras, clientes o resultados que no estén en observations, en userContext.proofPoints (resultados que el usuario cargó en su perfil) o en afirmaciones aprobadas del contexto de redacción, y sin atribuirle al destinatario procesos o necesidades que no constan. No ofrezcas prueba gratuita, descuentos ni garantías si el contexto no trae trialOffer aprobada. objective, angle y notes son indicaciones para ti: no copies sus frases en el correo.',
   'Si observations trae message.context configurado, respeta su voz (voiceExamples), evita prohibitedTerms, incluye requiredTerms y usa solo approvedClaims. Si no está configurado, escribe claro y sobrio sin inventar voz. Un tono «cercano» es tuteo, frases cortas y palabras simples, sin fórmulas como «pertinente», «estimado» o «quedo atento».',
   'Destinatarios: usa los nombres y empresas observados. Un nombre enmascarado («Jose Ca***o») se usa solo con el nombre de pila: nunca completes el apellido. Un correo a una sola persona la saluda por su nombre de pila («Hola Felipe,»), también si lo pide en Word o PDF: nunca «{{nombre}}». Un primer correo (kind email) para 2 o 3 personas con correo observado va en un bloque por persona, con to su correo: cada uno la saluda por su nombre de pila, nombra su empresa y abre con lo propio de su rubro, con su propia apertura y su propia pregunta (no el mismo texto con otro nombre); la campaña usa cada uno como el primer correo de esa persona. Para 4 o más personas, en una secuencia o si el usuario pide un solo texto para todos, va un solo bloque con todas en to: la campaña envía el texto a cada una por separado y reemplaza {{nombre}}, {{empresa}} y {{cargo}} con sus datos, así que saluda «Hola {{nombre}},» y escribe en singular («¿Te sirve…?»), sin nombrar a los demás. No uses otras variables. Si el usuario pide correos distintos por persona, un bloque por persona (máximo 3). Un correo que el usuario pegó para mejorarlo y que va a varias personas juntas («Estimados Marcela, Romualdo y Verónica») es un solo correo a ese grupo, no una campaña: conserva el saludo con sus nombres, el plural («¿tienen comentarios?») y lo que ya dice (lo conversado, lo adjunto); to queda null si no observaste sus correos. Si el correo pegado saluda sin nombre («Hola, les escribo…»), queda «Hola,»: no lo conviertas en {{nombre}}. Lo que el correo pegado pide (una demo, una reunión) se conserva, dicho fácil de responder («¿Qué día les acomoda una demo?»).',
@@ -96,7 +97,9 @@ type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: 
   /** The person pasted an email of their own to improve. */
   pasted?: boolean;
   /** The emails of the previous answer in the conversation (assistant.written, scope earlier_answer), and whether the request edits them. */
-  earlier?: EarlierEmail[]; edit?: boolean; shorter?: boolean; request?: string };
+  earlier?: EarlierEmail[]; edit?: boolean; shorter?: boolean; request?: string;
+  /** «Tu agenda» of «Firmas y estilo» (userContext.booking): the line that offers it may go after the closing question. */
+  booking?: string | null };
 type EarlierEmail = { to: string[]; subject: string; body: string };
 
 // «firmo como Nico», «Firma exactamente como «Nico»», «firmar siempre como Nicolás Y.»: the name that follows, as written.
@@ -156,7 +159,7 @@ function offerNames(userContext: { companyName?: unknown; offer?: unknown; offer
 /** What the checks need from the turn: who signs, the prohibited terms, whether a trial offer was approved, the proofs of the
  * person's profile, the people read with their company and the names of the offer; with the person's words (request), whether
  * they asked for a meeting. A signature the person asked for (coworkSignerPreference) replaces the profile's name. */
-export function coworkWriterContext(userContext: { fullName?: string | null; proofPoints?: unknown } | null | undefined, observations: Observation[], signer: string | null = null,
+export function coworkWriterContext(userContext: { fullName?: string | null; proofPoints?: unknown; booking?: { url?: unknown } | null } | null | undefined, observations: Observation[], signer: string | null = null,
   request?: string | null): WriterContext {
   const context = observations.slice().reverse().find(item => item.action === 'message.context')?.result as
     { configured?: boolean; context?: { prohibitedTerms?: unknown; trialOffer?: unknown } | null } | undefined;
@@ -170,6 +173,7 @@ export function coworkWriterContext(userContext: { fullName?: string | null; pro
   const edit = Boolean(earlier.length && typeof request === 'string' && !PASTED_EDIT.test(request) && request.length <= 160 && EDITS_EARLIER.test(request));
   return { signer: signer || userContext?.fullName?.trim() || null, prohibited, trialOffer: Boolean(context?.context?.trialOffer),
     proofs, recipients: observedRecipients(observations), products: offerNames(userContext as Parameters<typeof offerNames>[0]),
+    ...(typeof userContext?.booking?.url === 'string' ? { booking: userContext.booking.url } : {}),
     ...(typeof request === 'string' ? { meeting: MEETING_ASKED.test(request),
       keepsAsk: MEETING_ASKED.test(request) && PASTED_EDIT.test(request) && !DROPS_MEETING.test(request), pasted: PASTED_EDIT.test(request) } : {}),
     ...(earlier.length ? { earlier, edit, shorter: edit && SHORTER.test(String(request)), request: String(request ?? '') } : {}) };
@@ -621,8 +625,9 @@ function proofWithoutCapability(body: string, proofs: string[], products: string
   return body.match(new RegExp(`\\b${escapeRegex(name)}\\b`, 'i'))?.[0] ?? name;
 }
 
-/** A line between the closing question and the signature that is neither a sign-off nor part of the signature («AXIS»), or null. */
-function strayLine(body: string, signer: string | null): string | null {
+/** A line between the closing question and the signature that is neither a sign-off nor part of the signature («AXIS»), or null.
+ * The line that offers the person's own agenda (booking) is not stray: it is how a reply to a meeting request closes. */
+function strayLine(body: string, signer: string | null, booking: string | null = null): string | null {
   if (!signer) return null;
   const lines = body.split('\n').map(line => line.trim());
   const first = normalize(signer.split(/\s+/)[0] ?? '');
@@ -633,7 +638,7 @@ function strayLine(body: string, signer: string | null): string | null {
     if (line.includes('?')) question = index;
   });
   if (signature < 0 || question < 0 || question >= signature) return null;
-  return lines.slice(question + 1, signature).find(line => line && !SIGNOFF.test(normalize(line))) ?? null;
+  return lines.slice(question + 1, signature).find(line => line && !SIGNOFF.test(normalize(line)) && !(booking && line.includes(booking))) ?? null;
 }
 
 /** The company of the one person an email goes to, as observed, or null. */
@@ -1017,7 +1022,7 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     if (feeling && !issues.some(issue => issue.where === where && (OPENING_SHORTS.has(issue.short) || issue.short === 'pérdida en el negocio'))) issues.push({ where,
       problem: `La primera frase dice cómo se siente el equipo («${feeling[0]}»), no qué se pierde.`,
       fix: 'Di qué queda sin hacer o quién espera en su negocio («toma una tarde de buscar consulta por consulta», «el lunes faltan dos personas en el turno»).', short: 'consecuencia concreta' });
-    const stray = strayLine(email.body, context.signer);
+    const stray = strayLine(email.body, context.signer, context.booking ?? null);
     if (stray) issues.push({ where, problem: `Tiene una línea suelta antes de la firma («${stray}»).`, fix: 'Quítala: después de la pregunta va solo la firma.', short: 'sin líneas sueltas' });
   }
   // The person an email goes to, by their company; a campaign or a sequence, by {{empresa}} in the first email.

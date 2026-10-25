@@ -13,8 +13,8 @@ import { profileService } from '@/lib/services/profile-service';
 import { bookingProvider, normalizeBookingUrl, readBookingPreference, type BookingMode } from '@/lib/booking-link';
 
 const MODES: Array<{ value: BookingMode; title: string; text: string }> = [
-  { value: 'auto', title: 'Automático (recomendado)', text: 'La IA lo agrega a la respuesta sugerida cuando la persona muestra interés o pide una reunión. Nunca va en un primer correo.' },
-  { value: 'on_request', title: 'Solo cuando lo pida', text: 'Aparece el botón «Insertar mi agenda» al responder; la IA no lo agrega sola.' },
+  { value: 'auto', title: 'Automático (recomendado)', text: 'La IA lo agrega a la respuesta sugerida y a lo que escribe Cowork cuando la persona muestra interés o pide una reunión. Nunca va en un primer correo.' },
+  { value: 'on_request', title: 'Solo cuando lo pida', text: 'Aparece el botón «Insertar mi agenda» al responder, y Cowork lo usa solo si se lo pides; la IA no lo agrega sola.' },
   { value: 'never', title: 'Nunca', text: 'Ningún correo lleva enlace de agenda.' },
 ];
 
