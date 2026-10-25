@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
-  FIRST_EMAIL_PATH, HELP_GROUPS, HELP_ICONS, HELP_SECTIONS, POPULAR_QUESTIONS, helpSectionFor, helpSectionHref, helpSectionIdFrom,
+  FIRST_EMAIL_PATH, FIRST_TENDER_PATH, HELP_GROUPS, HELP_ICONS, HELP_SECTIONS, POPULAR_QUESTIONS, helpSectionFor, helpSectionHref, helpSectionIdFrom,
   manualAsText, popularHelpQuestions, searchHelp, visibleHelpSections,
 } from './manual';
 import { NAV_SECTIONS } from '../navigation';
@@ -94,6 +94,13 @@ test('the Centro de ayuda: a page and an icon per section, the path to the first
   for (const step of FIRST_EMAIL_PATH) {
     assert.ok(memberIds.includes(step.section), `${step.section}: every member sees the path`);
     assert.ok(step.title.length <= 24 && step.text.length <= 80, `${step.section}: short enough for a card`);
+  }
+  // Oportunidades has its own first steps, only for whoever has it (APP-19).
+  assert.equal(FIRST_TENDER_PATH.length, 5);
+  for (const step of FIRST_TENDER_PATH) {
+    assert.ok(!memberIds.includes(step.section), `${step.title}: not for who has no Oportunidades`);
+    assert.ok(visibleHelpSections({ opportunities: true, admin: false }).some(section => section.id === step.section), `${step.title}: its section exists`);
+    assert.ok(step.title.length <= 24 && step.text.length <= 80, `${step.title}: short enough for a card`);
   }
 
   const popular = popularHelpQuestions(member);

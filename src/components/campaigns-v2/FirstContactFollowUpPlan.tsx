@@ -51,6 +51,7 @@ import type { StyleProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { RewriteProposalReview } from './RewriteProposalReview';
 import { quickRewrites, readRewriteProposal, reconcileSavedText, versionConflictMessage, type RewriteProposal } from './draft-editor-behavior';
+import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 
 type FirstContactFollowUpPlanProps = {
   draftId: string;
@@ -766,19 +767,18 @@ export function FirstContactFollowUpPlan({
 
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium">Cantidad de correos</legend>
-                <div className="grid grid-cols-4 rounded-xl border border-border/60 bg-muted/30 p-1" aria-label="Cantidad de seguimientos">
+                <div className={`${SEGMENT_TRACK} grid grid-cols-4`} role="group" aria-label="Cantidad de seguimientos">
                   {[1, 2, 3, 4].map((count) => (
-                    <Button
+                    <button
                       key={count}
                       type="button"
-                      variant={followUpCount === count ? 'secondary' : 'ghost'}
-                      className="min-h-11 rounded-lg"
+                      className={`${segmentClass(followUpCount === count)} min-h-11`}
                       aria-pressed={followUpCount === count}
                       onClick={() => setFollowUpCount(count)}
                       disabled={disabled}
                     >
                       {count}
-                    </Button>
+                    </button>
                   ))}
                 </div>
               </fieldset>

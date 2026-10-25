@@ -30,7 +30,8 @@ test('today\'s contact sits right under the next step, not fourth on a phone, an
 });
 
 test('what is empty today takes one line, not a card: nothing waiting, no activity yet', () => {
-  assert.match(today, /data\.queue\.length === 0 \? \(\s*<p className="flex items-center gap-2[^"]*">\s*<CheckCircle2/);
+  // When the step above is the only pending item, nothing more is said (APP-01).
+  assert.match(today, /data\.queue\.length === 0 \? \(data\.primary\.queueId \? null : \(\s*<p className="flex items-center gap-2[^"]*">\s*<CheckCircle2/);
   assert.match(today, /Nada pendiente por ahora\./);
   assert.match(summary, /const quiet=Boolean\(summary\)&&METRICS\.every\(metric=>summary!\[metric\.key\]===0\)&&!summary!\.activity\.length/);
   assert.match(summary, /if\(quiet\)return <section aria-labelledby="summary-title">[\s\S]*Hoy aún no hay actividad en esta organización\./);
@@ -53,9 +54,10 @@ test('the counts come from /api/home/summary and each one opens its screen', () 
   assert.doesNotMatch(summary,/Campañas en curso|activeCampaigns|enrichedLeads/);
 });
 
-test('a finished setup shrinks to one line, still the tour target', () => {
-  assert.match(today, /setupComplete \? \(\s*<p data-tour="setup"/);
+test('a finished setup shrinks to one line, still the tour target, the first week only (APP-01)', () => {
+  assert.match(today, /setupComplete \? \(!data\.newAccount \? null : \(\s*<p data-tour="setup"/);
   assert.match(today, /Tu cuenta está lista/);
+  assert.match(readFileSync('src/app/api/home/today/route.ts', 'utf8'), /newAccount: Date\.parse\(String\(\(user as \{ created_at\?: string \}\)\.created_at \|\| ''\)\) > now\.getTime\(\) - 7 \* 86_400_000/);
 });
 
 test('a labelled chart is an image for assistive tech, which fixes axe aria-prohibited-attr on every chart', () => {

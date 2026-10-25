@@ -10,6 +10,7 @@ import { ProductTourProvider } from '@/components/onboarding/ProductTour';
 import { FullNamePrompt, useFullNamePrompt } from '@/components/profile/FullNamePrompt';
 import QuotaSync from '@/components/quota/quota-sync';
 import ThemeToggle from '@/components/theme-toggle';
+import { CommandPalette, CommandPaletteButton } from '@/components/command-palette';
 import { UsageCapture } from '@/components/admin/UsageCapture';
 import { useAdminUsageAccess } from '@/hooks/use-admin-usage-access';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
@@ -36,6 +37,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const helpAdmin = organizationRole === 'owner' || organizationRole === 'admin' || adminUsage;
   const helpVisibility = useMemo(() => ({ opportunities: access.opportunities, admin: helpAdmin, cowork: access.cowork }),
     [access.opportunities, helpAdmin, access.cowork]);
+  // ⌘K reaches the same screens as the menu (APP-24).
+  const paletteAccess = useMemo(() => ({ opportunities: access.opportunities, cowork: access.cowork,
+    admin: adminUsage || Boolean(organizationId) && (organizationRole === 'owner' || organizationRole === 'admin') }),
+  [access.opportunities, access.cowork, adminUsage, organizationId, organizationRole]);
   const screenLabel = navLabelFor(pathname);
   // Cowork takes the whole height: on a computer its header carries the menu, the help and the theme instead of this bar.
   const immersive = isImmersiveScreen(pathname);
@@ -78,6 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <AppSidebar access={access} adminUsage={adminUsage} pending={pending} />
         <SidebarInset>
           <p className="sr-only" role="status" aria-live="polite">{workspaceAnnouncement}</p>
+          <CommandPalette access={paletteAccess} />
           <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/85 px-2 backdrop-blur-sm md:hidden">
             <span className="relative inline-flex">
               <SidebarTrigger data-tour="menu" />
@@ -87,12 +93,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Logo size="sm" showWordmark={false} />
             {screenLabel && <span className="min-w-0 truncate text-sm font-semibold text-foreground">{screenLabel}</span>}
             {/* A screen can add its own button here while it is open (Cowork's history, on a phone): one row less under the bar. */}
-            <div className="ml-auto flex shrink-0 items-center gap-1"><span id="shell-bar-actions" className="contents" /><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
+            <div className="ml-auto flex shrink-0 items-center gap-1"><span id="shell-bar-actions" className="contents" />{immersive ? null : <CommandPaletteButton />}<PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
           </header>
 
           <div className={cn('sticky top-0 z-10 hidden h-12 items-center justify-between border-b bg-background/85 px-6 backdrop-blur-sm', !immersive && 'md:flex')}>
             <SidebarTrigger />
-            <div className="flex items-center gap-1"><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
+            <div className="flex items-center gap-1"><CommandPaletteButton /><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
           </div>
 
           <main

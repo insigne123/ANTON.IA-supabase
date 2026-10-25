@@ -1,9 +1,9 @@
 'use client';
 import {useCallback,useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import {Activity,ArrowLeft,ArrowRight,CalendarDays,CheckCircle2,Coins,Download,RefreshCw,Search,Users,AlertCircle,ChevronRight} from 'lucide-react';
-import {Area,AreaChart,CartesianGrid,XAxis,YAxis,Tooltip} from 'recharts';
 import {Button} from '@/components/ui/button';
 import {Card,CardContent,CardHeader,CardTitle as CardTitleBase} from '@/components/ui/card';
 import {Input} from '@/components/ui/input';
@@ -13,17 +13,17 @@ import {Tabs,TabsList,TabsTrigger,TabsContent} from '@/components/ui/tabs';
 import {Table,TableBody,TableCell,TableHead,TableHeader,TableRow} from '@/components/ui/table';
 import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet';
 import {Skeleton} from '@/components/ui/skeleton';
-import {ChartContainer,ChartTooltipContent} from '@/components/ui/chart';
 import {Badge} from '@/components/ui/badge';
 import {USAGE_MODULES,usageReportCsv,type AdminUsageReport,type CommercialCounts} from '@/lib/admin/usage';
 import {dayInZone,lastDaysInZone,shiftDay} from '@/lib/admin/chile-time';
 import {cn} from '@/lib/utils';
+import {SEGMENT_TRACK,chipClass,segmentClass} from '@/components/ui/chip';
 
 const n=(value:number|null|undefined)=>value===null||value===undefined?'—':value.toLocaleString('es-CL');
 const date=(value:string)=>new Date(value+'T12:00:00Z').toLocaleDateString('es-CL',{day:'numeric',month:'short',timeZone:'UTC'}).replace('.','');
 // 24-hour time, as everywhere else in the app: the 12-hour «p. m.» lost a dot to the month's and read «12:26 p m.».
 const time=(value:string|null)=>value?new Date(value).toLocaleString('es-CL',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:'America/Santiago'}).replace(/(\p{L}{3})\./u,'$1'):'Sin uso registrado';
-const chartConfig={active:{label:'Personas activas',color:'hsl(var(--chart-1))'},credits:{label:'Créditos del cupo diario',color:'hsl(var(--chart-2))'}};
+const UsageChart=dynamic(()=>import('./UsageChart'),{ssr:false,loading:()=><Skeleton className="h-64 w-full"/>});
 const commercialLabels:Array<{key:keyof CommercialCounts;label:string}>=[{key:'saved',label:'Contactos guardados'},
   {key:'researchCompleted',label:'Investigaciones terminadas'},{key:'drafts',label:'Borradores preparados'},{key:'contacted',label:'Contactos con envío registrado'},
   {key:'humanReplies',label:'Respuestas humanas clasificadas'},{key:'interested',label:'Contactos con interés registrado'},
@@ -90,7 +90,7 @@ export function UsageDashboard(){
     <section data-tour="admin-period" className="rounded-2xl border border-border/60 bg-card p-4" aria-label="Período y alcance del informe">
       {/* The shortcut that matches the dates on view is marked, so the period is read at a glance; edited dates mark none. */}
       <div role="group" aria-label="Períodos rápidos" className="mb-3 flex flex-wrap gap-1.5">{([['Hoy',1],['Ayer',0],['7 días',7],['30 días',30],['90 días',90]] as const).map(([label,days])=>{const range=presetRange(days);const active=range.from===from&&range.to===to;
-        return <Button key={label} variant={active?'secondary':'ghost'} size="sm" aria-pressed={active} className={cn(active&&'font-semibold')} onClick={()=>shortcuts(days)}>{label}</Button>;})}</div>
+        return <button key={label} type="button" aria-pressed={active} className={chipClass(active)} onClick={()=>shortcuts(days)}>{label}</button>;})}</div>
       <div className={cn('grid gap-3 sm:grid-cols-2',data?.platform?'xl:grid-cols-4':'xl:grid-cols-3')}>
         {data?.platform&&<div className="space-y-1.5"><Label htmlFor="usage-company">Empresa</Label><Select value={org||'all'} onValueChange={value=>{setOrg(value);setGroup('');setPerson('');}}><SelectTrigger id="usage-company"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Toda ANTON.IA</SelectItem>{data.organizations.map(o=><SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent></Select></div>}
         <div className="space-y-1.5"><Label htmlFor="usage-team">Equipo</Label><Select value={group||'all'} onValueChange={value=>{setGroup(value==='all'?'':value);setPerson('');}}><SelectTrigger id="usage-team"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos los equipos</SelectItem>{data?.groups.filter(g=>org==='all'||!org||g.organizationId===org).map(g=><SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}</SelectContent></Select></div>
@@ -115,8 +115,8 @@ export function UsageDashboard(){
         <TabsList data-tour="admin-tabs" className="mb-4 grid h-auto w-full grid-cols-2 gap-1 sm:w-auto sm:inline-flex"><TabsTrigger value="summary">Resumen</TabsTrigger><TabsTrigger value="people">Personas</TabsTrigger><TabsTrigger value="commercial">Comercial</TabsTrigger><TabsTrigger value="history">Histórico diario</TabsTrigger></TabsList>
         <TabsContent value="summary" className="space-y-5">
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,1fr)]">
-            <Card><CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3"><div><CardTitle className="text-base">Cuándo se utiliza</CardTitle><p className="mt-1 text-xs text-muted-foreground">Selecciona un día para ver su resumen.</p></div><div className="flex gap-1"><Button size="sm" variant={chart==='active'?'secondary':'ghost'} onClick={()=>setChart('active')}>Personas</Button><Button size="sm" variant={chart==='credits'?'secondary':'ghost'} onClick={()=>setChart('credits')}>Créditos</Button></div></CardHeader>
-              <CardContent className="px-2 sm:px-4"><ChartContainer config={chartConfig} className="h-64 w-full aspect-auto"><AreaChart accessibilityLayer data={data.daily} margin={{left:-12,right:8,top:8,bottom:0}} onClick={event=>{if(event?.activeLabel)openDay(String(event.activeLabel));}}><CartesianGrid vertical={false}/><XAxis dataKey="day" tickFormatter={date} tickLine={false} axisLine={false} minTickGap={25}/><YAxis allowDecimals={false} tickLine={false} axisLine={false}/><Tooltip content={<ChartTooltipContent labelFormatter={value=>date(String(value))}/>}/><Area isAnimationActive={false} dataKey={chart} type="monotone" stroke={`var(--color-${chart})`} fill={`var(--color-${chart})`} fillOpacity={.14} strokeWidth={2}/></AreaChart></ChartContainer>
+            <Card><CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3"><div><CardTitle className="text-base">Cuándo se utiliza</CardTitle><p className="mt-1 text-xs text-muted-foreground">Selecciona un día para ver su resumen.</p></div><div role="group" aria-label="Qué muestra el gráfico" className={SEGMENT_TRACK}><button type="button" aria-pressed={chart==='active'} className={segmentClass(chart==='active')} onClick={()=>setChart('active')}>Personas</button><button type="button" aria-pressed={chart==='credits'} className={segmentClass(chart==='credits')} onClick={()=>setChart('credits')}>Créditos</button></div></CardHeader>
+              <CardContent className="px-2 sm:px-4"><UsageChart daily={data.daily} chart={chart} date={date} onDay={openDay}/>
                 <p className="px-3 text-xs leading-5 text-muted-foreground">{chart==='active'?'Días y horas de actividad en Chile.':'Los créditos corresponden al día del cupo UTC; el saldo de hoy respeta su reinicio diario.'}</p></CardContent></Card>
             <Card><CardHeader><CardTitle className="text-base">Para qué la utilizan</CardTitle><p className="text-xs leading-5 text-muted-foreground">Cuántas personas usan cada pantalla y qué hicieron en ella.</p></CardHeader><CardContent className="space-y-4">{data.modules.filter(m=>m.users||m.operations||m.visits).slice(0,8).map(m=><div key={m.id}><div className="flex justify-between gap-3 text-sm"><span>{m.label}</span><span className="shrink-0 tabular-nums text-muted-foreground">{n(m.users)} personas</span></div><div className="mt-1.5 h-1.5 rounded-full bg-muted"><div className="h-full rounded-full bg-primary/70" style={{width:`${Math.max(m.users?3:0,data.summary.active?m.users/data.summary.active*100:0)}%`}}/></div><p className="mt-1 text-xs text-muted-foreground">{n(m.visits)} visitas · {n(m.operations)} operaciones registradas</p></div>)}{!data.modules.some(m=>m.users||m.operations||m.visits)&&<p className="text-sm text-muted-foreground">Sin uso registrado en este período. Prueba otro rango.</p>}</CardContent></Card>
           </div>

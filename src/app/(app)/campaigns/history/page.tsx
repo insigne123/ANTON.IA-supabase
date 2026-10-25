@@ -24,6 +24,7 @@ import { campaignsStorage, type Campaign } from '@/lib/services/campaigns-servic
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import type { CampaignType } from '@/lib/campaign-settings';
 import type { ContactedLead } from '@/lib/types';
+import { chipClass } from '@/components/ui/chip';
 
 type TypeFilter = 'all' | CampaignType;
 const FILTERS: Array<[TypeFilter, string]> = [['all', 'Todas'], ['reconnection', 'Reconexión'], ['follow_up', 'Seguimiento']];
@@ -161,9 +162,9 @@ export default function CampaignsArchivePage() {
         <section aria-label="Campañas anteriores" className="space-y-3">
           <div role="group" aria-label="Filtrar por tipo" className="flex flex-wrap gap-1.5">
             {FILTERS.map(([value, label]) => (
-              <Button key={value} size="sm" variant={filter === value ? 'secondary' : 'ghost'} aria-pressed={filter === value} onClick={() => setFilter(value)}>
-                {label} <span className="tabular-nums text-foreground/70">{counts[value]}</span>
-              </Button>
+              <button key={value} type="button" className={chipClass(filter === value)} aria-pressed={filter === value} onClick={() => setFilter(value)}>
+                {label} <span className="tabular-nums opacity-70">{counts[value]}</span>
+              </button>
             ))}
           </div>
 

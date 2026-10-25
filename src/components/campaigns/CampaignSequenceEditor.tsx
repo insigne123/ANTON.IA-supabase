@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { CampaignMessageSchema, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 import { validateSequenceProposal } from '@/lib/bulk-campaign-assist';
+import { chipClass } from '@/components/ui/chip';
 
 type Props = {
   definition: CampaignInput;
@@ -141,7 +142,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
 
     <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
       <div className="min-w-0 space-y-4">
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Correos de la secuencia">{definition.messages.map((_, index) => <Button key={index} disabled={busy} aria-pressed={messageIndex === index} variant={messageIndex === index ? 'secondary' : 'ghost'} onClick={() => onSelect(index)}>{label(index)}{isLocked(index) ? ' · Bloqueado' : ''}</Button>)}</div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Correos de la secuencia">{definition.messages.map((_, index) => <button key={index} type="button" disabled={busy} aria-pressed={messageIndex === index} className={chipClass(messageIndex === index)} onClick={() => onSelect(index)}>{label(index)}{isLocked(index) ? ' · Bloqueado' : ''}</button>)}</div>
         <h3 className="text-lg font-medium">{label(messageIndex)}</h3>
         {messageIndex > 0 && <div className="space-y-2"><Label htmlFor="delay">Días después del envío anterior</Label><Input id="delay" className="max-w-32" type="number" min={1} max={90} disabled={busy || isLocked(messageIndex)} value={message.delayDays} onChange={event => updateMessage({ delayDays: Number(event.target.value) })} /><p className="text-sm text-muted-foreground">El plazo empieza cuando se confirma el envío anterior. Los seguimientos se detienen si la persona responde.</p></div>}
         <div className="space-y-2"><Label htmlFor="subject">Asunto</Label><Input id="subject" maxLength={300} disabled={busy || isLocked(messageIndex)} value={message.subject} onChange={event => updateMessage({ subject: event.target.value })} /></div>
