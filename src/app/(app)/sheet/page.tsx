@@ -197,6 +197,11 @@ export default function SheetPage() {
   const [columns, setColumns] = useState<ColumnDef[]>(defaultColumns());
   const [rows, setRows] = useState<UnifiedRow[]>([]);
   const [query, setQuery] = useState('');
+  // ⌘K «en la Tabla de datos» (APP-24) arrives with what to look for.
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get('q')?.trim();
+    if (asked) setQuery(asked.slice(0, 200));
+  }, []);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [industryFilter, setIndustryFilter] = useState('all');
   const [createdFrom, setCreatedFrom] = useState('');

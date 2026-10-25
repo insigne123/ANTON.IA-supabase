@@ -117,6 +117,9 @@ export default function ConversationsWorkspace() {
   useEffect(() => {
     const requested = readConversationUrl(window.location.search).view;
     if (requested) setView(requested);
+    // ⌘K «en Conversaciones» (APP-24) arrives with what to look for.
+    const asked = new URLSearchParams(window.location.search).get('q')?.trim();
+    if (asked) setQuery(asked.slice(0, 200));
   }, []);
 
   const chooseView = useCallback((next: ConversationView) => {

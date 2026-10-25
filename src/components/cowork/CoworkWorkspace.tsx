@@ -456,6 +456,17 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     return () => window.removeEventListener('popstate', restore);
   }, []);
 
+  // «Preguntar a Cowork» from ⌘K (APP-24): ?pregunta= leaves the question written in a new conversation; the person sends it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const asked = url.searchParams.get('pregunta')?.trim();
+    if (!asked) return;
+    url.searchParams.delete('pregunta');
+    window.history.replaceState(window.history.state, '', url);
+    setMessage(asked.slice(0, 2000));
+    requestAnimationFrame(() => composer.current?.focus());
+  }, []);
+
   const choose = useCallback((id: string | null, options: { pin?: boolean } = {}) => {
     pinnedRun.current = options.pin ? id : null;
     setWorkUrl(id, 'push');

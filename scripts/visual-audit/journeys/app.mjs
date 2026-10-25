@@ -64,6 +64,29 @@ export default () => [
         c.check('el aviso se fue', !(await c.has(/ya tienen? correo/)));
       } },
     ] },
+  { id: 'app-buscar-todo', persona: 'owner', title: 'Encontrar a una persona desde cualquier pantalla, sin saber dónde está',
+    goal: 'Con Ctrl+K, escribir un nombre y llegar a su conversación (APP-24).',
+    steps: [
+      { say: 'Abro Hoy y pulso Ctrl+K', do: async c => {
+        await c.go('/dashboard'); await c.seeRole('heading', 'Hoy');
+        await c.page.keyboard.press('Control+k');
+        const box = c.page.getByRole('combobox', { name: 'Buscar e ir a…' });
+        c.check('se abre la caja, con el foco en ella', await visible(box) && await box.evaluate(node => node === document.activeElement));
+      } },
+      { say: 'Escribo «Andrea» y elijo Conversaciones', do: async c => {
+        await c.page.keyboard.type('Andrea');
+        const option = c.page.getByRole('option', { name: /«Andrea» en Conversaciones/ });
+        c.check('ofrece buscar en Conversaciones, la Tabla de datos y Oportunidades', await visible(option)
+          && await c.page.getByRole('option', { name: /en la Tabla de datos/ }).count() === 1);
+        c.check('la primera opción queda marcada', (await option.getAttribute('aria-selected')) === 'true');
+        await c.page.keyboard.press('Enter');
+        await c.seeRole('heading', 'Conversaciones');
+        const field = c.page.getByRole('textbox', { name: 'Buscar contacto o empresa' });
+        await c.wait(800);
+        c.check('Conversaciones abre con la búsqueda escrita', (await field.inputValue().catch(() => '')) === 'Andrea', c.page.url());
+        c.check('y la encuentra', await c.has('Andrea Soto'));
+      } },
+    ] },
   { id: 'app-tabla-telefono', persona: 'owner', viewport: 'phone', title: 'En el teléfono, la Tabla de datos dice a quién y cómo escribirle',
     goal: 'Ver correo, empresa y cargo de cada contacto sin desplazar una tabla de lado (APP-09).',
     steps: [
