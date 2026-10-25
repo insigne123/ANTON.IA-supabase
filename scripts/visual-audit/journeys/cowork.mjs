@@ -79,7 +79,8 @@ export default () => [
       { say: 'Busco «minería»', do: async c => {
         await c.page.getByRole('textbox', { name: 'Buscar conversaciones' }).first().fill('minería');
         const rail = c.page.getByRole('navigation', { name: 'Conversaciones' }).first();
-        const shown = await rail.getByText(/minería/).first().waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
+        // The line of the answer that says it, not the word in «Ninguna conversación coincide con «minería»».
+        const shown = await rail.getByText(/en minería/).first().waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
         const text = (await rail.innerText()).replace(/\s+/g, ' ');
         c.check('aparece la de Sodexo, con la línea donde lo dice', shown && /Investiga qué hace Sodexo/.test(text), text.slice(0, 200));
         c.check('las que no lo dicen no aparecen', !/Muéstrame mi pipeline/.test(text));

@@ -60,11 +60,16 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
     const timer = window.setTimeout(() => {
       onSearch(term, controller.signal).then(matches => {
         if (!controller.signal.aborted) setFound({ term, snippets: new Map(matches.map(match => [match.rootId, match.snippet])) });
-      }).catch(() => { /* the names still filter */ });
+      }).catch(() => {
+        // The names still filter; the list stops saying it is searching.
+        if (!controller.signal.aborted) setFound({ term, snippets: new Map() });
+      });
     }, 300);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [onSearch, term]);
   const snippets = found.term === term ? found.snippets : null;
+  // Until the server answers, an empty list is not «no match» yet.
+  const searching = Boolean(onSearch) && term.length >= 3 && found.term !== term;
   const groups = useMemo(() => {
     const now = new Date();
     // What waits for the person's approval goes first, all of it, so a proposal in an older conversation is not forgotten (COW-16).
@@ -125,10 +130,12 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
         <p className="text-[13px] font-medium leading-5 text-cw-text">Aún no tienes conversaciones</p>
         <p className="mt-0.5 text-[12.5px] leading-5 text-cw-muted">Lo que le pidas a Cowork queda aquí para retomarlo.</p>
       </div>}
-      {term && threads.length > 0 && groups.length === 0 && <div className="space-y-1.5 px-3 py-2">
-        <p className="text-[13px] leading-5 text-cw-muted">Ninguna conversación coincide con «{filter.trim()}».</p>
-        <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
-      </div>}
+      {term && threads.length > 0 && groups.length === 0 && (searching
+        ? <p role="status" className="flex items-center gap-2 px-3 py-2 text-[13px] text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Buscando en tus conversaciones…</p>
+        : <div className="space-y-1.5 px-3 py-2">
+          <p className="text-[13px] leading-5 text-cw-muted">Ninguna conversación coincide con «{filter.trim()}».</p>
+          <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
+        </div>)}
       {groups.map(group => <div key={group.label} className="mt-3 first:mt-1">
         <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}{group.label === 'Esperan tu aprobación' ? <span className="tabular-nums"> · {group.items.length}</span> : null}</h2>
         <ul className="space-y-px">
