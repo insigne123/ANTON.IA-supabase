@@ -100,6 +100,8 @@ export default function cowork(ctx) {
     tables: {
       cowork_runs: runs, cowork_run_events: events,
       cowork_search_proposals: [{ run_id: searchRun.id, user_id: ctx.OWNER, organization_id: ctx.ORG, criteria: searchCriteria, status: 'pending', created_at: searchRun.created_at }],
+      // The grants a first visit leaves (ensureCoworkGrant): the worker's own check reads them before changing a proposal.
+      cowork_access_grants: [{ user_id: ctx.OWNER, enabled: true, created_at: ctx.daysAgo(30) }, { user_id: ctx.MEMBER, enabled: true, created_at: ctx.daysAgo(30) }],
       // The model calls of those turns with their cost (Administración → «Oportunidades y Cowork»), one of them today.
       cowork_model_calls: [...runs.slice(0, 4).map((item, index) => ({ id: ctx.uid(9450 + index), run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, role: 'coordinator',
         output_reserved: 4000, usage: { costUsd: 0.012 + index * 0.004 }, usage_recorded_at: item.created_at, created_at: item.created_at })),

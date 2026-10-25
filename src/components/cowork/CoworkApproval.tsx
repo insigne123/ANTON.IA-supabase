@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowRight, Check, CircleSlash, LoaderCircle, Minus, Pencil, TriangleAlert } from 'lucide-react';
 import { COWORK_SEARCH_COMPANIES, coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from '@/lib/cowork/search-proposal';
 import type { CoworkRun } from '@/lib/cowork/contracts';
@@ -120,26 +120,21 @@ function SearchDetails({ criteria }: { criteria: unknown }) {
  * The search card while it waits (COW-29): its criteria, «Editar criterios» to change cargos, sectores, place or how many before
  * approving, and the decision. A profile search (one exact person) has nothing to edit.
  */
-function SearchReview({ runId, criteria, edited, onApprove, onReject, resolving }: {
-  runId: string; criteria: unknown; edited: boolean; onApprove: () => void; onReject: () => void; resolving: boolean;
+function SearchReview({ runId, criteria, edited, onSaved, onApprove, onReject, resolving }: {
+  runId: string; criteria: unknown; edited: boolean; onSaved: (criteria: CoworkSearchCriteria) => void;
+  onApprove: () => void; onReject: () => void; resolving: boolean;
 }) {
-  // What was saved shows at once; the conversation's own copy arrives with its next refresh.
-  const [saved, setSaved] = useState<CoworkSearchCriteria | null>(null);
   const [editing, setEditing] = useState(false);
-  const current = JSON.stringify(criteria ?? null);
-  useEffect(() => { setSaved(null); }, [current]);
-  const shown = saved ?? criteria;
-  const parsed = coworkSearchCriteriaSchema.safeParse(shown);
+  const parsed = coworkSearchCriteriaSchema.safeParse(criteria);
   const editable = parsed.success && coworkSearchStrategy(parsed.data) !== 'profile';
-  const changed = edited || saved !== null;
   const data = parsed.success ? parsed.data : null;
   const approveLabel = data?.linkedinUrl ? 'Consultar perfil' : data?.target === 'companies' ? 'Buscar empresas' : 'Buscar contactos';
   if (editing && parsed.success) return <SearchCriteriaEditor runId={runId} criteria={parsed.data}
-    onCancel={() => setEditing(false)} onSaved={next => { setSaved(next); setEditing(false); }} />;
+    onCancel={() => setEditing(false)} onSaved={next => { onSaved(next); setEditing(false); }} />;
   return <div className="space-y-4">
-    <SearchDetails criteria={shown} />
+    <SearchDetails criteria={criteria} />
     {editable && <div className="flex items-center justify-between gap-2">
-      <p role="status" className="text-[12.5px] text-cw-muted">{changed ? 'Se buscará con tus cambios.' : ''}</p>
+      <p role="status" className="text-[12.5px] text-cw-muted">{edited ? 'Se buscará con tus cambios.' : ''}</p>
       <CwButton variant="secondary" size="xs" disabled={resolving} onClick={() => setEditing(true)}><Pencil aria-hidden="true" />Editar criterios</CwButton>
     </div>}
     <ReviewActions onReject={onReject} onApprove={onApprove} resolving={resolving} rejectLabel="Descartar búsqueda" approveLabel={approveLabel} />
@@ -211,6 +206,12 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
   // «Guardar contacto Ana (Sur)» under the title «Guardar contacto» reads as «Ana (Sur)».
   const label = rawLabel.toLocaleLowerCase('es').startsWith(proposal.title.toLocaleLowerCase('es'))
     ? rawLabel.slice(proposal.title.length).replace(/^[\s:·-]+/, '') : rawLabel;
+  // A search edited in its card (COW-29) shows the saved criteria at once, in its details and in «Qué va a pasar»; the
+  // conversation's own copy replaces them when it arrives with its next refresh.
+  const [savedSearch, setSavedSearch] = useState<{ from: string; criteria: CoworkSearchCriteria } | null>(null);
+  const criteriaKey = JSON.stringify(proposal.payload.criteria ?? null);
+  const proposalShown: CoworkProposalView = savedSearch && savedSearch.from === criteriaKey
+    ? { ...proposal, payload: { ...proposal.payload, criteria: savedSearch.criteria, edited: true } } : proposal;
   const { state } = proposal;
   const search = proposal.type === 'search';
   const deciding = state === 'pending' && interactive;
@@ -236,8 +237,8 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
   let body: ReactNode = null;
   if (deciding) {
     if (search) {
-      body = <SearchReview runId={run.id} criteria={proposal.payload.criteria} edited={proposal.payload.edited === true}
-        onApprove={approve} onReject={reject} resolving={resolving} />;
+      body = <SearchReview runId={run.id} criteria={proposalShown.payload.criteria} edited={proposalShown.payload.edited === true}
+        onSaved={criteria => setSavedSearch({ from: criteriaKey, criteria })} onApprove={approve} onReject={reject} resolving={resolving} />;
     } else if (proposal.type === 'note') {
       body = <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -283,7 +284,7 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
     {state !== 'pending' && <p role="status" className="sr-only">{[heading, detail].filter(Boolean).join('. ')}</p>}
     {/* What approving does and the details leave at once when you decide: a button that is
         folding away must never take a second click. The timeline stays and moves on. */}
-    {deciding && <div className="px-4 pt-4"><Outcome outcome={coworkProposalOutcome(proposal)} /></div>}
+    {deciding && <div className="px-4 pt-4"><Outcome outcome={coworkProposalOutcome(proposalShown)} /></div>}
     {/* While you decide, «Necesita tu aprobación» already says where it is: the timeline joins once you approve (round 2 readings). */}
     <CwCollapse show={!folded && !deciding} animateIn={false}>
       <div className="space-y-3 px-4 py-4">

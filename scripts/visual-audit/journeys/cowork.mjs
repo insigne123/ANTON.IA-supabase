@@ -217,6 +217,7 @@ export default () => [
         c.check('la búsqueda que espera queda con los cambios', JSON.stringify(saved?.titles) === '["Gerente de Personas","Jefe de Selección"]'
           && JSON.stringify(saved?.locations) === '["Antofagasta, Chile"]' && saved?.limit === 10, JSON.stringify(saved || null).slice(0, 200));
         c.check('la tarjeta muestra lo que se va a buscar', await c.has('Jefe de Selección') && await c.has('Antofagasta, Chile') && await c.has('Hasta 10 personas'));
+        c.check('«Qué va a pasar» dice la cantidad nueva', await c.has('hasta 10 contactos nuevos') && !(await c.has('hasta 25 contactos nuevos')));
         c.check('la conversación guarda el cambio', c.table('cowork_run_events').some(event => event.kind === 'proposal.edited' && event.payload?.kind === 'search'));
         c.check('sigue esperando mi aprobación', await c.page.getByRole('button', { name: 'Buscar contactos' }).count() === 1);
       } },
