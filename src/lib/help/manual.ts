@@ -95,7 +95,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     feature: 'cowork',
     summary: 'Tu asistente de ventas: le pides lo que necesitas con tus palabras y lo hace con tus contactos, tu oferta y tus correos. Lo que envía, guarda o gasta créditos espera tu aprobación.',
     steps: [
-      'Escribe lo que necesitas, por ejemplo «¿Qué toca hoy?» o «Escribe a mis contactos de retail», o parte con una de las sugerencias de la portada. Con «/» ves los atajos y con «@» nombras a un contacto guardado.',
+      'Escribe lo que necesitas, por ejemplo «¿Qué toca hoy?» o «Escribe a mis contactos de retail», o parte con una de las sugerencias de la portada. Con «/» ves los atajos y tus pedidos guardados, y con «@» nombras a un contacto guardado.',
       'Cowork busca, lee y prepara a la vista: te muestra lo que va haciendo y deja el resultado en la conversación, como una tabla de contactos, un correo, un gráfico o un informe.',
       'Cuando propone algo que envía, guarda o gasta créditos, aparece una tarjeta con «Aprobar». Nada sale ni se guarda sin ese clic, y puedes editar antes de aprobar.',
       'Tus conversaciones quedan en la lista de la izquierda. Puedes adjuntar archivos, como un Excel con contactos, y bajar tablas en Excel o CSV e informes en Word o PDF.',
