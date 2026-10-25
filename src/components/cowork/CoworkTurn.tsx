@@ -226,7 +226,7 @@ function AutoRetry({ onRetry, onStop }: { onRetry: () => void; onStop: () => voi
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, decidable = false, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
-  liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null, onContinueNew = null }: {
+  liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null, onContinueNew = null, onSchedule = null }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** Its card still waits for a decision after a question about it, asked in the next turn: it keeps its buttons. */
@@ -260,6 +260,8 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   onRegenerate?: (() => void) | null;
   /** 👍 / 👎 on this answer; null when it cannot be rated. */
   onFeedback?: ((feedback: CoworkFeedback) => Promise<boolean>) | null;
+  /** «Programar» under the answer (COW-18): repeat this request on a schedule. */
+  onSchedule?: (() => void) | null;
 }) {
   const [editing, setEditing] = useState(false);
   const editOpener = useRef<HTMLDivElement>(null);
@@ -307,7 +309,8 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
       <PencilLine className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Ajusté la respuesta al revisarla.
     </p>}
     {!active && <div className="mt-1"><CoworkAnswerActions text={reply} latest={latest} rating={coworkTurnFeedback(events)?.rating ?? null}
-      onFeedback={run.status === 'completed' ? onFeedback : null} onRegenerate={onRegenerate} /></div>}
+      onFeedback={run.status === 'completed' ? onFeedback : null} onRegenerate={onRegenerate}
+      onSchedule={run.status === 'completed' && !run.automatic ? onSchedule : null} /></div>}
   </div> : null;
 
   return <article data-cowork-turn={run.id} tabIndex={-1} className="space-y-4" aria-label={run.automatic ? 'Continuación automática' : 'Turno'}>

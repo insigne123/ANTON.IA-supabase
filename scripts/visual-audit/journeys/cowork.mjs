@@ -168,6 +168,17 @@ export default () => [
           c.check('el horario sale del pedido: una vez por semana, a las 09:00', await form.locator('select').first().inputValue() === 'weekly' && await form.locator('input[type="time"]').inputValue() === '09:00');
         } },
       ] },
+    { id: 'cowork-programar-respuesta', persona: 'owner', title: 'Programar lo que le pedí a Cowork, desde su respuesta',
+      goal: 'Repetir un pedido que funcionó sin volver a escribirlo (COW-18).',
+      steps: [
+        { say: 'Abro la conversación de Sodexo', do: async c => { await c.go(`/cowork?work=${run(7)}`); await c.see('sí está reclutando en volumen'); await c.wait(1500); } },
+        { say: 'Pulso «Programar» bajo la respuesta', do: async c => {
+          await c.click({ role: 'button', name: 'Programar' });
+          await c.see('Qué debe hacer');
+          const form = c.page.getByRole('dialog');
+          c.check('el pedido queda tal como lo escribí', await form.locator('textarea').inputValue() === 'Investiga qué hace Sodexo Chile y si está contratando');
+        } },
+      ] },
     { id: 'cowork-tareas-programadas-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: ver mis tareas programadas',
       goal: 'Leer la lista de tareas y abrir el formulario en una pantalla angosta, sin desbordes.',
       steps: [
@@ -185,6 +196,31 @@ export default () => [
         } },
       ] },
   ] : []),
+  { id: 'cowork-busqueda-editar', persona: 'owner', title: 'Corregir los criterios de una búsqueda antes de aprobarla',
+    goal: 'Cambiar el cargo, el lugar y la cantidad en la tarjeta, sin pedirle a Cowork otra versión (COW-29).',
+    passWrites: [{ pattern: /^\/api\/cowork\/runs\/[0-9a-f-]{36}\/search-approval$/ }],
+    steps: [
+      { say: 'Abro la búsqueda que espera mi aprobación', do: async c => {
+        await c.go(`/cowork?work=${run(8)}`);
+        await c.see('Necesita tu aprobación');
+        await c.see('Gerente de Personas');
+        await c.wait(1500);
+      } },
+      { say: 'Edito cargos, lugar y cantidad', do: async c => {
+        await c.click({ role: 'button', name: 'Editar criterios' });
+        await c.fill({ label: 'Cargos (y parecidos)' }, 'Gerente de Personas\nJefe de Selección');
+        await c.fill({ label: 'Ubicación de la persona' }, 'Antofagasta, Chile');
+        await c.fill({ label: 'Cantidad' }, '10');
+        await c.click({ role: 'button', name: 'Guardar cambios' });
+        await c.see('Se buscará con tus cambios.');
+        const saved = c.table('cowork_search_proposals')[0]?.criteria;
+        c.check('la búsqueda que espera queda con los cambios', JSON.stringify(saved?.titles) === '["Gerente de Personas","Jefe de Selección"]'
+          && JSON.stringify(saved?.locations) === '["Antofagasta, Chile"]' && saved?.limit === 10, JSON.stringify(saved || null).slice(0, 200));
+        c.check('la tarjeta muestra lo que se va a buscar', await c.has('Jefe de Selección') && await c.has('Antofagasta, Chile') && await c.has('Hasta 10 personas'));
+        c.check('la conversación guarda el cambio', c.table('cowork_run_events').some(event => event.kind === 'proposal.edited' && event.payload?.kind === 'search'));
+        c.check('sigue esperando mi aprobación', await c.page.getByRole('button', { name: 'Buscar contactos' }).count() === 1);
+      } },
+    ] },
   { id: 'cowork-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: retomar la investigación con la web',
     goal: 'Leer la respuesta y sus fuentes en una pantalla angosta.',
     steps: [

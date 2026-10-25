@@ -1101,7 +1101,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 cardStatuses={cardStatuses} earlierRows={earlierRows.get(turn.run.id)} versions={coworkTurnVersions(runs, turn.run)} onVersion={busy || sending ? null : openVersion}
                 onEdit={index === shownTurns.length - 1 && canEdit ? editLatest : null}
                 onRegenerate={index === shownTurns.length - 1 && canRegenerate ? regenerate : null}
-                onFeedback={feedback => sendFeedback(turn.run.id, feedback)} />)}
+                onFeedback={feedback => sendFeedback(turn.run.id, feedback)}
+                onSchedule={index === shownTurns.length - 1 && schedulesAvailable ? () => openSchedules(coworkDisplayMessage(turn.run.message)) : null} />)}
               {latest?.run.clarificationOf && <div className="flex flex-wrap items-center gap-2 text-[13px] text-cw-muted">
                 <p>La propuesta original sigue esperando tu decisión.</p>
                 <CwButton size="sm" variant="secondary" onClick={() => choose(latest.run.clarificationOf!, { pin: true })}>Ver propuesta</CwButton>

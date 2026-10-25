@@ -1,8 +1,8 @@
 'use client';
 
-import type { ReactNode } from 'react';
-import { ArrowRight, Check, CircleSlash, LoaderCircle, Minus, TriangleAlert } from 'lucide-react';
-import { COWORK_SEARCH_COMPANIES, coworkSearchCriteriaSchema, coworkSearchStrategy } from '@/lib/cowork/search-proposal';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowRight, Check, CircleSlash, LoaderCircle, Minus, Pencil, TriangleAlert } from 'lucide-react';
+import { COWORK_SEARCH_COMPANIES, coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from '@/lib/cowork/search-proposal';
 import type { CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkProposalLink, coworkProposalOutcome, coworkProposalTimeline, type CoworkOutcome, type CoworkProposalState, type CoworkProposalView,
@@ -14,6 +14,7 @@ import { CampaignReview } from './CampaignReview';
 import { CodeReview } from './CodeReview';
 import { ProfileReview } from './ProfileReview';
 import { SavedSearchReview } from './SavedSearchReview';
+import { SearchCriteriaEditor } from './SearchCriteriaEditor';
 import { CampaignStopReview } from './CampaignStopReview';
 import { CrmRecordReview } from './CrmRecordReview';
 import { CampaignPrepareReview } from './CampaignPrepareReview';
@@ -32,7 +33,7 @@ import { TaskPlanReview } from './TaskPlanReview';
 import { ReviewActions, ReviewChips, ReviewField, ReviewFields, ReviewNote, ReviewPaper } from './ReviewParts';
 import { DoneMark } from './CoworkActivity';
 import { AnimatePresence, CW_EASE, CwCollapse, cwPop, cwSwap, cwVariants, m, useReducedMotion } from './motion';
-import { CoworkIcon } from './ui';
+import { CoworkIcon, CwButton } from './ui';
 
 type ReviewProps = { runId: string; onApprove: () => void; onReject: () => void; resolving: boolean };
 
@@ -112,6 +113,36 @@ function SearchDetails({ criteria }: { criteria: unknown }) {
       </ReviewField>}
     </ReviewFields>
     {strategy !== 'companies' && <ReviewNote>Los posibles compradores aparecen primero, agrupados por empresa; nadie se descarta.</ReviewNote>}
+  </div>;
+}
+
+/**
+ * The search card while it waits (COW-29): its criteria, «Editar criterios» to change cargos, sectores, place or how many before
+ * approving, and the decision. A profile search (one exact person) has nothing to edit.
+ */
+function SearchReview({ runId, criteria, edited, onApprove, onReject, resolving }: {
+  runId: string; criteria: unknown; edited: boolean; onApprove: () => void; onReject: () => void; resolving: boolean;
+}) {
+  // What was saved shows at once; the conversation's own copy arrives with its next refresh.
+  const [saved, setSaved] = useState<CoworkSearchCriteria | null>(null);
+  const [editing, setEditing] = useState(false);
+  const current = JSON.stringify(criteria ?? null);
+  useEffect(() => { setSaved(null); }, [current]);
+  const shown = saved ?? criteria;
+  const parsed = coworkSearchCriteriaSchema.safeParse(shown);
+  const editable = parsed.success && coworkSearchStrategy(parsed.data) !== 'profile';
+  const changed = edited || saved !== null;
+  const data = parsed.success ? parsed.data : null;
+  const approveLabel = data?.linkedinUrl ? 'Consultar perfil' : data?.target === 'companies' ? 'Buscar empresas' : 'Buscar contactos';
+  if (editing && parsed.success) return <SearchCriteriaEditor runId={runId} criteria={parsed.data}
+    onCancel={() => setEditing(false)} onSaved={next => { setSaved(next); setEditing(false); }} />;
+  return <div className="space-y-4">
+    <SearchDetails criteria={shown} />
+    {editable && <div className="flex items-center justify-between gap-2">
+      <p role="status" className="text-[12.5px] text-cw-muted">{changed ? 'Se buscará con tus cambios.' : ''}</p>
+      <CwButton variant="secondary" size="xs" disabled={resolving} onClick={() => setEditing(true)}><Pencil aria-hidden="true" />Editar criterios</CwButton>
+    </div>}
+    <ReviewActions onReject={onReject} onApprove={onApprove} resolving={resolving} rejectLabel="Descartar búsqueda" approveLabel={approveLabel} />
   </div>;
 }
 
@@ -205,12 +236,8 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
   let body: ReactNode = null;
   if (deciding) {
     if (search) {
-      body = <div className="space-y-4">
-        <SearchDetails criteria={proposal.payload.criteria} />
-        <ReviewActions onReject={reject} onApprove={approve} resolving={resolving} rejectLabel="Descartar búsqueda"
-          approveLabel={(proposal.payload.criteria as { linkedinUrl?: string } | undefined)?.linkedinUrl ? 'Consultar perfil'
-            : (proposal.payload.criteria as { target?: string } | undefined)?.target === 'companies' ? 'Buscar empresas' : 'Buscar contactos'} />
-      </div>;
+      body = <SearchReview runId={run.id} criteria={proposal.payload.criteria} edited={proposal.payload.edited === true}
+        onApprove={approve} onReject={reject} resolving={resolving} />;
     } else if (proposal.type === 'note') {
       body = <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">

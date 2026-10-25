@@ -21,6 +21,8 @@ export default function cowork(ctx) {
     run(6, 'Busca 25 gerentes de RR. HH. de retail en Santiago, guarda los 10 mejores, búscales el correo y escríbeles una secuencia', { root: ctx.uid(9006), status: 'waiting_approval', at: ctx.hoursAgo(0.2) }),
     // Research with the web (COWORK_WEB_ENABLED): what it searched and read is listed with the rest of what it consulted, and the answer cites it.
     run(7, 'Investiga qué hace Sodexo Chile y si está contratando', { root: ctx.uid(9007), at: ctx.hoursAgo(0.5) }),
+    // A search of new contacts waiting for approval, with criteria to edit in the card (COW-29).
+    run(8, 'Busca 25 gerentes de personas de retail en Santiago', { root: ctx.uid(9008), status: 'waiting_approval', at: ctx.hoursAgo(0.1) }),
   ];
   const replies = {
     1: 'Te recomiendo empezar por **3 personas** que calzan con tu cliente ideal y aún no contactas:\n\n1. **Andrea Soto**, Gerente de Personas en Retail Andino: están abriendo tiendas.\n2. **Matías Rojas**, Jefe de Reclutamiento en Logística Sur: contrataciones masivas en temporada.\n3. **Francisca Muñoz**, Gerente de Operaciones en Seguridad Austral.\n\n¿Quieres que prepare el primer correo para Andrea?',
@@ -77,7 +79,7 @@ export default function cowork(ctx) {
       ...(index === 0 ? { blocks: [stagesChart] } : {}),
       ...(index === 6 ? { question: '¿Busco contactos de selección y RR. HH. en Sodexo Chile?', suggestions: [{ label: 'Buscar contactos', message: 'Busca contactos de selección y RR. HH. en Sodexo Chile' }] } : {}) }, created_at: item.updated_at },
     ...(index === 4 ? [at(item, index * 10 + 9, 'answer.feedback', { rating: 'up', reason: null, comment: null })] : []),
-  ]).filter(event => !(event.run_id === ctx.uid(9006) && event.kind === 'run.completed'));
+  ]).filter(event => !((event.run_id === ctx.uid(9006) || event.run_id === ctx.uid(9008)) && event.kind === 'run.completed'));
   // The plan the task proposed, staged as an event of its run, and the card that asks to approve it.
   const taskRun = runs[5];
   const taskHash = '0123456789abcdef0123456789abcdef';
@@ -91,9 +93,13 @@ export default function cowork(ctx) {
     at(taskRun, 54, 'task.plan', { hash: taskHash, plan: taskPlan }),
     at(taskRun, 55, 'approval.requested', { action: 'cowork.effect', kind: 'task_plan', targetId: `task:${taskHash}`, label: 'Tarea de 4 pasos · hasta 1 búsqueda y 10 créditos' }),
   );
+  const searchRun = runs[7];
+  const searchCriteria = { target: 'people', titles: ['Gerente de Personas'], industries: ['Retail'], locations: ['Santiago, Chile'], limit: 25 };
+  events.push(at(searchRun, 75, 'approval.requested', { action: 'prospecting.search', criteria: searchCriteria }));
   return {
     tables: {
       cowork_runs: runs, cowork_run_events: events,
+      cowork_search_proposals: [{ run_id: searchRun.id, user_id: ctx.OWNER, organization_id: ctx.ORG, criteria: searchCriteria, status: 'pending', created_at: searchRun.created_at }],
       // The model calls of those turns with their cost (Administración → «Oportunidades y Cowork»), one of them today.
       cowork_model_calls: [...runs.slice(0, 4).map((item, index) => ({ id: ctx.uid(9450 + index), run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, role: 'coordinator',
         output_reserved: 4000, usage: { costUsd: 0.012 + index * 0.004 }, usage_recorded_at: item.created_at, created_at: item.created_at })),

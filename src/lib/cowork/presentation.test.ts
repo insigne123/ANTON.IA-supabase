@@ -64,6 +64,17 @@ test('proposal states follow approval, execution and discard events', () => {
   assert.equal(coworkProposalView({ status: 'waiting_approval' }, [search])?.title, 'Buscar empresas');
 });
 
+test('a search edited in its card shows the criteria the person left, which are the ones the approval runs (COW-29)', () => {
+  const search = event('approval.requested', { action: 'prospecting.search', criteria: { target: 'people', titles: ['Gerente'], industries: [], locations: [], limit: 25 } });
+  const edited = event('proposal.edited', { kind: 'search', criteria: { target: 'people', titles: ['Jefe de Selección'], industries: [], locations: [], limit: 10 } });
+  const view = coworkProposalView({ status: 'waiting_approval' }, [search, edited]);
+  assert.deepEqual([view?.payload.criteria && (view.payload.criteria as { titles: string[] }).titles, view?.payload.edited, view?.label, view?.state],
+    [['Jefe de Selección'], true, 'Hasta 10 contactos', 'pending']);
+  // An edit of another proposal of the conversation is not this search's.
+  const campaign = event('proposal.edited', { kind: 'campaign_create', emails: [1] });
+  assert.equal(coworkProposalView({ status: 'waiting_approval' }, [search, campaign])?.label, 'Hasta 25 contactos');
+});
+
 test('continuations are expected after effects and searches but not after discards or budget stops', () => {
   assert.equal(coworkExpectsContinuation([event('effect.completed'), event('run.completed', { reply: 'ok', document: null })]), true);
   // A failed action is explained in the next turn instead of ending on the raw error.
