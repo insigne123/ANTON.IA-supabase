@@ -137,6 +137,15 @@ export default function cowork(ctx) {
         memory(9203, ctx.MEMBER, 'organization', 'no escribir a Adecco: ya es cliente', ctx.daysAgo(9)),
         memory(9204, ctx.MEMBER, 'user', 'prefiere correos de menos de 80 palabras', ctx.daysAgo(1)),
       ],
+      // «Pedidos guardados» (COW-06): one of the owner's, one a member shared with the team and one a member keeps for themselves.
+      cowork_prompts: [
+        { id: ctx.uid(9301), organization_id: ctx.ORG, user_id: ctx.OWNER, title: 'Seguimiento sin respuesta', shared: false, created_at: ctx.daysAgo(3), updated_at: ctx.daysAgo(3),
+          prompt: 'Revisa a quién le escribí hace más de una semana y no respondió, y prepárame un seguimiento corto para cada uno.' },
+        { id: ctx.uid(9302), organization_id: ctx.ORG, user_id: ctx.MEMBER, title: 'Informe del lunes', shared: true, created_at: ctx.daysAgo(6), updated_at: ctx.daysAgo(6),
+          prompt: 'Dime quién respondió la semana pasada, qué reuniones salieron y a quién conviene escribir hoy.' },
+        { id: ctx.uid(9303), organization_id: ctx.ORG, user_id: ctx.MEMBER, title: 'Mi lista de retail', shared: false, created_at: ctx.daysAgo(1), updated_at: ctx.daysAgo(1),
+          prompt: 'Busca jefes de selección en cadenas de retail de regiones.' },
+      ],
     },
     rpc: { cowork_has_access: (_args, { user, service }) => service || user?.id === ctx.OWNER || user?.id === ctx.MEMBER },
     storage: { [`cowork-artifacts/${ctx.ORG}/${ctx.OWNER}/${runs[3].id}/${artifact.name}`]: { type: 'text/html; charset=utf-8', body: page } },
