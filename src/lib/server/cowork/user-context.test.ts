@@ -166,3 +166,16 @@ test('read through a session, the context leaves the connected mailboxes to the 
   await loadCoworkUserContext(db as never, scope, { memories: false });
   assert.deepEqual(calls.map(call => call.table).filter(table => table === 'provider_tokens'), ['provider_tokens'], 'the worker, with the server role, still reads them');
 });
+
+test('«Tu agenda» reaches Cowork with its service and when it goes; «never» keeps it out', () => {
+  const withAgenda = (booking: unknown) => coworkUserContextFromProfile({ id: userId, full_name: 'Nicolás Y.', signatures: { gmail: { html: '<p>firma</p>' }, booking } });
+  assert.deepEqual(withAgenda({ url: 'calendly.com/nicolas-yago/30min', mode: 'auto' }).booking,
+    { url: 'https://calendly.com/nicolas-yago/30min', provider: 'Calendly', mode: 'auto' });
+  assert.deepEqual(withAgenda({ url: 'https://calendar.app.google/abc123', mode: 'on_request' }).booking,
+    { url: 'https://calendar.app.google/abc123', provider: 'Google Calendar', mode: 'on_request' });
+  assert.equal(withAgenda({ url: 'https://calendly.com/nicolas-yago/30min', mode: 'never' }).booking, undefined);
+  assert.equal(withAgenda({ url: 'http://inseguro.cl/agenda', mode: 'auto' }).booking, undefined);
+  assert.equal(withAgenda(undefined).booking, undefined);
+  // The email signature next to it never travels.
+  assert.doesNotMatch(JSON.stringify(withAgenda({ url: 'https://calendly.com/x', mode: 'auto' })), /firma/);
+});
