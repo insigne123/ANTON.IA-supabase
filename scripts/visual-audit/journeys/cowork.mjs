@@ -89,7 +89,13 @@ export default () => [
   { id: 'cowork-memoria-escrita', persona: 'owner', title: 'Decirle a Cowork qué recordar sin pasar por el chat, y corregir un recuerdo',
     goal: 'Escribir una preferencia y corregir otra en «Lo que Cowork recuerda» (COW-05).', passWrites: [{ pattern: /^\/api\/cowork\/memories/ }],
     steps: [
-      { say: 'Abro Cowork y su memoria', do: async c => { await c.go('/cowork'); await c.click({ role: 'button', name: 'Memoria' }); await c.seeRole('dialog', 'Lo que Cowork recuerda'); await c.see('tutea a todos los contactos'); } },
+      { say: 'Abro Cowork y su memoria', do: async c => {
+        await c.go('/cowork');
+        // The page has to be alive before the dialog opens: the screen mounts again when the session resolves and would close it.
+        await c.see('Para hoy');
+        await c.wait(1500);
+        await c.click({ role: 'button', name: 'Memoria' }); await c.seeRole('dialog', 'Lo que Cowork recuerda'); await c.see('tutea a todos los contactos');
+      } },
       { say: 'Escribo algo para que recuerde', do: async c => {
         await c.fill('Que Cowork recuerde', 'Escribe en español neutro');
         await c.click({ role: 'button', name: 'Recordar' }); await c.see('Escribe en español neutro');
@@ -101,7 +107,8 @@ export default () => [
         await c.fill({ label: 'Corregir: tutea a todos los contactos' }, 'Trata de usted a los gerentes generales');
         await c.click({ role: 'button', name: 'Guardar' }); await c.see('Trata de usted a los gerentes generales');
         c.check('el recuerdo dice lo corregido', c.table('suplia_memories').some(row => row.value?.text === 'Trata de usted a los gerentes generales'));
-        c.check('el del equipo, guardado por otra persona, no se puede corregir', !(await c.page.getByRole('button', { name: /^Corregir: no escribir a Adecco/ }).count()));
+        // The owner is an administrator: they may correct what a teammate saved for the team (a member may not: memories.test.ts).
+        c.check('como dueña, también corrige lo que otra persona guardó para el equipo', await c.page.getByRole('button', { name: /^Corregir: no escribir a Adecco/ }).count() === 1);
       } },
     ] },
   { id: 'cowork-uso', persona: 'owner', title: 'Saber cuánto del uso del asistente llevo, antes de chocar con el tope',
