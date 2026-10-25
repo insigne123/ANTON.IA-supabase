@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ProfileIndex } from '@/components/profile/ProfileIndex';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -62,7 +63,7 @@ function Section({ id, icon: Icon, title, description, children, ...anchor }: {
       <div>
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          <h2 id={`${id}-heading`}>{title}</h2>
+          <h2 id={`${id}-heading`} className="scroll-mt-28">{title}</h2>
         </div>
         <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
       </div>
@@ -309,6 +310,8 @@ export default function ProfilePage() {
 
       {!isLoading && !loadError ? <ProfileCompleteness profile={profile} onComplete={focusField} /> : null}
       {!isLoading && !loadError ? <ProfileIcpSummary profile={profile} dirty={isDirty} onEdit={() => focusField('targetRoles')} /> : null}
+      {/* Five parts in some 3.200 px: the index names them and marks the one on screen (APP-07). */}
+      {!isLoading && !loadError ? <ProfileIndex /> : null}
 
       <form id="profile-form" onSubmit={handleSave}>
         <fieldset disabled={Boolean(loadError) || isSaving} className="min-w-0 border-0 p-0">
@@ -439,7 +442,7 @@ export default function ProfilePage() {
         </div>
       ) : null}
 
-      <PasswordChangeForm />
+      <div id="security-heading" className="scroll-mt-28"><PasswordChangeForm /></div>
 
       <ProfileSuggestionDialog
         suggestion={suggestion}

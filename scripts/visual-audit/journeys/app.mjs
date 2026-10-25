@@ -87,6 +87,18 @@ export default () => [
         c.check('y la encuentra', await c.has('Andrea Soto'));
       } },
     ] },
+  { id: 'app-perfil-indice', persona: 'owner', title: 'En Perfil, saber dónde estoy y saltar a mi cliente ideal',
+    goal: 'Ir a «Tu cliente ideal» sin recorrer 3.200 px (APP-07).',
+    steps: [
+      { say: 'Abro Perfil', do: async c => { await c.go('/profile'); await c.seeRole('navigation', 'Partes del perfil'); } },
+      { say: 'Pulso «Tu cliente ideal» en el índice', do: async c => {
+        const index = c.page.getByRole('navigation', { name: 'Partes del perfil' });
+        await c.clickOn(index.getByRole('link', { name: 'Tu cliente ideal' })); await c.wait(1200);
+        c.check('la página baja hasta «Tu cliente ideal»', await c.page.getByRole('heading', { name: 'Tu cliente ideal' }).evaluate(node => { const top = node.getBoundingClientRect().top; return top >= 0 && top < window.innerHeight / 2; }).catch(() => false));
+        c.check('el índice marca dónde estoy', (await index.getByRole('link', { name: 'Tu cliente ideal' }).getAttribute('aria-current')) === 'location');
+        c.check('el índice sigue a la vista', await index.isVisible());
+      } },
+    ] },
   { id: 'app-tabla-telefono', persona: 'owner', viewport: 'phone', title: 'En el teléfono, la Tabla de datos dice a quién y cómo escribirle',
     goal: 'Ver correo, empresa y cargo de cada contacto sin desplazar una tabla de lado (APP-09).',
     steps: [
