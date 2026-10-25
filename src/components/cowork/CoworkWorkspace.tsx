@@ -134,6 +134,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const [runs, setRuns] = useState<CoworkRun[]>([]);
   // Names the person gave and conversations they deleted (hidden), when the server can keep them (cowork_thread_settings).
   const [threadNames, setThreadNames] = useState<{ available: boolean; titles: Record<string, string> }>({ available: false, titles: {} });
+  // The pinned conversations (COW-12), latest pinned first; `pinsAvailable` once the server keeps them.
+  const [pins, setPins] = useState<{ available: boolean; rootIds: string[] }>({ available: false, rootIds: [] });
   /** The names Cowork gave the conversations (Plan 13): shown unless the person renamed it. */
   const [autoTitles, setAutoTitles] = useState<Record<string, string>>({});
   const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(() => new Set());
@@ -283,6 +285,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       setRuns(Array.isArray(data.runs) ? data.runs : []); setReady(data.canSubmit === true); setError(''); setListError('');
       const names = data.threads && typeof data.threads === 'object' ? data.threads : null;
       setThreadNames({ available: names?.available === true, titles: names?.titles && typeof names.titles === 'object' ? names.titles : {} });
+      setPins({ available: names?.pinsAvailable === true, rootIds: Array.isArray(names?.pinned) ? names.pinned.filter((id: unknown): id is string => typeof id === 'string') : [] });
       setAutoTitles(names?.autoTitles && typeof names.autoTitles === 'object' ? names.autoTitles : {});
       setSearchQuota(data.searchQuota && typeof data.searchQuota.remaining === 'number' ? data.searchQuota : null);
       setCanAutonomous(data.canAutonomous === true);
@@ -557,6 +560,18 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     }
   }, [request, toast]);
 
+  // «Fijar arriba» moves it at once; if the server says no, it goes back where it was.
+  const pinThread = useCallback(async (rootId: string, pinned: boolean) => {
+    const before = pins.rootIds;
+    setPins(current => ({ ...current, rootIds: pinned ? [rootId, ...current.rootIds.filter(id => id !== rootId)] : current.rootIds.filter(id => id !== rootId) }));
+    try {
+      await request(`/api/cowork/threads/${rootId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned }) });
+    } catch (problem) {
+      setPins(current => ({ ...current, rootIds: before }));
+      toast({ variant: 'destructive', title: pinned ? 'No pudimos fijar la conversación' : 'No pudimos quitarla de fijadas', description: problem instanceof Error ? problem.message : undefined });
+    }
+  }, [pins.rootIds, request, toast]);
+
   // «Eliminar» hides the conversation at once and offers «Deshacer»; if the server says no, it comes back.
   const deleteThread = useCallback(async (thread: CoworkThreadSummary) => {
     setHiddenRoots(current => new Set(current).add(thread.rootId));
@@ -573,8 +588,14 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       toast({ variant: 'destructive', title: 'No pudimos eliminar la conversación', description: problem instanceof Error ? problem.message : undefined });
     }
   }, [choose, request, restoreThread, selectedRoot, toast]);
+  // «Buscar conversaciones» also in what was asked and answered (COW-09).
+  const searchThreads = useCallback(async (term: string, signal: AbortSignal) => {
+    const data = await request(`/api/cowork/threads/search?q=${encodeURIComponent(term)}`, { signal });
+    return Array.isArray(data?.matches) ? data.matches as Array<{ rootId: string; snippet: string }> : [];
+  }, [request]);
   const threadActions = threadNames.available
-    ? { onRename: renameThread, onDelete: (thread: CoworkThreadSummary) => void deleteThread(thread) }
+    ? { onRename: renameThread, onDelete: (thread: CoworkThreadSummary) => void deleteThread(thread), pinnedRootIds: pins.rootIds,
+      ...(pins.available ? { onPin: (rootId: string, pinned: boolean) => void pinThread(rootId, pinned) } : {}) }
     : {};
   const retryList = useCallback(() => { setError(''); setListVersion(value => value + 1); }, []);
   const openSchedules = useCallback((prompt: string) => { setDrawerOpen(false); setSchedulesPrompt(prompt); setSchedulesOpen(true); }, []);
@@ -998,14 +1019,14 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
 
   return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className={cn('cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] max-md:-mx-4 max-md:-my-4 max-md:h-[calc(100dvh-3rem)] max-md:rounded-none max-md:border-0 max-md:shadow-none md:h-[calc(100dvh-5.5rem)]', chrome && 'md:h-dvh md:rounded-none md:border-0 md:shadow-none')}>
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
-      <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} onShortcuts={() => setShortcutsOpen(true)} {...threadActions} {...scheduleActions} />
+      <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} onShortcuts={() => setShortcutsOpen(true)} onSearch={searchThreads} {...threadActions} {...scheduleActions} />
     </div>
     <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
       <SheetContent side="left" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={returnFocusTo(listOpener)}
         className="w-[86%] max-w-[300px] border-cw-border bg-cw-rail p-0 text-cw-text sm:max-w-[300px]">
         <SheetTitle className="sr-only">Conversaciones</SheetTitle>
         <CoworkThreadList idPrefix="cowork-drawer" closeStyle="dismiss" threads={threads} loading={loading} error={listError} onRetry={retryList}
-          selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} {...threadActions} {...scheduleActions} />
+          selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} onSearch={searchThreads} {...threadActions} {...scheduleActions} />
       </SheetContent>
     </Sheet>
 

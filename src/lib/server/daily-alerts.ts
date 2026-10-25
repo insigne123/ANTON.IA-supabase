@@ -7,6 +7,7 @@ import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
 import { dropPdf } from '@/lib/server/lead-drops';
 import { readWaitingOnAdmins } from '@/lib/server/commercial-opportunities/workspace-waiting';
+import { groupCoworkThreads } from '@/lib/cowork/presentation';
 import { readSearchHealth } from '@/lib/server/commercial-opportunities/workspace-source-health';
 import { failingSources } from '@/lib/commercial-opportunities/source-health';
 import { matchesSearch, readAdminSettings, searchHref, type NewOpportunity } from '@/lib/commercial-opportunities/admin-settings';
@@ -48,6 +49,23 @@ export async function saveAlertsEmail(client: Client, userId: string, on: boolea
   return { alerts: on };
 }
 
+/** Conversations of Cowork whose latest turn waits for the person's approval, without the deleted ones, as the list counts them
+ * (COW-04). Best effort: the alert goes out without the line when this cannot be read. */
+async function readCoworkApprovals(client: Client, scope: AlertScope): Promise<number | undefined> {
+  try {
+    const [runs, settings]: any[] = await Promise.all([
+      client.from('cowork_runs').select('id,message,mode,status,created_at,parent_run_id,root_run_id').eq('user_id', scope.userId)
+        .eq('organization_id', scope.organizationId).order('created_at', { ascending: false }).limit(100),
+      client.from('cowork_thread_settings').select('root_run_id,hidden_at').eq('user_id', scope.userId).eq('organization_id', scope.organizationId).limit(1000),
+    ]);
+    if (runs.error) return undefined;
+    const hidden = new Set(((settings.error ? [] : settings.data || []) as any[]).filter(row => row.hidden_at).map(row => String(row.root_run_id)));
+    return groupCoworkThreads((runs.data || []) as any[]).filter(thread => thread.status === 'waiting_approval' && !hidden.has(thread.rootId)).length;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * What the morning alert can say to one person: replies, commitments, contacts that got an email, research that finished
  * and opportunities closing, since `since`; plus the goal of the week. Opportunities only when the person may see them:
@@ -57,7 +75,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
   const { now, since } = options;
   const own = (table: string, columns: string) => client.from(table).select(columns).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
   const week = reportWeek(now, 'current');
-  const [profile, replied, commitments, enriched, sent, research, goal, saved] = await Promise.all([
+  const [profile, replied, commitments, enriched, sent, research, goal, saved, coworkApprovals] = await Promise.all([
     client.from('profiles').select('full_name').eq('id', scope.userId).maybeSingle(),
     own('contacted_leads', 'id,email,name,company,reply_intent,replied_at,conversation_resolved_at,conversation_outbound_at').not('replied_at', 'is', null).order('replied_at', { ascending: false }).limit(200),
     own('contacted_leads', 'id,name,company,data').not('data->commitment', 'is', null).limit(200),
@@ -67,6 +85,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     readPersonGoal(client, scope, { from: week.from, to: week.to }),
     // Whether the person ever saved a contact: who only works Oportunidades gets no prospecting goal (below).
     options.opportunities === 'none' ? Promise.resolve({ data: [{}], error: null }) : own('leads', 'id').limit(1),
+    readCoworkApprovals(client, scope),
   ]);
   for (const result of [replied, commitments, enriched, sent, research] as any[]) if (result.error) throw new DailyAlertsError('No pudimos leer los pendientes.', 503);
 
@@ -121,6 +140,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     ...(options.opportunities === 'none' ? {} : await readOpportunityNews(client, scope, { now, since, manager: options.opportunities === 'manager' })),
     // APP-15: «Meta de la semana: personas contactadas» went to everyone, also to whoever only works tenders. With access to Oportunidades
     // and nobody ever saved, given an email or written to, the goal is not theirs (a failed read keeps it, as before).
+    ...(coworkApprovals ? { coworkApprovals } : {}),
     goal: options.opportunities !== 'none' && !(saved as any).error && !((saved as any).data || []).length && !ready.size && !written.size && !people.length ? null : goal,
   };
 }

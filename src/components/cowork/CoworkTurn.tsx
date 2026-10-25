@@ -1,8 +1,9 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, CornerDownRight, Download, FileText, LayoutDashboard, Library, PencilLine, RotateCcw, SquarePen, Table2, TriangleAlert } from 'lucide-react';
 import { coworkHitConversationLimit } from '@/lib/cowork/handoff';
+import { COWORK_AUTO_RETRY_SECONDS, coworkAutoRetryDue } from '@/lib/cowork/auto-retry';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkAgentRows, coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkHeldAnswerCopy, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
@@ -205,6 +206,24 @@ function NextStep({ question, live }: { question: string; live: boolean }) {
   </p>;
 }
 
+// When the page last retried a turn by itself, in this tab: a second failure right after waits for the person (COW-22).
+const AUTO_RETRY_KEY = 'cowork:auto-retry-at';
+const lastAutoRetry = () => { try { const at = Number(window.sessionStorage.getItem(AUTO_RETRY_KEY)); return at > 0 ? at : null; } catch { return null; } };
+
+/** A passing failure is retried once by itself after a short countdown; «No reintentar» stops it and leaves «Reintentar» (COW-22). */
+function AutoRetry({ onRetry, onStop }: { onRetry: () => void; onStop: () => void }) {
+  const [left, setLeft] = useState(COWORK_AUTO_RETRY_SECONDS);
+  useEffect(() => {
+    if (left > 0) { const timer = window.setTimeout(() => setLeft(value => value - 1), 1000); return () => window.clearTimeout(timer); }
+    try { window.sessionStorage.setItem(AUTO_RETRY_KEY, String(Date.now())); } catch { /* this tab only */ }
+    onRetry();
+  }, [left, onRetry]);
+  return <p className="flex w-full flex-wrap items-center gap-x-2 text-[12.5px] text-cw-text">
+    <span aria-live="polite">Lo reintento solo en <span className="tabular-nums">{left}</span> s.</span>
+    <button type="button" onClick={onStop} className="rounded font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">No reintentar</button>
+  </p>;
+}
+
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, decidable = false, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
   liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null, onContinueNew = null }: {
@@ -256,7 +275,11 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   const metrics = coworkTurnBlocks(events).flatMap(block => block.type === 'metrics' ? [block] : []);
   // The Writer's emails carry what the Reviewer did with them.
   const review = coworkDraftReview(events);
-  const failure = events.slice().reverse().find(event => event.kind === 'run.failed')?.payload;
+  const failedEvent = events.slice().reverse().find(event => event.kind === 'run.failed');
+  const failure = failedEvent?.payload;
+  const [autoRetryStopped, setAutoRetryStopped] = useState(false);
+  const autoRetry = Boolean(latest && onRetry && run.status === 'failed' && !autoRetryStopped && typeof window !== 'undefined'
+    && coworkAutoRetryDue(failure, failedEvent?.created_at, Date.now(), lastAutoRetry()));
   const startedAt = events.find(event => event.kind === 'run.started')?.created_at || run.created_at;
   const waitingDecision = proposal?.state === 'pending';
   const working = active && !waitingDecision;
@@ -335,6 +358,7 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
           {latest && onContinueNew && coworkHitConversationLimit(failure)
             ? <CwButton size="sm" variant="secondary" onClick={onContinueNew}><SquarePen aria-hidden="true" />Seguir en una conversación nueva</CwButton>
             : latest && onRetry && <CwButton size="sm" variant="secondary" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
+          {autoRetry && onRetry ? <AutoRetry onRetry={onRetry} onStop={() => setAutoRetryStopped(true)} /> : null}
         </div>}
         {run.status === 'cancelled' && <div className="flex flex-wrap items-center gap-3 text-[13.5px] text-cw-muted">
           <span>Lo detuviste. Lo consultado hasta aquí quedó guardado.</span>
