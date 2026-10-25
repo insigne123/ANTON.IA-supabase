@@ -17,6 +17,7 @@ import { WeeklyGoalCard } from '@/components/home/WeeklyGoalCard';
 import { LeadDropBanner } from '@/components/home/LeadDropBanner';
 import { OpportunitiesTodayCard } from '@/components/home/OpportunitiesTodayCard';
 import { WeeklyReport } from '@/components/weekly-report/WeeklyReport';
+import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 import { cn } from '@/lib/utils';
 
 /** «Hoy» or «Tu semana» (the weekly report, which lived on its own page until Oct 2026): ?vista=semana opens the second. */
@@ -54,9 +55,9 @@ export default function DashboardPage() {
         eyebrow={today || undefined}
         description={view === 'semana' ? 'Cómo te fue, comparado con la semana anterior, y qué hacer después.' : 'Tu actividad de hoy y tus pendientes en esta organización.'}
       >
-        <div role="group" aria-label="Vista de Hoy" className="inline-flex rounded-full bg-muted p-1">
+        <div role="group" aria-label="Vista de Hoy" className={SEGMENT_TRACK}>
           {([['hoy', 'Hoy'], ['semana', 'Tu semana']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={view === key} onClick={() => show(key)}
-            className={cn('rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>)}
+            className={cn(segmentClass(view === key), 'px-4')}>{label}</button>)}
         </div>
         <Button asChild variant="ghost" className="flex-1 text-muted-foreground sm:flex-none">
           <Link href="/search">
