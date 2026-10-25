@@ -27,18 +27,25 @@ export function coworkRunIsAutomatic(run: { parent_run_id?: string | null; reque
 
 const RUN_LIST_LIMIT = 50;
 
-/** The latest runs, without the conversations the person deleted (hid): those leave the list, not the database. */
-export async function listCoworkRuns(auth: AuthContext, { hiddenRootIds = [] }: { hiddenRootIds?: string[] } = {}) {
+/** The latest runs, without the conversations the person deleted (hid): those leave the list, not the database. The pinned
+ * ones (COW-12) are always there, however old, so they stay on top of the list. */
+export async function listCoworkRuns(auth: AuthContext, { hiddenRootIds = [], pinnedRootIds = [] }: { hiddenRootIds?: string[]; pinnedRootIds?: string[] } = {}) {
   const hidden = new Set(hiddenRootIds);
+  const columns = 'id,message,mode,status,created_at,parent_run_id,root_run_id,request_id';
   // Hidden conversations still hold runs: read further back so the list keeps its 50 visible runs.
-  const { data, error } = await auth.supabase.from('cowork_runs')
-    .select('id,message,mode,status,created_at,parent_run_id,root_run_id,request_id').eq('user_id', auth.user.id)
-    .eq('organization_id', auth.organizationId).order('created_at', { ascending: false }).limit(hidden.size ? 200 : RUN_LIST_LIMIT);
-  if (error) throw error;
-  return (data || [])
-    .filter((run: { root_run_id?: string | null }) => !run.root_run_id || !hidden.has(run.root_run_id))
-    .slice(0, RUN_LIST_LIMIT)
-    .map(withAutomaticFlag);
+  const [latest, pinned] = await Promise.all([
+    auth.supabase.from('cowork_runs').select(columns).eq('user_id', auth.user.id)
+      .eq('organization_id', auth.organizationId).order('created_at', { ascending: false }).limit(hidden.size ? 200 : RUN_LIST_LIMIT),
+    pinnedRootIds.length ? auth.supabase.from('cowork_runs').select(columns).eq('user_id', auth.user.id)
+      .eq('organization_id', auth.organizationId).in('root_run_id', pinnedRootIds.slice(0, 50)).order('created_at', { ascending: false }).limit(200)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (latest.error) throw latest.error;
+  if (pinned.error) throw pinned.error;
+  type Row = { id: string; message: string; mode: string; status: string; created_at: string; parent_run_id: string | null; root_run_id: string | null; request_id: string | null };
+  const runs = ((latest.data || []) as Row[]).filter(run => !run.root_run_id || !hidden.has(run.root_run_id)).slice(0, RUN_LIST_LIMIT);
+  const seen = new Set(runs.map(run => run.id));
+  return [...runs, ...((pinned.data || []) as Row[]).filter(run => !seen.has(run.id))].map(withAutomaticFlag);
 }
 
 /** Newest run that continues `id` (a worker continuation or a user follow-up). */
