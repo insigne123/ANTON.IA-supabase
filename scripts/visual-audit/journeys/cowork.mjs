@@ -185,6 +185,41 @@ export default () => [
         } },
       ] },
   ] : []),
+  { id: 'cowork-pedidos-guardados', persona: 'owner', title: 'Guardar un pedido que funcionó y repetirlo con «/»',
+    goal: 'Guardar el pedido escrito, compartirlo con el equipo y volver a usarlo sin escribirlo (COW-06).', passWrites: [{ pattern: /^\/api\/cowork\/prompts/ }],
+    steps: [
+      { say: 'Abro Cowork y escribo un pedido', do: async c => {
+        await c.go('/cowork');
+        // The page has to be alive before it is typed on: a text typed while it loads is dropped when it wakes up.
+        await c.see('Para hoy');
+        await c.wait(1500);
+        await c.fill({ label: 'Escribe tu mensaje' }, 'Busca gerentes de personas en empresas de seguridad privada de Santiago y prepárales un correo');
+      } },
+      { say: 'Lo guardo para mi equipo', do: async c => {
+        await c.click({ role: 'button', name: 'Guardar este pedido' });
+        await c.seeRole('dialog', 'Guardar este pedido');
+        c.check('la lista trae el mío y el que compartió el equipo, no el privado de otra persona',
+          await c.has('Seguimiento sin respuesta') && await c.has('Informe del lunes') && !(await c.has('Mi lista de retail')));
+        await c.fill({ label: 'Nombre' }, 'Seguridad privada');
+        await c.page.getByLabel('Compartir con mi equipo').check();
+        await c.click({ role: 'button', name: 'Guardar pedido' });
+        await c.see('Guardaste «Seguridad privada»');
+        const saved = c.table('cowork_prompts').find(row => row.title === 'Seguridad privada');
+        const me = c.table('cowork_prompts').find(row => row.title === 'Seguimiento sin respuesta')?.user_id;
+        c.check('queda guardado a mi nombre y compartido', Boolean(me) && saved?.user_id === me && saved?.shared === true
+          && saved?.prompt === 'Busca gerentes de personas en empresas de seguridad privada de Santiago y prepárales un correo', JSON.stringify(saved || null).slice(0, 160));
+      } },
+      { say: 'Lo uso otra vez con «/»', do: async c => {
+        await c.page.keyboard.press('Escape');
+        await c.notSee('Guardaste «Seguridad privada»');
+        await c.fill({ label: 'Escribe tu mensaje' }, '/segu');
+        await c.seeRole('listbox', 'Plantillas');
+        c.check('«/» ofrece el pedido guardado y dice que es mío', await c.page.getByRole('option', { name: /Seguridad privada.*Guardado/ }).count() === 1);
+        await c.page.keyboard.press('Enter');
+        const value = await c.page.getByLabel('Escribe tu mensaje').inputValue();
+        c.check('el pedido queda escrito en la caja', value === 'Busca gerentes de personas en empresas de seguridad privada de Santiago y prepárales un correo', value.slice(0, 80));
+      } },
+    ] },
   { id: 'cowork-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: retomar la investigación con la web',
     goal: 'Leer la respuesta y sus fuentes en una pantalla angosta.',
     steps: [
