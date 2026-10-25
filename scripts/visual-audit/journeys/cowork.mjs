@@ -122,6 +122,28 @@ export default () => [
         c.check('el resumen dice el uso de la conversación y el de hoy', /Uso del asistente: esta conversación \d+ % · hoy \d+ %/.test(text), text.match(/Uso del asistente[^\n]*/)?.[0] || 'sin la línea');
       } },
     ] },
+  { id: 'cowork-pegar-captura', persona: 'owner', title: 'Pegar una captura en el cuadro para que Cowork la mire',
+    goal: 'Adjuntar una imagen con pegar, sin guardarla antes como archivo (COW-11).', passWrites: [{ pattern: /^\/api\/cowork\/files$/ }],
+    steps: [
+      { say: 'Abro Cowork', do: async c => { await c.go('/cowork'); await c.see('Para hoy'); await c.wait(1500); } },
+      { say: 'Pego una captura en el cuadro', do: async c => {
+        const box = c.page.getByLabel('Escribe tu mensaje');
+        await box.focus();
+        await box.evaluate(element => {
+          // A screenshot as the clipboard carries it: a PNG with no text next to it.
+          const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='), char => char.charCodeAt(0));
+          const data = new DataTransfer();
+          data.items.add(new File([png], 'image.png', { type: 'image/png' }));
+          element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+        });
+        const chip = c.page.getByRole('region', { name: 'Archivos adjuntos' }).getByText(/^captura-\d{8}-\d{6}\.png$/);
+        await chip.waitFor({ timeout: 8000 });
+        c.check('la captura queda adjunta con un nombre propio', await chip.count() === 1, await chip.first().innerText().catch(() => 'sin adjunto'));
+        c.check('el cuadro sigue vacío: pegar una imagen no escribe texto', await box.inputValue() === '');
+        c.check('el cuadro dice que una captura se pega ahí', await c.has('pega una captura en el cuadro'));
+        c.check('se puede enviar sin escribir nada', await c.page.getByRole('button', { name: /Enviar/ }).first().isEnabled().catch(() => false));
+      } },
+    ] },
   // «Autónomo» (COW-17): it shows with AUDIT_COWORK_AUTONOMY=true, as in production since 24 Oct; it asks once and is remembered.
   ...(process.env.AUDIT_COWORK_AUTONOMY === 'true' ? [
     { id: 'cowork-modo-autonomo', persona: 'owner', title: 'Activar el modo Autónomo sabiendo qué aprueba solo',

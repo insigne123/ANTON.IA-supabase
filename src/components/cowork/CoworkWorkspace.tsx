@@ -1025,7 +1025,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const fileProps = (composerId: string) => ({
     onToggleFiles: () => setShowFiles(value => !value), filesOpen: showFiles,
     hasAttachments: attach.files.length > 0, attaching: attach.uploading,
-    onDropFiles: (files: FileList) => { setShowFiles(true); void attach.upload(files); },
+    onDropFiles: (files: FileList | File[]) => { setShowFiles(true); void attach.upload(files); },
     attachments: showFiles || attach.files.length > 0
       ? <CoworkAttachments id={`${composerId}-files`} files={attach.files} uploading={attach.uploading} open={showFiles}
         onUpload={files => void attach.upload(files)} onRemove={attach.remove} />

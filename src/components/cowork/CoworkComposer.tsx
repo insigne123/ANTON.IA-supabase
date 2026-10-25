@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { ArrowUp, Bookmark, CalendarClock, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
+import { coworkPastedImages } from '@/lib/cowork/attachments';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import {
   coworkComposerToken, coworkInsertMention, coworkMentionName, coworkTemplateBlank, coworkTemplates, type CoworkComposerToken, type CoworkMention,
@@ -38,7 +39,7 @@ type Props = {
   /** A file is uploading: sending waits so the message names it. */
   attaching?: boolean;
   /** Files dropped anywhere on the box. */
-  onDropFiles?: ((files: FileList) => void) | null;
+  onDropFiles?: ((files: FileList | File[]) => void) | null;
   queued?: { text: string; note: string; onCancel: () => void; onSendNow?: (() => void) | null; sendNowLabel?: string } | null;
   footnote?: ReactNode;
   size?: 'large' | 'regular';
@@ -180,6 +181,13 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         onChange={event => { onChange(event.target.value); requestAnimationFrame(readToken); }}
         onSelect={readToken}
         onBlur={() => setToken(null)}
+        // A screenshot pasted into the box is attached like a dropped file (COW-11); pasted text stays text.
+        onPaste={onDropFiles ? event => {
+          const images = coworkPastedImages(event.clipboardData, new Date());
+          if (!images.length) return;
+          event.preventDefault();
+          onDropFiles(images);
+        } : undefined}
         aria-autocomplete={searchContacts || templates ? 'list' : undefined}
         aria-controls={list && count ? listId : undefined}
         aria-activedescendant={list && count ? `${listId}-${Math.min(active, count - 1)}` : undefined}

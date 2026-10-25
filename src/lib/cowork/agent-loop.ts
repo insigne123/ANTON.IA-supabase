@@ -30,6 +30,7 @@ import { coworkLinkedinBatchLeads, coworkLinkedinBatchSchema, type CoworkLinkedi
 import { coworkPrepareBatchPeople, coworkPrepareBatchSchema, type CoworkPrepareBatchInput } from './prepare-batch';
 import { coworkBuyingRoleRank, coworkDecidesPurchase } from './buying-role';
 import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memory';
+import type { ImageBlock } from '@/lib/agent-harness/types';
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 import { withCoworkReports } from './report-document';
 import { COWORK_NEXT_STEP_RULE } from './next-step';
@@ -1346,6 +1347,8 @@ async function runCoworkLoop(input: {
    * budget: what is left of the ceiling at this decision. */
   decide: (observations: CoworkObservation[], mustAnswer: boolean, rejections?: CoworkRejection[], budget?: CoworkTurnBudget) => Promise<Decision>;
   execute: (action: CoworkReadAction, value: string) => Promise<unknown>;
+  /** An image of the person's uploads, by name, as the agent with tools sees it (image-view.ts, COW-11); this coordinator loop does not look. */
+  seeImage?: (name: string) => Promise<ImageBlock>;
   record: (observation: CoworkObservation) => Promise<void>;
   review?: (tasks: SpecialistTask[], observations: CoworkObservation[]) => Promise<unknown>;
   proposeNote?: (leadId: string, note: string) => Promise<void>;

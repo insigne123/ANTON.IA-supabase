@@ -8,6 +8,7 @@ import { coworkAsChatMessage, coworkAsFarewell, coworkAsksChatMessage, coworkIsF
 import { coworkProfileChangeLabel } from '@/lib/cowork/profile-proposal';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
+import { coworkImageBlock } from './image-view';
 import { coworkOpportunitiesSection } from './opportunities-section';
 import { coworkWorkerConfigured } from './runs';
 import { loadCoworkHistory } from './conversation-context';
@@ -412,6 +413,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         capability: action, input: value,
         operationId: `cowork:${run.id}:${action}:${coworkOperationHash(value)}`,
       }, controller.signal),
+      // An image files.read found is looked at by the agent with tools, from the person's own uploads (COW-11).
+      seeImage: name => coworkImageBlock(client, scope, name),
       record: recordEvent,
       onWriteDelivery: activeTask?.graph ? async answer => {
         const node = coworkTaskReadyNode(activeTask.graph!, 'write');

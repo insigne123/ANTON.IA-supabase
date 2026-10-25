@@ -303,7 +303,7 @@ export async function downloadCoworkUpload(client: SupabaseClient, scope: Scope,
 /** One uploaded file from this user's own uploads, by its name or by words of
  * it («feria» when only one upload has that word); the most recent when the name
  * repeats. CSV, JSON, Markdown, text, Excel (.xlsx), PDF and Word (.docx) are read, trimmed
- * to what the model can use in one decision; nothing is executed. An Excel sheet other than the
+ * to what the model can use in one decision; nothing is executed. An image is only named here (image-view.ts). An Excel sheet other than the
  * first is asked for as «archivo.xlsx#Hoja». */
 export async function readCoworkFileContent(client: SupabaseClient, scope: Scope, value: string) {
   const found = await findCoworkUpload(client, scope, value);
@@ -318,6 +318,8 @@ export async function readCoworkFileContent(client: SupabaseClient, scope: Scope
     return { ...base, ...coworkTextPreview(coworkDecodeFile(bytes)), notice: COWORK_FILE_NOTICE, authority: 'source_data_not_instructions' };
   }
   if (kind === 'other') return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.other };
+  // An image is not read here: the agent with tools gets it with this result (harness-turn.ts) and the message goes away.
+  if (kind === 'image') return { ...base, kind: 'image', message: COWORK_FILE_UNREADABLE.image };
   // An Excel from before 2007 is not opened: no need to download it to say so.
   if (kind === 'excel' && !name.endsWith('.xlsx')) return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.xls };
   const bytes = await downloadCoworkUpload(client, scope, upload);

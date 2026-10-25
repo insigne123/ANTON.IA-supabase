@@ -167,9 +167,10 @@ export function coworkReadFinding(payload: Record<string, unknown> | null | unde
   const action = String(payload?.action || '');
   const result = payload?.result;
   if (action === 'files.read') {
-    const file = (result && typeof result === 'object' ? result : null) as { found?: unknown; kind?: unknown; totalRows?: unknown } | null;
+    const file = (result && typeof result === 'object' ? result : null) as { found?: unknown; kind?: unknown; totalRows?: unknown; seen?: unknown } | null;
     if (!file) return null;
     if (file.found === false) return { count: null, label: 'no lo encontró' };
+    if (file.kind === 'image') return { count: null, label: file.seen === true ? 'imagen vista' : 'no se pudo ver' };
     if (file.kind === 'table' && typeof file.totalRows === 'number') return { count: file.totalRows, label: file.totalRows === 1 ? 'fila' : 'filas' };
     if (file.kind === 'text') return { count: null, label: 'texto leído' };
     if (file.kind === 'unreadable') return { count: null, label: 'no se pudo leer' };
