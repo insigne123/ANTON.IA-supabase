@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_FILE_READ_LIMITS, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkHeaderRow, coworkRowText } from './file-read';
+import { COWORK_FILE_READ_LIMITS, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkHeaderRow, coworkImageRead, coworkImageType, coworkRowText } from './file-read';
 
 test('a CSV keeps its columns and rows, with the delimiter detected and blank lines dropped', () => {
   const csv = '﻿Nombre;Empresa;Correo\n"Rojas, Marcela";Sodexo;mrojas@sodexo.cl\n\n;;\nFelipe Muñoz;Securitas;\n';
@@ -51,7 +51,7 @@ test('text is kept up to its limit, and the formats opened on the server are not
   assert.equal(coworkFileKind('prospectos.xlsx'), 'excel');
   assert.equal(coworkFileKind('Brief.PDF'), 'pdf');
   assert.equal(coworkFileKind('propuesta.docx'), 'docx');
-  assert.equal(coworkFileKind('foto.png'), 'other');
+  assert.equal(coworkFileKind('deck.pptx'), 'other');
   // Excel, PDF and Word are opened on the server (file-binary.ts), not from text.
   for (const name of ['prospectos.xlsx', 'brief.pdf', 'propuesta.docx']) assert.equal(coworkFilePreview(name, 'PK...'), null);
   assert.equal(coworkFilePreview('foto.png', 'x'), null);
@@ -107,4 +107,17 @@ test('the header is the first row, unless a title or a note stands above a wider
 test('a row of a sheet reads as one line of its filled cells', () => {
   assert.equal(coworkRowText(['Fuente:', '', 'CRM', null, 4]), 'Fuente: · CRM · 4');
   assert.equal(coworkRowText(['', '  ']), '');
+});
+
+test('an image is known by its extension and checked by its first bytes (COW-11)', () => {
+  assert.deepEqual(['Captura.PNG', 'tarjeta.jpg', 'aviso.jpeg', 'foto.webp', 'anim.gif', 'deck.pptx'].map(coworkFileKind), ['image', 'image', 'image', 'image', 'other', 'other']);
+  assert.equal(coworkImageType(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0])), 'image/png');
+  assert.equal(coworkImageType(new Uint8Array([0xff, 0xd8, 0xff, 0xe1])), 'image/jpeg');
+  assert.equal(coworkImageType(new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50])), 'image/webp');
+  // A WAV is RIFF too, and a CSV renamed .png is text: neither is an image.
+  assert.equal(coworkImageType(new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45])), null);
+  assert.equal(coworkImageType(new TextEncoder().encode('Nombre,Correo')), null);
+  assert.equal(coworkImageRead({ kind: 'image', found: true, name: 'tarjeta.jpg' }), true);
+  assert.equal(coworkImageRead({ kind: 'text', found: true, name: 'notas.md' }), false);
+  assert.equal(coworkImageRead({ found: false, name: 'tarjeta.jpg' }), false);
 });

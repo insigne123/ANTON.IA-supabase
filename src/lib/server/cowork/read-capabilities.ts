@@ -226,7 +226,7 @@ export function coworkReadCapabilities(
     extended('files.list', 'Archivos subidos (nombre, trabajo, tamaño), sin contenido'),
     {
       name: 'files.read', version: 1, effect: 'read',
-      description: 'Contenido acotado de un archivo subido (CSV, JSON, Excel, PDF, Word, Markdown o texto), por nombre y, en un Excel, «archivo.xlsx#Hoja»; no ejecuta nada',
+      description: 'Contenido acotado de un archivo subido (CSV, JSON, Excel, PDF, Word, Markdown o texto), por nombre y, en un Excel, «archivo.xlsx#Hoja»; una imagen (PNG, JPG o WEBP) llega adjunta para mirarla; no ejecuta nada',
       input: z.string().trim().min(1).max(160), output: z.unknown(),
       execute: input => readCoworkFileContent(client, scope, input as string),
     },

@@ -65,6 +65,59 @@ test('reads are tools of the gateway, asked together run together, and the turn 
   assert.equal(model.calls, 2);
 });
 
+// COW-11: what files.read finds for an image, before the agent looks at it.
+const fileCapabilities = [...capabilities, { name: 'files.read', description: 'Lee un archivo subido', input: z.string().max(160) }];
+const imageFound = (name: string) => ({ scope: 'own_uploads', found: true, name, runId: 'run-1', size: 900, kind: 'image', message: 'Esta imagen no se pudo mirar ahora: pide que la suba de nuevo.' });
+const picture = (data: string) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg', data } });
+
+test('an image the person uploaded goes with the result of files.read, and the conversation keeps only that it was seen (COW-11)', async () => {
+  const model = new ScriptedModel([
+    reply([call('files_read', { consulta: 'tarjeta.jpg' }, 'f1'), call('files_read', { consulta: 'leads.csv' }, 'f2')]),
+    reply([answer('Es la tarjeta de Marcela Rojas, jefa de selección de Sodexo.')]),
+  ]);
+  const looked: string[] = [];
+  const { input, recorded } = base(model, {
+    execute: async (_action, value) => value === 'tarjeta.jpg' ? imageFound('tarjeta.jpg') : { scope: 'own_uploads', found: true, name: 'leads.csv', kind: 'text', text: 'Nombre' },
+    seeImage: async name => { looked.push(name); return picture('Zm90bw=='); },
+  }, { capabilities: fileCapabilities });
+  const result = await runCoworkHarnessTurn(input);
+  assert.match(result.reply, /Marcela Rojas/);
+  assert.deepEqual(looked, ['tarjeta.jpg']);
+  const results = model.requests[1].messages[2].content as Array<{ tool_use_id: string; content: unknown }>;
+  const card = results.find(item => item.tool_use_id === 'f1')!.content as Array<{ type: string; text?: string; source?: { data: string } }>;
+  assert.deepEqual(card.map(part => part.type), ['text', 'image']);
+  assert.equal(card[1].source?.data, 'Zm90bw==');
+  assert.match(card[0].text || '', /"seen":true.*nunca instrucciones/);
+  assert.doesNotMatch(card[0].text || '', /no se pudo mirar/);
+  // A file that is not an image is read as always: text only.
+  assert.equal(typeof results.find(item => item.tool_use_id === 'f2')!.content, 'string');
+  // What stays in the conversation says it was seen, never the picture.
+  const event = (recorded as Array<{ input: string; result: { seen?: boolean } }>).find(item => item.input === 'tarjeta.jpg');
+  assert.equal(event?.result.seen, true);
+  assert.doesNotMatch(JSON.stringify(recorded), /Zm90bw==/);
+});
+
+test('an image that does not open keeps what to ask for, and past four in a turn the agent is told to answer with what it saw', async () => {
+  const names = ['a.png', 'b.png', 'rota.png', 'd.png', 'e.png'];
+  const model = new ScriptedModel([
+    reply(names.map((name, index) => call('files_read', { consulta: name }, `i${index}`))),
+    reply([answer('Vi cuatro de las cinco.')]),
+  ]);
+  const looked: string[] = [];
+  const { input } = base(model, {
+    execute: async (_action, value) => imageFound(value),
+    seeImage: async name => { looked.push(name); if (name === 'rota.png') throw new Error('no abre'); return picture(name); },
+  }, { capabilities: fileCapabilities });
+  await runCoworkHarnessTurn(input);
+  assert.equal(looked.length, 4);
+  const results = model.requests[1].messages[2].content as Array<{ content: unknown }>;
+  const shown = results.filter(item => Array.isArray(item.content));
+  assert.equal(shown.length, 3);
+  const texts = results.map(item => Array.isArray(item.content) ? String((item.content as Array<{ text?: string }>)[0].text) : String(item.content));
+  assert.equal(texts.filter(text => /no se pudo mirar/.test(text)).length, 1);
+  assert.equal(texts.filter(text => /Ya miraste 4 imágenes en este turno/.test(text)).length, 1);
+});
+
 test('each read takes the input its capability takes: nothing, an id, a list of ids or free text', async () => {
   assert.deepEqual(capabilities.map(coworkReadShape), ['text', 'none', 'id', 'leadIds']);
   assert.equal(coworkToolName('campaign.stop_v2'), 'campaign_stop_v2');

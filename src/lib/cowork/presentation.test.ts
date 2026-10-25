@@ -502,6 +502,9 @@ test('what the agent searched or read on the web shows with its query or its sit
   assert.equal(describeCoworkObservation({ action: 'web.fetch', input: 'https://nada.cl', result: { ok: false, sources: [], error: 'url_not_allowed' } }).detail, 'nada.cl · no se pudo');
   assert.equal(describeCoworkObservation({ action: 'web.search', input: 'algo', result: { ok: false, sources: [], error: 'unavailable' } }).detail, '«algo» · no se pudo');
   assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}, {}, {}] } }), { count: 3, label: 'fuentes' });
+  // COW-11: an image is seen, or it could not be.
+  assert.deepEqual(coworkReadFinding({ action: 'files.read', result: { found: true, kind: 'image', seen: true } }), { count: null, label: 'imagen vista' });
+  assert.deepEqual(coworkReadFinding({ action: 'files.read', result: { found: true, kind: 'image', message: 'Esta imagen no se pudo mirar ahora' } }), { count: null, label: 'no se pudo ver' });
   assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}] } }), { count: 1, label: 'fuente' });
   // A page that would not open is not a search that found nothing (COW-27: «2 fuentes · sin resultados»).
   assert.deepEqual(coworkReadFinding({ action: 'web.fetch', result: { ok: false, sources: [], error: 'url_not_allowed' } }), { count: null, label: 'no se pudo leer' });

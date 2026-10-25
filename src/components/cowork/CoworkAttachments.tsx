@@ -1,14 +1,21 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { FileText, LoaderCircle, Upload, X } from 'lucide-react';
+import { FileText, Image as ImageIcon, LoaderCircle, Upload, X } from 'lucide-react';
 import { coworkMessageAttachments } from '@/lib/cowork/attachments';
+import { coworkFileKind } from '@/lib/cowork/file-read';
 import { coworkMentionSegments, coworkMessageMentions } from '@/lib/cowork/mentions';
 import { coworkDisplayMessage, coworkFileSize } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, cwPop, cwVariants, m } from './motion';
 
 export type CoworkAttachment = { name: string; size: number };
+
+/** A picture reads as one in the chips: the person sees which of the files Cowork will look at. */
+function FileIcon({ name }: { name: string }) {
+  const Icon = coworkFileKind(name) === 'image' ? ImageIcon : FileText;
+  return <Icon className="h-3.5 w-3.5 shrink-0 text-cw-muted" aria-hidden="true" />;
+}
 
 /** Files for the next message: uploaded as soon as they are chosen or dropped,
  * and named at the end of the message when it is sent (attachments.ts). */
@@ -56,7 +63,7 @@ export function CoworkAttachments({ id, files, uploading, open, onUpload, onRemo
       <AnimatePresence initial={false}>
       {files.map(file => <m.li key={file.name} {...cwVariants(cwPop)}
         className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-cw-border bg-cw-elevated py-1 pl-2 pr-1 text-[12.5px]">
-        <FileText className="h-3.5 w-3.5 shrink-0 text-cw-muted" aria-hidden="true" />
+        <FileIcon name={file.name} />
         <span className="truncate">{file.name}</span><span className="shrink-0 text-cw-muted">{coworkFileSize(file.size)}</span>
         <button type="button" onClick={() => onRemove(file.name)} aria-label={`Quitar ${file.name} del mensaje`} title="Quitar del mensaje"
           className="shrink-0 rounded-md p-0.5 text-cw-muted hover:bg-cw-hover hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
@@ -69,10 +76,10 @@ export function CoworkAttachments({ id, files, uploading, open, onUpload, onRemo
       <label htmlFor={id} className={cn('inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] font-medium text-cw-text hover:bg-cw-hover focus-within:ring-2 focus-within:ring-[color:var(--cw-accent-ring)]', uploading && 'pointer-events-none opacity-50')}>
         {uploading ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
         {uploading ? 'Subiendo…' : 'Elegir archivos'}
-        <input id={id} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx,.pdf,.docx" disabled={uploading}
+        <input id={id} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx,.pdf,.docx,.png,.jpg,.jpeg,.webp" disabled={uploading}
           onChange={event => { onUpload(event.target.files); event.target.value = ''; }} className="sr-only" />
       </label>
-      <span className="text-[12px] text-cw-muted">o arrástralos al cuadro · Cowork lee CSV, Excel, PDF, Word, JSON, MD y TXT de hasta 20 MB.</span>
+      <span className="text-[12px] text-cw-muted">o arrástralos o pega una captura en el cuadro · Cowork lee CSV, Excel, PDF, Word, JSON, MD, TXT e imágenes de hasta 20 MB.</span>
     </div>}
     <p role="status" className="sr-only">{uploading ? 'Subiendo…' : files.length ? `${files.length} ${files.length === 1 ? 'archivo adjunto' : 'archivos adjuntos'}` : ''}</p>
   </section>;
@@ -92,7 +99,7 @@ export function CoworkUserMessage({ message }: { message: string }) {
     </p>}
     {files.length > 0 && <ul aria-label="Archivos adjuntos" className="flex flex-wrap justify-end gap-1.5">
       {files.map(name => <li key={name} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-cw-border bg-cw-elevated px-2 py-1 text-[12.5px] text-cw-text">
-        <FileText className="h-3.5 w-3.5 shrink-0 text-cw-muted" aria-hidden="true" /><span className="truncate">{name}</span>
+        <FileIcon name={name} /><span className="truncate">{name}</span>
       </li>)}
     </ul>}
   </div>;

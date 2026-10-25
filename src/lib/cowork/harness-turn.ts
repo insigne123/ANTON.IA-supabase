@@ -6,6 +6,7 @@
 // the ledger before every model call, approvals for every effect, the same answer polish on the way out.
 import { z } from 'zod';
 import { defineTool, planTool, runAgent, ToolRegistry, webToolSpecs, type AgentHooks, type AgentTool, type ModelResponse, type ToolOutcome, type WebAction, type WebSettings } from '@/lib/agent-harness/index';
+import type { ImageBlock } from '@/lib/agent-harness/types';
 import { COWORK_AGENT_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema } from './contracts';
 import { coworkBlocks } from './answer-quality';
 import { coworkCampaignEmails, coworkPersonalEmails } from './blocks';
@@ -17,6 +18,7 @@ import { coworkAnalysisBriefSchema } from './analyst';
 import { coworkCorrectionVerdict } from './correction-guard';
 import { coworkDesignBriefSchema } from './design-brief';
 import type { CoworkHarnessCapability, CoworkHarnessConfig } from './harness-config';
+import { COWORK_IMAGE_NOTICE, COWORK_IMAGES_PER_TURN, coworkImageRead } from './file-read';
 import { coworkThreadMemorySchema } from './thread-memory';
 import { parseMarkdown } from './markdown';
 import { produceDocument } from '@/lib/documents/pipeline';
@@ -173,6 +175,24 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
 
   const registry = new ToolRegistry();
 
+  /** The images looked at in this turn, by the read that found them (COW-11). */
+  const images = new Map<string, ImageBlock>();
+  let looked = 0;
+  /** An uploaded image is looked at, not read: it goes with the result of files.read, smaller, and the observation keeps only that it was seen. */
+  const lookAt = async (key: string, result: unknown) => {
+    if (!input.seeImage || !coworkImageRead(result)) return result;
+    if (looked >= COWORK_IMAGES_PER_TURN) {
+      return { ...result, message: `Ya miraste ${COWORK_IMAGES_PER_TURN} imágenes en este turno: responde con lo que viste y ofrece mirar las demás en el siguiente mensaje.` };
+    }
+    looked += 1;
+    const image = await input.seeImage(result.name).catch(() => null);
+    if (!image) return result;
+    images.set(key, image);
+    const seen = { ...result, seen: true, notice: COWORK_IMAGE_NOTICE };
+    delete seen.message;
+    return seen;
+  };
+
   // Reads: one tool per capability of the gateway.
   for (const capability of config.capabilities) {
     const shape = coworkReadShape(capability);
@@ -194,7 +214,7 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
         const made = (async (): Promise<CoworkObservation> => {
           await input.authorize();
           context.signal.throwIfAborted();
-          const result = await input.execute(action, value);
+          const result = await lookAt(key, await input.execute(action, value));
           context.signal.throwIfAborted();
           const observation: CoworkObservation = { action, input: value, result };
           await input.authorize();
@@ -204,7 +224,9 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
         })();
         reads.set(key, made);
         try {
-          return { status: 'ok', output: (await made).result };
+          const { result } = await made;
+          const image = images.get(key);
+          return { status: 'ok', output: result, ...(image ? { images: [image] } : {}) };
         } catch (error) {
           // A read that failed can be asked again (it stays counted, as it always was).
           reads.delete(key);

@@ -243,18 +243,24 @@ test('files.read opens the most recent upload with that name, trimmed and marked
 });
 
 test('files.read says what exists when the name is not there, and what it cannot open', async () => {
-  const { client, paths } = uploadsClient({ 'run-a': [{ name: 'antiguo.xls', size: 900, updated_at: '2026-09-26T10:00:00Z' }, { name: 'foto.png', size: 900, updated_at: '2026-09-26T10:00:00Z' }] }, {});
+  const { client, paths } = uploadsClient({ 'run-a': [{ name: 'antiguo.xls', size: 900, updated_at: '2026-09-26T10:00:00Z' }, { name: 'deck.pptx', size: 900, updated_at: '2026-09-26T10:00:00Z' },
+    { name: 'foto.png', size: 900, updated_at: '2026-09-26T10:00:00Z' }] }, {});
   const missing = await readCoworkFileContent(client as never, scope, 'leads.csv') as { found: boolean; available: string[]; nextStep: string };
   assert.equal(missing.found, false);
-  assert.deepEqual(missing.available, ['antiguo.xls', 'foto.png']);
+  assert.deepEqual(missing.available, ['antiguo.xls', 'deck.pptx', 'foto.png']);
   // The next step asks for the file, not only for another one.
   assert.match(missing.nextStep, /Adjuntar archivos/);
   // An Excel from before 2007 and a kind of file Cowork does not read say what to do, without downloading anything.
   const xls = await readCoworkFileContent(client as never, scope, 'antiguo.xls') as { kind: string; message: string };
   assert.equal(xls.kind, 'unreadable');
   assert.match(xls.message, /guárdalo como \.xlsx/);
-  const image = await readCoworkFileContent(client as never, scope, 'foto.png') as { kind: string; message: string };
-  assert.match(image.message, /Excel \(\.xlsx\), PDF, Word/);
+  const deck = await readCoworkFileContent(client as never, scope, 'deck.pptx') as { kind: string; message: string };
+  assert.match(deck.message, /Excel \(\.xlsx\), PDF, Word.*imagen \(PNG, JPG o WEBP\)/);
+  // An image is only named here: the agent with tools looks at it (COW-11), and until then its message says what to ask for.
+  const image = await readCoworkFileContent(client as never, scope, 'foto.png') as { kind: string; found: boolean; message: string };
+  assert.equal(image.kind, 'image');
+  assert.equal(image.found, true);
+  assert.match(image.message, /no se pudo mirar/);
   assert.ok(!paths.some(path => path.startsWith('cowork-uploads:')), 'nothing was downloaded');
   await assert.rejects(readCoworkFileContent(client as never, scope, '../otro/leads.csv'), /inválido/);
   await assert.rejects(readCoworkFileContent(client as never, scope, '.env'), /inválido/);
