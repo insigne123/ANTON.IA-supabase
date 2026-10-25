@@ -78,6 +78,12 @@ test('the user context travels with its instruction and stays null when the serv
   const context = coworkDecisionContext(instructions, { ...base, userContext });
   assert.deepEqual({ ...context.userContext, instruction: undefined }, { ...userContext, instruction: undefined });
   assert.match(context.userContext?.instruction || '', /firma con fullName/);
+  // Without «Tu agenda», a reply to a meeting request lets the other person pick the time and offers, once, to save the agenda.
+  assert.match(context.userContext?.instruction || '', /no guardó su agenda[^.]*\(«¿Qué día te acomoda\?»\)/);
+  const booked = coworkDecisionContext(instructions, { ...base, userContext: { ...userContext,
+    booking: { url: 'https://calendly.com/nicolas-yago/30min', provider: 'Calendly', mode: 'auto' as const } } });
+  assert.match(booked.userContext?.instruction || '', /booking es la agenda del usuario[^.]*la ofrece con la dirección tal cual/);
+  assert.doesNotMatch(booked.userContext?.instruction || '', /no guardó su agenda/);
   // Reading it spends nothing from the reads of the turn.
   assert.equal(context.readBudget.remaining, COWORK_TURN_DEFAULTS.reads);
   assert.equal(coworkDecisionContext(instructions, base).userContext, null);

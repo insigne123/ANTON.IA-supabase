@@ -276,6 +276,12 @@ test('the checks catch what made the measured emails generic or wrong (12 oct re
   // R15: a stray line before the signature; a sign-off is not one.
   assert.deepEqual(felipe(good.replace('\n\nNicolás Y.', '\n\nAXIS\n\nNicolás Y.')), ['sin líneas sueltas']);
   assert.deepEqual(felipe(good.replace('\n\nNicolás Y.', '\n\nSaludos,\nNicolás Y.')), []);
+  // The line that offers the person's own agenda («Tu agenda» in «Firmas y estilo») is how a reply to a meeting request closes: not stray.
+  const agenda = good.replace('\n\nNicolás Y.', '\n\nSi te acomoda, puedes tomar un horario aquí: https://calendly.com/nicolas-yago/30min\n\nNicolás Y.');
+  assert.deepEqual(coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo para Felipe', to: ['Felipe Muñoz'], subject: 'Antecedentes de guardias en Securitas', body: agenda }],
+    { ...withProofs, booking: 'https://calendly.com/nicolas-yago/30min' }).map(issue => issue.short), []);
+  assert.deepEqual(felipe(agenda), ['sin líneas sueltas']);
+  assert.equal(coworkWriterContext({ fullName: 'Nicolás Y.', booking: { url: 'https://calendly.com/nicolas-yago/30min' } }, []).booking, 'https://calendly.com/nicolas-yago/30min');
   // An email to one person that never names his company could go to anyone.
   assert.deepEqual(felipe(good.replace(', y en Securitas cada uno', ', y cada uno'), 'Antecedentes en el PJUD'), ['con su empresa']);
   // A campaign text names each person's company with {{empresa}}.
@@ -1295,4 +1301,13 @@ test('a draft is not said to be paused, and a sentence does not end on a conjunc
   assert.equal(coworkPlainReply('Preparé una versión centrada en procesos con varias candidaturas y. Queda en pausa hasta que la actives.'),
     'Preparé una versión centrada en procesos con varias candidaturas.');
   assert.equal(coworkPlainReply('Preparé el correo para Daniela.'), 'Preparé el correo para Daniela.');
+});
+
+test('a reply to someone who asked for a meeting offers the person\'s own agenda, as «Tu agenda» says, never in a cold email', () => {
+  const rule = COWORK_WRITER_RULES.find(line => line.startsWith('Agenda:')) || '';
+  assert.match(rule, /userContext\.booking/);
+  assert.match(rule, /pidió una reunión, una llamada o una demo/);
+  assert.match(rule, /dirección tal cual y completa/);
+  assert.match(rule, /on_request, solo si el usuario la pide/);
+  assert.match(rule, /Nunca en un primer correo en frío ni en una secuencia/);
 });
