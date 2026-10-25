@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CoworkMemoryRefused, forgetCoworkMemory, listCoworkMemories } from './memories';
+import { CoworkMemoryRefused, addCoworkMemory, editCoworkMemory, forgetCoworkMemory, listCoworkMemories } from './memories';
 
 const ME = '11111111-1111-4111-8111-111111111111';
 const TEAMMATE = '22222222-2222-4222-8222-222222222222';
@@ -15,6 +15,7 @@ function memories(rows: Row[]) {
     const where: Row = {};
     let or: string | null = null;
     let values: Row | null = null;
+    let inserted: Row | null = null;
     const matches = () => rows.filter(row => Object.entries(where).every(([key, value]) => row[key] === value)
       && (!or || row.scope === 'organization' || `user_id.eq.${row.user_id}` === or.split(',')[1]));
     const chain: Record<string, (...args: unknown[]) => unknown> = {
@@ -22,6 +23,8 @@ function memories(rows: Row[]) {
       eq: (key, value) => { where[key as string] = value; return chain; },
       or: (filter) => { or = filter as string; return chain; },
       update: (next) => { values = next as Row; return chain; },
+      insert: (next) => { inserted = { id: id(900 + rows.length), ...(next as Row) }; rows.push(inserted); return chain; },
+      single: async () => ({ data: inserted, error: null }),
       maybeSingle: async () => {
         const found = matches()[0] ?? null;
         if (values && found) { Object.assign(found, values); updates.push({ id: found.id, values }); }
@@ -68,4 +71,36 @@ test('forgetting archives the memory; a teammate\'s, or the organization\'s for 
   assert.deepEqual(await forgetCoworkMemory(auth('owner') as never, id(2), admin, NOW), { forgotten: true });
   assert.equal(updates.length, 2);
   await assert.rejects(forgetCoworkMemory(auth() as never, 'nope', admin, NOW));
+});
+
+test('«Recordar» by hand stores an approved preference, for you or for the team, and the same sentence only once (COW-05)', async () => {
+  const store = memories([]);
+  const first = await addCoworkMemory(auth() as never, { text: '  Firma solo con mi nombre. ', scope: 'personal' }, store.admin, NOW);
+  assert.equal(first.created, true);
+  assert.deepEqual({ text: first.memory.text, scope: first.memory.scope, canEdit: first.memory.canEdit, mine: first.memory.mine },
+    { text: 'Firma solo con mi nombre.', scope: 'personal', canEdit: true, mine: true });
+  const again = await addCoworkMemory(auth() as never, { text: 'firma solo con mi nombre', scope: 'personal' }, store.admin, NOW);
+  assert.equal(again.created, false, 'the same sentence is not stored twice');
+  const team = await addCoworkMemory(auth() as never, { text: 'No le escribimos a Adecco', scope: 'organization' }, store.admin, NOW);
+  assert.equal(team.memory.scope, 'organization');
+  const listed = await listCoworkMemories(auth() as never, store.admin, NOW);
+  assert.equal(listed.length, 2);
+  await assert.rejects(addCoworkMemory(auth() as never, { text: 'no', scope: 'personal' }, store.admin, NOW));
+});
+
+test('«Corregir» changes the words of a preference you may forget; other kinds and others\' memories are not yours to correct', async () => {
+  const store = memories([
+    row(1, { scope: 'user', user_id: ME, key: 'tuteo a todos', value: { text: 'Tuteo a todos', runId: 'r1' } }),
+    row(2, { scope: 'organization', user_id: TEAMMATE }),
+    row(3, { scope: 'user', user_id: ME, memory_type: 'offer_summary', value: { summary: 'Vendemos AXIS' } }),
+  ]);
+  const { memory } = await editCoworkMemory(auth() as never, id(1), { text: 'Trato de usted a gerentes generales' }, store.admin, NOW);
+  assert.equal(memory.text, 'Trato de usted a gerentes generales');
+  assert.equal(store.updates[0].values.key, 'trato de usted a gerentes generales');
+  assert.deepEqual(store.updates[0].values.value, { text: 'Trato de usted a gerentes generales', runId: 'r1' }, 'the turn that proposed it is kept');
+  await assert.rejects(editCoworkMemory(auth() as never, id(2), { text: 'Otra cosa' }, store.admin, NOW), (error: unknown) => error instanceof CoworkMemoryRefused && error.status === 403);
+  await assert.rejects(editCoworkMemory(auth() as never, id(3), { text: 'Otra cosa' }, store.admin, NOW), (error: unknown) => error instanceof CoworkMemoryRefused && error.status === 403);
+  // An administrator corrects the team's.
+  const { memory: fixed } = await editCoworkMemory(auth('admin') as never, id(2), { text: 'Escribimos en español neutro' }, store.admin, NOW);
+  assert.equal(fixed.text, 'Escribimos en español neutro');
 });
