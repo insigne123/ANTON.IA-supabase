@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import type { TodayPlan, TodayPrimary, TodayQueueItem } from '@/lib/home/today';
 import {usePersonalHome} from './usePersonalHome';
 
-type TodayResponse = TodayPlan & { partial?: boolean; firstName?: string };
+type TodayResponse = TodayPlan & { partial?: boolean; firstName?: string; newAccount?: boolean };
 
 const QUEUE_ICONS: Record<TodayQueueItem['kind'], typeof MessageSquareReply> = {
   reply: MessageSquareReply,
@@ -79,17 +79,19 @@ export function TodayPanel({ afterPrimary }: { afterPrimary?: (primary: TodayPri
 
         {afterPrimary?.(data.primary)}
 
-        {/* Nothing waiting is a sentence, not a card with a title, a description and an empty box. */}
-        {data.queue.length === 0 ? (
+        {/* Nothing waiting is a sentence, not a card with a title, a description and an empty box. When the step above is the only
+            pending item, there is nothing to add (APP-01). */}
+        {data.queue.length === 0 ? (data.primary.queueId ? null : (
           <p className="flex items-center gap-2 rounded-2xl border border-border/60 px-4 py-3 text-sm text-foreground/80">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
             Nada pendiente por ahora. Cuando alguien te responda o venza un compromiso, aparecerá aquí.
           </p>
-        ) : (
+        )) : (
         <Card className="rounded-2xl">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Lo que te espera</CardTitle>
-            <CardDescription>Tus pendientes en esta organización, incluidos los anteriores que aún necesitan atención.</CardDescription>
+            {/* The step above is one of the pending items: the list holds the others, so it says what comes after. */}
+            <CardTitle className="text-base">{data.primary.queueId ? 'Después' : 'Lo que te espera'}</CardTitle>
+            <CardDescription>{data.primary.queueId ? 'Lo demás que espera en esta organización, incluidos los anteriores que aún necesitan atención.' : 'Tus pendientes en esta organización, incluidos los anteriores que aún necesitan atención.'}</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
@@ -120,13 +122,13 @@ export function TodayPanel({ afterPrimary }: { afterPrimary?: (primary: TodayPri
         )}
       </div>
 
-      {/* Once everything is set up, the checklist shrinks to one line: «Hoy» is for the work, not for setup. */}
-      {setupComplete ? (
+      {/* Once everything is set up, the checklist shrinks to one line the first week, and then goes: «Hoy» is for the work (APP-01). */}
+      {setupComplete ? (!data.newAccount ? null : (
         <p data-tour="setup" className="flex items-center gap-2 rounded-2xl border border-border/60 px-4 py-3 text-sm text-foreground/80">
           <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
           Tu cuenta está lista: perfil, correo y contactos.
         </p>
-      ) : (
+      )) : (
       <Card className="rounded-2xl" data-tour="setup">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Prepara tu cuenta</CardTitle>

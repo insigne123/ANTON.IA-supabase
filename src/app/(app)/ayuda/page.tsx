@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import { useSharedNavAccess } from '@/hooks/use-nav-access';
 import {
-  FIRST_EMAIL_PATH, HELP_GROUPS, helpSectionHref, helpSectionIdFrom, popularHelpQuestions, searchHelp, visibleHelpSections,
+  FIRST_EMAIL_PATH, FIRST_TENDER_PATH, HELP_GROUPS, helpSectionHref, helpSectionIdFrom, popularHelpQuestions, searchHelp, visibleHelpSections,
 } from '@/lib/help/manual';
 import { visibleTutorialVideos } from '@/lib/help/tutorial-videos';
 
@@ -43,6 +43,8 @@ export default function HelpCenterPage() {
   const results = useMemo(() => (query.trim().length >= 2 ? searchHelp(query, sections, 8) : null), [query, sections]);
   const popular = useMemo(() => popularHelpQuestions(sections), [sections]);
   const path = FIRST_EMAIL_PATH.filter((step) => visibleIds.has(step.section));
+  // Whoever has Oportunidades gets its own first steps beside the ones of prospecting (APP-19).
+  const tenderPath = visibleIds.has('oportunidades') ? FIRST_TENDER_PATH : [];
   const videos = useMemo(() => visibleTutorialVideos({ opportunities, admin }), [opportunities, admin]);
 
   // Older links point at a section of this page (/ayuda#perfil): each section now has its own page.
@@ -101,15 +103,15 @@ export default function HelpCenterPage() {
             )}
           </section>
 
-          {path.length > 0 && (
-            <section aria-labelledby="help-path-title" className="space-y-3">
+          {([['help-path', 'Tu camino al primer correo', path], ['help-tender-path', 'Tu camino a la primera licitación', tenderPath]] as const).map(([id, title, steps]) => steps.length > 0 && (
+            <section key={id} aria-labelledby={`${id}-title`} className="space-y-3">
               <div>
-                <h2 id="help-path-title" className="text-base font-semibold tracking-tight">Tu camino al primer correo</h2>
+                <h2 id={`${id}-title`} className="text-base font-semibold tracking-tight">{title}</h2>
                 <p className="text-sm text-muted-foreground">Los pasos en el orden en que se hacen. Toca uno para ver cómo.</p>
               </div>
               <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {path.map((step, index) => (
-                  <li key={step.section}>
+                {steps.map((step, index) => (
+                  <li key={step.title}>
                     <Link href={helpSectionHref(step.section)} className={CARD_LINK}>
                       <span className="relative flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                         <HelpIcon section={step.section} className="size-5" />
@@ -126,7 +128,7 @@ export default function HelpCenterPage() {
                 ))}
               </ol>
             </section>
-          )}
+          ))}
 
           {videos.length > 0 && (
             <section aria-labelledby="help-videos-title" className="space-y-3">

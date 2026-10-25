@@ -40,6 +40,7 @@ import { cn } from '@/lib/utils';
 import { useBookingLink } from '@/hooks/use-booking-link';
 import { insertBookingLine } from '@/lib/booking-link';
 import type { ContactedLead } from '@/lib/types';
+import { chipClass } from '@/components/ui/chip';
 
 type Message = { id: string; direction: string; from?: string; to?: string[]; receivedAt: string; subject?: string; text?: string; source: string };
 type Detail = { work?: any; messages: Message[]; plans: { touches: PlannedTouch[]; complete: boolean }; providerComplete: boolean; providerError: string | null; trackingAvailable: boolean; trackingEvents: Array<{ id: string; event_type: string; event_at: string; meta?: Record<string, unknown> }>; canResolve: boolean; team?: ConversationTeamLock | null };
@@ -116,6 +117,9 @@ export default function ConversationsWorkspace() {
   useEffect(() => {
     const requested = readConversationUrl(window.location.search).view;
     if (requested) setView(requested);
+    // ⌘K «en Conversaciones» (APP-24) arrives with what to look for.
+    const asked = new URLSearchParams(window.location.search).get('q')?.trim();
+    if (asked) setQuery(asked.slice(0, 200));
   }, []);
 
   const chooseView = useCallback((next: ConversationView) => {
@@ -384,7 +388,7 @@ export default function ConversationsWorkspace() {
           <SelectTrigger aria-label="Canal" className="h-9 w-[176px]"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">Todos los canales</SelectItem><SelectItem value="gmail">Gmail</SelectItem><SelectItem value="outlook">Outlook</SelectItem><SelectItem value="linkedin">LinkedIn</SelectItem><SelectItem value="phone">Teléfono</SelectItem></SelectContent>
         </Select>
-        <Button type="button" size="sm" variant={mine ? 'secondary' : 'outline'} aria-pressed={mine} onClick={() => setMine(value => !value)}>Solo mías</Button>
+        <button type="button" className={chipClass(mine)} aria-pressed={mine} onClick={() => setMine(value => !value)}>Solo mías</button>
         <Button data-tour="conv-sync" type="button" size="sm" variant="ghost" className="ml-auto" disabled={syncing} onClick={() => void sync()}>
           <RefreshCw className={cn('h-4 w-4', syncing && 'motion-safe:animate-spin')} aria-hidden="true" />{syncing ? 'Actualizando…' : 'Traer respuestas'}
         </Button>
