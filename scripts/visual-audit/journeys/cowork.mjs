@@ -86,6 +86,24 @@ export default () => [
         c.check('las que no lo dicen no aparecen', !/Muéstrame mi pipeline/.test(text));
       } },
     ] },
+  { id: 'cowork-memoria-escrita', persona: 'owner', title: 'Decirle a Cowork qué recordar sin pasar por el chat, y corregir un recuerdo',
+    goal: 'Escribir una preferencia y corregir otra en «Lo que Cowork recuerda» (COW-05).', passWrites: [{ pattern: /^\/api\/cowork\/memories/ }],
+    steps: [
+      { say: 'Abro Cowork y su memoria', do: async c => { await c.go('/cowork'); await c.click({ role: 'button', name: 'Memoria' }); await c.seeRole('dialog', 'Lo que Cowork recuerda'); await c.see('tutea a todos los contactos'); } },
+      { say: 'Escribo algo para que recuerde', do: async c => {
+        await c.fill('Que Cowork recuerde', 'Escribe en español neutro');
+        await c.click({ role: 'button', name: 'Recordar' }); await c.see('Escribe en español neutro');
+        const saved = c.table('suplia_memories').find(row => row.value?.text === 'Escribe en español neutro');
+        c.check('queda guardado y aprobado, solo para mí', saved?.status === 'approved' && saved?.scope === 'user', JSON.stringify(saved || null).slice(0, 160));
+      } },
+      { say: 'Corrijo «tutea a todos los contactos»', do: async c => {
+        await c.click({ role: 'button', name: 'Corregir: tutea a todos los contactos' });
+        await c.fill({ label: 'Corregir: tutea a todos los contactos' }, 'Trata de usted a los gerentes generales');
+        await c.click({ role: 'button', name: 'Guardar' }); await c.see('Trata de usted a los gerentes generales');
+        c.check('el recuerdo dice lo corregido', c.table('suplia_memories').some(row => row.value?.text === 'Trata de usted a los gerentes generales'));
+        c.check('el del equipo, guardado por otra persona, no se puede corregir', !(await c.page.getByRole('button', { name: /^Corregir: no escribir a Adecco/ }).count()));
+      } },
+    ] },
   { id: 'cowork-uso', persona: 'owner', title: 'Saber cuánto del uso del asistente llevo, antes de chocar con el tope',
     goal: 'Ver el uso de la conversación y el del día en el resumen (COW-15).',
     steps: [
