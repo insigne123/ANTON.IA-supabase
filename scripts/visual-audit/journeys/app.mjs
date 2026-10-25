@@ -57,18 +57,21 @@ export default () => [
         c.check('abrir la pantalla no movió a nadie', before > 0 && withEmail() === before, `${before} → ${withEmail()}`);
       } },
       { say: 'Pulso «Traerlos a «Por escribir»»', do: async c => {
-        const enrichedBefore = c.table('enriched_leads').length;
+        const moving = c.table('leads').filter(lead => String(lead.email || '').includes('@')).map(lead => String(lead.email).toLowerCase());
         await c.click({ role: 'button', name: /^Traerlos a «Por escribir»/ }); await c.see(/pasaron? a «Por escribir»/);
         c.check('los guardados con correo dejaron la lista de guardados', !c.table('leads').some(lead => String(lead.email || '').includes('@')));
-        c.check('y llegaron a «Por escribir»', c.table('enriched_leads').length > enrichedBefore, `${enrichedBefore} → ${c.table('enriched_leads').length}`);
-        c.check('el aviso se fue', !(await c.has(/ya tienen? correo/)));
+        // Who was already in «Por escribir» is not added twice: each one is there once.
+        const enriched = new Set(c.table('enriched_leads').map(lead => String(lead.email || '').toLowerCase()));
+        c.check('y están en «Por escribir»', moving.length > 0 && moving.every(email => enriched.has(email)), `${moving.filter(email => enriched.has(email)).length} de ${moving.length}`);
+        c.check('el aviso se fue', await c.notSee(/ya tienen? correo/, { timeout: 6000 }).then(() => true, () => false));
       } },
     ] },
   { id: 'app-buscar-todo', persona: 'owner', title: 'Encontrar a una persona desde cualquier pantalla, sin saber dónde está',
     goal: 'Con Ctrl+K, escribir un nombre y llegar a su conversación (APP-24).',
     steps: [
       { say: 'Abro Hoy y pulso Ctrl+K', do: async c => {
-        await c.go('/dashboard'); await c.seeRole('heading', 'Hoy');
+        // After «Hoy» loads: the screen mounts again once the session resolves.
+        await c.go('/dashboard'); await c.seeRole('heading', 'Hoy'); await c.see(/Lo primero hoy/);
         await c.page.keyboard.press('Control+k');
         const box = c.page.getByRole('combobox', { name: 'Buscar e ir a…' });
         c.check('se abre la caja, con el foco en ella', await visible(box) && await box.evaluate(node => node === document.activeElement));
@@ -94,7 +97,9 @@ export default () => [
       { say: 'Pulso «Tu cliente ideal» en el índice', do: async c => {
         const index = c.page.getByRole('navigation', { name: 'Partes del perfil' });
         await c.clickOn(index.getByRole('link', { name: 'Tu cliente ideal' })); await c.wait(1200);
-        c.check('la página baja hasta «Tu cliente ideal»', await c.page.getByRole('heading', { name: 'Tu cliente ideal' }).evaluate(node => { const top = node.getBoundingClientRect().top; return top >= 0 && top < window.innerHeight / 2; }).catch(() => false));
+        const heading = c.page.locator('#icp-heading');
+        c.check('la página baja hasta «Tu cliente ideal»', await heading.evaluate(node => { const top = node.getBoundingClientRect().top; return top >= 0 && top < window.innerHeight / 2; }).catch(() => false),
+          String(await heading.evaluate(node => Math.round(node.getBoundingClientRect().top)).catch(() => 'sin título')));
         c.check('el índice marca dónde estoy', (await index.getByRole('link', { name: 'Tu cliente ideal' }).getAttribute('aria-current')) === 'location');
         c.check('el índice sigue a la vista', await index.isVisible());
       } },

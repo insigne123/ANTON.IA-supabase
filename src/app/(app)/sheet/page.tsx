@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
@@ -369,11 +369,12 @@ export default function SheetPage() {
   const sharedSaves = useMemo(() => new Set(rows.map((row) => row.savedById).filter(Boolean)).size > 1, [rows]);
   const phone = useMediaQuery('(max-width: 639px)');
   // Whether the table goes on to the right of what shows: the «Acción» column then casts its shadow (APP-09).
-  const tableArea = useRef<HTMLDivElement>(null);
+  // A callback ref: the table can appear after the first render (the session resolves, the screen mounts again).
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  const tableArea = useCallback((node: HTMLDivElement | null) => setScroller((node?.firstElementChild as HTMLElement | null) ?? null), []);
   const [moreRight, setMoreRight] = useState(false);
   useEffect(() => {
-    const scroller = tableArea.current?.firstElementChild as HTMLElement | null | undefined;
-    if (!scroller) return;
+    if (!scroller) { setMoreRight(false); return; }
     const update = () => setMoreRight(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1);
     update();
     scroller.addEventListener('scroll', update, { passive: true });
@@ -381,7 +382,7 @@ export default function SheetPage() {
     observer?.observe(scroller);
     if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
     return () => { scroller.removeEventListener('scroll', update); observer?.disconnect(); };
-  }, [phone]);
+  }, [scroller]);
   // «Guardado por ti» on your own rows: two members may share a name.
   const [me, setMe] = useState<string | null>(null);
   useEffect(() => { void supabase.auth.getUser().then(({ data }) => setMe(data.user?.id ?? null)).catch(() => setMe(null)); }, []);

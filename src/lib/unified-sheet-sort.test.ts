@@ -46,5 +46,7 @@ test('on a phone each contact is a card; on a desktop «Acción» casts a shadow
   // The table and the cards lead to the same place.
   assert.equal((page.match(/<RowAction row=\{row\} \/>/g) || []).length, 2);
   assert.match(page, /setMoreRight\(scroller\.scrollLeft \+ scroller\.clientWidth < scroller\.scrollWidth - 1\)/);
+  // Found when the table appears, also after the first render.
+  assert.match(page, /const tableArea = useCallback\(\(node: HTMLDivElement \| null\) => setScroller/);
   assert.equal((page.match(/\$\{moreRight \? EDGE_SHADOW : ''\}/g) || []).length, 3, 'the header, the rows and the loading rows');
 });
