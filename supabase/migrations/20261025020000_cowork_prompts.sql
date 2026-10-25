@@ -21,7 +21,8 @@ alter table public.cowork_prompts enable row level security;
 revoke all on public.cowork_prompts from public, anon, authenticated;
 grant select on public.cowork_prompts to authenticated;
 grant all on public.cowork_prompts to service_role;
+-- auth.uid() inside a select: Postgres reads it once per query, not once per row.
 create policy cowork_prompts_read on public.cowork_prompts for select to authenticated
-  using ((user_id = auth.uid() or shared) and public.cowork_has_access(organization_id));
+  using ((user_id = (select auth.uid()) or shared) and public.cowork_has_access(organization_id));
 
 notify pgrst, 'reload schema';

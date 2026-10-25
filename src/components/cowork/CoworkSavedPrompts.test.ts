@@ -128,6 +128,6 @@ test('the table: each person reads their own and what was shared in their organi
   assert.match(sql, /alter table public\.cowork_prompts enable row level security;/);
   assert.match(sql, /revoke all on public\.cowork_prompts from public, anon, authenticated;/);
   assert.match(sql, /grant select on public\.cowork_prompts to authenticated;/);
-  assert.match(sql, /using \(\(user_id = auth\.uid\(\) or shared\) and public\.cowork_has_access\(organization_id\)\);/);
+  assert.match(sql, /using \(\(user_id = \(select auth\.uid\(\)\) or shared\) and public\.cowork_has_access\(organization_id\)\);/);
   assert.doesNotMatch(sql, /grant (insert|update|delete|all)[^;]*to authenticated/);
 });
