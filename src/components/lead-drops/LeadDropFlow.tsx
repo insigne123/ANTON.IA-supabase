@@ -30,7 +30,8 @@ const markPlayed = (id: string) => { try { window.localStorage.setItem(PLAYED + 
 const brief = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations]
   .map(values => (values?.length ? (values.length > 1 ? `${values[0]} +${values.length - 1}` : values[0]) : null)).filter(Boolean).join(' · ');
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
-const SOURCE: Record<DropCriteria['source'], string> = { perfil: 'Tu cliente ideal, de «Perfil»', equipo: 'El cliente ideal de tu equipo', contactos: 'Parecidos a los contactos que guarda tu equipo' };
+const SOURCE: Record<DropCriteria['source'], string> = { perfil: 'Tu cliente ideal, de «Perfil»', equipo: 'El cliente ideal de tu equipo',
+  empresa: 'El cliente ideal de tu empresa, de su ficha', contactos: 'Parecidos a los contactos que guarda tu equipo' };
 
 function Filter({ label, values }: { label: string; values: string[] }) {
   if (!values.length) return null;

@@ -21,14 +21,15 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 
 1. **Preparación** (`leadDropsTick`, martes, miércoles y viernes de 06:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`):
    - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos y una dirección que no es de prueba, y a quien le llega el correo: con Resend, a todos; sin Resend, a quien tiene su Gmail u Outlook conectado (o con el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
-   - **A quién buscar:**
-     - el «Cliente ideal» de su «Perfil»;
-     - si no lo tiene, el de un compañero (los administradores primero);
+   - **A quién buscar: un cliente ideal por empresa** (`companyDropCriteria`, desde el 26 de octubre):
+     - el de la «Ficha de la empresa», si la tiene;
+     - si no, el que más se repite en los «Perfil» del equipo (si empatan, el de un administrador);
      - si nadie lo tiene, los cargos y rubros que más se repiten entre los contactos que guardó el equipo.
 
      Sin nada de eso no hay contacto, y queda dicho por qué (`status = empty`).
+   - **Por qué uno por empresa:** antes cada persona usaba su propio cliente ideal. El 21 de octubre, 35 personas de dos empresas hicieron 11 búsquedas, y cada búsqueda paga el mínimo de Apify aunque traiga pocos contactos. Cuatro personas con un cliente ideal propio costaron US$0,70 de los US$0,99 del día; las 21 que compartían uno, US$0,20 entre todas.
    - **Cliente ideal completado por ANTON.IA:** el 20 de octubre se completó el de las 31 personas de clientes que no lo tenían. A quien guardó 5 contactos o más, con los cargos y rubros de esos contactos; al resto, con uno por empresa (GrupoExpro: personal externo y RR. HH.; PSOL: selección). Queda marcado (`profile_extended.icpSource = 'anton'`) y «Perfil» lo avisa hasta que la persona lo guarda: si está de acuerdo, «Confirmar» lo deja como suyo sin editar nada.
-   - **Una búsqueda por cliente ideal:** Leads Finder (Apify, `code_crafter/leads-finder`) busca solo correos validados. Trae el doble de lo que el grupo necesita más cinco, con un mínimo de diez.
+   - **Una búsqueda por empresa:** Leads Finder (Apify, `code_crafter/leads-finder`) busca solo correos validados. Trae el doble de lo que el grupo necesita más cinco, con un mínimo de diez.
      - El tope de cada corrida nunca baja del de una búsqueda normal (`LEADS_FINDER_MAX_RUN_USD`, US$0,50). Apify rechaza topes bajo su mínimo (`max-total-charge-usd-below-minimum`), y uno de US$0,03 hizo fallar la primera prueba real (20 oct). Es solo el límite: el costo sale de los resultados que trae.
      - **Rubros:** van con el nombre que usa el actor (`leadsFinderIndustry`: «Seguridad privada» → *security & investigations*, «Logística» → *logistics & supply chain*). Un rubro que no reconoce se omite. En la búsqueda normal pasaría como palabra clave de la empresa, y junto a otro rubro casi nadie calza: así salió vacía la segunda prueba real.
      - **Sin nadie con esos rubros o tamaños,** se busca una vez más solo con cargos y lugares. Si tampoco hay nadie, la pantalla lo dice así («Esta vez no encontramos a nadie») y no como si el equipo ya los tuviera.
@@ -47,7 +48,7 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 3. **Envío:** el aviso de la mañana (`dailyAlertsTick`, 08:00) lo lleva, así que nunca hay dos correos el mismo día.
    - **Asunto:** «Tu contacto de hoy: Gerente de Personas en Ripley», salvo que haya algo más urgente, como una respuesta o un compromiso.
    - **Cuerpo:** un bloque por contacto (nombre, cargo · empresa, por qué calza), no una tabla: una tabla de tres columnas se rompe en un teléfono. Con el contacto va su botón «Ver y guardar», el único botón principal del correo: «Abrir ANTON.IA» pasa a ser un enlace. Si hay otras cosas en el aviso (una respuesta, un compromiso), van en la lista y el contacto no se repite como una línea más; si el contacto es lo único, el saludo lo dice («Tu contacto del día ya está listo») y no hay lista ni título.
-   - **Por qué calza:** lo que coincidió, sin repetir el cargo que se ve al lado: «Calza con tu cliente ideal por su cargo y su rubro (logística), en Santiago.» (`whyText`).
+   - **Por qué calza:** lo que coincidió, sin repetir el cargo que se ve al lado: «Calza con el cliente ideal de tu equipo por su cargo y su rubro (logística), en Santiago.» (o «de tu empresa», si viene de su ficha) (`whyText`).
    - **Adjunto:** `contacto-del-dia-AAAA-MM-DD.pdf`, con la investigación y el primer correo.
    - Una vez enviado, pasa a `sent`.
 4. **En la app** (`/search/contactos/<id>`, dentro de «Buscar prospectos»):

@@ -5,11 +5,10 @@ import { dayInZone } from '@/lib/admin/chile-time';
 import { industryLabel } from '@/lib/companies/coverage';
 import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/lib/cowork/writer';
 import {
-  DROP_SIZE, assignDrops, criteriaKey, dropCriteria, dropDay, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText,
+  DROP_SIZE, assignDrops, companyDropCriteria, dropDay, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText,
   type DropCandidate, type DropCriteria, type DropItem, type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
-import { withCompanyProfile } from '@/lib/profile/company-profile';
 import { readCompanyFields } from '@/lib/server/company-profile';
 import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
@@ -101,7 +100,7 @@ const searchInput = (criteria: DropCriteria, count: number, broad = false): Lead
   personLocations: criteria.locations, employeeRanges: broad ? [] : criteria.sizes, includeSimilarTitles: true, maxResults: count,
 });
 
-/** What a customer is chosen from: the team, admins first (their customer speaks for the team when a person has none), and what it saved. */
+/** What the company's customer is chosen from: its «Ficha de la empresa», the team (admins first, for ties) and what it saved. */
 async function teamOf(client: Client, organizationId: string) {
   const [members, saved]: any[] = await Promise.all([
     client.from('organization_members').select('user_id,role').eq('organization_id', organizationId),
@@ -114,16 +113,17 @@ async function teamOf(client: Client, organizationId: string) {
     readCompanyFields(client, organizationId),
   ]);
   if (profiles.error) throw new LeadDropsError('No pudimos leer los perfiles.', 503);
-  // With a «Ficha de la empresa», its ideal customer is everyone's (a field it leaves empty keeps the person's).
-  const byId = new Map<string, any>(((profiles.data || []) as any[]).map(row => [String(row.id), withCompanyProfile(row, company)]));
+  const byId = new Map<string, any>(((profiles.data || []) as any[]).map(row => [String(row.id), row]));
   const rank = (id: string) => ['owner', 'admin'].includes(String((members.data || []).find((row: any) => String(row.user_id) === id)?.role)) ? 0 : 1;
   const team: string[] = memberIds.slice().sort((a: string, b: string) => rank(a) - rank(b));
   const savedRows = ((saved.data || []) as any[]).map(row => ({ title: row.title, industry: row.organization_industry }));
-  return { byId, team, savedRows };
+  return { byId, team, savedRows, company };
 }
 type Team = Awaited<ReturnType<typeof teamOf>>;
-const customerOf = (userId: string, { byId, team, savedRows }: Team) =>
-  dropCriteria(declaredOf(byId.get(userId)), team.filter(id => id !== userId).map(id => declaredOf(byId.get(id))), savedRows);
+/** One customer per company (companyDropCriteria): every person of the team gets a contact from the same search. */
+const customerOf = ({ byId, team, savedRows, company }: Team) => companyDropCriteria(
+  company ? { roles: company.targetRoles, industries: company.targetIndustries, locations: company.targetLocations, size: company.targetCompanySize } : null,
+  team.map(id => declaredOf(byId.get(id))), savedRows);
 /** How many a search asks for: twice what the group needs and some more (some are known already, some have no email), ten at least. */
 const searchCount = (people: number) => Math.max(10, Math.min(100, people * DROP_SIZE * 2 + 5));
 
@@ -136,10 +136,10 @@ const NOBODY = 'La búsqueda no encontró personas con correo verificado para es
 const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.status === 'empty' && !Array.isArray((drop.criteria as DropCriteria | null)?.titles);
 
 /**
- * Plans today's drops of an organization for the people given: each one's customer (theirs, a teammate's or what the team
- * saved), one Leads Finder search per customer, a different contact for each person (DROP_SIZE), kept in the vault and in a
- * «pending» drop that `writeDrop` completes. Whoever has no customer to go by, or when the month's budget ran out, gets
- * an «empty» drop with the reason, so later runs do not try again.
+ * Plans today's drops of an organization for the people given: the company's customer (its ficha's, the one most of the team
+ * declared or what the team saved), one Leads Finder search for all of them, a different contact for each person (DROP_SIZE),
+ * kept in the vault and in a «pending» drop that `writeDrop` completes. Without a customer to go by, or when the month's
+ * budget ran out, each gets an «empty» drop with the reason, so later runs do not try again.
  */
 export async function planOrganizationDrops(client: Client, organizationId: string, people: string[], deps: {
   now: Date; search?: Search; budgetUsd: number; spentUsd: number; usdPerLead?: number;
@@ -151,25 +151,18 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const usdPerLead = deps.usdPerLead ?? leadsFinderUsdPerLead();
   const team = await teamOf(client, organizationId);
 
-  // One search per customer; each person keeps where theirs came from («tu cliente ideal» or the team's).
-  const groups = new Map<string, { criteria: DropCriteria; people: string[]; own: Map<string, DropCriteria> }>();
+  // One search for the whole team, with the company's customer.
   const results: Array<{ userId: string; status: 'pending' | 'empty'; error?: string; items?: PendingItem[]; cost?: number; criteria?: DropCriteria }> = [];
-  for (const userId of people) {
-    const criteria = customerOf(userId, team);
-    if (!criteria) { results.push({ userId, status: 'empty', error: NO_CUSTOMER }); continue; }
-    const key = criteriaKey(criteria);
-    const group = groups.get(key) || { criteria, people: [], own: new Map<string, DropCriteria>() };
-    group.people.push(userId);
-    group.own.set(userId, criteria);
-    groups.set(key, group);
-  }
+  const customer = people.length ? customerOf(team) : null;
+  if (!customer) for (const userId of people) results.push({ userId, status: 'empty', error: NO_CUSTOMER });
+  const groups = customer ? [{ criteria: customer, people }] : [];
 
-  const known = groups.size ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
+  const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
   let spent = deps.spentUsd;
-  for (const { criteria, people: members, own } of groups.values()) {
+  for (const { criteria, people: members } of groups) {
     const count = searchCount(members.length);
     if (spent + count * usdPerLead > deps.budgetUsd) {
-      for (const userId of members) results.push({ userId, status: 'empty', error: NO_BUDGET, criteria: own.get(userId) });
+      for (const userId of members) results.push({ userId, status: 'empty', error: NO_BUDGET, criteria });
       continue;
     }
     let found: Awaited<ReturnType<Search>>;
@@ -185,7 +178,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         found = { ...broad, costUsd: found.costUsd + broad.costUsd };
       }
     } catch (error) {
-      for (const userId of members) results.push({ userId, status: 'empty', error: `La búsqueda falló: ${text((error as Error)?.message, 200)}`, criteria: own.get(userId) });
+      for (const userId of members) results.push({ userId, status: 'empty', error: `La búsqueda falló: ${text((error as Error)?.message, 200)}`, criteria });
       continue;
     }
     spent += found.costUsd;
@@ -194,13 +187,12 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     const share = members.length ? Math.round((found.costUsd / members.length) * 10_000) / 10_000 : 0;
     for (const userId of members) {
       const picks = assigned.get(userId) || [];
-      const mine = own.get(userId) || criteria;
-      if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria: mine }); continue; }
+      if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria }); continue; }
       for (const pick of picks) { known.leadIds.add(pick.leadId); if (pick.emailKey) known.emails.add(pick.emailKey); }
       await storeInVault(client, { organizationId, userId, entries: picks.map(pick => entries.get(pick.leadId)!).filter(Boolean), now: deps.now.getTime() });
-      results.push({ userId, status: 'pending', cost: share, criteria: mine, items: picks.map(pick => ({
+      results.push({ userId, status: 'pending', cost: share, criteria, items: picks.map(pick => ({
         leadId: pick.leadId, name: pick.name, title: pick.title, company: pick.company, domain: pick.domain, industry: pick.industry, size: pick.size,
-        city: pick.city, hasEmail: pick.hasEmail, hasPhone: pick.hasPhone, why: whyText(pick, mine), research: researchFacts({ ...pick, about: null }), draft: null,
+        city: pick.city, hasEmail: pick.hasEmail, hasPhone: pick.hasPhone, why: whyText(pick, criteria), research: researchFacts({ ...pick, about: null }), draft: null,
         description: pick.about,
       })) });
     }
@@ -325,7 +317,7 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
   if (today && last!.status === 'pending') return 'preparing';
   const fresh = !last || withoutCustomer(last);
   if (!fresh && (today || !dropDay(now))) return null;
-  if (!customerOf(scope.userId, await teamOf(client, scope.organizationId))) return 'profile';
+  if (!customerOf(await teamOf(client, scope.organizationId))) return 'profile';
   if ((await monthSpend(client, now)) + searchCount(1) * leadsFinderUsdPerLead() > dropsMonthlyUsd()) return null;
   return fresh ? 'first' : 'today';
 }

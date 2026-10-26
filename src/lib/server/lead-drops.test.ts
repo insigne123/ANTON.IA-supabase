@@ -42,7 +42,7 @@ const fakeGenerate = async (options: any) => {
   return writerDraft(name);
 };
 
-test('one search for people with the same customer; each gets different contacts and nobody the team has', async () => {
+test('one search for the whole company; each gets different contacts and nobody the team has', async () => {
   searchCalls.length = 0;
   const { client, tables } = memory(seed(), { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
   const planned = await planOrganizationDrops(client, ORG, ['u-ana', 'u-leo', 'u-sin'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
@@ -53,15 +53,33 @@ test('one search for people with the same customer; each gets different contacts
   const ids = drops.flatMap(drop => drop.items.map((item: any) => item.leadId));
   assert.equal(new Set(ids).size, ids.length, 'nobody twice');
   assert.ok(!drops.some(drop => drop.items.some((item: any) => item.company === 'Paris')), 'the team already has the one at Paris');
-  assert.deepEqual(drops.map(drop => [drop.user_id, drop.status, drop.criteria.source]), [['u-ana', 'pending', 'perfil'], ['u-leo', 'pending', 'equipo'], ['u-sin', 'pending', 'equipo']]);
-  assert.match(drops[0].items[0].why, /^Calza con tu cliente ideal por su cargo/);
-  assert.match(drops[1].items[0].why, /^Calza con el cliente ideal de tu equipo por su cargo/, 'one search, but each says whose customer it is');
+  assert.deepEqual(drops.map(drop => [drop.user_id, drop.status, drop.criteria.source]), [['u-ana', 'pending', 'equipo'], ['u-leo', 'pending', 'equipo'], ['u-sin', 'pending', 'equipo']]);
+  assert.ok(drops.every(drop => /^Calza con el cliente ideal de tu equipo por su cargo/.test(drop.items[0].why)), 'the company\'s customer, for everyone');
   assert.ok(drops.every(drop => drop.items.every((item: any) => !('email' in item) && item.hasEmail)), 'the email stays in the vault');
   assert.equal(tables.lead_search_vault.length, ids.length);
   assert.match(tables.lead_search_vault[0].contact_encrypted, /^enc:v1\./);
   // A second run the same morning finds the drops and plans nothing again.
   await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
   assert.equal(tables.lead_drops.length, 3);
+});
+
+test('people with customers of their own still share one search: the one most of the team declared, or the ficha\'s (APP-06)', async () => {
+  searchCalls.length = 0;
+  const own = () => ({ ...seed(), profiles: [profile('u-ana', { targetRoles: 'Gerente de Personas', targetIndustries: 'retail' }),
+    profile('u-leo', { targetRoles: 'Jefe de Operaciones', targetIndustries: 'logística' }), profile('u-sin', { targetRoles: 'Jefe de Operaciones', targetIndustries: 'logística' })] });
+  const first = memory(own(), { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
+  await planOrganizationDrops(first.client, ORG, ['u-ana', 'u-leo', 'u-sin'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
+  assert.equal(searchCalls.length, 1, 'not one search per person');
+  assert.deepEqual(searchCalls[0].titles, ['Jefe de Operaciones'], 'two of three declared it, though Ana is the admin');
+  assert.equal(first.tables.lead_drops.filter(drop => drop.status === 'pending').length, 3);
+
+  searchCalls.length = 0;
+  const withFicha = memory({ ...own(), organization_company_profile: [{ organization_id: ORG, fields: { services: 'AXIS: consultas judiciales', targetRoles: 'Jefe de Seguridad', targetIndustries: 'minería' } }] },
+    { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
+  await planOrganizationDrops(withFicha.client, ORG, ['u-ana', 'u-leo', 'u-sin'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
+  assert.equal(searchCalls.length, 1);
+  assert.deepEqual(searchCalls[0].titles, ['Jefe de Seguridad']);
+  assert.ok(withFicha.tables.lead_drops.every(drop => drop.criteria.source === 'empresa' && /^Calza con el cliente ideal de tu empresa/.test(drop.items[0].why)));
 });
 
 test('the title, the company and the industry as people say them: linking words in lower case, «S.A.», the industry in Spanish', async () => {
@@ -71,7 +89,7 @@ test('the title, the company and the industry as people say them: linking words 
   await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: search as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
   const [item] = tables.lead_drops[0].items;
   assert.deepEqual([item.title, item.company, item.industry], ['Jefe de Reclutamiento y Selección', 'Rutas S.A.', 'Logística']);
-  assert.equal(item.why, 'Calza con tu cliente ideal por su cargo y su rubro (logística), en Santiago.', 'what matched, with the industry in Spanish, not the role again');
+  assert.equal(item.why, 'Calza con el cliente ideal de tu equipo por su cargo y su rubro (logística), en Santiago.', 'what matched, with the industry in Spanish, not the role again');
   assert.deepEqual(item.research, ['Logística · 500 personas · Santiago']);
 });
 
