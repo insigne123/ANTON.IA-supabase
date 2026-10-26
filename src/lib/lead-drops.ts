@@ -23,7 +23,8 @@ export function nextDropDay(now: Date) {
 }
 
 /** Who the contacts are for: from the person's «Perfil», a teammate's, or the contacts the team already saved. */
-export type DropCriteria = { titles: string[]; industries: string[]; locations: string[]; sizes: string[]; source: 'perfil' | 'equipo' | 'contactos' };
+/** `perfil`: a person's own customer, as drops were made until 26 Oct 2026; since then one per company (companyDropCriteria). */
+export type DropCriteria = { titles: string[]; industries: string[]; locations: string[]; sizes: string[]; source: 'perfil' | 'equipo' | 'empresa' | 'contactos' };
 export type IcpDeclared = { roles?: string | null; industries?: string | null; locations?: string | null; size?: string | null };
 
 /** One contact of a drop, as the person sees it before saving it: never the email or the phone, which stay in the vault. */
@@ -78,9 +79,25 @@ export function inferCriteria(saved: Array<{ title?: string | null; industry?: s
   return { titles: top(saved.map(row => row.title), 4), industries: top(saved.map(row => row.industry), 3), locations: ['Chile'], sizes: [], source: 'contactos' };
 }
 
-/** The person's customer, else a teammate's, else what the team saved; null when there is nothing to go by. */
-export function dropCriteria(person: IcpDeclared | null, team: IcpDeclared[], saved: Array<{ title?: string | null; industry?: string | null }>) {
-  return fromDeclared(person, 'perfil') ?? team.map(item => fromDeclared(item, 'equipo')).find(Boolean) ?? inferCriteria(saved);
+/**
+ * The customer of a whole organization, so one search serves its team: the «Ficha de la empresa»'s; without one, the one most
+ * of the team declared (the first in `team`, admins first, on a tie); else what the team saved. Null with nothing to go by.
+ * One per company, not one per person: on 21 Oct 2026 35 people of two companies took 11 searches, and each search has
+ * Apify's minimum charge however few it brings.
+ */
+export function companyDropCriteria(company: IcpDeclared | null, team: IcpDeclared[], saved: Array<{ title?: string | null; industry?: string | null }>) {
+  const fromCompany = fromDeclared(company, 'empresa');
+  if (fromCompany) return fromCompany;
+  const counted = new Map<string, { criteria: DropCriteria; count: number; first: number }>();
+  team.forEach((declared, index) => {
+    const criteria = fromDeclared(declared, 'equipo');
+    if (!criteria) return;
+    const key = criteriaKey(criteria);
+    const known = counted.get(key);
+    if (known) known.count++; else counted.set(key, { criteria, count: 1, first: index });
+  });
+  const top = [...counted.values()].sort((a, b) => b.count - a.count || a.first - b.first)[0];
+  return top?.criteria ?? inferCriteria(saved);
 }
 
 /** A key that groups people with the same customer, so one search serves all of them. */
@@ -172,7 +189,8 @@ export function tidyCompany(name: string | null | undefined) {
 
 /** «Calza con tu cliente ideal por su cargo y su rubro (retail), en Santiago»: why the contact fits, from what matched, without repeating the role the screen shows beside it. */
 export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city'>, criteria: DropCriteria) {
-  const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo' : 'los contactos que guarda tu equipo';
+  const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo'
+    : criteria.source === 'empresa' ? 'el cliente ideal de tu empresa' : 'los contactos que guarda tu equipo';
   const matched = [item.title ? 'su cargo' : null, item.industry ? `su rubro (${item.industry.toLowerCase()})` : null].filter(Boolean).join(' y ');
   return `Calza con ${source}${matched ? ` por ${matched}` : ''}${item.city ? `, en ${item.city}` : ''}.`;
 }

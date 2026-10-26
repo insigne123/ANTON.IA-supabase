@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assignDrops, criteriaKey, dropCriteria, dropDay, dropEmailSection, dropHref, dropSubject, foreignDomain, inferCriteria, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
+import { assignDrops, companyDropCriteria, criteriaKey, dropDay, dropEmailSection, dropHref, dropSubject, foreignDomain, inferCriteria, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -18,19 +18,23 @@ test('the contact of the day goes out on Tuesdays, Wednesdays and Fridays, in Ch
     ['mañana', 'el viernes', 'mañana', 'el martes', 'el martes', 'mañana']);
 });
 
-test('the customer comes from the person, a teammate, or what the team saved', () => {
-  assert.deepEqual(dropCriteria({ roles: 'Gerente de Personas, Jefe de RR. HH.', industries: 'retail', locations: '', size: '51-200' }, [], []),
-    { titles: ['Gerente de Personas', 'Jefe de RR. HH.'], industries: ['retail'], locations: ['Chile'], sizes: ['51,200'], source: 'perfil' });
-  assert.equal(dropCriteria({ roles: '', industries: '' }, [{ roles: 'Gerente de Operaciones', industries: 'minería' }], [])?.source, 'equipo');
+test('one customer per company: its ficha, else the one most of the team declared, else what the team saved', () => {
+  const people = { roles: 'Gerente de Personas, Jefe de RR. HH.', industries: 'retail', locations: '', size: '51-200' };
+  const ops = { roles: 'Gerente de Operaciones', industries: 'minería' };
+  assert.deepEqual(companyDropCriteria({ roles: 'Jefe de Seguridad', industries: 'minería', locations: 'Chile, Perú' }, [people, people], []),
+    { titles: ['Jefe de Seguridad'], industries: ['minería'], locations: ['Chile', 'Perú'], sizes: [], source: 'empresa' }, 'the ficha wins over the team');
+  assert.deepEqual(companyDropCriteria(null, [ops, people, {}, { ...people, roles: 'jefe de rr. hh., gerente de personas' }], []),
+    { titles: ['Gerente de Personas', 'Jefe de RR. HH.'], industries: ['retail'], locations: ['Chile'], sizes: ['51,200'], source: 'equipo' }, 'the one most declared, written either way');
+  assert.equal(companyDropCriteria({ roles: '', industries: '' }, [ops, people], [])?.titles[0], 'Gerente de Operaciones', 'on a tie, the first (admins come first)');
   const saved = [...Array(4).fill({ title: 'Jefe de Seguridad', industry: 'Minería' }), { title: 'Gerente General', industry: 'Retail' }];
-  assert.deepEqual(dropCriteria(null, [{}], saved), { titles: ['Jefe de Seguridad', 'Gerente General'], industries: ['Minería', 'Retail'], locations: ['Chile'], sizes: [], source: 'contactos' });
+  assert.deepEqual(companyDropCriteria(null, [{}], saved), { titles: ['Jefe de Seguridad', 'Gerente General'], industries: ['Minería', 'Retail'], locations: ['Chile'], sizes: [], source: 'contactos' });
   assert.equal(inferCriteria(saved.slice(0, 4)), null, 'too few contacts to say what the team looks for');
-  assert.equal(dropCriteria(null, [], []), null);
+  assert.equal(companyDropCriteria(null, [], []), null);
 });
 
 test('people with the same customer share one search', () => {
-  const a = dropCriteria({ roles: 'Gerente de Personas, Jefe de RR. HH.', industries: 'Retail' }, [], [])!;
-  const b = dropCriteria({ roles: 'jefe de rr. hh., gerente de personas', industries: 'retail' }, [], [])!;
+  const a = companyDropCriteria({ roles: 'Gerente de Personas, Jefe de RR. HH.', industries: 'Retail' }, [], [])!;
+  const b = companyDropCriteria({ roles: 'jefe de rr. hh., gerente de personas', industries: 'retail' }, [], [])!;
   assert.equal(criteriaKey(a), criteriaKey(b));
   assert.notEqual(criteriaKey(a), criteriaKey({ ...a, locations: ['Perú'] }));
 });
