@@ -29,7 +29,7 @@ import { anthropicModel } from '@/lib/agent-harness/anthropic';
 import { coworkHarnessSettings } from '@/lib/cowork/harness-config';
 import { coworkHarnessTelemetry, runCoworkTurn } from '@/lib/cowork/harness-turn';
 import { processCoworkEffectQueue, resolveCoworkEffect, admitCoworkContinuation } from './effects';
-import { coworkTaskGraph, coworkTaskReadyEffect, coworkTaskReadyNode } from '@/lib/cowork/task-graph';
+import { coworkTaskGraph, coworkTaskNextNode, coworkTaskReadyEffect, coworkTaskReadyNode } from '@/lib/cowork/task-graph';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 import { stageCoworkCampaignDefinition } from './campaign-ops';
@@ -758,7 +758,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // An approved task goes on by itself to its next step, unless this answer asks the person something: then it waits, and
     // their answer goes on with the task (coworkTaskReplyContinues).
     if (finished.data === true && activeTask?.graph && !answer.question && !answer.choices) {
-      const next = activeTask.graph.find(node => node.state === 'pending' && node.dependsOn.every(id => activeTask.graph!.some(dep => dep.id === id && dep.state === 'succeeded')));
+      const next = coworkTaskNextNode(activeTask.graph);
       if (next) {
         const child = await client.from('cowork_runs').select('id').eq('parent_run_id', run.id)
           .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).limit(1).maybeSingle();

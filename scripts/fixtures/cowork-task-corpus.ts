@@ -6,7 +6,7 @@
 // (server/cowork/conversation-context.ts: the turn's newest reads and the effects that ran). Everything here is pure: no model, no database.
 import { COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH, coworkContinuationAfter, coworkContinueTask } from '../../src/lib/cowork/continuation-messages';
 import { coworkTaskApproves, coworkTaskContext, coworkTaskReplyContinues, type CoworkActiveTask, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
-import { coworkTaskGraph, type CoworkTaskDeliveryEvent } from '../../src/lib/cowork/task-graph';
+import { coworkTaskGraph, coworkTaskNextNode, type CoworkTaskDeliveryEvent } from '../../src/lib/cowork/task-graph';
 import { coworkResearchNoticeMessage } from '../../src/lib/cowork/research-notice';
 import { coworkStoredScheduleOffer, describeCoworkSchedule } from '../../src/lib/cowork/schedules';
 import { COWORK_SEARCH_ROLE_NOTE } from '../../src/lib/cowork/search-ranking';
@@ -74,10 +74,18 @@ const COMPANIES: Array<{ match: RegExp; industry: string; names: string[] }> = [
   { match: /constru/i, industry: 'Construcción', names: ['Constructora Cordillera', 'Obras Metropolitanas', 'Edificaciones del Valle', 'Ingeniería y Montaje Sur', 'Constructora Pehuén'] },
 ];
 
+/** The name of the n-th person a search brings: past the list, a first name of one and the surname of another, never repeated. */
+const personName = (index: number) => index < NAMES.length ? NAMES[index]
+  : `${NAMES[index % NAMES.length].split(' ')[0]} ${NAMES[(index * 7 + 3) % NAMES.length].split(' ')[1]}`;
+
 const slug = (value: string) => value.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 const text = (value: unknown) => typeof value === 'string' ? value : Array.isArray(value) ? value.filter(item => typeof item === 'string').join(' ') : '';
 
-/** What an approved search brings: people (or companies) that fit its criteria, as normalizeCoworkSearchResult returns them. */
+/**
+ * What an approved search brings: people (or companies) that fit its criteria, as normalizeCoworkSearchResult returns them. As many
+ * people as it asks for, up to 25: production brings up to 100 companies first, and a world that stopped at 10 made the judge mark
+ * «trajo 10 de los 20 del plan» as Cowork's fault.
+ */
 export function simulateSearch(criteria: Record<string, unknown>) {
   const asked = [text(criteria.industries), text(criteria.keywords), text(criteria.companyKeywords), text(criteria.query), text(criteria.titles)].join(' ');
   const sector = COMPANIES.find(entry => entry.match.test(asked)) ?? { industry: 'Servicios', names: ['Servicios Integrales', 'Grupo Horizonte', 'Empresas del Maule', 'Corporación Andina', 'Holding Litoral'] };
@@ -93,9 +101,9 @@ export function simulateSearch(criteria: Record<string, unknown>) {
       notice: 'Resultados del proveedor por palabras clave; confirma el encaje del sector. Son empresas, no contactos guardables como personas.' };
   }
   const titles = Array.isArray(criteria.titles) && criteria.titles.length ? criteria.titles.map(String) : ['Gerente de Personas'];
-  const items = Array.from({ length: Math.min(limit, 10) }, (_, index) => {
+  const items = Array.from({ length: limit }, (_, index) => {
     const company = sector.names[index % sector.names.length];
-    return { id: `apollo:sim-${index + 1}`, name: NAMES[index % NAMES.length], title: titles[index % titles.length], company,
+    return { id: `apollo:sim-${index + 1}`, name: personName(index), title: titles[index % titles.length], company,
       linkedin_url: `https://www.linkedin.com/in/sim-${index + 1}`, company_website: `https://www.${slug(company)}.cl/`, company_linkedin: null,
       email: null, status: 'No guardado', industry: sector.industry, employees: 150 + index * 60, location: `${location}, Chile` };
   });
@@ -343,7 +351,7 @@ export function activeTask(history: CorpusHistoryTurn[], nextRequest: string, du
     .flatMap((turn, index) => deliveryEvents(turn, `00000000-0000-4000-9500-${String(index + 2).padStart(12, '0')}`)));
   const task: CoworkActiveTask = { startRunId, startDepth: 0, plan, used: { steps: effects.length + searches, searches, credits }, graph };
   // The step the worker goes on with: the first pending one whose steps before it are done (worker.ts).
-  const next = graph.find(node => node.state === 'pending' && node.dependsOn.every(id => graph.some(dep => dep.id === id && dep.state === 'succeeded')));
+  const next = coworkTaskNextNode(graph);
   return { plan, graph, next: next ? { label: next.label, kind: next.kind } : null, context: coworkTaskContext(task),
     /** Whether the worker approves this proposal by itself (worker.ts, coworkTaskApproves): the person never sees its card. */
     approves: (kind: string, cost: { searches: number; credits: number }) => coworkTaskApproves(task, kind === 'search' ? null : kind, cost) };

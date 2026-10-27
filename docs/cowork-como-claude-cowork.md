@@ -151,11 +151,46 @@ Tercera parte, el mismo 27 de octubre. Las tareas programadas ya existían (`COW
 - La respuesta explica qué hará cada ejecución y qué no (no guarda, no gasta créditos, no envía), y ofrece buscar hoy los primeros.
 - **Revisión visual:** `cowork-programar-tarjeta` y su versión de teléfono, en claro y oscuro: la tarjeta, su única acción y el formulario con el nombre, el pedido y el horario que propuso.
 
+## Dentro de una tarea, el paso se hace, no se pregunta
+
+Cuarta parte, el mismo 27 de octubre. En las corridas de las tareas largas, Cowork volvía a preguntar lo que el plan ya había aprobado: «¿Creo la campaña pausada con estos 7 correos?», «¿Busco el correo de las 10 primeras personas?». La causa es un choque de instrucciones:
+
+- la tarea le dice «haz el siguiente paso, sin preguntar»;
+- el mensaje que reanuda la conversación después de un lote o de una búsqueda le dice «propón el siguiente paso concreto».
+
+Haiku seguía el segundo y lo convertía en una pregunta.
+
+**Qué cambia**
+
+- **La tarea nombra su siguiente paso** (`task.next`, en `coworkTaskContext`): qué paso es, de qué tipo y cómo hacerlo. Por ejemplo, para redactar: escribir los correos en esa misma respuesta y, si lo que sigue es la campaña pausada, proponerla ahí mismo con esos correos.
+- **La instrucción de la tarea lo dice:** ese paso se hace como dice `task.next.how`, aunque el pedido diga «propón el siguiente paso», sin preguntar si se hace.
+- **El paso con que sigue la tarea se calcula en un solo lugar** (`coworkTaskNextNode`). Lo usan el worker, el contexto y el banco.
+- **Lo que pide aprobación no cambia:** enviar, activar, LinkedIn o gastar más de lo aprobado.
+
+**El banco, más fiel:** la búsqueda simulada traía como máximo 10 personas, aunque se pidieran 20. Producción trae hasta 100 empresas primero. La jueza marcaba «trajo 10 de los 20 del plan» como una falla de Cowork, y no lo era. Ahora trae las que se piden, hasta 25.
+
+**Resultado** (`lista-y-campana`, `mineria-investigar-escribir` y `tarea-larga-plan`, 2 veces cada uno, Haiku, la misma búsqueda simulada en las dos columnas):
+
+| | Antes | Ahora |
+| --- | --- | --- |
+| Turnos de tarea que preguntan si hacer un paso del plan | 10 de 28 | 4 de 22 |
+| Turnos en total | 46 | 38 |
+| Llamadas al modelo | 126 | 89 |
+| Tarjetas que tuvo que aprobar la persona después del plan | 3 | 3 |
+| Pasos que aprobó la propia tarea | 15 | 17 |
+| Avance · veracidad · claridad (de 5) | 3,7 · 3 · 3,7 | 4,2 · 3,3 · 3,8 |
+| Encargos terminados (de 6) | 2 | 2 |
+
+- **Las 4 preguntas que quedan** salen todas del paso de redactar.
+  - En 3, la Redactora del banco (Haiku) no devolvió el correo y Cowork escribió uno de reserva. Pedir que lo revisen antes de crear la campaña es razonable. En producción escribe Luna.
+  - La cuarta pregunta por un correo que faltaba buscar.
+- **«Terminado» no se mueve,** por el mismo ruido de siempre.
+- **Lo que encontró y queda pendiente:** un plan de 20 personas con correo hace un primer lote de 10, que es el máximo por lote para buscar correos. La tarea da el paso por hecho y sigue a redactar con la mitad. Hay que contar el paso de preparar contra las personas que pide el plan, y aprobar solo el segundo lote dentro de los mismos créditos.
+
 ## Lo que sigue
 
 1. **Tareas largas: lo que falta.**
-   - Que la búsqueda de una tarea traiga lo que el plan pide (20 personas, no 10).
-   - Que, dentro de una tarea, Cowork no pregunte lo que el plan ya aprobó.
+   - Que el paso de preparar cuente a todas las personas que pide el plan: con 20, hoy se da por hecho con el primer lote de 10.
    - Sin aviso por correo cuando la tarea termina: se decidió no agregarlo.
 2. **Contexto más liviano.**
    - Cada llamada del coordinador lee unos 62.000 tokens: 75.000 caracteres de reglas, unos 33.000 del contexto del turno y las herramientas. El 87 % sale de la caché, así que con Haiku cuesta poco.
