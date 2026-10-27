@@ -7,6 +7,7 @@ En GrupoExpro (32 personas) y PSOL (7), las búsquedas les muestran a todos las 
 - **Quién la tiene.** La primera persona de la organización que guardó al lead, en Contactos o en «Por escribir», por 30 días desde ese primer guardado.
   - Si lo borra, o deja la organización, deja de estar adjudicado.
   - Pasados los 30 días, cualquiera lo puede guardar, y desde ese momento queda adjudicado a quien lo guarde.
+  - Quien ya lo tenía guardado sigue trabajando con él: puede actualizarlo o guardarlo otra vez, aunque ahora esté adjudicado a otra persona. Solo no lo puede guardar quien no lo tenía.
 - **Qué ven los demás.** En la búsqueda, «Por escribir», Cowork y la extensión: «Adjudicado a Ana Pérez · le quedan 12 días».
   - En la búsqueda no se puede marcar ni guardar, y su estado dice «Adjudicado».
   - Cowork no lo guarda ni le propone nada, y ofrece otras personas.
@@ -18,7 +19,10 @@ En GrupoExpro (32 personas) y PSOL (7), las búsquedas les muestran a todos las 
 - **En la base de datos**, en tres migraciones pequeñas:
   - `20261027120000_lead_claims_lookup.sql`: la lectura. Son `lead_claims_v1` (para la app; cada persona lee solo su organización y como sí misma), `lead_claim_lookup_v1` (interna) y un índice de `enriched_leads` por organización.
   - `20261027120050_lead_claims_lookup_faster.sql`: la misma lectura, más rápida. Normaliza una vez los contactos de la organización y los cruza por igualdad. En GrupoExpro, 200 personas pasaron de 1.214 ms a 22 ms; en una prueba local con 8.000 contactos, de 13,8 s a 91 ms. El resultado es el mismo.
-  - `20261027120100_lead_claims_enforce.sql`: el bloqueo. Un trigger antes de insertar en `leads` y `enriched_leads` rechaza a la persona adjudicada a otro integrante, con el error `lead_claimed`; el error lleva quién la tiene y cuántos días le quedan. Solo al insertar: quien ya la tenía la conserva, y reasignar un contacto no cambia.
+  - `20261027120100_lead_claims_enforce.sql`: el bloqueo. Un trigger antes de insertar en `leads` y `enriched_leads` rechaza a la persona adjudicada a otro integrante, con el error `lead_claimed`; el error lleva quién la tiene y cuántos días le quedan.
+    - Solo al insertar. Reasignar un contacto no cambia.
+    - No rechaza a quien ya tiene guardada a la persona. Esto importa porque Postgres corre el trigger también en un `upsert` que termina actualizando, y así guarda «Por escribir» un enriquecimiento (`enriched-leads-service.ts`). Sin esta excepción, quien tuvo a la persona antes no podría actualizarla una vez que otro la guardó.
+    - El trigger cuesta unos 2 ms por fila en la organización más grande (7.687 contactos): una importación de 1.000 personas suma unos 2 segundos.
 - **En la app**, para que nadie choque con el rechazo:
   - la búsqueda deja fuera a los adjudicados al guardar;
   - la importación de CSV y la de Cowork los dejan fuera y lo dicen en el resumen;
