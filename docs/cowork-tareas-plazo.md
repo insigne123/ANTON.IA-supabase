@@ -11,7 +11,7 @@ Le faltaba el tiempo.
 
 - **Un plan aprobado aprueba sus pasos solo durante 24 horas** desde que se aprobó. Se cambia con `COWORK_TASK_TTL_HOURS`, de 1 a 168; cualquier otro valor deja 24.
 - **Pasado el plazo**, la tarea deja de estar activa y cada paso que falte vuelve a pedir aprobación con su tarjeta, como fuera de una tarea. Lo mismo pasa si no se puede leer cuándo se aprobó: se pregunta antes que seguir sin límite.
-- **La tarjeta del plan lo dice:** «Si escribes un mensaje, la tarea se detiene ahí, y si no termina en 24 horas, lo que falte te lo pregunto antes». La ruta del plan devuelve `ttlHours` para que el texto use el valor configurado.
+- **La tarjeta del plan lo dice:** «Si me contestas o me dices “sigue”, continúo; un pedido nuevo o un “para” la detiene. Si no termina en 24 horas, lo que falte te lo pregunto antes» (desde el 27 de octubre; antes, cualquier mensaje la detenía). La ruta del plan devuelve `ttlHours` para que el texto use el valor configurado.
 
 ## Cómo funciona
 

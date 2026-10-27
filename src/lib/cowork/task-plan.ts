@@ -6,7 +6,8 @@ import { coworkTaskReadyNode, type CoworkTaskNode, type CoworkTaskDeliveryEvent 
  * búscales el correo y escríbeles una secuencia») becomes one plan the person approves once, as in Claude Cowork: the steps,
  * what it may spend (searches of the daily quota and email credits) and what it never does without asking. Each step that fits
  * the plan is approved by itself and the task goes on in continuations; anything outside it (sending, activating a campaign,
- * LinkedIn, a bigger spend) waits for the person as always. A message from the person ends the task.
+ * LinkedIn, a bigger spend) waits for the person as always. A message from the person ends the task, unless it goes on with it
+ * (coworkTaskReplyContinues): a «sí» or the answer to what the task asked.
  */
 
 /** What a step of a plan does. Writing needs no approval; the others are the effects the task may approve by itself. */
@@ -82,6 +83,35 @@ export function coworkTaskApproves(task: CoworkActiveTask, kind: string | null, 
   return task.used.credits + cost.credits <= task.plan.limits.credits;
 }
 
+/** The longest message of the person that may still go on with the task, and the longest answer to its question: a longer
+ * one is a new request. */
+export const COWORK_TASK_REPLY_MAX = { goAhead: 280, answer: 160 } as const;
+
+/** How a new request opens: «ahora…», «otra cosa…», «olvida eso…». */
+const NEW_REQUEST = /^(?:ahora|otra cosa|aparte|olvida|olvídate|olvidate|cambiando de tema|nueva tarea|otra tarea)(?!\p{L})/u;
+
+/** The words of a go-ahead, alone or together: «sí», «dale, sigue», «ok, adelante por favor». */
+const GO_AHEAD = new Set(['si', 'sí', 'dale', 'ok', 'okay', 'oka', 'okey', 'vale', 'ya', 'adelante', 'sigue', 'siga', 'seguir', 'continua', 'continúa',
+  'continuar', 'continúe', 'hazlo', 'haz', 'hagalo', 'hágalo', 'procede', 'vamos', 'perfecto', 'listo', 'de', 'acuerdo', 'bien', 'muy', 'correcto',
+  'exacto', 'claro', 'genial', 'bueno', 'buena', 'eso', 'gracias', 'por', 'favor', 'porfa', 'con', 'todo', 'apruebo', 'aprobado', 'conforme']);
+
+/** A message that stops the task whatever came before: an order to stop or wait, or a «no» first. Words end at any letter, accents included. */
+const STOPS = /^(?:no|para|paremos|parar|detente|det[eé]n|espera|esperá|stop|alto)(?!\p{L})|(?<!\p{L})(?:no sigas|no contin[uú]es|cancela(?:la|r)?|det[eé]n(?:la|te)?)(?!\p{L})/u;
+
+/**
+ * Whether a message of the person goes on with the approved task instead of ending it, as Claude Cowork keeps working while the
+ * person answers: a go-ahead («sí», «dale, sigue»), one of the answers the task's last turn offered (its buttons or choices), or
+ * a short answer to the question it asked. A stop («para», «espera», «no…») or anything else, a new request above all, ends it.
+ */
+export function coworkTaskReplyContinues(message: string, previous: { asked: boolean; offered: string[] }): boolean {
+  const text = String(message || '').normalize('NFC').trim().toLowerCase();
+  const words = text.replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  const plain = words.join(' ');
+  if (!words.length || text.length > COWORK_TASK_REPLY_MAX.goAhead || STOPS.test(plain)) return false;
+  if (words.every(word => GO_AHEAD.has(word)) || previous.offered.some(option => option.trim().toLowerCase() === text)) return true;
+  return previous.asked && text.length <= COWORK_TASK_REPLY_MAX.answer && !NEW_REQUEST.test(plain);
+}
+
 /** A thread running a task may take as many automatic steps as the plan has, beyond the usual budget (never past 10 deep). */
 export function coworkTaskThreadBudget<T extends { maxDepth: number; maxEffects: number; maxSearches: number }>(base: T, task: CoworkActiveTask | null): T {
   if (!task) return base;
@@ -97,8 +127,9 @@ export function coworkTaskThreadBudget<T extends { maxDepth: number; maxEffects:
 const TASK_INSTRUCTION = 'Estás ejecutando una tarea que el usuario ya aprobó (task). Haz ahora el siguiente paso pendiente del plan, sin '
   + 'preguntar antes: las búsquedas, preparaciones y la campaña pausada que caben en el plan y en lo que queda de sus límites se aprueban '
   + 'solas; lo que no cabe (enviar, activar, LinkedIn o un gasto mayor) pide aprobación como siempre, y dilo en una frase. Un paso de '
-  + 'redactar (write) se hace en esta respuesta. Cuando no quede ningún paso, cierra con el resumen de lo hecho, cifras incluidas, y lo que '
-  + 'queda para el usuario (por ejemplo activar la campaña).';
+  + 'redactar (write) se hace en esta respuesta. Si el pedido es del usuario, es un «sí» o su respuesta a lo que le preguntaste: síguela con '
+  + 'eso. Cuando no quede ningún paso, cierra con el resumen de lo hecho, cifras incluidas, y lo que queda para el usuario (por ejemplo '
+  + 'activar la campaña).';
 
 /** What a turn inside the task reads: the plan, what it already spent and how to go on. */
 export function coworkTaskContext(task: CoworkActiveTask) {

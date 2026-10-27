@@ -10,7 +10,7 @@ const plan = { goal: 'Escribirles a los 10 mejores', limits: { searches: 1, cred
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 // A continuation's request id is derived from its parent, as the worker admits it.
 const automatic = (runId: string, parent: string) => ({ id: runId, parent_run_id: parent, depth: 0, request_id: deterministicCoworkUuid(`cowork:continuation:${parent}`) });
-const human = (runId: string, parent: string | null) => ({ id: runId, parent_run_id: parent, depth: 0, request_id: id(900) });
+const human = (runId: string, parent: string | null, message = 'Busca gerentes de retail') => ({ id: runId, parent_run_id: parent, depth: 0, request_id: id(900), message });
 
 // Events carry the time they were written; by default, a moment ago.
 function fakeClient(runs: Array<Record<string, unknown>>, events: Array<{ run_id: string; kind: string; payload: unknown; created_at?: string | null }>) {
@@ -20,6 +20,7 @@ function fakeClient(runs: Array<Record<string, unknown>>, events: Array<{ run_id
       select: () => chain,
       eq: (key: string, value: unknown) => { where[key] = value; return chain; },
       order: () => chain,
+      limit: () => chain,
       maybeSingle: async () => ({ data: runs.find(run => run.id === where.id) ?? null, error: null }),
       then: (resolve: (value: unknown) => void) => resolve({ data: table === 'cowork_run_events'
         ? events.filter(event => event.run_id === where.run_id && event.kind === where.kind)
@@ -49,7 +50,7 @@ test('a task goes on through the worker\'s continuations, counting what its step
   assert.equal(task?.plan.goal, plan.goal);
 });
 
-test('a message from the person ends the task, and a thread that never started one has none', async () => {
+test('a new request from the person ends the task, and a thread that never started one has none', async () => {
   const events = [{ run_id: id(1), kind: COWORK_TASK_EVENTS.started, payload: { hash: 'h', plan } }];
   // The person wrote after the task's continuation.
   const runs = [human(id(1), null), automatic(id(2), id(1)), human(id(3), id(2))];
@@ -57,6 +58,29 @@ test('a message from the person ends the task, and a thread that never started o
   // The run that proposed the plan is not inside it either: approving it starts the task.
   assert.equal(await loadCoworkActiveTask(fakeClient(runs, events), scope, id(1)), null);
   assert.equal(await loadCoworkActiveTask(fakeClient([human(id(1), null), automatic(id(2), id(1))], []), scope, id(2)), null);
+});
+
+test('the person\'s «sí», the answer to what the task asked or a button it offered go on with the task; a new request or a stop ends it', async () => {
+  const events = [
+    { run_id: id(1), kind: COWORK_TASK_EVENTS.started, payload: { hash: 'h', plan } },
+    { run_id: id(2), kind: COWORK_TASK_EVENTS.step, payload: { kind: 'search', searches: 1, credits: 0 } },
+    { run_id: id(2), kind: 'run.completed', payload: { reply: 'Encontré 25.', question: '¿Guardo solo a los de Santiago?', suggestions: [{ label: 'Guardar los 10', message: 'Guarda a los 10 mejores' }] } },
+  ];
+  const after = (message: string) => [human(id(1), null), automatic(id(2), id(1)), human(id(3), id(2), message), automatic(id(4), id(3))];
+  for (const message of ['Sí, dale', 'Solo Santiago', 'Guarda a los 10 mejores']) {
+    const task = await loadCoworkActiveTask(fakeClient(after(message), events), scope, id(4));
+    assert.equal(task?.startRunId, id(1), message);
+    assert.deepEqual(task?.used, { steps: 1, searches: 1, credits: 0 }, 'what the task spent before the reply still counts');
+    // The reply's own turn reads the task too.
+    assert.equal((await loadCoworkActiveTask(fakeClient(after(message), events), scope, id(3)))?.startRunId, id(1), message);
+  }
+  for (const message of ['Para', 'No, espera', 'Ahora escríbele a los de minería que guardé ayer y arma otra campaña con ellos, con un tono más directo y sin citar noticias']) {
+    assert.equal(await loadCoworkActiveTask(fakeClient(after(message), events), scope, id(4)), null, message);
+  }
+  // Without a question or a button in the turn before, an answer is a new request: it ends the task; a «sí» still goes on.
+  const quiet = events.filter(event => event.kind !== 'run.completed');
+  assert.equal(await loadCoworkActiveTask(fakeClient(after('Solo Santiago'), quiet), scope, id(4)), null);
+  assert.equal((await loadCoworkActiveTask(fakeClient(after('Sí'), quiet), scope, id(4)))?.startRunId, id(1));
 });
 
 test('the worker approves by itself only what fits the plan, and never past the plan\'s limits or outside the task', async () => {

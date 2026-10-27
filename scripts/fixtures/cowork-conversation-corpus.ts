@@ -274,7 +274,9 @@ export type CorpusHistoryTurn = { request: string; reply: string; at: string; ob
   /** What the person said about that answer (👍/👎, Plan 13), as the history carries it. */
   feedback?: { rating: 'up' | 'down'; reason: string | null; comment: string | null };
   /** The code artifacts that turn made (Plan 12, 3b), as the conversation history carries them. */
-  artifacts?: Array<{ name: string; title: string }> };
+  artifacts?: Array<{ name: string; title: string }>;
+  /** What that answer left open for the person, as loadCoworkActiveTask reads it: whether it asked and the answers it offered. Never sent to the model. */
+  open?: { asked: boolean; offered: string[] } };
 
 export type CorpusCase = {
   id: string;

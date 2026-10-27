@@ -95,7 +95,7 @@ test('researches asked in the work finish: the conversation resumes with the not
   assert.match(after.research.findings[0], /2026/);
 });
 
-test('an approved task: its turns carry the task, a delivery with steps left goes on by itself, and a message of the person ends it', () => {
+test('an approved task: its turns carry the task, a delivery with steps left goes on by itself, a «sí» goes on with it and a new request ends it', () => {
   const plan = { goal: 'Campaña para retail', steps: [{ label: 'Buscar prospectos', kind: 'search' }, { label: 'Escribir el correo', kind: 'write' }, { label: 'Crear la campaña pausada', kind: 'campaign' }],
     limits: { searches: 1, credits: 10 } };
   const approved = simulateEffect({ kind: 'task_plan', label: 'Tarea de 3 pasos', task: plan as never }, []) as { result: unknown };
@@ -108,7 +108,16 @@ test('an approved task: its turns carry the task, a delivery with steps left goe
   const email = { type: 'email_draft', title: 'Correo', to: [], subject: 'Hola', body: 'Texto' } as never;
   const next = nextTurn(task, { request: COWORK_CONTINUE_AFTER_SEARCH, at: AT, result: base({ reply: 'Escribí el correo.', blocks: [email] }), observations: [] }, history, 0)!;
   assert.match(next.request!, /^Continúa la tarea aprobada desde su entrega guardada\. Siguiente paso: Crear la campaña pausada\./, 'the write step was delivered by this turn');
-  assert.equal(activeTask([...history, next.turn], 'Sí, adelante.'), null, 'a message of the person ends the task');
+  assert.equal(activeTask([...history, next.turn], 'Sí, adelante.')?.next?.kind, 'campaign', 'a «sí» of the person goes on with the task');
+  assert.equal(activeTask([...history, next.turn], 'Busca gerentes de minería en Antofagasta'), null, 'a new request ends it');
+  // An answer that asks waits for the person, and their answer goes on with the task; past it, the worker's continuation again.
+  const asking = nextTurn(task, { request: COWORK_CONTINUE_AFTER_SEARCH, at: AT, result: base({ reply: 'Escribí el correo. ¿Lo dejo con tono formal?', question: '¿Lo dejo con tono formal?', blocks: [email] }), observations: [] }, history, 0)!;
+  assert.equal(asking.request, null, 'the person answers');
+  assert.deepEqual(asking.turn.open, { asked: true, offered: [] });
+  const answered = activeTask([...history, asking.turn], 'Más cercano, de tú')!;
+  assert.equal(answered.next!.kind, 'campaign');
+  const after = nextTurn(task, { request: 'Más cercano, de tú', at: AT, result: base({ reply: 'Lo dejé más cercano.', blocks: [email] }), observations: [] }, [...history, asking.turn], 1)!;
+  assert.match(after.request!, /^Continúa la tarea aprobada desde su entrega guardada\. Siguiente paso: Crear la campaña pausada\./);
 });
 
 test('the turn that resumes with a research notice already reads those researches finished, by id or by the JSON with it', () => {

@@ -5,7 +5,7 @@
 // the worker writes in production (src/lib/cowork/continuation-messages.ts), and the history carries the result as production loads it
 // (server/cowork/conversation-context.ts: the turn's newest reads and the effects that ran). Everything here is pure: no model, no database.
 import { COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH, coworkContinuationAfter, coworkContinueTask } from '../../src/lib/cowork/continuation-messages';
-import { coworkTaskApproves, coworkTaskContext, type CoworkActiveTask, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
+import { coworkTaskApproves, coworkTaskContext, coworkTaskReplyContinues, type CoworkActiveTask, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
 import { coworkResearchNoticeMessage } from '../../src/lib/cowork/research-notice';
 import { COWORK_SEARCH_ROLE_NOTE } from '../../src/lib/cowork/search-ranking';
 import { CORPUS_NOW, CORPUS_SAVED_EMAILS, corpusRead, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
@@ -287,14 +287,26 @@ export function taskWorld(history: CorpusHistoryTurn[], request = ''): CorpusWor
   };
 }
 
-/** A request the worker wrote on its own (a continuation or a notice), not the person: an approved task goes on only through these. */
+/** A request the worker wrote on its own (a continuation or a notice), not the person. */
 const automatic = (request: string) => /^(?:Continúa |El usuario aprobó el plan de la tarea|Termin(?:ó la investigación|aron las investigaciones) que pediste)/.test(request);
 
-/** The approved task the next turn continues, as loadCoworkActiveTask finds it: approved in this work and with no message of the person since. */
+/** Whether a turn's request goes on with an approved task: the worker's own, or a reply of the person that goes on with it, after what the turn before left open. */
+const goesOn = (request: string, before: CorpusHistoryTurn | undefined) =>
+  automatic(request) || coworkTaskReplyContinues(request, before?.open ?? { asked: false, offered: [] });
+
+/** What an answer leaves open for the person (its question, its buttons and choices), as the next turn's task reads it. */
+const leftOpen = (result: CorpusTurnResult) => {
+  const offered = [...(result.suggestions || []).map(item => item.message), ...(result.choices?.options || [])];
+  const asked = Boolean(result.question) || (result.choices?.options?.length ?? 0) > 0;
+  return asked || offered.length ? { open: { asked, offered } } : {};
+};
+
+/** The approved task the next turn continues, as loadCoworkActiveTask finds it: approved in this work, and since then only the worker's
+ * own turns and the person's replies that go on with it (a «sí», the answer to what it asked). */
 export function activeTask(history: CorpusHistoryTurn[], nextRequest: string) {
   let start = -1;
   history.forEach((turn, index) => { if ((turn.actions as Array<{ kind?: string }> | undefined)?.some(action => action.kind === 'task_plan')) start = index; });
-  if (start < 0 || !automatic(nextRequest) || history.slice(start + 1).some(turn => !automatic(turn.request))) return null;
+  if (start < 0 || !goesOn(nextRequest, history.at(-1)) || history.slice(start + 1).some((turn, index) => !goesOn(turn.request, history[start + index]))) return null;
   const plan = ((history[start].actions as Array<{ kind?: string; result?: { plan?: CoworkTaskPlan | null } }>).find(action => action.kind === 'task_plan')?.result?.plan) ?? null;
   if (!plan) return null;
   const after = history.slice(start + 1);
@@ -339,20 +351,21 @@ export function nextTurn(task: CoworkTask, turn: { request: string; at: string; 
   }
   // Inside an approved task, a delivery with steps left goes on by itself: the worker admits the next step (worker.ts, with the task graph).
   // What this turn delivered counts: a turn that wrote the emails completed the write step.
-  const kept: CorpusHistoryTurn = { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), ...shown(result) };
-  const running = automatic(turn.request) ? activeTask([...history, kept], COWORK_CONTINUE_AFTER_PLAN) : null;
-  if (running?.next && !result.question) return { request: coworkContinueTask(running.next.label), approved: null, turn: kept };
+  // An answer that asks the person waits for them (worker.ts), and their answer goes on with the task.
+  const kept: CorpusHistoryTurn = { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), ...shown(result), ...leftOpen(result) };
+  const running = activeTask([...history, kept], COWORK_CONTINUE_AFTER_PLAN);
+  if (running?.next && !kept.open?.asked) return { request: coworkContinueTask(running.next.label), approved: null, turn: kept };
   // Researches asked for in this work finish a few minutes later: the worker resumes the conversation with its notice (research-notice.ts),
   // whatever the last answer asked.
   const research = researchesOf([...history, kept]);
   if (research.waiting.length) {
     const saved = savedByTheWork(history);
     const done = research.waiting.map(leadId => { const person = saved.find(item => item.id === leadId); return { leadId, name: person?.name ?? null, company: person?.company ?? null, status: 'completed' }; });
-    return { request: coworkResearchNoticeMessage(done), approved: null, turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), ...shown(result) } };
+    return { request: coworkResearchNoticeMessage(done), approved: null, turn: kept };
   }
   // An answer that asks something: the person answers it (with the task's own words first) and the work goes on.
   const asks = Boolean(result.question) || (result.choices?.options?.length ?? 0) > 0;
   if (!asks) return null;
   // null: the person answers in their own words (the evaluator asks its simulated person; offline it is «Sí, adelante.»).
-  return { request: task.answers?.[answered] ?? null, approved: null, turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), ...shown(result) } };
+  return { request: task.answers?.[answered] ?? null, approved: null, turn: kept };
 }
