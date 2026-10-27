@@ -223,7 +223,9 @@ export type CorpusTurnResult = {
     /** A long task's plan (Plan 13, 4c): its goal, steps and limits, as the plan card shows them. */
     task?: { goal: string; steps: Array<{ label: string; kind: string }>; limits: { searches: number; credits: number } };
     /** How many contacts an email lookup batch covers, and a prepare batch's goal and people: what its card's cost line counts. */
-    enrichBatch?: number; prepareBatch?: { goal: 'save' | 'email' | 'research' | 'linkedin'; people: number } } | null;
+    enrichBatch?: number; prepareBatch?: { goal: 'save' | 'email' | 'research' | 'linkedin'; people: number };
+    /** Who a batch is for (search results or saved contacts), as proposed: the task bench plays the batch on these people. */
+    who?: Array<{ providerId?: string | null; leadId?: string | null } | string> } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;
@@ -265,6 +267,8 @@ export const corpusShown = (result: CorpusTurnResult) => [result.reply, result.c
 export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[]; userContext?: CoworkUserContext | null };
 
 export type CorpusHistoryTurn = { request: string; reply: string; at: string; observations?: unknown[]; actions?: unknown[];
+  /** The cards of that answer (emails, sequences, tables) and its document, as conversation-context.ts loads them: «usa ese correo» refers to them. */
+  blocks?: CoworkBlock[]; document?: { title: string; content: string } | null;
   /** What the person said about that answer (👍/👎, Plan 13), as the history carries it. */
   feedback?: { rating: 'up' | 'down'; reason: string | null; comment: string | null };
   /** The code artifacts that turn made (Plan 12, 3b), as the conversation history carries them. */
@@ -303,6 +307,8 @@ export type CorpusCase = {
   /** The code of the artifacts made before in this conversation, by file name: what the Designer gets to edit. */
   artifacts?: Record<string, { html: string; css: string; js: string }>;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
+  /** The approved task this turn continues (coworkTaskContext), as the worker passes it: its steps approve themselves within its limits. */
+  task?: unknown;
 };
 
 const answerOk = (result: CorpusTurnResult) => !result.failed;

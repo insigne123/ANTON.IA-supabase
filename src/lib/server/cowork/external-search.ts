@@ -18,6 +18,7 @@ import { coworkOwnSavedByProvider } from './prepare-batch';
 import { normalizeLockLinkedin, teamLockNotice } from '@/lib/team-lock';
 import type { AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
 import { linkedinProfilesMatch } from '@/lib/linkedin-url';
+import { COWORK_CONTINUE_AFTER_SEARCH } from '@/lib/cowork/continuation-messages';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
 function text(value: unknown, max = 500) { return typeof value === 'string' ? value.slice(0, max) : null; }
@@ -189,7 +190,7 @@ export async function admitSearchContinuation(
   runId: string,
 ): Promise<string | null> {
   return admitCoworkContinuation(client, scope, runId,
-    'Continúa a partir del resultado de búsqueda completado del trabajo anterior, dentro del mismo encargo. Si result.strategy es profile, presenta a la persona de ese perfil exacto y conserva el encargo original: propone guardarla y, después de guardarla, preparar la invitación o mensaje solicitado; no pidas su empresa ni muestres a otras personas. Si no fue un perfil exacto, presenta lo encontrado agrupado por empresa: cuántas personas y empresas trajo, quiénes parecen decidir la compra según su cargo (role y fit, que son hipótesis) y cualquier aviso (notice). Propón el siguiente paso concreto, por ejemplo guardar a los adecuados en un solo lote. Si result.next no es null, ofrece «Traer más» como respuesta sugerida; al pedirlo, propones los mismos criterios con page y offset de result.next. No repitas la búsqueda externa: ya está completada y su resultado está en el historial.');
+    COWORK_CONTINUE_AFTER_SEARCH);
 }
 /** Only the scheduled worker consumes quota/calls Apollo. Claims are never replayed. */
 export async function processCoworkSearchQueue() {

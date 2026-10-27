@@ -70,6 +70,13 @@ function coworkWebTagged(input: CoworkLoopInput, fromWeb: boolean): Partial<Cowo
   };
 }
 
+/** The emails the Writer wrote, as the coordinator reads them before proposing the campaign: each with its subject and its text. */
+export function coworkWrittenPreview(emails: Array<{ subject: string; body: string; day: number | null }> | null, personal: Array<{ email: string; subject: string; body: string }> | null) {
+  const cut = (body: string) => body.length > 1_200 ? `${body.slice(0, 1_200)}…` : body;
+  if (emails?.length) return emails.map((email, index) => `Correo ${index + 1}${email.day ? ` (día ${email.day})` : ''}: «${email.subject}»\n${cut(email.body)}`).join('\n\n');
+  return (personal ?? []).map(email => `Para ${email.email}: «${email.subject}»\n${cut(email.body)}`).join('\n\n');
+}
+
 /** The tool name of a gateway action: the API admits letters, digits, underscores and hyphens. */
 export const coworkToolName = (action: string) => action.replace(/\./g, '_');
 
@@ -282,6 +289,10 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
       name: 'redactar', kind: 'meta', schema: coworkWriteBriefSchema,
       description: 'Entrega un encargo a la Redactora para escribir correos, secuencias o mensajes con lo que leíste (draft.write). Vuelve el texto listo; si el encargo incluye una campaña, sigue con proponer_campana.',
       run: async (brief, context) => {
+        // Written for the campaign already: writing it again costs a second Writer and leaves the campaign unproposed.
+        if (written && input.proposeEffect && !proposed && (brief.campaign || coworkAcceptsCampaignOffer(input.message, input.history))) {
+          return { status: 'error', message: 'Los correos de esta campaña ya están escritos (arriba, en el resultado de redactar). No los escribas de nuevo: propón ahora la campaña con proponer_campana (action campaign.create).' };
+        }
         await input.authorize();
         context.signal.throwIfAborted();
         const lookup = async (name: string): Promise<CoworkObservation | null> => {
@@ -299,8 +310,11 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
         if (!emails && !personal) return finished(coworkWithDemoNote(answer), 'writer');
         written = { emails, personal, answer };
         observations.push({ action: COWORK_WRITTEN_ACTION, input: '', result: emails ? { scope: 'writer_output', emails } : { scope: 'writer_output', firstEmails: personal } });
+        // The coordinator sees what was written: told only that it exists, it would not propose a text it never read and the emails got lost.
         return { status: 'ok', output: { emails: emails?.length ?? 0, personal: personal?.length ?? 0 },
-          text: 'La Redactora ya escribió los correos y la persona pidió la campaña: propónla ahora con proponer_campana (action campaign.create); la app copia su texto tal cual. En explicacion di a quiénes va y cuántos correos lleva.' };
+          text: ['La Redactora ya escribió los correos y la Revisora los revisó; la persona pidió la campaña. Este es el texto, no hace falta revisarlo de nuevo:',
+            coworkWrittenPreview(emails, personal),
+            'Propónla ahora con proponer_campana (action campaign.create): la app copia este texto tal cual. En explicacion di a quiénes va y cuántos correos lleva.'].join('\n\n') };
       },
     }));
   }
@@ -343,6 +357,11 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
         }
       }
       if (memoria) await rememberMemory(memoria);
+      // Written for a campaign that was not proposed: the emails go with the answer, so the person sees them and a «sí» next turn proposes
+      // the campaign with that exact text (coworkShownCampaignEmails), instead of the next turn finding that nothing came back.
+      if (written && !proposed && !coworkCampaignEmails(answer.blocks) && !coworkPersonalEmails(answer.blocks)) {
+        return finished({ ...answer, blocks: [...(answer.blocks ?? []), ...(written.answer.blocks ?? [])] }, 'answer');
+      }
       return finished(answer, 'answer');
     },
   }));

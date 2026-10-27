@@ -1,4 +1,5 @@
 import { claimForCoworkUsers } from './worker-users';
+import { coworkContinueTask } from '@/lib/cowork/continuation-messages';
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { coworkClarificationAnswer, coworkDecisionSchema, coworkRescueNote, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from '@/lib/cowork/agent-loop';
 import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_REASONING_EFFORT, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
@@ -749,8 +750,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       if (next) {
         const child = await client.from('cowork_runs').select('id').eq('parent_run_id', run.id)
           .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).limit(1).maybeSingle();
-        if (!child.error && !child.data) await admitCoworkContinuation(client, scope, run.id,
-          `Continúa la tarea aprobada desde su entrega guardada. Siguiente paso: ${next.label}. Conserva los targets, la oferta y la versión exacta; no repitas lo ya completado ni amplíes permisos o gasto.`);
+        if (!child.error && !child.data) await admitCoworkContinuation(client, scope, run.id, coworkContinueTask(next.label));
       }
     }
     return { claimed: true, processed: finished.data === true ? 1 : 0 };

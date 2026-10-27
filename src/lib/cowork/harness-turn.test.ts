@@ -245,6 +245,49 @@ test('the Writer is a tool: its emails are the answer, or the base of a campaign
   assert.equal(model.calls, 1);
 });
 
+test('written for a campaign: the coordinator reads the text, and if it answers instead of proposing, the emails go with the answer', async () => {
+  const email = { type: 'email_draft', title: 'Para retail', to: ['ana@tiendas.cl'], subject: 'Temporada alta en tus tiendas', body: 'Hola {{nombre}},\n\nVi que abren dos tiendas.\n\nSaludos' };
+  const model = new ScriptedModel([
+    reply([call('redactar', { kind: 'email', recipients: ['ana@tiendas.cl'], objective: 'Presentar la oferta', angle: 'Temporada alta', tone: 'cercano', steps: null, campaign: true, notes: null, findings: null })]),
+    reply([answer('Escribí el correo para tu campaña.')]),
+  ]);
+  const proposals: unknown[] = [];
+  const { input } = base(model, {
+    message: 'Escríbeles y déjame una campaña pausada',
+    proposeEffect: async proposal => { proposals.push(proposal); },
+    write: async () => ({ reply: 'Aquí está el correo.', document: null, blocks: [email] }) as never,
+  });
+  const result = await runCoworkHarnessTurn(input);
+  const seen = model.requests[1].messages.at(-1)!.content as Array<{ content: string }>;
+  assert.match(seen[0].content, /«Temporada alta en tus tiendas»\nHola \{\{nombre\}\}/, 'the subject and the text, not only that it was written');
+  assert.match(seen[0].content, /proponer_campana/);
+  assert.equal(proposals.length, 0);
+  assert.equal(result.reply, 'Escribí el correo para tu campaña.');
+  assert.deepEqual((result.blocks ?? []).map(block => (block as { subject?: string }).subject), ['Temporada alta en tus tiendas'],
+    'the person sees the emails, and the next «sí» proposes the campaign with that text');
+});
+
+test('written for a campaign once: asking the Writer again is sent back to propose the campaign', async () => {
+  const email = { type: 'email_draft', title: 'Para retail', to: ['ana@tiendas.cl'], subject: 'Temporada alta', body: 'Hola {{nombre}},\n\nVi que abren dos tiendas.\n\nSaludos' };
+  const brief = { kind: 'email', recipients: ['ana@tiendas.cl'], objective: 'Presentar la oferta', angle: 'Temporada alta', tone: 'cercano', steps: null, campaign: true, notes: null, findings: null };
+  const model = new ScriptedModel([
+    reply([call('redactar', brief, 'w1')]),
+    reply([call('redactar', brief, 'w2')]),
+    reply([answer('Escribí el correo.')]),
+  ]);
+  let writes = 0;
+  const { input } = base(model, {
+    message: 'Escríbeles y déjame una campaña pausada',
+    proposeEffect: async () => {},
+    write: async () => { writes += 1; return { reply: 'Aquí está el correo.', document: null, blocks: [email] } as never; },
+  });
+  await runCoworkHarnessTurn(input);
+  assert.equal(writes, 1, 'the Writer writes once');
+  const again = model.requests[2].messages.at(-1)!.content as Array<{ is_error?: boolean; content: string }>;
+  assert.equal(again[0].is_error, true);
+  assert.match(again[0].content, /ya están escritos[\s\S]*proponer_campana/);
+});
+
 test('the Analyst needs something read first', async () => {
   const model = new ScriptedModel([
     reply([call('analizar', { question: '¿Qué campaña rinde más?', focus: 'respuestas', notes: null }, 'a1')]),

@@ -141,7 +141,7 @@ export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, optio
     campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunitiesSection: Boolean(entry.opportunitiesSection),
     preferences: Boolean(entry.preferences),
     // Long tasks (Plan 13, 4c), as production with COWORK_TASKS_ENABLED=true.
-    tasks: process.env.COWORK_TASKS_ENABLED === 'true',
+    tasks: process.env.COWORK_TASKS_ENABLED === 'true' && !entry.task,
     prepareBatch: corpusPrepareBatch,
     intents: corpusIntentPrompts ? coworkTurnIntents(entry.request, entry.history || []) : null,
     threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
@@ -279,7 +279,8 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   harness?: (turn: { system: string; context: string }) => CoworkHarnessConfig): Promise<CorpusOutcome> {
   const turns = (entry.history || []).map((turn, index) => ({
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
-    reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
+    reply: turn.reply, document: turn.document ?? null, ...(turn.blocks?.length ? { blocks: turn.blocks } : {}),
+    observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
     ...(turn.artifacts ? { artifacts: turn.artifacts } : {}),
     ...(turn.feedback && process.env.COWORK_EVAL_VERSIONS !== 'off' ? { feedback: turn.feedback } : {}),
   }));
@@ -300,13 +301,14 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
     const answer = await (harness ? runCoworkHarnessTurn : runCoworkReadLoop)({
       ...(harness ? { harness: harness({ system: instructions.systemPrompt, context: JSON.stringify(coworkDecisionContext(instructions, {
         history: { turns, olderTurnsOmitted: false }, request: entry.request, observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' }, userContext,
+        ...(entry.task ? { task: entry.task } : {}),
         ...(entry.previousVersions?.length && process.env.COWORK_EVAL_VERSIONS !== 'off' ? { previousVersions: entry.previousVersions } : {}),
       }, CORPUS_NOW, 'America/Santiago')) }) } : {}),
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal),
       preferences: Boolean(entry.preferences),
       metricPeriods: entry.id.startsWith('integral-'),
-      tasks: process.env.COWORK_TASKS_ENABLED === 'true',
+      tasks: process.env.COWORK_TASKS_ENABLED === 'true' && !entry.task,
       prepareBatch: corpusPrepareBatch,
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
@@ -324,6 +326,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       decide: (observations, mustAnswer, rejections: CoworkRejection[] = [], turnBudget) => decide(coworkDecisionContext(instructions, {
         history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer, turnBudget,
         executionPolicy: { mode: 'approval' }, userContext,
+        ...(entry.task ? { task: entry.task } : {}),
         ...(rejections.length ? { rejectedDecisions: rejections } : {}),
         // As the worker sends them since Plan 13; COWORK_EVAL_VERSIONS=off measures Cowork without them.
         ...(entry.previousVersions?.length && process.env.COWORK_EVAL_VERSIONS !== 'off' ? { previousVersions: entry.previousVersions } : {}),
@@ -397,7 +400,8 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
           ...(proposal.contactsImport ? { contactsImport: { ...proposal.contactsImport, card: staged?.card } } : {}),
           ...(proposal.profile ? { profile: proposal.profile } : {}),
           ...(proposal.enrichBatch ? { enrichBatch: proposal.enrichBatch.length } : {}),
-          ...(proposal.prepareBatch ? { prepareBatch: { goal: proposal.prepareBatch.goal, people: proposal.prepareBatch.people.length } } : {}) };
+          ...(proposal.prepareBatch ? { prepareBatch: { goal: proposal.prepareBatch.goal, people: proposal.prepareBatch.people.length }, who: proposal.prepareBatch.people } : {}),
+          ...(proposal.enrichBatch && !proposal.prepareBatch ? { who: proposal.enrichBatch } : {}) };
       },
     });
     // Without the loop's verdict (the correction became the Writer's emails), a different reply is the correction:
