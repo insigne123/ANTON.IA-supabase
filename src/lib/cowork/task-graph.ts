@@ -83,3 +83,25 @@ export function coworkTaskReadyNode(graph: CoworkTaskNode[], kind: CoworkTaskSte
 export function coworkTaskReadyEffect(graph: CoworkTaskNode[] | undefined, kind: string) {
   return graph && effects[kind] ? coworkTaskReadyNode(graph, effects[kind]) : undefined;
 }
+
+/** Where a step of a task stands as the conversation shows it: done, the one it goes on with, still to come, or with something to look at. */
+export type CoworkTaskProgressState = 'done' | 'current' | 'pending' | 'attention';
+export type CoworkTaskProgress = { goal: string; steps: Array<{ label: string; state: CoworkTaskProgressState }> };
+const PROGRESS_STATES: readonly CoworkTaskProgressState[] = ['done', 'current', 'pending', 'attention'];
+
+/** The task after a turn (the «task.progress» event): its goal and each step, with the first one not done as the current one. */
+export function coworkTaskProgress(goal: string, graph: CoworkTaskNode[]): CoworkTaskProgress {
+  const current = graph.find(node => node.state !== 'succeeded');
+  return { goal, steps: graph.map(node => ({ label: node.label, state: node.state === 'succeeded' ? 'done'
+    : node.state === 'partial' || node.state === 'failed' ? 'attention' : node === current ? 'current' : 'pending' })) };
+}
+
+/** Structural read of a stored «task.progress» for the UI; anything else reads as none. */
+export function coworkStoredTaskProgress(value: unknown): CoworkTaskProgress | null {
+  if (!value || typeof value !== 'object') return null;
+  const { goal, steps } = value as { goal?: unknown; steps?: unknown };
+  if (typeof goal !== 'string' || !goal.trim() || !Array.isArray(steps) || steps.length < 2 || steps.length > 6) return null;
+  const kept = steps.filter((step): step is { label: string; state: CoworkTaskProgressState } => Boolean(step) && typeof step.label === 'string'
+    && step.label.trim().length > 0 && PROGRESS_STATES.includes(step.state));
+  return kept.length === steps.length ? { goal: goal.slice(0, 300), steps: kept.map(step => ({ label: step.label.slice(0, 160), state: step.state })) } : null;
+}

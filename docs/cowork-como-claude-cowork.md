@@ -102,7 +102,7 @@ Una corrida de los ocho encargos con el código de hoy y los dos arreglos de arr
 ```
 set -a; . <banderas COWORK_* de apphosting.yaml>; set +a
 ANTHROPIC_API_KEY=... COWORK_WRITER_MODEL=claude-haiku-5-5 COWORK_REVIEWER_MODEL=claude-haiku-5-5 COWORK_MODEL=claude-haiku-5-5 \
-  node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-tasks.ts --live --writer --max-calls=500 [--tasks=a,b] [--repeat=2] --output=tareas.json
+  node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-tasks.ts --live --writer --max-calls=500 [--tasks=a,b] [--repeat=2] [--max-turns=12] --output=tareas.json
 ```
 
 `EVAL_DEBUG=1` imprime cada herramienta que llama el coordinador y lo que le vuelve. Con `--rejudge=tareas.json --max-calls=1`, la jueza vuelve a leer una corrida guardada sin volver a correr Cowork. Una corrida de los ocho encargos cuesta alrededor de US$0,5, entre coordinador, Redactora, persona y jueza, y tarda unos 20 a 40 minutos.

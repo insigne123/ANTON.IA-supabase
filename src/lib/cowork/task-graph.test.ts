@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { coworkTaskGraph, coworkTaskReadyNode } from './task-graph';
+import { coworkStoredTaskProgress, coworkTaskGraph, coworkTaskProgress, coworkTaskReadyNode } from './task-graph';
 const plan = { goal: 'Preparar contactos y campaña pausada', steps: [{ kind: 'prepare' as const, label: 'Preparar los contactos' },
   { kind: 'write' as const, label: 'Escribir el correo' }, { kind: 'campaign' as const, label: 'Guardar campaña pausada' }], limits: { searches: 0, credits: 2 } };
 test('admission and queued research do not unlock writing; delivered references and dependencies persist', () => {
@@ -20,4 +20,19 @@ test('a partially prepared batch keeps later dependencies blocked', () => {
   const graph = coworkTaskGraph('root', plan, [{ runId: 'prepare-run', kind: 'effect.completed', payload: { kind: 'lead_prepare_batch',
     result: { items: [{ id: 'lead1', status: 'ready', research: 'completed' }, { id: 'lead2', status: 'partial' }] } } }]);
   assert.deepEqual(graph.map(node => node.state), ['partial', 'blocked', 'blocked']);
+});
+test('the conversation shows each step as done, the one it goes on with, still to come or with something to look at', () => {
+  const written = { runId: 'write-run', kind: 'run.completed', payload: { blocks: [{ type: 'email_draft', subject: 'hola', body: 'Texto' }] } };
+  const ready = { runId: 'prepare-run', kind: 'effect.completed', payload: { kind: 'lead_prepare_batch', result: { items: [{ id: 'lead1', status: 'ready' }] } } };
+  assert.deepEqual(coworkTaskProgress(plan.goal, coworkTaskGraph('root', plan, [])).steps.map(step => step.state), ['current', 'pending', 'pending']);
+  const progress = coworkTaskProgress(plan.goal, coworkTaskGraph('root', plan, [ready, written]));
+  assert.deepEqual(progress, { goal: plan.goal, steps: [{ label: 'Preparar los contactos', state: 'done' }, { label: 'Escribir el correo', state: 'done' },
+    { label: 'Guardar campaña pausada', state: 'current' }] });
+  const partial = { ...ready, payload: { kind: 'lead_prepare_batch', result: { items: [{ id: 'lead1', status: 'partial' }] } } };
+  assert.deepEqual(coworkTaskProgress(plan.goal, coworkTaskGraph('root', plan, [partial])).steps.map(step => step.state), ['attention', 'pending', 'pending']);
+  // What the page reads back: the same shape, or nothing.
+  assert.deepEqual(coworkStoredTaskProgress(progress), progress);
+  for (const bad of [null, 'x', { goal: '', steps: progress.steps }, { goal: 'x', steps: progress.steps.slice(0, 1) }, { goal: 'x', steps: [...progress.steps.slice(0, 2), { label: 'y', state: 'running' }] }]) {
+    assert.equal(coworkStoredTaskProgress(bad), null);
+  }
 });

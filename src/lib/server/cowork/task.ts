@@ -5,7 +5,7 @@ import { coworkTaskPlanLabel, coworkTaskPlanProblem, coworkTaskPlanSchema, type 
 import { requireCoworkWorkerAccess } from './access';
 import { COWORK_TASK_EVENTS, coworkTaskRunEvents, parseCoworkTaskTarget } from './task-state';
 
-export { COWORK_TASK_EVENTS, coworkTasksEnabled, loadCoworkActiveTask, parseCoworkTaskTarget, recordCoworkTaskStep } from './task-state';
+export { COWORK_TASK_EVENTS, coworkTasksEnabled, loadCoworkActiveTask, parseCoworkTaskTarget, recordCoworkTaskProgress, recordCoworkTaskStep } from './task-state';
 
 type Scope = { userId: string; organizationId: string };
 

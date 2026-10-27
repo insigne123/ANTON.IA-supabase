@@ -19,6 +19,8 @@ import { CoworkUserMessage } from './CoworkAttachments';
 import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
 import { CoworkChoicesCard } from './CoworkChoices';
+import { CoworkTaskProgressCard } from './CoworkTaskProgress';
+import type { CoworkTaskProgress } from '@/lib/cowork/task-graph';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
 import { AnimatePresence, cwFadeRise, cwSwap, cwVariants, m } from './motion';
@@ -226,7 +228,8 @@ function AutoRetry({ onRetry, onStop }: { onRetry: () => void; onStop: () => voi
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, decidable = false, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
-  liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null, onContinueNew = null, onSchedule = null }: {
+  liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null, onContinueNew = null, onSchedule = null,
+  taskProgress = null }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** Its card still waits for a decision after a question about it, asked in the next turn: it keeps its buttons. */
@@ -262,6 +265,8 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   onFeedback?: ((feedback: CoworkFeedback) => Promise<boolean>) | null;
   /** «Programar» under the answer (COW-18): repeat this request on a schedule. */
   onSchedule?: (() => void) | null;
+  /** The steps of the approved task this turn belongs to, as it left them; only on the task's latest turn. */
+  taskProgress?: CoworkTaskProgress | null;
 }) {
   const [editing, setEditing] = useState(false);
   const editOpener = useRef<HTMLDivElement>(null);
@@ -349,6 +354,7 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
             ? <ContactChips key={artifact.id} artifact={artifact} events={events} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />
             : <ArtifactCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />)}
         </div>}
+        {taskProgress && !active && <CoworkTaskProgressCard progress={taskProgress} live={live} />}
         {question && <NextStep question={question} live={live} />}
         <AnimatePresence initial={false}>
           {choices && onSuggestion && <CoworkChoicesCard key="choices" choices={choices} live={live} onSelect={onSuggestion} />}

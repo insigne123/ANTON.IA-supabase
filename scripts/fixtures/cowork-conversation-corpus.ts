@@ -276,7 +276,9 @@ export type CorpusHistoryTurn = { request: string; reply: string; at: string; ob
   /** The code artifacts that turn made (Plan 12, 3b), as the conversation history carries them. */
   artifacts?: Array<{ name: string; title: string }>;
   /** What that answer left open for the person, as loadCoworkActiveTask reads it: whether it asked and the answers it offered. Never sent to the model. */
-  open?: { asked: boolean; offered: string[] } };
+  open?: { asked: boolean; offered: string[] };
+  /** Every read of that turn, as its run's events keep them for the task graph (observations keeps the newest, as the history). Never sent to the model. */
+  reads?: unknown[] };
 
 export type CorpusCase = {
   id: string;

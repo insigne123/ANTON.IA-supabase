@@ -98,6 +98,14 @@ test('the worker approves by itself only what fits the plan, and never past the 
   assert.match(worker, /let taskCredits = proposal\.kind === 'enrich_contact' \? 1 : 0;/);
   assert.match(worker, /taskCredits = staged\.cost\.lookups;/);
   assert.match(worker, /taskCredits = staged\.costEstimate;/);
+  // Where the task's steps stand is recorded at the end of each of its turns, before it waits or finishes, and never fails the turn.
+  const progress = worker.indexOf('if (activeTask?.graph) await recordCoworkTaskProgress(client, scope, run.id, activeTask).catch(() => undefined);');
+  assert.ok(progress >= 0 && progress < worker.indexOf('if (waitingApproval) {', progress) && progress < worker.indexOf("p_status: 'completed'", progress));
+  // The emails of the turn's own answer count for the write step before the progress and the next step are read.
+  const own = worker.indexOf("activeTask.deliveryEvents.push({ runId: run.id, kind: 'run.completed', payload: { blocks: ownBlocks } });");
+  assert.ok(own >= 0 && own < progress, 'the turn\'s own emails count before its progress is recorded');
+  // An answer that asks the person waits for them: the task goes on by itself only when it asks nothing.
+  assert.match(worker, /if \(finished\.data === true && activeTask\?\.graph && !answer\.question && !answer\.choices\) \{/);
   // The search of the plan.
   assert.match(worker, /const planned = !autonomous && activeTask !== null && coworkTaskApproves\(activeTask, null, \{ searches: 1, credits: 0 \}\);/);
   // The turn reads the task and has room for its steps; continuations too.

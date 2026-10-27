@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_CONTINUE_AFTER_BATCH, COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH } from '../src/lib/cowork/continuation-messages';
+import { COWORK_CONTINUE_AFTER_BATCH, COWORK_CONTINUE_AFTER_EFFECT, COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH } from '../src/lib/cowork/continuation-messages';
 import type { CorpusHistoryTurn, CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { activeTask, COWORK_TASKS, nextTurn, simulateEffect, simulateSearch, taskWorld } from './fixtures/cowork-task-corpus';
 
@@ -37,15 +37,17 @@ test('the search resumes the conversation as the worker does, with its result in
   assert.equal(observation.result.items.length, 5);
 });
 
-test('a batch is played on the people it names: two of every three get an email, the rest say why not', () => {
+test('a batch is played on the people it names: two of every three get an email, and the rest are ready with a note, as in production', () => {
   const found = simulateSearch({ titles: ['Gerente de Personas'], industries: ['retail'], limit: 3 });
   const history = [{ request: 'x', reply: 'y', at: AT, observations: [{ action: 'prospecting.search', input: {}, result: found }] }];
   const proposal = { kind: 'lead_prepare_batch', label: 'Preparar 3', prepareBatch: { goal: 'email' as const, people: 3 },
     who: found.items.map(item => ({ providerId: (item as { id: string }).id })) };
-  const effect = simulateEffect(proposal, history) as { reply: string; result: { items: Array<{ name: string; email: string | null; status: string }> } };
+  const effect = simulateEffect(proposal, history) as { reply: string; result: { items: Array<{ name: string; email: string | null; status: string; steps: Array<{ step: string; detail?: string }> }> } };
   assert.deepEqual(effect.result.items.map(item => item.name), found.items.map(item => (item as { name: string }).name), 'the same people, by name');
   assert.deepEqual(effect.result.items.map(item => Boolean(item.email)), [true, true, false]);
-  assert.deepEqual(effect.result.items.map(item => item.status), ['ready', 'ready', 'partial']);
+  // prepare-batch-run.ts: an email the provider did not find is a done lookup with its note, not a failure.
+  assert.deepEqual(effect.result.items.map(item => item.status), ['ready', 'ready', 'ready']);
+  assert.equal(effect.result.items[2].steps.find(step => step.step === 'enrich')?.detail, 'El proveedor no encontró su correo.');
   const next = nextTurn(task, { request: COWORK_CONTINUE_AFTER_SEARCH, at: AT, result: base({ proposal, note: 'Preparo el lote.' }), observations: [] }, history, 0)!;
   assert.equal(next.request, COWORK_CONTINUE_AFTER_BATCH);
   assert.equal((next.turn.actions as Array<{ outcome: string }>)[0].outcome, 'ejecutada');
@@ -118,6 +120,28 @@ test('an approved task: its turns carry the task, a delivery with steps left goe
   assert.equal(answered.next!.kind, 'campaign');
   const after = nextTurn(task, { request: 'Más cercano, de tú', at: AT, result: base({ reply: 'Lo dejé más cercano.', blocks: [email] }), observations: [] }, [...history, asking.turn], 1)!;
   assert.match(after.request!, /^Continúa la tarea aprobada desde su entrega guardada\. Siguiente paso: Crear la campaña pausada\./);
+});
+
+test('the task goes on as the worker\'s graph says: a research batch keeps its step running until each research is read finished', () => {
+  const plan = { goal: 'Minería', steps: [{ label: 'Buscar gerentes', kind: 'search' }, { label: 'Guardar e investigar', kind: 'prepare' }, { label: 'Escribir a cada uno', kind: 'write' }],
+    limits: { searches: 1, credits: 10 } };
+  const approved = simulateEffect({ kind: 'task_plan', label: 'Tarea', task: plan as never }, []) as { result: unknown };
+  const found = simulateSearch({ titles: ['Gerente de Operaciones'], industries: ['minería'], limit: 2 });
+  const history: CorpusHistoryTurn[] = [
+    { request: task.request, reply: 'Plan.', at: AT, observations: [], actions: [{ kind: 'task_plan', label: 'Tarea', outcome: 'ejecutada', result: approved.result }] },
+    { request: COWORK_CONTINUE_AFTER_PLAN, reply: 'Busco.', at: AT, observations: [{ action: 'prospecting.search', input: {}, result: found }] },
+  ];
+  const proposal = { kind: 'lead_prepare_batch', label: 'Preparar 2', prepareBatch: { goal: 'research' as const, people: 2 }, who: found.items.map(item => ({ providerId: (item as { id: string }).id })) };
+  const effect = simulateEffect(proposal, history) as { result: { items: Array<{ id: string }> } };
+  history.push({ request: COWORK_CONTINUE_AFTER_SEARCH, reply: 'Preparo.', at: AT, observations: [], actions: [{ kind: 'lead_prepare_batch', label: 'Preparar 2', outcome: 'ejecutada', result: effect.result }] });
+  assert.equal(activeTask(history, COWORK_CONTINUE_AFTER_BATCH)!.graph.find(node => node.kind === 'prepare')!.state, 'running', 'researches still running');
+  assert.equal(activeTask(history, COWORK_CONTINUE_AFTER_BATCH)!.next, null, 'nothing to go on with until they finish');
+  // The turn after the notice reads both: every read counts, not only the newest the history keeps.
+  const reads = effect.result.items.map(item => ({ action: 'research.get_existing', input: item.id, result: taskWorld(history, 'Terminaron las investigaciones que pediste en esta conversación:').read('research.get_existing', item.id) }));
+  history.push({ request: 'Terminaron las investigaciones que pediste en esta conversación:', reply: 'Listas.', at: AT, observations: reads.slice(-1), reads });
+  const after = activeTask(history, COWORK_CONTINUE_AFTER_EFFECT)!;
+  assert.equal(after.graph.find(node => node.kind === 'prepare')!.state, 'succeeded');
+  assert.equal(after.next!.kind, 'write');
 });
 
 test('the turn that resumes with a research notice already reads those researches finished, by id or by the JSON with it', () => {

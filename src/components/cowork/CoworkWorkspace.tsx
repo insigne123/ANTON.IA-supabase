@@ -17,7 +17,7 @@ import { COWORK_KEY_HANDLERS, coworkIsMac, coworkShortcut, coworkTypesIntoCompos
 import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkDisplayMessage, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
-  coworkCardStatuses, coworkEarlierRows, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, coworkTurnSuggestions, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+  coworkCardStatuses, coworkEarlierRows, coworkLatestTaskProgress, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, coworkTurnSuggestions, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
   type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -496,6 +496,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const latestIsCurrent = Boolean(latest && latest.run.id === selected);
   // A template written after its people were read still previews with the first of them.
   const earlierRows = useMemo(() => coworkEarlierRows(turns), [turns]);
+  // An approved task's steps show under its latest turn, as that turn left them.
+  const taskProgress = useMemo(() => coworkLatestTaskProgress(shownTurns), [shownTurns]);
   const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events, earlierRows.get(turn.run.id))), [turns, earlierRows]);
   // What later turns did with each email or sequence card («Campaña creada · guardada sin enviar»…).
   const cardStatuses = useMemo(() => coworkCardStatuses(turns), [turns]);
@@ -1132,7 +1134,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 onEdit={index === shownTurns.length - 1 ? (canEdit ? editLatest : null) : editEarlier(turn)}
                 onRegenerate={index === shownTurns.length - 1 && canRegenerate ? regenerate : null}
                 onFeedback={feedback => sendFeedback(turn.run.id, feedback)}
-                onSchedule={index === shownTurns.length - 1 && schedulesAvailable ? () => openSchedules(coworkDisplayMessage(turn.run.message)) : null} />)}
+                onSchedule={index === shownTurns.length - 1 && schedulesAvailable ? () => openSchedules(coworkDisplayMessage(turn.run.message)) : null}
+                taskProgress={taskProgress?.runId === turn.run.id ? taskProgress.progress : null} />)}
               {latest?.run.clarificationOf && <div className="flex flex-wrap items-center gap-2 text-[13px] text-cw-muted">
                 <p>La propuesta original sigue esperando tu decisión.</p>
                 <CwButton size="sm" variant="secondary" onClick={() => choose(latest.run.clarificationOf!, { pin: true })}>Ver propuesta</CwButton>

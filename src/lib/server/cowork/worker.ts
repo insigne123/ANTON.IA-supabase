@@ -74,7 +74,7 @@ import { coworkCodeArtifactsEnabled, coworkDesignerModel, coworkDesignerTurn } f
 import { coworkAnalystEnabled, coworkAnalystModel, coworkAnalystTurn } from './analyst-run';
 import { coworkArtifactStore } from './artifact-store';
 import { coworkPreferencesEnabled, stageCoworkPreference } from './preference';
-import { coworkTasksEnabled, loadCoworkActiveTask, recordCoworkTaskStep, stageCoworkTaskPlan } from './task';
+import { coworkTasksEnabled, loadCoworkActiveTask, recordCoworkTaskProgress, recordCoworkTaskStep, stageCoworkTaskPlan } from './task';
 import { coworkTaskApproves, coworkTaskContext, coworkTaskThreadBudget } from '@/lib/cowork/task-plan';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
@@ -728,6 +728,15 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       },
     });
     await judgeTurn?.finish(result);
+    // The emails of this turn's own answer deliver the task's write step, as the next turn will read them: the progress and the
+    // next step count them now.
+    const ownBlocks = 'blocks' in result ? result.blocks : null;
+    if (activeTask?.deliveryEvents && ownBlocks?.some(block => block.type === 'email_draft' || block.type === 'sequence')) {
+      activeTask.deliveryEvents.push({ runId: run.id, kind: 'run.completed', payload: { blocks: ownBlocks } });
+      activeTask.graph = coworkTaskGraph(activeTask.startRunId, activeTask.plan, activeTask.deliveryEvents);
+    }
+    // Where the task's steps stand after this turn, shown under its answer. The work itself never depends on it.
+    if (activeTask?.graph) await recordCoworkTaskProgress(client, scope, run.id, activeTask).catch(() => undefined);
     if (waitingApproval) {
       if (pendingMemory) await saveCoworkThreadMemory(client, scope, run,
         coworkPendingProposalMemory(pendingMemory, threadMemory?.memory ?? null));

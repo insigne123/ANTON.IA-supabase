@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { coworkTaskPlanSchema, coworkTaskReplyContinues, type CoworkActiveTask, type CoworkTaskCost } from '@/lib/cowork/task-plan';
 import { coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions } from '@/lib/cowork/contracts';
 import { coworkRunIsAutomatic } from './runs';
-import { coworkTaskGraph } from '@/lib/cowork/task-graph';
+import { coworkTaskGraph, coworkTaskProgress } from '@/lib/cowork/task-graph';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -21,8 +21,9 @@ export function coworkTaskTtlHours(env: Record<string, string | undefined> = pro
   return Number.isInteger(hours) && hours >= 1 && hours <= 168 ? hours : 24;
 }
 
-/** The run events of a task: the plan a turn proposed, the plan once approved, and each step it approved by itself. */
-export const COWORK_TASK_EVENTS = { plan: 'task.plan', started: 'task.started', step: 'task.step' } as const;
+/** The run events of a task: the plan a turn proposed, the plan once approved, each step it approved by itself, and where its
+ * steps stand after each of its turns (what the conversation shows). */
+export const COWORK_TASK_EVENTS = { plan: 'task.plan', started: 'task.started', step: 'task.step', progress: 'task.progress' } as const;
 
 export function parseCoworkTaskTarget(targetId: string) {
   const match = /^task:([0-9a-f]{32})$/.exec(String(targetId || ''));
@@ -113,4 +114,14 @@ export async function recordCoworkTaskStep(client: SupabaseClient, scope: Scope,
     kind: COWORK_TASK_EVENTS.step, payload: step,
   });
   if (recorded.error) throw new Error('No se pudo registrar el paso de la tarea.');
+}
+
+/** Where the task's steps stand after a turn, as the conversation shows them under its answer. Only with the task graph. */
+export async function recordCoworkTaskProgress(client: SupabaseClient, scope: Scope, runId: string, task: CoworkActiveTask) {
+  if (!task.graph) return;
+  const recorded = await client.from('cowork_run_events').insert({
+    run_id: runId, user_id: scope.userId, organization_id: scope.organizationId,
+    kind: COWORK_TASK_EVENTS.progress, payload: coworkTaskProgress(task.plan.goal, task.graph),
+  });
+  if (recorded.error) throw new Error('No se pudo registrar el avance de la tarea.');
 }

@@ -48,6 +48,26 @@ export default () => [
         c.check('hay un botón para aprobar y uno para descartar', await c.page.getByRole('button', { name: /Aprobar/ }).first().isVisible().catch(() => false) && await c.page.getByRole('button', { name: /Descartar/ }).first().isVisible().catch(() => false));
       } },
     ] },
+  { id: 'cowork-tarea-en-curso', persona: 'owner', title: 'Ver en qué va una tarea aprobada',
+    goal: 'Saber qué pasos ya hizo, en cuál va y qué falta, sin leer toda la conversación.',
+    steps: [
+      { say: 'Abro la tarea en curso', do: async c => { await c.go(`/cowork?work=${run(9)}`); await c.seeRole('region', 'Avance de la tarea'); } },
+      { say: 'Veo sus pasos', do: async c => {
+        const card = c.page.getByRole('region', { name: 'Avance de la tarea' }).first();
+        const text = await card.innerText().catch(() => '');
+        c.check('dice cuántos pasos lleva', /2 de 4 pasos/.test(text), text.slice(0, 120).replace(/\n/g, ' | '));
+        c.check('cada paso dice dónde va, también para un lector de pantalla', /\(hecho\)/.test(text) && /\(sigue\)/.test(text) && /\(pendiente\)/.test(text));
+      } },
+    ] },
+  { id: 'cowork-tarea-en-curso-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: ver en qué va una tarea aprobada',
+    goal: 'Que los pasos se lean completos en una pantalla angosta.',
+    steps: [
+      { say: 'Abro la tarea en curso', do: async c => { await c.go(`/cowork?work=${run(9)}`); await c.seeRole('region', 'Avance de la tarea'); } },
+      { say: 'Veo sus pasos sin desplazar de lado', do: async c => {
+        const wide = await c.page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+        c.check('la página no se desplaza de lado', !wide);
+      } },
+    ] },
   { id: 'cowork-pendientes', persona: 'owner', title: 'Lo que espera mi aprobación queda arriba, aunque sea de otra conversación',
     goal: 'Ver de un vistazo qué propuestas esperan una decisión (COW-16).',
     steps: [
