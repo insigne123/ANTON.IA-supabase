@@ -110,3 +110,16 @@ test('an approved task: its turns carry the task, a delivery with steps left goe
   assert.match(next.request!, /^Continúa la tarea aprobada desde su entrega guardada\. Siguiente paso: Crear la campaña pausada\./, 'the write step was delivered by this turn');
   assert.equal(activeTask([...history, next.turn], 'Sí, adelante.'), null, 'a message of the person ends the task');
 });
+
+test('the turn that resumes with a research notice already reads those researches finished, by id or by the JSON with it', () => {
+  const found = simulateSearch({ titles: ['Gerente de Personas'], industries: ['logística'], limit: 1 });
+  const history: CorpusHistoryTurn[] = [{ request: 'x', reply: 'y', at: AT, observations: [{ action: 'prospecting.search', input: {}, result: found }] }];
+  const proposal = { kind: 'lead_prepare_batch', label: 'Preparar 1', prepareBatch: { goal: 'research' as const, people: 1 }, who: [{ providerId: (found.items[0] as { id: string }).id }] };
+  const effect = simulateEffect(proposal, history) as { result: { items: Array<{ id: string }> } };
+  history.push({ request: 'z', reply: 'w', at: AT, observations: [], actions: [{ kind: 'lead_prepare_batch', label: 'Preparar 1', outcome: 'ejecutada', result: effect.result }] });
+  const lead = effect.result.items[0].id;
+  const notice = 'Terminó la investigación que pediste en esta conversación:\n- Contacto: lista.';
+  assert.equal((taskWorld(history, notice).read('research.get_existing', lead) as { availability: string }).availability, 'available');
+  assert.equal((taskWorld(history, notice).read('research.get_existing', JSON.stringify({ leadId: lead })) as { availability: string }).availability, 'available');
+  assert.equal((taskWorld(history, 'Sí, adelante.').read('research.get_existing', lead) as { availability: string }).availability, 'none');
+});

@@ -417,6 +417,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   } catch (error) {
     result.failed = coworkFailureMessage(error);
   }
+  // What it searched and read on the web, as the history of the next turn and a reader of the whole work see it.
+  const web = recorded.filter(observation => observation.action === 'web.search' || observation.action === 'web.fetch');
+  if (web.length) result.web = web.map(observation => ({ action: observation.action, input: observation.input, result: observation.result }));
   const note = recorded.find(observation => observation.action === COWORK_NOTE_ACTION);
   result.note = note ? coworkNoteText(note) : null;
   const plan = recorded.find(observation => observation.action === COWORK_PLAN_ACTION);

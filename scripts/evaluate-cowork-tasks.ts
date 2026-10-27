@@ -40,13 +40,17 @@ const judgeSchema = z.object({
   que_falto: z.string().max(400).describe('Lo que un asistente como Claude Cowork habría hecho distinto en este encargo, en una o dos frases'),
 });
 
-const personSchema = z.object({ respuesta: z.string().min(1).max(300).describe('Lo que la persona escribe, en una o dos frases') });
+const personSchema = z.object({
+  terminado: z.boolean().describe('true si Cowork ya entregó o dejó listo lo que pediste y no queda nada tuyo por pedirle'),
+  respuesta: z.string().min(1).max(300).describe('Lo que la persona escribe, en una o dos frases'),
+});
 
 /** The person who asked: answers what Cowork asks in a few words, within what they asked for; declines what goes beyond it. */
 function personPrompt(task: CoworkTask, reply: string) {
   return [
     'Eres la persona que le pidió un trabajo a Cowork, el asistente de ventas de ANTON.IA. Respondes como escribiría alguien ocupado: corto, en español de Chile, sin explicar de más.',
     `Lo que pediste al comienzo: ${task.request}`,
+    'Si Cowork ya entregó o dejó listo lo que pediste (aunque cierre con una pregunta o te ofrezca algo más), marca terminado y agradece en una frase.',
     'Si Cowork te pregunta algo que tu pedido ya responde, repítelo con tus palabras. Si te ofrece un paso que lleva a lo que pediste, acéptalo. Si te ofrece algo que no pediste (activar o enviar, otra campaña, otro informe), recházalo con amabilidad y pide que siga con lo tuyo. Si pregunta un dato que no está en tu pedido, elige lo razonable.',
     `Lo último que te dijo Cowork:\n${reply.slice(0, 3000)}`,
   ].join('\n\n');
@@ -130,17 +134,20 @@ async function main() {
       let finishing = false;
       for (let index = 0; index < (task.maxTurns ?? 8); index++) {
         const at = new Date(CORPUS_NOW.getTime() + index * 120_000).toISOString();
-        const world = taskWorld(history);
+        const world = taskWorld(history, request);
         const running = activeTask(history, request);
         const outcome = await runCorpusCase({ id: `${task.id}#${index + 1}`, title: task.title, request, history: [...history], world, checks: [],
           ...(running ? { task: running.context } : {}) }, async () => {
           throw new Error('The coordinator loop must not run in harness mode');
         }, write, undefined, undefined, undefined, undefined, harness).catch(error => ({ result: { failed: error instanceof Error ? error.message : String(error) } as CorpusTurnResult }));
         const result = outcome.result;
-        const observations = (result.reads || []).map(read => ({ action: read.action, input: read.input, result: world.read(read.action, read.input) }));
+        const observations = [...(result.reads || []).map(read => ({ action: read.action, input: read.input, result: world.read(read.action, read.input) })), ...(result.web || [])];
         const next = nextTurn(task, { request, at, result, observations }, history, answered);
         steps.push({ turno: index + 1, pedido: request.slice(0, 400), ...(running ? { tarea_activa: running.next?.label ?? 'sin pasos pendientes' } : {}), respuesta: String(result.note || result.reply || '').slice(0, 1500),
-          lecturas: (result.reads || []).map(read => read.action), propuesta: result.proposal ? { tipo: result.proposal.kind, etiqueta: result.proposal.label } : null,
+          lecturas: (result.reads || []).map(read => ({ accion: read.action, consulta: read.input.slice(0, 120), resultado: JSON.stringify(world.read(read.action, read.input)).slice(0, 700) })),
+          web: (result.web || []).map(item => ({ tipo: item.action, consulta: item.input,
+            fuentes: ((item.result as { sources?: Array<{ title?: string; url?: string }> } | null)?.sources || []).slice(0, 5).map(source => `${source.title || ''} ${source.url || ''}`.trim()),
+            extracto: String((item.result as { excerpt?: unknown } | null)?.excerpt || '').slice(0, 500) })), propuesta: result.proposal ? { tipo: result.proposal.kind, etiqueta: result.proposal.label } : null,
           busqueda: result.search, pregunta: result.question ?? null, documento: result.document ? { titulo: result.document.title, largo: result.document.content.length } : null,
           bloques: (result.blocks || []).map(block => block.type), fallo: result.failed,
           aprobado: next?.approved ? { tipo: next.approved.kind, respuesta: next.approved.reply, resultado: JSON.stringify(next.approved.result).slice(0, 1200) } : null });
@@ -154,9 +161,12 @@ async function main() {
         if (next.request === null) {
           budget();
           const said = String(next.turn.reply || '');
-          next.request = (await generateStructuredWithTelemetry({ schema: personSchema, systemPrompt: 'Respondes solo con el objeto pedido.', prompt: personPrompt(task, said),
-            provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 400, timeoutMs: 60000 }).catch(() => null))?.data.respuesta || 'Sí, adelante.';
-          (steps.at(-1) as Record<string, unknown>).persona = next.request;
+          const person = (await generateStructuredWithTelemetry({ schema: personSchema, systemPrompt: 'Respondes solo con el objeto pedido.', prompt: personPrompt(task, said),
+            provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 400, timeoutMs: 60000 }).catch(() => null))?.data;
+          (steps.at(-1) as Record<string, unknown>).persona = person?.respuesta ?? 'Sí, adelante.';
+          // The person has what they asked for: the work ends here, as it would in the app.
+          if (person?.terminado) { stopped = 'la persona dio el encargo por terminado'; break; }
+          next.request = person?.respuesta || 'Sí, adelante.';
         }
         request = next.request;
         if (index === (task.maxTurns ?? 8) - 1) stopped = 'llegó al máximo de turnos';

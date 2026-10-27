@@ -250,9 +250,10 @@ function finishedResearch(person: Saved) {
 }
 
 /** The account as the next turn reads it: the corpus account, plus the contacts this work saved (its campaign may go to them). */
-export function taskWorld(history: CorpusHistoryTurn[]): CorpusWorld {
+export function taskWorld(history: CorpusHistoryTurn[], request = ''): CorpusWorld {
   const saved = savedByTheWork(history);
-  const research = researchesOf(history);
+  // The request of this turn counts: the turn that resumes with a research notice reads those researches finished.
+  const research = researchesOf([...history, { request, reply: '', at: CORPUS_NOW.toISOString() }]);
   // The campaigns this work created, newest first, as campaigns.list shows them.
   const created = history.flatMap(turn => ((turn.actions || []) as Array<{ kind?: string; label?: string; result?: { campaignId?: string; status?: string } }>)
     .filter(action => action.kind === 'campaign_create' && action.result?.campaignId)
@@ -262,8 +263,10 @@ export function taskWorld(history: CorpusHistoryTurn[]): CorpusWorld {
     savedEmails: [...CORPUS_SAVED_EMAILS, ...saved.flatMap(item => item.email ? [item.email] : [])],
     read: (action, input) => {
       const found = corpusRead(action, input);
-      if (action === 'research.get_existing' && research.finished.includes(input.trim())) {
-        const person = saved.find(item => item.id === input.trim());
+      // The id alone, or the JSON with it that a model sometimes sends.
+      const asked = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(input)?.[0] ?? '';
+      if (action === 'research.get_existing' && research.finished.includes(asked)) {
+        const person = saved.find(item => item.id === asked);
         if (person) return finishedResearch(person);
       }
       if (action === 'campaigns.list' && created.length) {

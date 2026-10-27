@@ -245,6 +245,8 @@ export type CorpusTurnResult = {
   plan?: Array<{ label: string; read: string | null }> | null;
   /** Each read with its input, so the judge can see the same data the model saw. */
   reads?: Array<{ action: string; input: string }>;
+  /** The web searches and page reads of the turn, as they were recorded (their sources and the beginning of a page read). */
+  web?: Array<{ action: string; input: unknown; result: unknown }>;
   /** When the Writer wrote the answer (writer.ts): the coordinator's brief and what each agent did. */
   writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }> };
   /** The question the coordinator handed the Analyst (analysis.write, Plan 12, 4b). */
