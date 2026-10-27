@@ -219,6 +219,8 @@ test('rendered editors preserve edits across proposals/conflicts/overlapping sav
       '@/hooks/use-toast': { useToast: () => ({ toast() {} }) },
       '@/hooks/use-contactability': { useContactability: () => ({ loading: false, error: null, result: null }) },
       '@/hooks/use-booking-link': { useBookingLink: () => null },
+      '@/lib/drafts/email-length': { emailWordCount: (value: string) => value.match(/[\p{L}\p{N}]+/gu)?.length || 0, emailLengthNote: (words: number) => ({ tone: 'quiet', text: `${words} palabras` }) },
+      '@/lib/drafts/approval-failure': { approvalFailureText: () => 'Revisa el correo e inténtalo nuevamente.' },
       '@/lib/campaign-qa': { assessCampaignQa: () => ({ status: 'passed', checks: [], reviewCount: 0 }) },
       '@/lib/email-utils': { extractPrimaryEmail: (lead: any) => ({ email: lead?.email || '' }) },
       '@/lib/lead-research-storage': { findReportForLead: () => report },

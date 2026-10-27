@@ -59,6 +59,8 @@ import type { DurableSendReceipt } from '@/lib/outbound-send-receipt';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ArrowLeft, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, SendHorizontal, Sparkles } from 'lucide-react';
 import { SenderLine, type SenderState } from '@/components/compose/SenderLine';
+import { emailLengthNote, emailWordCount } from '@/lib/drafts/email-length';
+import { approvalFailureText } from '@/lib/drafts/approval-failure';
 
 type AnyLead = EnrichedLead | EnrichedOppLead | any;
 
@@ -720,7 +722,7 @@ function ComposeInner() {
         body: JSON.stringify({ versionId: nativeDraft.versionId, warnings: campaignQa.reviewCount ? ['Hay observaciones para revisar antes de enviar.'] : [] }),
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.draft) throw new Error('No se pudo confirmar la revisión.');
+      if (!response.ok || !payload?.draft) throw new Error(approvalFailureText(payload));
       setNativeDraft(payload.draft);
       if (campaignStepId) {
         setCampaignSendContextLoading(true);
@@ -730,7 +732,7 @@ function ComposeInner() {
       return true;
     } catch (error) {
       console.error('No se pudo confirmar la revisión del correo', error);
-      toast({ variant: 'destructive', title: 'No se pudo confirmar la revisión', description: 'Revisa el correo e inténtalo nuevamente.' });
+      toast({ variant: 'destructive', title: 'No se pudo confirmar la revisión', description: error instanceof Error && error.message ? error.message : approvalFailureText(null) });
       return false;
     } finally {
       draftOperationRef.current = false;
@@ -1173,6 +1175,7 @@ function ComposeInner() {
   }
 
   const displayEmail = composeEmail;
+  const bodyLength = emailLengthNote(emailWordCount(body));
   const send = sendProvider === 'outlook' ? doSendOutlook : doSendGmail;
   const dispatchLocksCompose = Boolean(sendReceipt);
   const composeControlsLocked = dispatchLocksCompose || isLoading || Boolean(sendOperation);
@@ -1452,9 +1455,13 @@ function ComposeInner() {
                   placeholder="Escribe tu mensaje"
                   rows={16}
                   className="min-h-[390px] resize-y text-[15px] leading-7"
-                  aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
+                  aria-describedby={isCanonicalDraft ? 'review-status compose-body-length' : 'compose-body-length'}
                   disabled={Boolean(proposal) || followUpDirty || followUpBusy || nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
                 />
+                {/* The length is the person's call within 10–400 words; outside 35–180 it says why it matters (email-length.ts). */}
+                <p id="compose-body-length" aria-live="polite" className={`text-xs leading-5 ${bodyLength.tone === 'stop' ? 'text-destructive' : bodyLength.tone === 'notice' ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  {bodyLength.text}
+                </p>
                 {bookingUrl ? (
                   <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground"
                     disabled={Boolean(proposal) || followUpDirty || followUpBusy || nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked || body.includes(bookingUrl)}

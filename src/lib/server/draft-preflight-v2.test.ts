@@ -848,3 +848,21 @@ test('required personalization prefers a dated signal over the static company ov
   const [signalFirst] = requiredDraftPersonalizationV2(withSignal);
   assert.equal(signalFirst.claimId, 'claim-signal');
 });
+
+test('an email the person edited may be longer or shorter than the AI writes: a notice within 10–400 words, an error outside', () => {
+  const context = draftContextFixture();
+  const base = validOutput();
+  const filler = (words: number) => Array.from({ length: words }, (_, index) => `palabra${index}`).join(' ');
+  const withBody = (extra: number) => ({ ...base, body: base.body.replace('En Northstar automatizamos', `${filler(extra)}.\n\nEn Northstar automatizamos`) });
+  const long = withBody(190);
+  const lengthIssue = (options: Parameters<typeof validateDraftPreflightV2>[2]) =>
+    validateDraftPreflightV2(context, long, options).issues.find((issue) => issue.code === 'body_length');
+
+  assert.match(String(lengthIssue({})?.message), /entre 35 y 180 palabras/, 'what the AI writes keeps its limit');
+  const edited = validateDraftPreflightV2(context, long, { editedByPerson: true });
+  assert.equal(edited.issues.some((issue) => issue.code === 'body_length'), false, 'the person decides the length of their own email');
+  assert.ok(edited.preflight.warnings.some((warning) => /tiene \d+ palabras; los correos en frío de 35 a 180 suelen responderse más/.test(warning)));
+
+  const tooLong = validateDraftPreflightV2(context, withBody(420), { editedByPerson: true }).issues.find((issue) => issue.code === 'body_length');
+  assert.match(String(tooLong?.message), /para enviarlo, debe tener entre 10 y 400/);
+});

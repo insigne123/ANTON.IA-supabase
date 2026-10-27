@@ -115,6 +115,8 @@ type NativeDraftGenerationMetadata = {
   reportSchemaVersion?: string | null;
   reportRevision?: number | null;
   reportContentHash?: string | null;
+  /** Who wrote this version: the model, or the person who edited it (their own length is a notice, not an error). */
+  generationMethod?: 'model' | 'human';
 };
 
 type NativeDraftGenerationMetadataInput = NativeDraftGenerationMetadata & NativeDraftAccess & {
@@ -581,7 +583,7 @@ async function loadNativeDraftMetadata(input: NativeDraftAccess & {
 }): Promise<NativeDraftGenerationMetadata | null> {
   const { data, error } = await getSupabaseAdminClient()
     .from('messaging_draft_generation_metadata')
-    .select('version_id,draft_id,research_snapshot_id,style_profile_id,claim_ids,report_document_id,report_schema_version,report_revision,report_content_hash')
+    .select('version_id,draft_id,research_snapshot_id,style_profile_id,claim_ids,report_document_id,report_schema_version,report_revision,report_content_hash,generation_method')
     .eq('organization_id', input.organizationId)
     .eq('user_id', input.userId)
     .eq('version_id', input.versionId)
@@ -589,6 +591,7 @@ async function loadNativeDraftMetadata(input: NativeDraftAccess & {
   if (error) throw error;
   if (!data) return null;
   return {
+    ...(data.generation_method === 'human' || data.generation_method === 'model' ? { generationMethod: data.generation_method } : {}),
     versionId: text(data.version_id),
     draftId: text(data.draft_id),
     researchSnapshotId: text(data.research_snapshot_id),
@@ -1731,7 +1734,7 @@ export async function approveNativeDraft(input: NativeDraftAccess & {
     const validation = validateDraftPreflightV2(
       context,
       outputForPersistedDraft({ draft: current, context, metadata }),
-      { existingContentFingerprints, now },
+      { existingContentFingerprints, now, editedByPerson: metadata.generationMethod === 'human' },
     );
     if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
     if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
