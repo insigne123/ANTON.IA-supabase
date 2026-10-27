@@ -144,6 +144,58 @@ export default () => [
         c.check('se puede enviar sin escribir nada', await c.page.getByRole('button', { name: /Enviar/ }).first().isEnabled().catch(() => false));
       } },
     ] },
+  { id: 'cowork-dictar', persona: 'owner', title: 'Dictar el pedido en vez de escribirlo',
+    goal: 'Decirle a Cowork lo que necesito con la voz y ver el texto en el cuadro antes de enviarlo (COW-13).',
+    steps: [
+      { say: 'Abro Cowork en un navegador que dicta', do: async c => {
+        // The browser's recognizer, played by the journey: it says what the test makes it hear and ends when asked to stop.
+        await c.page.addInitScript(() => {
+          class FakeRecognition {
+            constructor() { this.lang = ''; this.continuous = false; this.interimResults = false; window.__dictation = this; }
+            start() { this.started = true; }
+            stop() { setTimeout(() => this.onend?.(), 200); }
+            abort() { this.onend?.(); }
+            hear(pieces) { this.onresult?.({ results: pieces.map(([text, isFinal]) => Object.assign([{ transcript: text }], { isFinal })) }); }
+            fail(error) { this.onerror?.({ error }); this.onend?.(); }
+          }
+          window.SpeechRecognition = FakeRecognition;
+          window.webkitSpeechRecognition = FakeRecognition;
+        });
+        await c.go('/cowork');
+        await c.see('Para hoy');
+        await c.seeRole('button', 'Dictar');
+      } },
+      { say: 'Escribo un saludo y pulso el micrófono', do: async c => {
+        const box = c.page.getByLabel('Escribe tu mensaje');
+        await box.fill('Hola.');
+        await c.click({ role: 'button', name: 'Dictar' });
+        const mic = c.page.getByRole('button', { name: 'Terminar dictado' });
+        c.check('el micrófono queda marcado mientras escucha', await mic.getAttribute('aria-pressed') === 'true');
+        c.check('el cuadro dice que está escuchando y cómo terminar', await c.has('Escuchando… Pulsa el micrófono para terminar.'));
+        c.check('escucha en español', /^es-/.test(await c.page.evaluate(() => window.__dictation?.lang || '')));
+      } },
+      { say: 'Hablo y veo lo que dije en el cuadro', do: async c => {
+        const box = c.page.getByLabel('Escribe tu mensaje');
+        await c.page.evaluate(() => window.__dictation.hear([['busca gerentes', false]]));
+        c.check('lo que va oyendo aparece después del saludo', await box.inputValue() === 'Hola. Busca gerentes', await box.inputValue());
+        await c.page.evaluate(() => window.__dictation.hear([['busca gerentes de personas', true], ['en retail', false]]));
+        c.check('lo dicho y lo que sigue oyendo se juntan sin repetirse', await box.inputValue() === 'Hola. Busca gerentes de personas en retail', await box.inputValue());
+      } },
+      { say: 'Termino el dictado', do: async c => {
+        await c.click({ role: 'button', name: 'Terminar dictado' });
+        await c.seeRole('button', 'Dictar');
+        const box = c.page.getByLabel('Escribe tu mensaje');
+        c.check('el texto dictado queda para revisarlo antes de enviar', await box.inputValue() === 'Hola. Busca gerentes de personas en retail');
+        c.check('el micrófono deja de estar marcado', await c.page.getByRole('button', { name: 'Dictar' }).getAttribute('aria-pressed') === 'false');
+        c.check('nada se envió solo', await c.page.getByRole('button', { name: /Enviar/ }).first().isEnabled().catch(() => false));
+      } },
+      { say: 'El navegador no tiene permiso para el micrófono', do: async c => {
+        await c.click({ role: 'button', name: 'Dictar' });
+        await c.page.evaluate(() => window.__dictation.fail('not-allowed'));
+        await c.see('permite que el navegador use el micrófono');
+        c.check('el texto que había no se pierde', await c.page.getByLabel('Escribe tu mensaje').inputValue() === 'Hola. Busca gerentes de personas en retail');
+      } },
+    ] },
   // «Autónomo» (COW-17): it shows with AUDIT_COWORK_AUTONOMY=true, as in production since 24 Oct; it asks once and is remembered.
   ...(process.env.AUDIT_COWORK_AUTONOMY === 'true' ? [
     { id: 'cowork-modo-autonomo', persona: 'owner', title: 'Activar el modo Autónomo sabiendo qué aprueba solo',
