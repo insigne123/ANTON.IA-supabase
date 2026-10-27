@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { coworkTaskReadyNode, type CoworkTaskNode, type CoworkTaskDeliveryEvent } from './task-graph';
+import { coworkTaskNextNode, coworkTaskReadyNode, type CoworkTaskNode, type CoworkTaskDeliveryEvent } from './task-graph';
 
 /**
  * Long tasks (Plan 13, 4c): a request of several steps («busca 25 gerentes de RR. HH. de retail, guarda los 10 mejores,
@@ -132,18 +132,34 @@ export function coworkTaskThreadBudget<T extends { maxDepth: number; maxEffects:
 const TASK_INSTRUCTION = 'Estás ejecutando una tarea que el usuario ya aprobó (task). Haz ahora el siguiente paso pendiente del plan, sin '
   + 'preguntar antes: las búsquedas, preparaciones y la campaña pausada que caben en el plan y en lo que queda de sus límites se aprueban '
   + 'solas; lo que no cabe (enviar, activar, LinkedIn o un gasto mayor) pide aprobación como siempre, y dilo en una frase. Un paso de '
-  + 'redactar (write) se hace en esta respuesta. Si el pedido es del usuario, es un «sí» o su respuesta a lo que le preguntaste: síguela con '
-  + 'eso. Cuando no quede ningún paso, cierra con el resumen de lo hecho, cifras incluidas, y lo que queda para el usuario (por ejemplo '
-  + 'activar la campaña).';
+  + 'redactar (write) se hace en esta respuesta. Ese paso es task.next: hazlo como dice task.next.how, aunque el pedido diga «propón el '
+  + 'siguiente paso», y no preguntes si lo haces («¿Creo la campaña?», «¿Busco sus correos?»): el plan ya lo aprobó. Si el pedido es del '
+  + 'usuario, es un «sí» o su respuesta a lo que le preguntaste: síguela con eso. Cuando no quede ningún paso, cierra con el resumen de lo '
+  + 'hecho, cifras incluidas, y lo que queda para el usuario (por ejemplo activar la campaña).';
+
+/**
+ * How each kind of step is done inside the task (task.next.how). The proposal it needs approves itself when it fits the plan, so
+ * the step is done, not offered: the continuation after an effect says «propón el siguiente paso», and Haiku read it as asking
+ * «¿Creo la campaña pausada…?» in 5 of 6 task runs of the bench, though the plan already approved it.
+ */
+const STEP_HOW: Record<CoworkTaskStepKind, string> = {
+  search: 'propón la búsqueda con prospecting.propose_search y, en limit, la cantidad de personas que pide el plan',
+  prepare: 'propón el lote con contacts.prepare_batch para las personas de la búsqueda',
+  write: 'escribe los correos en esta respuesta; si el paso que sigue es la campaña pausada, propónla también en esta respuesta con esos '
+    + 'mismos correos (campaign.create): cuenta como los dos pasos',
+  campaign: 'propón la campaña pausada con campaign.create y los correos ya escritos',
+};
 
 /** What a turn inside the task reads: the plan, what it already spent and how to go on. */
 export function coworkTaskContext(task: CoworkActiveTask) {
+  const next = task.graph ? coworkTaskNextNode(task.graph) : undefined;
   return {
     goal: task.plan.goal,
     steps: task.plan.steps,
     limits: task.plan.limits,
     used: task.used,
     ...(task.graph ? { graph: task.graph, deliveryInstruction: 'La aprobación inicia el paso; solo sus resultados confirman entrega. Los pasos blocked esperan su dependencia; partial requiere resolver lo pendiente sin repetir los éxitos.' } : {}),
+    ...(next ? { next: { step: next.label, kind: next.kind, how: STEP_HOW[next.kind] } } : {}),
     left: { searches: Math.max(0, task.plan.limits.searches - task.used.searches), credits: Math.max(0, task.plan.limits.credits - task.used.credits) },
     instruction: TASK_INSTRUCTION,
   };

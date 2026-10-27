@@ -95,6 +95,11 @@ export function coworkTaskReadyEffect(graph: CoworkTaskNode[] | undefined, kind:
   return graph && effects[kind] ? coworkTaskReadyNode(graph, effects[kind]) : undefined;
 }
 
+/** The step the task goes on with: the first pending one whose steps before it are done. */
+export function coworkTaskNextNode(graph: CoworkTaskNode[]) {
+  return graph.find(node => node.state === 'pending' && node.dependsOn.every(id => graph.some(dep => dep.id === id && dep.state === 'succeeded')));
+}
+
 /** Where a step of a task stands as the conversation shows it: done, the one it goes on with, still to come, or with something to look at. */
 export type CoworkTaskProgressState = 'done' | 'current' | 'pending' | 'attention';
 export type CoworkTaskProgress = { goal: string; steps: Array<{ label: string; state: CoworkTaskProgressState }> };

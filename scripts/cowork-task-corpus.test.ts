@@ -18,6 +18,12 @@ test('an approved search brings people that fit, shaped as the search returns th
   const found = simulateSearch({ titles: ['Jefe de Selección'], industries: ['retail'], locations: ['Santiago'], limit: 10 });
   assert.equal(found.scope, 'external_search');
   assert.equal(found.returned, 10);
+  // As many as the plan asks for, up to 25, each a different person.
+  const twenty = simulateSearch({ titles: ['Jefe de Selección'], industries: ['construcción'], limit: 20 });
+  assert.equal(twenty.returned, 20);
+  assert.equal(simulateSearch({ titles: ['Jefe de Selección'], industries: ['retail'], limit: 40 }).returned, 25);
+  const many = simulateSearch({ titles: ['Jefe de Selección'], industries: ['retail'], limit: 25 }).items as Array<{ name: string }>;
+  assert.equal(new Set(many.map(item => item.name)).size, 25);
   const first = found.items[0] as { id: string; title: string; industry: string; email: unknown; location: string };
   assert.match(first.id, /^apollo:sim-\d+$/);
   assert.equal(first.title, 'Jefe de Selección');

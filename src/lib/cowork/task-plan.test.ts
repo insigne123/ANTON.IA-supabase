@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { coworkTaskApproves, coworkTaskContext, coworkTaskPlanLabel, coworkTaskPlanProblem, coworkTaskPlanSchema, coworkTaskReplyContinues,
   coworkTaskThreadBudget, type CoworkActiveTask, type CoworkTaskPlan } from './task-plan';
+import { coworkTaskGraph } from './task-graph';
 
 const plan: CoworkTaskPlan = {
   goal: 'Escribirles una secuencia a los 10 mejores gerentes de RR. HH. de retail en Santiago',
@@ -62,6 +63,20 @@ test('a turn of the task reads the plan, what it spent and what is left', () => 
   assert.deepEqual(context.left, { searches: 0, credits: 10 });
   assert.match(context.instruction, /siguiente paso pendiente del plan/);
   assert.match(context.instruction, /enviar, activar, LinkedIn o un gasto mayor/);
+  assert.equal('next' in context, false, 'without its graph there is no step to name');
+});
+
+test('the turn reads the step it goes on with and how to do it, so it does the step instead of asking about it', () => {
+  const searched = { runId: 'search-run', kind: 'tool.completed', payload: { action: 'prospecting.search', result: { items: [{ id: 'apollo:1' }] } } };
+  const prepared = { runId: 'prepare-run', kind: 'effect.completed', payload: { kind: 'lead_prepare_batch', result: { items: [{ id: 'lead1', status: 'ready' }] } } };
+  const first = coworkTaskContext({ ...task(), graph: coworkTaskGraph('run-1', plan, []) });
+  assert.equal(first.next?.kind, 'search');
+  assert.match(first.next?.how ?? '', /prospecting\.propose_search.*limit/);
+  const writing = coworkTaskContext({ ...task(), graph: coworkTaskGraph('run-1', plan, [searched, prepared]) });
+  assert.deepEqual([writing.next?.step, writing.next?.kind], ['Escribir una secuencia de 3 correos', 'write']);
+  assert.match(writing.next?.how ?? '', /campaña pausada.*en esta respuesta.*campaign\.create/);
+  assert.match(writing.instruction, /task\.next/);
+  assert.match(writing.instruction, /no preguntes si lo haces/);
 });
 
 test('a reply of the person goes on with the task when it is a «sí», the answer it asked for or one it offered; a stop or a new request ends it', () => {
