@@ -4,8 +4,8 @@ import { goalSentence, goalsOff, type GoalProgress } from '@/lib/weekly-goals';
 
 /**
  * «Informe semanal» (propuesta 2): one report per person with a section for each role they have. Everyone gets «Tu
- * semana»; owners and admins also «Equipo»; whoever an admin names «Gestor de oportunidades» (or the admins, while nobody is)
- * also «Oportunidades». It is read in the app at any time, and on Mondays at 8:00 it can arrive by email, sent by the person
+ * semana»; owners and admins also «Equipo»; whoever an admin names «Gestor de oportunidades» (or everyone who may see Oportunidades,
+ * while nobody is) also «Oportunidades». It is read in the app at any time, and on Mondays at 8:00 it can arrive by email, sent by the person
  * to themselves from their own connected mailbox. Everything here is pure: the server reads (server/weekly-report.ts).
  */
 

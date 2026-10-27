@@ -114,10 +114,10 @@ test('«Equipo»: two people with the same name are told apart by their email', 
     [['Nicolás Yarur', null], ['Ana Soto', 'ana@axis.cl'], ['ana soto', 'ana.soto@axis.cl']], 'a name nobody else has keeps no detail');
 });
 
-test('the roles: a member has only their week; a named manager gets Oportunidades and the admins stop getting it', async () => {
+test('the roles: with no managers named everyone who may see Oportunidades gets it; naming them narrows it', async () => {
   const { client, tables } = memory(seed());
   const member = await reportRoles(client, { organizationId: ORG, userId: 'u-ana' }, canSee);
-  assert.deepEqual(member.roles, ['personal']);
+  assert.deepEqual(member.roles, ['personal', 'opportunities'], 'a member too, while nobody is named (OPP-04)');
   await assert.rejects(saveOpportunityManagers(client, { organizationId: ORG, userId: 'u-ana' }, ['u-ana']), /Solo un administrador/);
   await assert.rejects(saveOpportunityManagers(client, { organizationId: ORG, userId: 'u-admin' }, ['00000000-0000-4000-8000-000000000009']), /Elige personas/);
   await saveOpportunityManagers(client, { organizationId: ORG, userId: 'u-admin' }, ['u-ana']);
@@ -126,7 +126,7 @@ test('the roles: a member has only their week; a named manager gets Oportunidade
   assert.deepEqual((await reportRoles(client, { organizationId: ORG, userId: 'u-admin' }, canSee)).roles, ['personal', 'team']);
   assert.deepEqual((await reportRoles(client, { organizationId: ORG, userId: 'u-ana' }, async () => false)).roles, ['personal'], 'only whoever may see Oportunidades');
   await assert.rejects(reportRoles(client, { organizationId: ORG, userId: 'u-stranger' }, canSee), /No perteneces/);
-  // Before the migration, nobody is a manager and the admins keep the section.
+  // Before the migration, nobody is a manager and everyone who may see Oportunidades keeps the section.
   const before = memory(seed(), ['organization_report_roles']);
   assert.deepEqual(await readOpportunityManagers(before.client, ORG), []);
 });

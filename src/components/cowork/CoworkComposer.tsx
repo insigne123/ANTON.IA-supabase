@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { ArrowUp, Bookmark, CalendarClock, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, Bookmark, CalendarClock, LoaderCircle, Mic, Paperclip, Square, X } from 'lucide-react';
 import { coworkPastedImages } from '@/lib/cowork/attachments';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import {
@@ -13,6 +13,7 @@ import { COWORK_AUTONOMOUS_NOTE, ExecutionMode } from './ExecutionMode';
 import { ComposerShortcutList, type ComposerShortcutItems, type CoworkContactOption } from './ComposerShortcuts';
 import { AnimatePresence, CwCollapse } from './motion';
 import { CwButton } from './ui';
+import { useDictation } from './useDictation';
 
 export type CoworkComposerHandle = { focus: () => void };
 
@@ -66,6 +67,13 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
 }, ref) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
+  // Dictation writes into the box (COW-13); sending or typing over it ends it, keeping what the box already says.
+  const dictation = useDictation(onChange);
+  const cancelDictation = dictation.cancel;
+  useEffect(() => { if (sending) cancelDictation(); }, [sending, cancelDictation]);
+  const submit = () => { cancelDictation(); onSubmit(); };
+  const dictationNote = dictation.state === 'listening' ? 'Escuchando… Pulsa el micrófono para terminar.'
+    : dictation.state === 'stopping' ? 'Terminando el dictado…' : dictation.problem || '';
   useImperativeHandle(ref, () => ({ focus: () => textarea.current?.focus() }), []);
   const listId = `${useId()}-shortcuts`;
   // The shortcut being typed («@mar», «/mej»), the active option, and the contacts found for it.
@@ -162,7 +170,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
     <AnimatePresence>
       {list && <ComposerShortcutList key={list.kind} id={listId} list={list} active={Math.min(active, Math.max(0, count - 1))} onPick={pick} onHover={setActive} />}
     </AnimatePresence>
-    <form onSubmit={event => { event.preventDefault(); if (canSend) onSubmit(); }}
+    <form onSubmit={event => { event.preventDefault(); if (canSend) submit(); }}
       onDragOver={onDropFiles ? event => { if (!carriesFiles(event)) return; event.preventDefault(); setDragging(true); } : undefined}
       onDragLeave={onDropFiles ? event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); } : undefined}
       onDrop={onDropFiles ? event => { if (!carriesFiles(event)) return; event.preventDefault(); setDragging(false); onDropFiles(event.dataTransfer.files); } : undefined}
@@ -178,7 +186,12 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         value={value}
         maxLength={20000}
         rows={size === 'large' ? 3 : 1}
-        onChange={event => { onChange(event.target.value); requestAnimationFrame(readToken); }}
+        onChange={event => {
+          if (dictation.state !== 'idle') cancelDictation();
+          if (dictation.problem) dictation.clearProblem();
+          onChange(event.target.value);
+          requestAnimationFrame(readToken);
+        }}
         onSelect={readToken}
         onBlur={() => setToken(null)}
         // A screenshot pasted into the box is attached like a dropped file (COW-11); pasted text stays text.
@@ -203,7 +216,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
           }
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
-            if (canSend) onSubmit();
+            if (canSend) submit();
           }
         }}
         placeholder={placeholder}
@@ -214,11 +227,19 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         )}
       />
       {attachments && <div className="px-3 pb-1">{attachments}</div>}
+      {dictation.supported && <p role="status" className={cn('px-4 text-[12.5px] leading-5 text-cw-muted', dictationNote ? 'pb-1' : 'sr-only')}>{dictationNote}</p>}
       {list && <span className="sr-only" role="status">{count ? `${count} ${list.kind === 'mention' ? (count === 1 ? 'contacto' : 'contactos') : (count === 1 ? 'plantilla' : 'plantillas')}. Usa las flechas para elegir.` : ''}</span>}
       <div className="flex items-center gap-1 px-2 pb-2 pt-1">
         {onToggleFiles && <CwButton size="icon-sm" variant="ghost" onClick={onToggleFiles} aria-expanded={filesOpen}
           aria-label={filesOpen ? 'Ocultar archivos' : 'Adjuntar archivos'} title="Adjuntar archivos" disabled={sending}>
           <Paperclip aria-hidden="true" />
+        </CwButton>}
+        {dictation.supported && <CwButton size="icon-sm" variant="ghost" disabled={sending || dictation.state === 'stopping'}
+          onClick={() => { if (dictation.state === 'listening') dictation.stop(); else dictation.start(value); }}
+          aria-pressed={dictation.state === 'listening'} aria-label={dictation.state === 'listening' ? 'Terminar dictado' : 'Dictar'}
+          title={dictation.state === 'listening' ? 'Terminar dictado' : 'Dictar: tu navegador escribe lo que dices'}
+          className={cn(dictation.state === 'listening' && 'bg-cw-accent-soft text-cw-accent hover:bg-cw-accent-soft hover:text-cw-accent')}>
+          <Mic aria-hidden="true" />
         </CwButton>}
         {onSavePrompt && (value.trim().length >= 10 || savedPrompts.length > 0) && <CwButton size="icon-sm" variant="ghost" onClick={onSavePrompt} disabled={sending}
           aria-label={value.trim().length >= 10 ? 'Guardar este pedido' : 'Pedidos guardados'}
