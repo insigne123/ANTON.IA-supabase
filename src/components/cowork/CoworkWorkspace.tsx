@@ -34,6 +34,7 @@ import { COWORK_LOW_SEARCH_QUOTA, CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkShortcuts } from './CoworkShortcuts';
 import { CoworkSchedules, useCoworkSchedules } from './CoworkSchedules';
+import type { CoworkScheduleOffer } from '@/lib/cowork/schedules';
 import { CoworkSavedPrompts, useCoworkSavedPrompts } from './CoworkSavedPrompts';
 import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
@@ -171,6 +172,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const schedulesAvailable = schedules.available;
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [schedulesPrompt, setSchedulesPrompt] = useState('');
+  const [schedulesDraft, setSchedulesDraft] = useState<CoworkScheduleOffer | null>(null);
   // «Pedidos guardados» (COW-06): offered with «/» once the table exists; saved from the message box.
   const savedPrompts = useCoworkSavedPrompts(true);
   const [savedPromptsOpen, setSavedPromptsOpen] = useState(false);
@@ -616,7 +618,9 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       ...(pins.available ? { onPin: (rootId: string, pinned: boolean) => void pinThread(rootId, pinned) } : {}) }
     : {};
   const retryList = useCallback(() => { setError(''); setListVersion(value => value + 1); }, []);
-  const openSchedules = useCallback((prompt: string) => { setDrawerOpen(false); setSchedulesPrompt(prompt); setSchedulesOpen(true); }, []);
+  const openSchedules = useCallback((prompt: string) => { setDrawerOpen(false); setSchedulesDraft(null); setSchedulesPrompt(prompt); setSchedulesOpen(true); }, []);
+  // The task an answer proposed («Programar» card): the form opens with it, for the person to save.
+  const openScheduleOffer = useCallback((offer: CoworkScheduleOffer) => { setDrawerOpen(false); setSchedulesPrompt(''); setSchedulesDraft(offer); setSchedulesOpen(true); }, []);
   const openSavedPrompts = useCallback((prompt: string) => { setSavedPromptsDraft(prompt); setSavedPromptsOpen(true); }, []);
   const promptProps = savedPrompts.available
     ? { savedPrompts: savedPrompts.prompts, onSavePrompt: () => openSavedPrompts(message) }
@@ -1135,7 +1139,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 onRegenerate={index === shownTurns.length - 1 && canRegenerate ? regenerate : null}
                 onFeedback={feedback => sendFeedback(turn.run.id, feedback)}
                 onSchedule={index === shownTurns.length - 1 && schedulesAvailable ? () => openSchedules(coworkDisplayMessage(turn.run.message)) : null}
-                taskProgress={taskProgress?.runId === turn.run.id ? taskProgress.progress : null} />)}
+                taskProgress={taskProgress?.runId === turn.run.id ? taskProgress.progress : null}
+                onScheduleOffer={schedulesAvailable ? openScheduleOffer : null} />)}
               {latest?.run.clarificationOf && <div className="flex flex-wrap items-center gap-2 text-[13px] text-cw-muted">
                 <p>La propuesta original sigue esperando tu decisión.</p>
                 <CwButton size="sm" variant="secondary" onClick={() => choose(latest.run.clarificationOf!, { pin: true })}>Ver propuesta</CwButton>
@@ -1233,7 +1238,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     </m.div>}
     <CoworkShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} mac={mac} />
     {savedPrompts.available && <CoworkSavedPrompts open={savedPromptsOpen} onOpenChange={setSavedPromptsOpen} draft={savedPromptsDraft} prompts={savedPrompts.prompts} onChanged={savedPrompts.refresh} />}
-    {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={open => { setSchedulesOpen(open); if (!open) schedules.refresh(); }} initialPrompt={schedulesPrompt} onStarted={retryList} />}
+    {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={open => { setSchedulesOpen(open); if (!open) schedules.refresh(); }} initialPrompt={schedulesPrompt}
+      initialDraft={schedulesDraft} onStarted={retryList} />}
     <AutonomousConfirm open={confirmingAutonomous} onCancel={() => setConfirmingAutonomous(false)}
       onConfirm={() => { writeLocal(AUTONOMOUS_CONFIRMED, '1'); setConfirmingAutonomous(false); setModeState('autonomous'); writeLocal(MODE_KEY, 'autonomous'); }} />
   </section></CoworkExportProvider></CoworkMotion>;

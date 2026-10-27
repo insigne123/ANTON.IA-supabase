@@ -8,6 +8,7 @@ import { COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH, coworkContinu
 import { coworkTaskApproves, coworkTaskContext, coworkTaskReplyContinues, type CoworkActiveTask, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
 import { coworkTaskGraph, type CoworkTaskDeliveryEvent } from '../../src/lib/cowork/task-graph';
 import { coworkResearchNoticeMessage } from '../../src/lib/cowork/research-notice';
+import { coworkStoredScheduleOffer, describeCoworkSchedule } from '../../src/lib/cowork/schedules';
 import { COWORK_SEARCH_ROLE_NOTE } from '../../src/lib/cowork/search-ranking';
 import { CORPUS_NOW, CORPUS_SAVED_EMAILS, corpusRead, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
 
@@ -59,8 +60,8 @@ export const COWORK_TASKS: CoworkTask[] = [
     expected: ['task_plan', 'search', 'lead_prepare_batch', 'campaign_create'], doneAfter: ['campaign_create'] },
   { id: 'cada-lunes', title: 'Algo que se repite cada semana',
     request: 'Cada lunes a las 9 tráeme 5 prospectos nuevos de logística en Santiago para escribirles.',
-    goal: 'Cowork deja programado el pedido semanal (o dice con claridad cómo programarlo con «Programar este pedido») y no lo confunde con una búsqueda de una sola vez.',
-    expected: ['answer'] },
+    goal: 'Cowork propone la tarea semanal con su tarjeta «Programar» (los lunes a las 09:00, con el pedido completo para que se entienda sin esta conversación), la persona la guarda, y no la confunde con una búsqueda de una sola vez.',
+    expected: ['schedule'], doneAfter: ['schedule'] },
 ];
 
 const NAMES = ['Camila Rojas', 'Felipe Muñoz', 'Daniela Soto', 'Matías González', 'Valentina Díaz', 'Sebastián Pérez', 'Javiera Fuentes', 'Tomás Herrera',
@@ -373,6 +374,10 @@ export function nextTurn(task: CoworkTask, turn: { request: string; at: string; 
       turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: [...turn.observations, ...writtenReads(result)],
         actions: [{ kind: result.proposal.kind, label: result.proposal.label, outcome: 'ejecutada', result: effect.result }] } };
   }
+  // A task proposed with its «Programar» card: the person reviews and saves it in «Tareas programadas»; the app does not resume.
+  const offer = coworkStoredScheduleOffer(result.schedule);
+  if (offer) return { request: null, approved: { kind: 'schedule', reply: `Programada: ${describeCoworkSchedule({ ...offer, timeZone: 'America/Santiago' }).toLowerCase()}.`, result: offer },
+    turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: turn.observations, ...shown(result) } };
   // Inside an approved task, a delivery with steps left goes on by itself: the worker admits the next step (worker.ts, with the task graph).
   // What this turn delivered counts: a turn that wrote the emails completed the write step.
   // An answer that asks the person waits for them (worker.ts), and their answer goes on with the task.

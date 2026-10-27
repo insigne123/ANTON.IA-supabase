@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { coworkReportRequestSchema } from './report-document';
+import { coworkScheduleOfferSchema } from './schedules';
 
 export const coworkRequestSchema = z.object({
   requestId: z.string().uuid(),
@@ -264,6 +265,8 @@ export const coworkDocumentSchema = z.object({
   choices: coworkChoicesSchema.nullable().optional(),
   /** Whose research reports, read in this turn, go complete in document: the app writes it (report-document.ts). */
   reports: z.array(coworkReportRequestSchema).min(1).max(5).nullable().optional(),
+  /** A task to repeat this request, as a «Programar» card the person reviews and saves (schedules.ts). Cowork never creates one. */
+  schedule: coworkScheduleOfferSchema.nullable().optional(),
 }).strict();
 
 const transitions: Record<CoworkRunStatus, readonly CoworkRunStatus[]> = {

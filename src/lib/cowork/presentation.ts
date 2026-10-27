@@ -1,5 +1,6 @@
 import { coworkSpecialistFor, type CoworkSpecialistInfo } from './agents';
 import { coworkScheduledTitle } from './schedule-message';
+import { coworkStoredScheduleOffer, type CoworkScheduleOffer } from './schedules';
 import { collectCoworkLeadRows } from './lead-export';
 import { coworkSearchCriteriaSchema, coworkSearchStrategy } from './search-proposal';
 import { coworkVersionSource } from './blocks';
@@ -608,6 +609,12 @@ export function coworkTurnBlocks(events: CoworkEvent[]): CoworkBlock[] {
 export function coworkTurnSuggestions(events: CoworkEvent[]): CoworkSuggestion[] {
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
   return coworkStoredSuggestions(completed?.suggestions);
+}
+
+/** The task Cowork proposed to repeat the request («Programar» card), as it was saved with the answer, or null. */
+export function coworkTurnScheduleOffer(events: CoworkEvent[]): CoworkScheduleOffer | null {
+  const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
+  return coworkStoredScheduleOffer(completed?.schedule);
 }
 
 /** The options that answer the closing question of a turn (V5), or null. */

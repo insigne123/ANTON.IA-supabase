@@ -162,15 +162,16 @@ test('remembering a preference is described only when it is on, in any turn, wit
   assert.match(String(on.preferenceCapability), /Nunca digas que algo queda guardado o propuesto si no propusiste preference\.save/);
 });
 
-test('scheduled tasks are described only when they are on: Cowork says where to set one up and never that it did', () => {
+test('scheduled tasks are described only when they are on: Cowork proposes the task as a card and never says it did it', () => {
   const base = { history: { turns: [] }, request: 'Cada lunes dime a quién escribir', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
   const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
   assert.equal('scheduleCapability' in off, false);
   const on = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, schedules: true, intents: new Set(['email'] as const) }), base);
-  assert.match(String(on.scheduleCapability), /Tú no creas ni cambias tareas/);
+  assert.match(String(on.scheduleCapability), /propón la tarea en answer\.schedule/);
+  assert.match(String(on.scheduleCapability), /tarjeta «Programar» que la persona revisa y guarda: tú no la creas/);
   assert.match(String(on.scheduleCapability), /ícono del calendario/);
   assert.match(String(on.scheduleCapability), /modo aprobación/);
-  assert.match(String(on.scheduleCapability), /nunca digas que ya quedó programado/);
+  assert.match(String(on.scheduleCapability), /nunca digas que ya quedó programada/);
 });
 
 test('the Analyst is described only when it is on, with a decision in reserve for the coordinator to answer if it fails', () => {

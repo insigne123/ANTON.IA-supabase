@@ -237,6 +237,8 @@ export type CorpusTurnResult = {
   question?: string | null;
   /** The options that answer it (V5), when it asks for something only the person knows. */
   choices?: CoworkChoices | null;
+  /** The task it proposed to repeat the request («Programar» card), as the answer brought it. */
+  schedule?: unknown;
   /** The conversation's memory the turn wrote (thread-memory.ts), with the name Cowork gave the conversation (Plan 13). */
   memory?: unknown;
   /** The account's state the turn carried (COWORK_WORKSPACE_ENABLED, Plan 13), so the judge reads the same figures. */

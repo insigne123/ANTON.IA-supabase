@@ -40,7 +40,7 @@ export const COWORK_HARNESS_PROTOCOL = [
   '- draft.write es la herramienta redactar; analysis.write es analizar; artifact.create es disenar (solo si existe).',
   '- Lo que cambia algo, gasta créditos o busca personas nuevas se propone con la herramienta proponer_* de su tipo, con el mismo action de las instrucciones (leads.save_contact, campaign.create, prospecting.propose_search…) y sus mismos campos, más explicacion (lo que las instrucciones llaman answer.reply de una propuesta: 1 a 3 frases). Si devuelve un problema, corrígelo y vuelve a llamarla; nada se ejecuta sin la aprobación de la persona.',
   '- Una pregunta de información (qué tengo pendiente, cómo voy, a quién conviene escribir) se responde con responder, completa y con la estructura que las instrucciones piden para ella (la conclusión, lo que revisaste, la tabla): la propuesta de buscar o de cambiar algo va como siguiente paso en question, y la preparas con proponer_* cuando la persona lo pide o acepta tu oferta. Si la persona ya pidió la acción, propónla sin preguntar de nuevo.',
-  '- Entregas la respuesta con responder: sus campos son los de answer en las instrucciones (reply, document, question, suggestions, blocks, choices, reports) y, en la respuesta final, memoria. Después de responder o de proponer no llames nada más.',
+  '- Entregas la respuesta con responder: sus campos son los de answer en las instrucciones (reply, document, question, suggestions, blocks, choices, reports, schedule) y, en la respuesta final, memoria. Después de responder o de proponer no llames nada más.',
   '- Si vas a entregar un documento largo (más de unas 500 palabras, con tablas o varias secciones) en el campo document de responder, llama antes a revisar_documento con su título y contenido: te dice cómo se vería como PDF (páginas, títulos solos, tablas cortadas, última página casi vacía) y qué corregir.',
   '- Un resultado con error dice qué corregir: no lo repitas igual. Si una consulta ya se hizo en este turno, el resultado vuelve de memoria sin gastar presupuesto.',
 ].join('\n');
@@ -154,6 +154,7 @@ const answerSchema = coworkDocumentSchema.extend({
   blocks: fields.blocks.describe('Correos, secuencias, tablas y cifras como tarjetas, no en el chat (regla 11)'),
   choices: fields.choices.describe('Las opciones que responden la pregunta final cuando solo la persona sabe la respuesta (V5)'),
   reports: fields.reports.describe('Las investigaciones leídas en este turno cuyo informe completo va en document: la app lo escribe'),
+  schedule: fields.schedule.describe('La tarea programada que propones cuando la persona pide que algo se repita: la app muestra la tarjeta «Programar» y la persona la revisa y la guarda'),
   memoria: coworkThreadMemorySchema.nullable().optional().describe('Resumen de toda la conversación, solo en la respuesta final'),
 });
 

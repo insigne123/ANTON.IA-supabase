@@ -140,6 +140,8 @@ export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, optio
     contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch),
     campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunitiesSection: Boolean(entry.opportunitiesSection),
     preferences: Boolean(entry.preferences),
+    // Scheduled tasks, as production with COWORK_SCHEDULES_ENABLED=true: Cowork proposes one with its «Programar» card.
+    schedules: process.env.COWORK_SCHEDULES_ENABLED === 'true',
     // Long tasks (Plan 13, 4c), as production with COWORK_TASKS_ENABLED=true.
     tasks: process.env.COWORK_TASKS_ENABLED === 'true' && !entry.task,
     prepareBatch: corpusPrepareBatch,
@@ -416,6 +418,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
     result.blocks = polished.blocks || [];
     result.question = polished.question;
     result.choices = polished.choices;
+    if ('schedule' in polished && polished.schedule) result.schedule = polished.schedule;
   } catch (error) {
     result.failed = coworkFailureMessage(error);
   }

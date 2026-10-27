@@ -60,6 +60,33 @@ export const coworkScheduleInputSchema = z.object(coworkScheduleFields).strict()
 });
 export type CoworkScheduleInput = z.infer<typeof coworkScheduleInputSchema>;
 
+/**
+ * A task Cowork proposes in its answer (answer.schedule) when the person asks for something to repeat: the chat shows it as a card,
+ * «Programar», that opens the form already filled in, and the person saves it. Cowork never creates one itself. Plain fields, so the
+ * model's tools read it as is; what a task needs (the day of a weekly one) is checked when it is read back (coworkStoredScheduleOffer).
+ */
+export const coworkScheduleOfferSchema = z.object({
+  title: coworkScheduleFields.title,
+  prompt: coworkScheduleFields.prompt,
+  frequency: coworkScheduleFields.frequency,
+  time: coworkScheduleFields.time,
+  weekday: coworkScheduleFields.weekday,
+  monthDay: coworkScheduleFields.monthDay,
+}).strict();
+export type CoworkScheduleOffer = { title: string; prompt: string; frequency: CoworkScheduleFrequency; time: string; weekday: number | null; monthDay: number | null };
+
+/** A stored offer, as a task would take it (a day field the frequency does not use is dropped), or null for one that is not a valid task. */
+export function coworkStoredScheduleOffer(value: unknown): CoworkScheduleOffer | null {
+  if (!value || typeof value !== 'object') return null;
+  const { title, prompt, frequency, time, weekday, monthDay } = value as Record<string, unknown>;
+  const parsed = coworkScheduleInputSchema.safeParse({ title, prompt, frequency, time,
+    ...(frequency === 'weekly' ? { weekday } : {}), ...(frequency === 'monthly' ? { monthDay } : {}) });
+  if (!parsed.success) return null;
+  const task = parsed.data;
+  return { title: task.title, prompt: task.prompt, frequency: task.frequency, time: task.time,
+    weekday: task.frequency === 'weekly' ? task.weekday ?? null : null, monthDay: task.frequency === 'monthly' ? task.monthDay ?? null : null };
+}
+
 /** The schedule of an input, with the zone checked (an unknown one falls back to the account's) and the unused day fields null. */
 export function coworkScheduleOf(input: Pick<CoworkScheduleInput, 'frequency' | 'time' | 'weekday' | 'monthDay' | 'timeZone'>): CoworkSchedule {
   return {

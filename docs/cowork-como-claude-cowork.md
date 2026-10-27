@@ -68,7 +68,7 @@ Una corrida de los ocho encargos con el código de hoy y los dos arreglos de arr
 - **El ruido es grande.** Con una sola corrida y una jueza Haiku, el mismo encargo cambia de «sí» a «parcial» entre corridas. El mismo trabajo, juzgado otra vez con la jueza corregida, pasó de 1 a 4 terminados. Para decidir entre variantes hacen falta al menos 3 corridas por variante.
 - **Se probó y no quedó: «hacer en vez de ofrecer».** Era cambiar las continuaciones para que Cowork escribiera en la misma respuesta lo que el encargo ya pedía. Dio 2 de 8 contra 4 de 8, con menos llamadas (98 contra 109), y no se distingue del ruido. No se cambia en producción.
 - **Las dos fallas que se repiten en las dos corridas** son las que hay que atacar primero:
-  - **Programar desde el chat.** Lo que Claude Cowork hace con una tarjeta, aquí se le prohíbe al coordinador. Requiere un efecto nuevo y una migración pequeña: el tipo `schedule_create` en el *check* de `cowork_effect_proposals` y en la función que registra los efectos.
+  - **Programar desde el chat.** Lo que Claude Cowork hace con una tarjeta, aquí se le prohíbe al coordinador. Se resolvió sin migración (ver «Programar desde el chat» más abajo).
   - **Encargos largos con investigación.** Ocho turnos no alcanzan. Hace falta que la tarea siga viva cuando la persona contesta algo corto, y que sus pasos queden a la vista.
 
 ## Tareas largas: un «sí» ya no corta la tarea y sus pasos se ven
@@ -124,23 +124,49 @@ Segunda parte, el mismo 27 de octubre. Una tarea aprobada (un plan de 2 a 6 paso
   - Ninguno de los 4 quedó «terminado» para la jueza, por las mismas razones de contenido de arriba.
 - **Revisión visual:** `cowork-tarea-en-curso` y su versión de teléfono, en claro y oscuro. Los 16 recorridos de Cowork pasan.
 
+## Programar desde el chat: «cada lunes a las 9…» termina en una tarjeta
+
+Tercera parte, el mismo 27 de octubre. Las tareas programadas ya existían (`COWORK_SCHEDULES_ENABLED=true` en producción), pero solo desde «Programadas» o desde «Programar» bajo una respuesta. Si la persona le pedía a Cowork algo que se repite, las reglas le decían que explicara dónde programarlo. En el banco, el encargo `cada-lunes` lo convertía en una búsqueda única y no terminaba.
+
+**Qué cambia**
+
+- **Cowork propone la tarea en su respuesta** (`answer.schedule`, `coworkScheduleOfferSchema` en `src/lib/cowork/schedules.ts`), con:
+  - un nombre;
+  - el pedido completo, sin «cada lunes», porque quien lo ejecuta no tiene la conversación;
+  - la frecuencia, la hora y el día. Si la persona no los dice, usa las 09:00 y el lunes.
+- **La conversación la muestra como una tarjeta «Programar»** (`CoworkScheduleOffer.tsx`): qué hará, cuándo, y «Aún no está programada: revísala y guárdala». Su única acción, «Revisar y programar», abre «Tareas programadas» con todo ya escrito.
+- **La persona la guarda.** Cowork no crea la tarea ni dice que ya quedó programada. Se guarda por el mismo camino de siempre, con sus validaciones y su límite de tareas. Por eso no hizo falta una migración: la tabla ya estaba pensada para guardar desde la app.
+- **Una sola forma de programar ese turno.** Con la tarjeta, el «Programar» bajo la respuesta no aparece.
+- **El banco ahora conoce las tareas programadas.** Las instrucciones del banco no tenían la capacidad, aunque producción sí. Con `COWORK_SCHEDULES_ENABLED=true` la tiene, y guardar la tarjeta termina el encargo `cada-lunes`.
+
+**Resultado** (`cada-lunes`, 2 corridas, Haiku):
+
+| | Antes | Ahora |
+| --- | --- | --- |
+| Encargos terminados | 0 de 2 | 2 de 2 |
+| Turnos | 8 (máximo) | 1 |
+| Avance · veracidad · claridad (de 5) | — | 5 · 5 · 4,5 |
+
+- En las dos corridas la tarjeta propone «Prospectos de logística del lunes», los lunes a las 09:00, con un pedido completo: el rubro, la ciudad, los cargos, que excluya a quienes ya tiene y que no envíe nada sin aprobación.
+- La respuesta explica qué hará cada ejecución y qué no (no guarda, no gasta créditos, no envía), y ofrece buscar hoy los primeros.
+- **Revisión visual:** `cowork-programar-tarjeta` y su versión de teléfono, en claro y oscuro: la tarjeta, su única acción y el formulario con el nombre, el pedido y el horario que propuso.
+
 ## Lo que sigue
 
-1. **Programar desde el chat**, con aprobación: «cada lunes a las 9…» termina en una tarjeta «Programar», no en instrucciones. Necesita la migración del punto de arriba.
-2. **Tareas largas: lo que falta.**
-   - Un aviso por correo cuando la tarea termina. La app ya manda correos propios (`self-email.ts`); conviene decidirlo antes, porque es un correo nuevo a cada persona.
+1. **Tareas largas: lo que falta.**
    - Que la búsqueda de una tarea traiga lo que el plan pide (20 personas, no 10).
    - Que, dentro de una tarea, Cowork no pregunte lo que el plan ya aprobó.
-3. **Contexto más liviano.**
+   - Sin aviso por correo cuando la tarea termina: se decidió no agregarlo.
+2. **Contexto más liviano.**
    - Cada llamada del coordinador lee unos 62.000 tokens: 75.000 caracteres de reglas, unos 33.000 del contexto del turno y las herramientas. El 87 % sale de la caché, así que con Haiku cuesta poco.
    - El problema es la atención: con tantas reglas, Haiku se salta algunas.
    - El camino es que las reglas de cada capacidad lleguen solo cuando se usan (las guías por demanda del harness, `skills.ts`), y medirlo con este banco.
-4. **Medir con la Redactora de producción (Luna).** En el banco escribe Haiku, que dos veces devolvió «Writer returned no email».
-5. **Archivos como entregable.** El informe en Word ya sale. Faltan Excel y presentaciones a partir de un pedido, con versiones.
-6. **Conectores.**
+3. **Medir con la Redactora de producción (Luna).** En el banco escribe Haiku, que dos veces devolvió «Writer returned no email».
+4. **Archivos como entregable.** El informe en Word ya sale. Faltan Excel y presentaciones a partir de un pedido, con versiones.
+5. **Conectores.**
    - **Calendario:** para proponer horarios cuando alguien pide reunión. Requiere agregar el permiso de calendario en la consola de Google (y probablemente una nueva verificación de Google) y en la de Microsoft; después cada persona reconecta su correo.
    - **Drive:** para leer archivos.
-7. **Que se use.** Hoy lo usan 5 de 37 personas de los clientes. Llevar a Cowork desde «Hoy» con un encargo listo, y hacer seguimiento de las propuestas que quedan sin responder.
+6. **Que se use.** Hoy lo usan 5 de 37 personas de los clientes. Llevar a Cowork desde «Hoy» con un encargo listo, y hacer seguimiento de las propuestas que quedan sin responder.
 
 ## Qué no se midió
 

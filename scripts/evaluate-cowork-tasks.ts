@@ -191,6 +191,8 @@ async function main() {
         if (next.approved && task.doneAfter?.includes(next.approved.kind)) finishing = true;
         if (!next.approved) answered += 1;
         history.push(next.turn);
+        // The person saved the task its card proposed: that is the end of this work in the app.
+        if (next.approved?.kind === 'schedule') { stopped = 'la persona programó la tarea'; break; }
         if (next.request === null) {
           budget();
           const said = String(next.turn.reply || '');
