@@ -15,8 +15,9 @@ En GrupoExpro (32 personas) y PSOL (7), las búsquedas les muestran a todos las 
 
 ## Dónde se hace cumplir
 
-- **En la base de datos**, en dos migraciones pequeñas:
+- **En la base de datos**, en tres migraciones pequeñas:
   - `20261027120000_lead_claims_lookup.sql`: la lectura. Son `lead_claims_v1` (para la app; cada persona lee solo su organización y como sí misma), `lead_claim_lookup_v1` (interna) y un índice de `enriched_leads` por organización.
+  - `20261027120050_lead_claims_lookup_faster.sql`: la misma lectura, más rápida. Normaliza una vez los contactos de la organización y los cruza por igualdad. En GrupoExpro, 200 personas pasaron de 1.214 ms a 22 ms; en una prueba local con 8.000 contactos, de 13,8 s a 91 ms. El resultado es el mismo.
   - `20261027120100_lead_claims_enforce.sql`: el bloqueo. Un trigger antes de insertar en `leads` y `enriched_leads` rechaza a la persona adjudicada a otro integrante, con el error `lead_claimed`; el error lleva quién la tiene y cuántos días le quedan. Solo al insertar: quien ya la tenía la conserva, y reasignar un contacto no cambia.
 - **En la app**, para que nadie choque con el rechazo:
   - la búsqueda deja fuera a los adjudicados al guardar;
@@ -26,7 +27,7 @@ En GrupoExpro (32 personas) y PSOL (7), las búsquedas les muestran a todos las 
 
 ## Orden de puesta en marcha
 
-1. Migración de lectura en producción: no cambia nada de lo que se puede guardar.
+1. Migraciones de lectura en producción: no cambian nada de lo que se puede guardar. Se aplicaron el 27 de octubre: permisos, índice, advisors y logs, sin errores.
 2. Despliegue de la app: los avisos aparecen. Antes de la migración, la lectura falla en silencio y las pantallas siguen como antes.
 3. Migración del bloqueo.
 
