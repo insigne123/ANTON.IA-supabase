@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { ExtensionRequestSchema, assertExtensionScope } from '../../../../lib/extension-contracts';
+import * as leadClaim from '../../../../lib/lead-claim';
 
 const require = createRequire(import.meta.url);
 const { NextRequest, NextResponse } = require('next/server');
@@ -19,6 +20,7 @@ function fixture(withLead = false, authenticated = true) {
     '@/app/api/opportunities/enrich-apollo/route': { POST: async (req: any) => { const body = await req.json(); calls.push(body); return NextResponse.json({ enriched: [] }); } },
     'next/server': { NextRequest, NextResponse }, zod: require('zod'),
     '@/lib/extension-contracts': { ExtensionRequestSchema, assertExtensionScope },
+    '@/lib/lead-claim': leadClaim,
     '@/lib/server/auth-utils': { AuthError, requireAuth: async () => {
       if (!authenticated) throw new AuthError('Unauthorized');
       return { organizationId: org, user: { id: user, email: 'seller@example.test' }, supabase: { from: (table: string) => {

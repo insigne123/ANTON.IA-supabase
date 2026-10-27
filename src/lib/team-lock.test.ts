@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeLockEmail, normalizeLockLinkedin, teamLockFreeFrom, teamLockNotice, type TeamLock } from '@/lib/team-lock';
+import { normalizeLockEmail, normalizeLockLinkedin, teamLockClaimed, teamLockFreeFrom, teamLockNotice, type TeamLock } from '@/lib/team-lock';
 
 const NOW = Date.parse('2026-10-10T12:00:00Z');
 const lock = (patch: Partial<TeamLock> = {}): TeamLock => ({
@@ -45,4 +45,14 @@ test('a contact another member saved first only says so: «Guardado por Ana», w
   assert.deepEqual(teamLockNotice(lock({ status: 'saved', lastContactedAt: null }), NOW), { text: 'Guardado por Ana Pérez', blocks: false });
   assert.equal(teamLockFreeFrom(lock({ status: 'saved' })), null, 'nothing to free: nobody wrote to them yet');
   assert.equal(teamLockNotice(lock({ status: 'saved', mine: true }), NOW), null, 'saved by you first, nothing to say');
+});
+
+test('a contact another member saved in the last 30 days is theirs: «Adjudicado a Ana · le quedan 12 días», and it blocks', () => {
+  const now = Date.parse('2026-10-27T12:00:00Z');
+  const lock = { status: 'claimed' as const, ownerName: 'Ana Pérez', mine: false, replied: false, lastContactedAt: null, claimedUntil: '2026-11-08T12:00:00Z' };
+  assert.deepEqual(teamLockNotice(lock, now), { text: 'Adjudicado a Ana Pérez · le quedan 12 días', blocks: true });
+  assert.equal(teamLockClaimed(lock), true);
+  assert.equal(teamLockClaimed({ ...lock, mine: true }), false, 'your own is not held from you');
+  assert.equal(teamLockClaimed({ ...lock, status: 'saved' }), false);
+  assert.equal(teamLockClaimed(undefined), false);
 });

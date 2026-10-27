@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { z } from 'zod';
 
 import { identityFromProvider } from '@/lib/server/lead-identity';
+import * as leadClaim from '@/lib/lead-claim';
 import { LEADS_FINDER_PROVIDER, LeadsFinderError, leadsFinderMaxRunUsd, splitLeadsFinderItems } from '@/lib/server/leads-finder/client';
 import * as reveal from '@/lib/server/leads-finder/reveal';
 import { isLeadsFinderId, LeadsFinderVaultError } from '@/lib/server/leads-finder/vault';
@@ -159,6 +160,7 @@ function enrichRoute(options: { inVault?: string[]; existing?: any; allowed?: bo
     },
     '@/lib/server/leads-finder/client': { LEADS_FINDER_PROVIDER },
     '@/lib/server/leads-finder/reveal': reveal,
+    '@/lib/lead-claim': leadClaim,
     '@/lib/server/leads-finder/vault': {
       isLeadsFinderId, LeadsFinderVaultError,
       readFromVault: async (_client: unknown, input: { ids: string[] }) => new Map(input.ids.filter(id => vault.has(id)).map(id => [id, vault.get(id)!])),

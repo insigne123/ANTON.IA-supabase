@@ -13,6 +13,7 @@ import {
 } from '@/lib/server/apollo-enrichment-callbacks';
 import { submitApolloEnrichment } from '@/lib/server/apollo-enrichment';
 import { isApolloCreditBalanceStale, loadLatestApolloCreditBalance } from '@/lib/server/apollo-credit-balance';
+import { leadClaimRefusal } from '@/lib/lead-claim';
 import {
   COWORK_PHONE_REVEAL_CREDITS, coworkPhoneRevealEnabled, coworkPhoneRevealTarget, hashCoworkPhoneReveal, parseCoworkPhoneRevealTarget, type CoworkPhoneWho,
 } from '@/lib/cowork/enrich-phone-target';
@@ -171,7 +172,7 @@ export async function executeCoworkPhoneReveal(auth: AuthContext, runId: string,
       data: { sourceProvider: 'apollo', sourceProviderId: info.apolloId, sourceSavedLeadId: target.leadId, companyDomain: info.domain, phoneRequested: true },
       created_at: now, updated_at: now,
     }).select('id,enrichment_status').maybeSingle();
-    if (inserted.error || !inserted.data) throw new Error('No se pudo preparar el pedido del teléfono.');
+    if (inserted.error || !inserted.data) throw new Error(leadClaimRefusal(inserted.error)?.message ?? 'No se pudo preparar el pedido del teléfono.');
     const callback = await createApolloEnrichmentCallback({
       operationId, claimToken: claim.claimToken, userId, organizationId, quotaResource: 'enrich',
       targetTable: 'enriched_leads', targetId: targetRow, apolloPersonId: info.apolloId, requestedFields: ['person.phone_numbers'],

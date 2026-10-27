@@ -3,6 +3,7 @@ import type { AuthContext } from '@/lib/server/auth-utils';
 import { deterministicMessagingUuid } from '@/lib/messaging-contracts';
 import { getCoworkRun } from './runs';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { withLeadClaimMessage } from '@/lib/lead-claim';
 
 export const coworkSaveContactSchema = z.object({ providerId: z.string().regex(/^apollo:[A-Za-z0-9_-]{1,200}$/) }).strict();
 
@@ -49,7 +50,8 @@ export async function insertCoworkContact(auth: AuthContext, providerId: string,
     company_linkedin: observed.company_linkedin || null,
     email: null,
   }, { onConflict: 'id', ignoreDuplicates: true });
-  if (result.error) throw result.error;
+  // Another member saved them in the last 30 days: the database refuses, and the batch or the card says who holds them.
+  if (result.error) throw withLeadClaimMessage(result.error);
   const saved = await auth.supabase.from('leads').select(fields).eq('id', id)
     .eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).single();
   if (saved.error || !saved.data) throw new Error('COWORK_CONTACT_SAVE_NOT_CONFIRMED');

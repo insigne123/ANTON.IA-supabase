@@ -98,6 +98,22 @@ test('the same person twice in the file is imported once: same email, LinkedIn p
     assert.deepEqual(plan.repeated.map((row) => row.name), ['Ana Perez', 'A. Pérez', 'Jorge S.']);
 });
 
+test('whoever another member of the team holds stays out of the import, and the summary says so', () => {
+    const rows = [
+        { name: 'Ana', email: 'ana@empresa.cl' },
+        { name: 'Marta', email: 'marta@empresa.cl' },
+        { name: 'Jorge', email: '', company: 'Otra', linkedinUrl: 'https://www.linkedin.com/in/jorge' },
+    ] as CsvLeadInput[];
+    const plan = planCsvImport(rows, new Set(), (row) => row.email === 'marta@empresa.cl' || Boolean(row.linkedinUrl));
+    assert.deepEqual(plan.porEscribir.map((row) => row.name), ['Ana']);
+    assert.deepEqual(plan.claimed.map((row) => row.name), ['Marta', 'Jorge']);
+    assert.deepEqual(planCsvImport(rows, new Set()).claimed, [], 'nobody is held unless the team says so');
+    assert.deepEqual(csvImportSummary({ porEscribir: 1, porCompletar: 0, duplicates: 0, alreadyContacted: 0, repeated: 0, claimed: 2 }).notes,
+        ['2 contactos están adjudicados a otras personas del equipo, que los guardaron en los últimos 30 días, y no se importaron.']);
+    assert.deepEqual(csvImportSummary({ porEscribir: 1, porCompletar: 0, duplicates: 0, alreadyContacted: 0, repeated: 0, claimed: 1 }).notes,
+        ['1 contacto está adjudicado a otra persona del equipo, que lo guardó en los últimos 30 días, y no se importó.']);
+});
+
 test('the summary counts what was really added', () => {
     assert.deepEqual(csvImportSummary({ porEscribir: 3, porCompletar: 1, duplicates: 2, alreadyContacted: 1, repeated: 2 }), {
         title: 'Importaste 4 contactos',

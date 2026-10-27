@@ -55,18 +55,20 @@ export async function monthSpend(client: Client, now: Date) {
 /** The people, companies and contacts the organization already has, and who got what in earlier drops: never offered again. */
 async function knownPeople(client: Client, organizationId: string, now: Date): Promise<KnownPeople> {
   const since = new Date(now.getTime() - 180 * DAY).toISOString().slice(0, 10);
-  const [enriched, contacted, drops]: any[] = await Promise.all([
+  // Contactos too: a person a member saved there is theirs (lead-claim.ts), and «Por escribir» would refuse them.
+  const [enriched, contacted, drops, saved]: any[] = await Promise.all([
     client.from('enriched_leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId).limit(10000),
     client.from('contacted_leads').select('email').eq('organization_id', organizationId).limit(10000),
     client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since).limit(2000),
+    client.from('leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId).limit(10000),
   ]);
-  if (enriched.error || contacted.error || drops.error) throw new LeadDropsError('No pudimos leer los contactos del equipo.', 503);
+  if (enriched.error || contacted.error || drops.error || saved.error) throw new LeadDropsError('No pudimos leer los contactos del equipo.', 503);
   const lower = (value: unknown) => String(value || '').trim().toLowerCase();
   return {
-    emails: new Set([...(enriched.data || []), ...(contacted.data || [])].map((row: any) => lower(row.email)).filter(Boolean)),
-    linkedins: new Set((enriched.data || []).map((row: any) => lower(row.linkedin_url).replace(/\/$/, '')).filter(Boolean)),
+    emails: new Set([...(enriched.data || []), ...(contacted.data || []), ...(saved.data || [])].map((row: any) => lower(row.email)).filter(Boolean)),
+    linkedins: new Set([...(enriched.data || []), ...(saved.data || [])].map((row: any) => lower(row.linkedin_url).replace(/\/$/, '')).filter(Boolean)),
     leadIds: new Set([
-      ...(enriched.data || []).map((row: any) => String(row.source_provider_id || '')),
+      ...[...(enriched.data || []), ...(saved.data || [])].map((row: any) => String(row.source_provider_id || '')),
       ...(drops.data || []).flatMap((row: any) => (Array.isArray(row.items) ? row.items : []).map((item: any) => String(item?.leadId || ''))),
     ].filter(Boolean)),
   };

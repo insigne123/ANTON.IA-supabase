@@ -1,6 +1,6 @@
 import { normalizeLockEmail, normalizeLockLinkedin, type TeamLock, type TeamLockStatus } from '@/lib/team-lock';
 
-type Client = { from: (table: string) => any };
+type Client = { from: (table: string) => any; rpc?: (fn: string, args: Record<string, unknown>) => any };
 type Scope = { userId: string; organizationId: string };
 export type TeamLockQuery = { emails?: string[]; providerIds?: string[]; linkedinUrls?: string[] };
 export type TeamLocks = {
@@ -17,13 +17,59 @@ const unique = (values: string[]) => [...new Set(values.filter(Boolean))].slice(
 /**
  * The team locks for a set of people (Plan 5, PR-9b), read with the person's own client: members can read their
  * organization's contacts, conversations and threads. People are matched by email; search results without one are
- * matched through a contact another member saved, by provider id or LinkedIn. Without collaboration nothing is locked.
+ * matched through a contact another member saved, by provider id or LinkedIn. Without collaboration nothing is locked,
+ * except the people another member saved in the last 30 days («Adjudicado a Ana · le quedan 12 días»), in every organization.
  */
 export async function readTeamLocks(client: Client, scope: Scope, input: TeamLockQuery): Promise<TeamLocks> {
-  const empty: TeamLocks = { enabled: false, byEmail: {}, byProviderId: {}, byLinkedin: {} };
   const org = await client.from('organizations').select('collaboration_v1_enabled').eq('id', scope.organizationId).maybeSingle();
   if (org.error) throw org.error;
-  if (!org.data?.collaboration_v1_enabled) return empty;
+  const [locks, claims] = await Promise.all([
+    org.data?.collaboration_v1_enabled ? readCollaborationLocks(client, scope, input) : Promise.resolve({ enabled: false, byEmail: {}, byProviderId: {}, byLinkedin: {} }),
+    readLeadClaims(client, scope, input),
+  ]);
+  return withLeadClaims(locks, claims);
+}
+
+export type LeadClaimRow = { match_kind: 'email' | 'provider' | 'linkedin'; match_key: string; owner_id: string; owner_name: string; claimed_at: string; claimed_until: string };
+
+/**
+ * Who else in the organization holds each of these people: saved by them in the last 30 days (lead_claims_v1, migration
+ * 20261027120000). Before that migration, or if the read fails, there are none and the screens work as before; the database
+ * still refuses the save.
+ */
+export async function readLeadClaims(client: Client, scope: Scope, input: TeamLockQuery): Promise<LeadClaimRow[]> {
+  const emails = unique((input.emails || []).map(normalizeLockEmail).filter(email => email.includes('@')));
+  const providerIds = unique((input.providerIds || []).map(value => String(value || '').trim()));
+  const linkedins = unique((input.linkedinUrls || []).map(normalizeLockLinkedin));
+  if (!client.rpc || (!emails.length && !providerIds.length && !linkedins.length)) return [];
+  try {
+    const { data, error } = await client.rpc('lead_claims_v1', {
+      p_organization_id: scope.organizationId, p_user_id: scope.userId, p_emails: emails, p_provider_ids: providerIds, p_linkedins: linkedins,
+    });
+    if (error || !Array.isArray(data)) return [];
+    return (data as LeadClaimRow[]).filter(row => row && typeof row.match_key === 'string' && typeof row.claimed_until === 'string');
+  } catch {
+    return [];
+  }
+}
+
+/** The claims over the locks: a conversation or a close is stronger and stays; a claim replaces «Guardado por Ana». */
+export function withLeadClaims(locks: TeamLocks, claims: LeadClaimRow[]): TeamLocks {
+  if (!claims.length) return locks;
+  const result: TeamLocks = { enabled: true, byEmail: { ...locks.byEmail }, byProviderId: { ...locks.byProviderId }, byLinkedin: { ...locks.byLinkedin } };
+  for (const claim of claims) {
+    const lock: TeamLock = { status: 'claimed', ownerName: claim.owner_name || null, mine: false, replied: false, lastContactedAt: null, claimedUntil: claim.claimed_until };
+    const [map, key] = claim.match_kind === 'email' ? [result.byEmail, normalizeLockEmail(claim.match_key)]
+      : claim.match_kind === 'provider' ? [result.byProviderId, claim.match_key]
+        : [result.byLinkedin, `linkedin.com/in/${claim.match_key}`];
+    if (!map[key] || map[key].status === 'saved') map[key] = lock;
+  }
+  return result;
+}
+
+/** The locks of collaboration (Plan 5, PR-9b; Plan 6, PR-E): conversations, closes and «Guardado por Ana». */
+async function readCollaborationLocks(client: Client, scope: Scope, input: TeamLockQuery): Promise<TeamLocks> {
+  const empty: TeamLocks = { enabled: false, byEmail: {}, byProviderId: {}, byLinkedin: {} };
   const result: TeamLocks = { ...empty, enabled: true };
 
   const emails = unique((input.emails || []).map(normalizeLockEmail).filter(email => email.includes('@')));
