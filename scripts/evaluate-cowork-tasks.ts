@@ -5,11 +5,12 @@
 //
 //   ANTHROPIC_API_KEY=... COWORK_WORKSPACE_ENABLED=true COWORK_TASKS_ENABLED=true \
 //   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-tasks.ts --live --max-calls=300 [--tasks=a,b] [--repeat=2] [--output=file.json] [--writer]
+//   ... --live --max-calls=1 --rejudge=file.json --output=rejudged.json   (only the judge, again, over a saved run)
 //
 // --writer hands emails to the Writer and the Reviewer, as production does (COWORK_WRITER_MODEL / COWORK_REVIEWER_MODEL; a «claude-» model
 // needs no OpenAI key). The judge is COWORK_TASK_JUDGE_MODEL (claude-haiku-5-5 by default). Calls of the turn, the Writer and the judge all
 // count against --max-calls.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { anthropicModel } from '../src/lib/agent-harness/anthropic';
@@ -20,7 +21,7 @@ import { coworkHarnessSettings } from '../src/lib/cowork/harness-config';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '../src/lib/server/cowork/writer-run';
 import { coworkReadCapabilities } from '../src/lib/server/cowork/read-capabilities';
-import { CORPUS_NOW, type CorpusHistoryTurn, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
+import { CORPUS_NOW, CORPUS_USER_CONTEXT, type CorpusHistoryTurn, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { runCorpusCase, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { activeTask, COWORK_TASKS, nextTurn, taskWorld, type CoworkTask } from './fixtures/cowork-task-corpus';
 
@@ -59,8 +60,10 @@ function personPrompt(task: CoworkTask, reply: string) {
 function judgePrompt(task: CoworkTask, steps: Array<Record<string, unknown>>) {
   return [
     'Eres quien evalúa a Cowork, el asistente de ventas de ANTON.IA, en un encargo completo de varios pasos.',
-    'Entre turnos, la persona aprobó cada propuesta y el sistema ejecutó lo aprobado (su resultado está en «aprobado»). Cuando Cowork preguntó algo, la persona respondió.',
+    'Entre turnos, el sistema ejecutó lo aprobado (su resultado está en «aprobado»; «por» dice si lo aprobó la persona o la tarea aprobada, sin que la persona viera nada). Cuando Cowork preguntó algo, la persona respondió.',
     'Evalúa el trabajo entero, no cada frase. Cowork no envía correos ni gasta créditos sin aprobación: pedirla para eso es correcto, no fricción.',
+    // What the account knows of whoever asks (their profile and offer): a figure taken from it is not invented.
+    `Lo que la cuenta sabe de quien pide (perfil y oferta; sus datos son ciertos): ${JSON.stringify({ ...CORPUS_USER_CONTEXT, instruction: undefined }).slice(0, 3000)}`,
     `Encargo: ${task.request}`,
     `Terminado significa: ${task.goal}`,
     `Pasos que una persona esperaría (guía, no guion): ${task.expected.join(' → ')}`,
@@ -83,6 +86,30 @@ async function main() {
   const settings = coworkHarnessSettings({ COWORK_RUNTIME: 'harness', ...(process.env as Record<string, string | undefined>) })!;
   const judgeModel = process.env.COWORK_TASK_JUDGE_MODEL?.trim() || 'claude-haiku-5-5';
   if (!isClaudeModel(judgeModel) && !String(process.env.OPENAI_API_KEY || '').trim()) throw new Error(`The judge ${judgeModel} needs OPENAI_API_KEY.`);
+  const judge = (task: CoworkTask, steps: Array<Record<string, unknown>>) => generateStructuredWithTelemetry({ schema: judgeSchema,
+    systemPrompt: 'Respondes solo con el objeto pedido, en español.', prompt: judgePrompt(task, steps),
+    provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 90000 }).then(response => response.data);
+
+  // --rejudge=<report.json>: the same work read again by the judge of today (a better rubric, more context), without running Cowork again.
+  const rejudge = arg('rejudge');
+  if (rejudge) {
+    const report = JSON.parse(readFileSync(path.resolve(rejudge), 'utf8')) as { outcomes: Array<Record<string, unknown>>; done?: number; means?: unknown };
+    for (const outcome of report.outcomes) {
+      const task = COWORK_TASKS.find(item => item.id === outcome.id);
+      if (!task) continue;
+      outcome.judged = await judge(task, outcome.steps as Array<Record<string, unknown>>).catch(() => null);
+      const judged = outcome.judged as { completo?: string; donde_se_trabo?: string } | null;
+      console.log(`${judged?.completo === 'si' ? 'HECHO' : judged?.completo === 'parcial' ? 'PARCIAL' : 'NO'} ${task.id}${judged?.donde_se_trabo ? ` · ${judged.donde_se_trabo.slice(0, 160)}` : ''}`);
+    }
+    const judged = report.outcomes.map(item => item.judged as Record<string, number | string> | null);
+    const mean = (key: string) => { const values = judged.map(item => item?.[key]).filter((value): value is number => typeof value === 'number'); return values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length * 100) / 100 : null; };
+    Object.assign(report, { judge: judgeModel, done: judged.filter(item => item?.completo === 'si').length, partial: judged.filter(item => item?.completo === 'parcial').length,
+      means: { avance: mean('avance'), veracidad: mean('veracidad'), claridad: mean('claridad'), pasos_de_mas: mean('pasos_de_mas') } });
+    const output = arg('output');
+    if (output) writeFileSync(path.resolve(output), JSON.stringify(report, null, 2));
+    console.log(`\n${report.done} de ${report.outcomes.length} encargos terminados · ${JSON.stringify(report.means)}`);
+    return;
+  }
   const writerOn = process.argv.includes('--writer');
   const writerModels = coworkWriterModels();
   const writerEfforts = coworkWriterEfforts();
@@ -150,7 +177,10 @@ async function main() {
             extracto: String((item.result as { excerpt?: unknown } | null)?.excerpt || '').slice(0, 500) })), propuesta: result.proposal ? { tipo: result.proposal.kind, etiqueta: result.proposal.label } : null,
           busqueda: result.search, pregunta: result.question ?? null, documento: result.document ? { titulo: result.document.title, largo: result.document.content.length } : null,
           bloques: (result.blocks || []).map(block => block.type), fallo: result.failed,
-          aprobado: next?.approved ? { tipo: next.approved.kind, respuesta: next.approved.reply, resultado: JSON.stringify(next.approved.result).slice(0, 1200) } : null });
+          aprobado: next?.approved ? { tipo: next.approved.kind, respuesta: next.approved.reply, resultado: JSON.stringify(next.approved.result).slice(0, 1200),
+            // Inside an approved task the worker approves what fits the plan by itself: no card reaches the person.
+            por: running?.approves(next.approved.kind, { searches: next.approved.kind === 'search' ? 1 : 0,
+              credits: Number((next.approved.result as { cost?: { lookups?: number } } | null)?.cost?.lookups ?? 0) }) ? 'la tarea aprobada, sin preguntar' : 'la persona' } : null });
         console.log(`  ${task.id}#${attempt} turno ${index + 1}: ${result.failed ? `falló (${result.failed.slice(0, 80)})` : result.search ? 'propone búsqueda' : result.proposal ? `propone ${result.proposal.kind}` : result.question ? 'pregunta' : 'responde'}`);
         if (result.failed) { stopped = 'falló'; break; }
         if (finishing) { stopped = 'terminó tras su último paso'; break; }
@@ -174,8 +204,7 @@ async function main() {
       let judged: z.infer<typeof judgeSchema> | null = null;
       try {
         budget();
-        judged = (await generateStructuredWithTelemetry({ schema: judgeSchema, systemPrompt: 'Respondes solo con el objeto pedido, en español.', prompt: judgePrompt(task, steps),
-          provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 90000 })).data;
+        judged = await judge(task, steps);
       } catch (error) { console.warn(`  ! juez: ${error instanceof Error ? error.message : error}`.slice(0, 300)); }
       const spent = { ...usage, inputTokens: usage.inputTokens - usageBefore.inputTokens, outputTokens: usage.outputTokens - usageBefore.outputTokens,
         cacheReadTokens: usage.cacheReadTokens - usageBefore.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens - usageBefore.cacheWriteTokens };

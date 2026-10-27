@@ -5,7 +5,7 @@
 // the worker writes in production (src/lib/cowork/continuation-messages.ts), and the history carries the result as production loads it
 // (server/cowork/conversation-context.ts: the turn's newest reads and the effects that ran). Everything here is pure: no model, no database.
 import { COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH, coworkContinuationAfter, coworkContinueTask } from '../../src/lib/cowork/continuation-messages';
-import { coworkTaskContext, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
+import { coworkTaskApproves, coworkTaskContext, type CoworkActiveTask, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
 import { coworkResearchNoticeMessage } from '../../src/lib/cowork/research-notice';
 import { COWORK_SEARCH_ROLE_NOTE } from '../../src/lib/cowork/search-ranking';
 import { CORPUS_NOW, CORPUS_SAVED_EMAILS, corpusRead, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
@@ -307,8 +307,10 @@ export function activeTask(history: CorpusHistoryTurn[], nextRequest: string) {
     ...(after.some(turn => (turn.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence')) ? ['write'] : []),
     ...(effects.some(action => action.kind === 'campaign_create') ? ['campaign'] : []),
   ]);
-  return { plan, next: plan.steps.find(step => !done.has(step.kind)) ?? null,
-    context: coworkTaskContext({ startRunId: '00000000-0000-4000-9500-000000000001', startDepth: 0, plan, used: { steps: effects.length + searches, searches, credits } }) };
+  const task: CoworkActiveTask = { startRunId: '00000000-0000-4000-9500-000000000001', startDepth: 0, plan, used: { steps: effects.length + searches, searches, credits } };
+  return { plan, next: plan.steps.find(step => !done.has(step.kind)) ?? null, context: coworkTaskContext(task),
+    /** Whether the worker approves this proposal by itself (worker.ts, coworkTaskApproves): the person never sees its card. */
+    approves: (kind: string, cost: { searches: number; credits: number }) => coworkTaskApproves(task, kind === 'search' ? null : kind, cost) };
 }
 
 /** After a memory is saved, production does not resume: the person writes next. Every other approval resumes on its own. */
