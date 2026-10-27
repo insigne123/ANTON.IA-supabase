@@ -188,7 +188,7 @@ export async function readOpportunityManagers(client: Client, organizationId: st
 
 /**
  * The roles of a person: everyone has «Tu semana»; owners and admins «Equipo»; «Oportunidades» goes to its managers, or
- * to the admins while there are none, and only to whoever may see Oportunidades.
+ * to everyone while there are none (OPP-04: an admin narrows it by naming them), and only to whoever may see Oportunidades.
  */
 export async function reportRoles(client: Client, scope: ReportScope, canSeeOpportunities: () => Promise<boolean>) {
   // The three reads do not depend on each other: asked together they cost one round trip, not three. Membership is still
@@ -204,7 +204,7 @@ export async function reportRoles(client: Client, scope: ReportScope, canSeeOppo
   const admin = ['owner', 'admin'].includes(String(member.data.role));
   const roles: ReportRole[] = ['personal'];
   if (admin) roles.push('team');
-  if ((managers.value.includes(scope.userId) || (admin && !managers.value.length)) && mayOpportunities) roles.push('opportunities');
+  if ((managers.value.includes(scope.userId) || !managers.value.length) && mayOpportunities) roles.push('opportunities');
   return { roles, admin, managers: managers.value };
 }
 

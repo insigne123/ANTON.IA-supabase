@@ -284,7 +284,7 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
     <Sheet open={managersOpen} onOpenChange={value => { if (!saving) setManagersOpen(value); }}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader><SheetTitle>Gestores de oportunidades</SheetTitle>
-          <SheetDescription>Reciben cada semana lo que llegó a «Oportunidades», lo que cierra pronto y lo que nadie tiene asignado. Mientras no elijas a nadie, lo reciben los administradores.</SheetDescription></SheetHeader>
+          <SheetDescription>Reciben cada semana lo que llegó a «Oportunidades», lo que cierra pronto y lo que nadie tiene asignado. Mientras no elijas a nadie, lo recibe todo el que usa Oportunidades.</SheetDescription></SheetHeader>
         <ul className="mt-6 space-y-1">{(data?.members || []).map(member => <li key={member.userId}>
           <label className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-sm hover:bg-muted/40">
             <Checkbox checked={chosen.includes(member.userId)} onCheckedChange={value => setChosen(current => value ? [...current, member.userId] : current.filter(id => id !== member.userId))} />
