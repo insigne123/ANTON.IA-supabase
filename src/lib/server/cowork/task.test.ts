@@ -81,7 +81,10 @@ test('the worker approves by itself only what fits the plan, and never past the 
   assert.match(worker, /coworkTaskThreadBudget\(coworkThreadBudgets\(run\.mode, autonomyEnabled\), activeTask\)/);
   const effects = readFileSync('src/lib/server/cowork/effects.ts', 'utf8').replace(/\r\n/g, '\n');
   assert.match(effects, /coworkTaskThreadBudget\(coworkThreadBudgets\(mode, process\.env\.COWORK_AUTONOMY_ENABLED === 'true'\), task\)/);
-  assert.match(effects, /job\.kind === 'task_plan'\n[^\n]*\n\s*\? 'El usuario aprobó el plan de la tarea \(task\)\. Empieza ahora por su primer paso pendiente, sin volver a preguntar\.'/);
+  // The approved plan resumes by its first step without asking again (continuation-messages.ts, which the task bench also plays).
+  assert.match(effects, /admitCoworkContinuation\(client, scope, job\.run_id, coworkContinuationAfter\(job\.kind\)\)/);
+  const { coworkContinuationAfter } = await import('@/lib/cowork/continuation-messages');
+  assert.equal(coworkContinuationAfter('task_plan'), 'El usuario aprobó el plan de la tarea (task). Empieza ahora por su primer paso pendiente, sin volver a preguntar.');
 });
 
 test('an approved plan approves its steps by itself only within its time, 24 hours unless set (Plan 14, 3)', async () => {

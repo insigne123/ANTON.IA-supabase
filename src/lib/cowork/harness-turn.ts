@@ -289,6 +289,10 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
       name: 'redactar', kind: 'meta', schema: coworkWriteBriefSchema,
       description: 'Entrega un encargo a la Redactora para escribir correos, secuencias o mensajes con lo que leíste (draft.write). Vuelve el texto listo; si el encargo incluye una campaña, sigue con proponer_campana.',
       run: async (brief, context) => {
+        // Written for the campaign already: writing it again costs a second Writer and leaves the campaign unproposed.
+        if (written && input.proposeEffect && !proposed && (brief.campaign || coworkAcceptsCampaignOffer(input.message, input.history))) {
+          return { status: 'error', message: 'Los correos de esta campaña ya están escritos (arriba, en el resultado de redactar). No los escribas de nuevo: propón ahora la campaña con proponer_campana (action campaign.create).' };
+        }
         await input.authorize();
         context.signal.throwIfAborted();
         const lookup = async (name: string): Promise<CoworkObservation | null> => {

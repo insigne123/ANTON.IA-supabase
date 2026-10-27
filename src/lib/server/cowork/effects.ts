@@ -1,4 +1,5 @@
 import { claimForCoworkUsers, coworkWorkerUserIds } from './worker-users';
+import { coworkContinuationAfter } from '@/lib/cowork/continuation-messages';
 import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -341,13 +342,8 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
     if (finished.error) throw finished.error;
     // A remembered preference needs no next turn: its reply says what was kept, and the next request already reads it.
     if (finished.data === true && job.kind !== 'memory_save') {
-      await admitCoworkContinuation(client, scope, job.run_id, job.kind === 'task_plan'
-        // The plan was approved: the task starts by its first step, without asking again.
-        ? 'El usuario aprobó el plan de la tarea (task). Empieza ahora por su primer paso pendiente, sin volver a preguntar.'
-        : job.kind === 'lead_prepare_batch'
-        // The people of the batch are the people of this work: shown by what the batch returned, never searched again by name.
-        ? 'Continúa a partir del lote recién ejecutado, dentro del mismo encargo. Presenta su resultado en un bloque table con esas mismas personas (nombre real, correo y su estado, LinkedIn, investigación), tomado del resultado del lote en history.actions, sin buscarlas de nuevo por nombre; di en una frase qué faltó y por qué, y propón el siguiente paso concreto sin repetir el lote.'
-        : 'Continúa a partir del efecto recién ejecutado, dentro del mismo encargo. Resume qué quedó hecho y propón el siguiente paso concreto sin repetir el efecto.');
+      // The plan starts by its first step without asking again; a batch shows its own people; any other effect says what was done.
+      await admitCoworkContinuation(client, scope, job.run_id, coworkContinuationAfter(job.kind));
     }
     return { processed: finished.data === true ? 1 : 0, claimed: true };
   } catch (error) {
