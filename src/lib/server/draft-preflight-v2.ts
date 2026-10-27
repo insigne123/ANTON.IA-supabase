@@ -7,6 +7,7 @@ import {
 } from '@/lib/messaging-contracts';
 import { DRAFT_STYLE_ADVISORIES, isSignalLikeEvidence, type DraftContextV2 } from '@/lib/server/draft-context-v2';
 import { checkHumanTone } from '@/lib/server/human-tone-checks';
+import { EDITED_EMAIL_BODY_WORDS } from '@/lib/drafts/email-length';
 
 export const DRAFT_PREFLIGHT_V2_VERSION = 'native-draft-preflight/v2';
 
@@ -76,6 +77,9 @@ export type ValidateDraftPreflightV2Options = {
   // ficha corporativa). Solo para texto del modelo, nunca ediciones del
   // usuario: el llamador los activa junto a checkGeneratedCopy.
   checkHumanTone?: boolean;
+  // The version is the person's own edit (generation_method 'human'): its length is a notice inside
+  // EDITED_EMAIL_BODY_WORDS, not an error (src/lib/drafts/email-length.ts).
+  editedByPerson?: boolean;
 };
 
 export function requiredDraftPersonalizationV2(context: DraftContextV2): DraftPersonalizationProvenanceV2[] {
@@ -625,8 +629,15 @@ export function validateDraftPreflightV2(
     add('prohibited_phrase', 'El asunto no debe empezar por «Seguimiento». Nombra el tema concreto que aporta este correo.', 'subject');
   }
   const words = wordCount(body);
-  if (words < context.constraints.body.minWords || words > context.constraints.body.maxWords) {
-    add('body_length', `El cuerpo debe tener entre ${context.constraints.body.minWords} y ${context.constraints.body.maxWords} palabras.`, 'body');
+  const { minWords, maxWords } = context.constraints.body;
+  if (words < minWords || words > maxWords) {
+    if (options.editedByPerson && words >= EDITED_EMAIL_BODY_WORDS.min && words <= EDITED_EMAIL_BODY_WORDS.max) {
+      warnings.push(`El correo tiene ${words} palabras; los correos en frío de ${minWords} a ${maxWords} suelen responderse más.`);
+    } else if (options.editedByPerson) {
+      add('body_length', `El correo tiene ${words} palabras: para enviarlo, debe tener entre ${EDITED_EMAIL_BODY_WORDS.min} y ${EDITED_EMAIL_BODY_WORDS.max}.`, 'body');
+    } else {
+      add('body_length', `El cuerpo debe tener entre ${minWords} y ${maxWords} palabras.`, 'body');
+    }
   }
   // A first touch is the greeting, the opening, the value and the approved CTA. A step of a sequence has no approved CTA (its own question closes the
   // value), so three paragraphs are its whole structure: asking for four warned about 18 of the 25 drafts written in October 2026.
