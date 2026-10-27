@@ -21,6 +21,17 @@ test('a partially prepared batch keeps later dependencies blocked', () => {
     result: { items: [{ id: 'lead1', status: 'ready', research: 'completed' }, { id: 'lead2', status: 'partial' }] } } }]);
   assert.deepEqual(graph.map(node => node.state), ['partial', 'blocked', 'blocked']);
 });
+test('a campaign carries its own emails: proposed right after the contacts, it is ready, and created it delivers the write step too', () => {
+  const ready = { runId: 'prepare-run', kind: 'effect.completed', payload: { kind: 'lead_prepare_batch', result: { items: [{ id: 'lead1', status: 'ready' }] } } };
+  assert.equal(coworkTaskReadyNode(coworkTaskGraph('root', plan, []), 'campaign'), undefined, 'not before the contacts');
+  assert.equal(coworkTaskReadyNode(coworkTaskGraph('root', plan, [ready]), 'campaign')?.id, 'root:step:3');
+  const created = { runId: 'campaign-run', kind: 'effect.completed', payload: { kind: 'campaign_create', result: { campaignId: 'c1', status: 'paused' } } };
+  const graph = coworkTaskGraph('root', plan, [ready, created]);
+  assert.deepEqual(graph.map(node => node.state), ['succeeded', 'succeeded', 'succeeded']);
+  assert.deepEqual(graph[1].resultRefs, ['campaign-run:campaign']);
+  assert.ok(graph[2].resultRefs.includes('campaign:c1'));
+});
+
 test('the conversation shows each step as done, the one it goes on with, still to come or with something to look at', () => {
   const written = { runId: 'write-run', kind: 'run.completed', payload: { blocks: [{ type: 'email_draft', subject: 'hola', body: 'Texto' }] } };
   const ready = { runId: 'prepare-run', kind: 'effect.completed', payload: { kind: 'lead_prepare_batch', result: { items: [{ id: 'lead1', status: 'ready' }] } } };

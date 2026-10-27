@@ -83,9 +83,8 @@ export function coworkTaskApproves(task: CoworkActiveTask, kind: string | null, 
   return task.used.credits + cost.credits <= task.plan.limits.credits;
 }
 
-/** The longest message of the person that may still go on with the task, and the longest answer to its question: a longer
- * one is a new request. */
-export const COWORK_TASK_REPLY_MAX = { goAhead: 280, answer: 160 } as const;
+/** The longest message of the person that may still go on with the task: a longer one is a new request. */
+export const COWORK_TASK_REPLY_MAX = 280;
 
 /** How a new request opens: «ahora…», «otra cosa…», «olvida eso…». */
 const NEW_REQUEST = /^(?:ahora|otra cosa|aparte|olvida|olvídate|olvidate|cambiando de tema|nueva tarea|otra tarea)(?!\p{L})/u;
@@ -95,21 +94,27 @@ const GO_AHEAD = new Set(['si', 'sí', 'dale', 'ok', 'okay', 'oka', 'okey', 'val
   'continuar', 'continúe', 'hazlo', 'haz', 'hagalo', 'hágalo', 'procede', 'vamos', 'perfecto', 'listo', 'de', 'acuerdo', 'bien', 'muy', 'correcto',
   'exacto', 'claro', 'genial', 'bueno', 'buena', 'eso', 'gracias', 'por', 'favor', 'porfa', 'con', 'todo', 'apruebo', 'aprobado', 'conforme']);
 
-/** A message that stops the task whatever came before: an order to stop or wait, or a «no» first. Words end at any letter, accents included. */
-const STOPS = /^(?:no|para|paremos|parar|detente|det[eé]n|espera|esperá|stop|alto)(?!\p{L})|(?<!\p{L})(?:no sigas|no contin[uú]es|cancela(?:la|r)?|det[eé]n(?:la|te)?)(?!\p{L})/u;
+/** The words of a plain «no»: «no», «no, gracias», «no, todavía no», «mejor no», «no, espera». */
+const REFUSAL = new Set(['no', 'nada', 'gracias', 'mejor', 'todavía', 'todavia', 'aún', 'aun', 'ya', 'por', 'ahora', 'así', 'asi', 'está', 'esta', 'bien',
+  'espera', 'esperá', 'eso', 'tanto', 'nomás', 'nomas']);
+
+/** An order to stop or wait, first or anywhere. Words end at any letter, accents included. */
+const STOPS = /^(?:para|paremos|parar|detente|det[eé]n|espera|esperá|stop|alto)(?!\p{L})|(?<!\p{L})(?:no sigas|no contin[uú]es|cancela(?:la|r)?|det[eé]n(?:la|te)?)(?!\p{L})/u;
 
 /**
  * Whether a message of the person goes on with the approved task instead of ending it, as Claude Cowork keeps working while the
  * person answers: a go-ahead («sí», «dale, sigue»), one of the answers the task's last turn offered (its buttons or choices), or
- * a short answer to the question it asked. A stop («para», «espera», «no…») or anything else, a new request above all, ends it.
+ * an answer to the question it asked, even one that steers it («no, primero lee los informes»). A stop («para», «espera»), a
+ * plain «no», a new request («ahora…», or anything after a turn that asked nothing) or a long message ends it.
  */
 export function coworkTaskReplyContinues(message: string, previous: { asked: boolean; offered: string[] }): boolean {
   const text = String(message || '').normalize('NFC').trim().toLowerCase();
   const words = text.replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(Boolean);
   const plain = words.join(' ');
-  if (!words.length || text.length > COWORK_TASK_REPLY_MAX.goAhead || STOPS.test(plain)) return false;
+  if (!words.length || text.length > COWORK_TASK_REPLY_MAX || STOPS.test(plain)) return false;
+  if (words.some(word => word === 'no' || word === 'nada') && words.every(word => REFUSAL.has(word))) return false;
   if (words.every(word => GO_AHEAD.has(word)) || previous.offered.some(option => option.trim().toLowerCase() === text)) return true;
-  return previous.asked && text.length <= COWORK_TASK_REPLY_MAX.answer && !NEW_REQUEST.test(plain);
+  return previous.asked && !NEW_REQUEST.test(plain);
 }
 
 /** A thread running a task may take as many automatic steps as the plan has, beyond the usual budget (never past 10 deep). */

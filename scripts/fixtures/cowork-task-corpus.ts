@@ -315,9 +315,17 @@ function deliveryEvents(turn: CorpusHistoryTurn, runId: string): CoworkTaskDeliv
     ...(written.length ? [{ runId, kind: 'run.completed', payload: { blocks: turn.blocks } as Record<string, unknown> }] : [])];
 }
 
+/** What the Writer delivered in a turn, as onWriteDelivery records it for the task graph (worker.ts): the write step is done from that moment,
+ * so a campaign proposed in the same turn finds it done. */
+export function writtenReads(result: CorpusTurnResult): unknown[] {
+  const blocks = result.writer?.blocks ?? [];
+  return blocks.some(block => block.type === 'email_draft' || block.type === 'sequence')
+    ? [{ action: 'assistant.written', input: '', result: { scope: 'task_delivery', blocks } }] : [];
+}
+
 /** The approved task the next turn continues, as loadCoworkActiveTask finds it: approved in this work, and since then only the worker's
  * own turns and the person's replies that go on with it (a «sí», the answer to what it asked). */
-export function activeTask(history: CorpusHistoryTurn[], nextRequest: string) {
+export function activeTask(history: CorpusHistoryTurn[], nextRequest: string, during: unknown[] = []) {
   let start = -1;
   history.forEach((turn, index) => { if ((turn.actions as Array<{ kind?: string }> | undefined)?.some(action => action.kind === 'task_plan')) start = index; });
   if (start < 0 || !goesOn(nextRequest, history.at(-1)) || history.slice(start + 1).some((turn, index) => !goesOn(turn.request, history[start + index]))) return null;
@@ -329,7 +337,9 @@ export function activeTask(history: CorpusHistoryTurn[], nextRequest: string) {
   const credits = effects.reduce((sum, action) => sum + (action.result?.cost?.lookups ?? 0), 0);
   // The graph of the task, as the worker rebuilds it from the events of the turns since it started (COWORK_TASK_GRAPH_ENABLED=true in production).
   const startRunId = '00000000-0000-4000-9500-000000000001';
-  const graph = coworkTaskGraph(startRunId, plan, after.flatMap((turn, index) => deliveryEvents(turn, `00000000-0000-4000-9500-${String(index + 2).padStart(12, '0')}`)));
+  // `during`: what the next turn itself delivered so far (the Writer's emails), which its own proposals already find done.
+  const graph = coworkTaskGraph(startRunId, plan, [...after, { request: nextRequest, reply: '', at: '', reads: during }]
+    .flatMap((turn, index) => deliveryEvents(turn, `00000000-0000-4000-9500-${String(index + 2).padStart(12, '0')}`)));
   const task: CoworkActiveTask = { startRunId, startDepth: 0, plan, used: { steps: effects.length + searches, searches, credits }, graph };
   // The step the worker goes on with: the first pending one whose steps before it are done (worker.ts).
   const next = graph.find(node => node.state === 'pending' && node.dependsOn.every(id => graph.some(dep => dep.id === id && dep.state === 'succeeded')));
@@ -360,13 +370,14 @@ export function nextTurn(task: CoworkTask, turn: { request: string; at: string; 
     const effect = simulateEffect(result.proposal, history);
     if (!resumesAfter(result.proposal.kind)) return null;
     return { request: coworkContinuationAfter(result.proposal.kind), approved: { kind: result.proposal.kind, ...effect },
-      turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: turn.observations,
+      turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: [...turn.observations, ...writtenReads(result)],
         actions: [{ kind: result.proposal.kind, label: result.proposal.label, outcome: 'ejecutada', result: effect.result }] } };
   }
   // Inside an approved task, a delivery with steps left goes on by itself: the worker admits the next step (worker.ts, with the task graph).
   // What this turn delivered counts: a turn that wrote the emails completed the write step.
   // An answer that asks the person waits for them (worker.ts), and their answer goes on with the task.
-  const kept: CorpusHistoryTurn = { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: turn.observations, ...shown(result), ...leftOpen(result) };
+  const kept: CorpusHistoryTurn = { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: [...turn.observations, ...writtenReads(result)],
+    ...shown(result), ...leftOpen(result) };
   const running = activeTask([...history, kept], COWORK_CONTINUE_AFTER_PLAN);
   if (running?.next && !kept.open?.asked) return { request: coworkContinueTask(running.next.label), approved: null, turn: kept };
   // Researches asked for in this work finish a few minutes later: the worker resumes the conversation with its notice (research-notice.ts),

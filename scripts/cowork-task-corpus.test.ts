@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { COWORK_CONTINUE_AFTER_BATCH, COWORK_CONTINUE_AFTER_EFFECT, COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH } from '../src/lib/cowork/continuation-messages';
 import type { CorpusHistoryTurn, CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
-import { activeTask, COWORK_TASKS, nextTurn, simulateEffect, simulateSearch, taskWorld } from './fixtures/cowork-task-corpus';
+import { activeTask, COWORK_TASKS, nextTurn, simulateEffect, simulateSearch, taskWorld, writtenReads } from './fixtures/cowork-task-corpus';
 
 const base = (over: Partial<CorpusTurnResult>): CorpusTurnResult => ({ actions: [], reply: '', document: null, proposal: null, search: null, note: null, failed: null, ...over });
 const task = COWORK_TASKS[0];
@@ -155,4 +155,23 @@ test('the turn that resumes with a research notice already reads those researche
   assert.equal((taskWorld(history, notice).read('research.get_existing', lead) as { availability: string }).availability, 'available');
   assert.equal((taskWorld(history, notice).read('research.get_existing', JSON.stringify({ leadId: lead })) as { availability: string }).availability, 'available');
   assert.equal((taskWorld(history, 'Sí, adelante.').read('research.get_existing', lead) as { availability: string }).availability, 'none');
+});
+
+test('what the Writer delivers in a turn marks its write step done in that turn, as onWriteDelivery does in production', () => {
+  const plan = { goal: 'Retail', steps: [{ label: 'Buscar', kind: 'search' }, { label: 'Escribir el correo', kind: 'write' }, { label: 'Crear la campaña pausada', kind: 'campaign' }],
+    limits: { searches: 1, credits: 0 } };
+  const approved = simulateEffect({ kind: 'task_plan', label: 'Tarea', task: plan as never }, []) as { result: unknown };
+  const found = simulateSearch({ titles: ['Gerente de Personas'], industries: ['retail'], limit: 3 });
+  const history: CorpusHistoryTurn[] = [
+    { request: task.request, reply: 'Plan.', at: AT, observations: [], actions: [{ kind: 'task_plan', label: 'Tarea', outcome: 'ejecutada', result: approved.result }] },
+    { request: COWORK_CONTINUE_AFTER_PLAN, reply: 'Busco.', at: AT, observations: [{ action: 'prospecting.search', input: {}, result: found }] },
+  ];
+  const write = (during: unknown[] = []) => activeTask(history, COWORK_CONTINUE_AFTER_SEARCH, during)!.graph.find(node => node.kind === 'write')!.state;
+  assert.equal(write(), 'pending');
+  const written = base({ writer: { brief: {}, steps: [], blocks: [{ type: 'email_draft', title: 'Correo', to: [], subject: 'Hola', body: 'Texto' } as never] } });
+  assert.equal(writtenReads(written).length, 1);
+  assert.equal(write(writtenReads(written)), 'succeeded');
+  assert.deepEqual(writtenReads(base({})), [], 'no Writer, nothing delivered');
+  // A campaign carries its own emails: right after its write step's dependencies, the task approves it either way.
+  assert.equal(activeTask(history, COWORK_CONTINUE_AFTER_SEARCH)!.approves('campaign_create', { searches: 0, credits: 0 }), true);
 });

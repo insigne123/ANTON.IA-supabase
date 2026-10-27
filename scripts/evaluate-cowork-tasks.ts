@@ -23,7 +23,7 @@ import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '
 import { coworkReadCapabilities } from '../src/lib/server/cowork/read-capabilities';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, type CorpusHistoryTurn, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { runCorpusCase, type CorpusWriter } from './fixtures/cowork-conversation-runner';
-import { activeTask, COWORK_TASKS, nextTurn, taskWorld, type CoworkTask } from './fixtures/cowork-task-corpus';
+import { activeTask, COWORK_TASKS, nextTurn, taskWorld, writtenReads, type CoworkTask } from './fixtures/cowork-task-corpus';
 
 /** USD per million tokens (Anthropic list prices, as the Cowork ledger prices them). */
 const PRICES: Record<string, { input: number; output: number; cache: number; write: number }> = {
@@ -182,7 +182,7 @@ async function main() {
           bloques: (result.blocks || []).map(block => block.type), fallo: result.failed,
           aprobado: next?.approved ? { tipo: next.approved.kind, respuesta: next.approved.reply, resultado: JSON.stringify(next.approved.result).slice(0, 1200),
             // Inside an approved task the worker approves what fits the plan by itself: no card reaches the person.
-            por: running?.approves(next.approved.kind, { searches: next.approved.kind === 'search' ? 1 : 0,
+            por: (activeTask(history, request, writtenReads(result)) ?? running)?.approves(next.approved.kind, { searches: next.approved.kind === 'search' ? 1 : 0,
               credits: Number((next.approved.result as { cost?: { lookups?: number } } | null)?.cost?.lookups ?? 0) }) ? 'la tarea aprobada, sin preguntar' : 'la persona' } : null });
         console.log(`  ${task.id}#${attempt} turno ${index + 1}: ${result.failed ? `falló (${result.failed.slice(0, 80)})` : result.search ? 'propone búsqueda' : result.proposal ? `propone ${result.proposal.kind}` : result.question ? 'pregunta' : 'responde'}`);
         if (result.failed) { stopped = 'falló'; break; }

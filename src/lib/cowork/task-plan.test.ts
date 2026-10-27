@@ -79,14 +79,19 @@ test('a reply of the person goes on with the task when it is a «sí», the answ
   const offered = { asked: false, offered: ['Crear la campaña pausada', 'Solo a los 5 con correo'] };
   assert.equal(coworkTaskReplyContinues('Crear la campaña pausada', offered), true);
   assert.equal(coworkTaskReplyContinues('Crear otra campaña', offered), false);
-  // A stop or a «no» first ends it even after a question; «para» inside a sentence is not a stop.
-  for (const stop of ['Para', 'para, no sigas', 'Espera.', 'Esperá un poco', 'No, mejor no', 'No', 'sí pero no sigas con la campaña', 'Cancela la tarea', 'detenla']) {
+  // A stop or a plain «no» ends it even after a question; «para» inside a sentence is not a stop.
+  for (const stop of ['Para', 'para, no sigas', 'Espera.', 'Esperá un poco', 'No, mejor no', 'No', 'No, gracias', 'No, todavía no', 'no, espera',
+    'sí pero no sigas con la campaña', 'Cancela la tarea', 'detenla']) {
     assert.equal(coworkTaskReplyContinues(stop, asked), false, stop);
   }
   assert.equal(coworkTaskReplyContinues('Prepara los correos para Camila y Felipe', asked), true);
+  // A «no» that answers or steers goes on, as the task bench's person wrote it.
+  assert.equal(coworkTaskReplyContinues('No, solo Santiago', asked), true);
+  assert.equal(coworkTaskReplyContinues('No, todavía no. Primero lee los informes de Valentina y Matías y confirma las dos señales en fuentes reales, no solo en la portada. Después escribe los correos.', asked), true);
+  assert.equal(coworkTaskReplyContinues('No, solo Santiago', quiet), false, 'after a turn that asked nothing it is a new request');
   // A long message, or one that opens as a new request, is a new request whatever came before.
   assert.equal(coworkTaskReplyContinues(`Sí, ${'y además '.repeat(40)}`, asked), false);
-  assert.equal(coworkTaskReplyContinues(`Solo Santiago, ${'y también Valparaíso '.repeat(8)}`, asked), false);
+  assert.equal(coworkTaskReplyContinues(`Solo Santiago, ${'y también Valparaíso '.repeat(14)}`, asked), false);
   assert.equal(coworkTaskReplyContinues('Ahora busca gerentes de minería', asked), false);
   assert.equal(coworkTaskReplyContinues('Otra cosa: ¿cuántos créditos me quedan?', asked), false);
   assert.equal(coworkTaskReplyContinues('   ', asked), false);

@@ -33,7 +33,7 @@ Medido el 27 de octubre, solo lectura:
   - un lote las guarda y encuentra el correo de dos de cada tres;
   - una campaña queda en pausa y aparece en la lista;
   - una investigación termina y la conversación sigue con el mismo aviso que escribe el worker.
-- **Tarea aprobada:** viaja en el contexto como la pasa el worker. Si entrega algo y le quedan pasos, sigue sola con «Continúa la tarea aprobada…». Un mensaje de la persona la termina, igual que en producción.
+- **Tarea aprobada:** viaja en el contexto como la pasa el worker, con su grafo de pasos. Si entrega algo y le quedan pasos, sigue sola con «Continúa la tarea aprobada…». Un mensaje de la persona la sigue o la termina con la misma regla que producción (ver «Tareas largas» más abajo).
 - **Fidelidad:** la conversación sigue con las mismas palabras que escribe el worker (`src/lib/cowork/continuation-messages.ts`, ahora compartido por el servidor y el banco). El historial lleva lo que carga `conversation-context.ts`: las lecturas, las tarjetas y los efectos de cada turno.
 - **La persona simulada:** una persona hecha con Haiku contesta lo que Cowork pregunta. Usa pocas palabras, se queda dentro de lo que pidió y da el encargo por terminado cuando ya lo tiene.
 - **La jueza:** al final, una jueza (Haiku) lee el trabajo entero contra lo que significa «terminado» para ese encargo. Marca si quedó completo, parcial o no, y califica de 1 a 5 el avance, la veracidad y la claridad. También anota los pasos de más, dónde se trabó y qué habría hecho distinto Claude Cowork.
@@ -71,15 +71,66 @@ Una corrida de los ocho encargos con el código de hoy y los dos arreglos de arr
   - **Programar desde el chat.** Lo que Claude Cowork hace con una tarjeta, aquí se le prohíbe al coordinador. Requiere un efecto nuevo y una migración pequeña: el tipo `schedule_create` en el *check* de `cowork_effect_proposals` y en la función que registra los efectos.
   - **Encargos largos con investigación.** Ocho turnos no alcanzan. Hace falta que la tarea siga viva cuando la persona contesta algo corto, y que sus pasos queden a la vista.
 
+## Tareas largas: un «sí» ya no corta la tarea y sus pasos se ven
+
+Segunda parte, el mismo 27 de octubre. Una tarea aprobada (un plan de 2 a 6 pasos que la persona aprueba una vez) terminaba apenas la persona escribía algo, aunque fuera «sí». Desde ahí, cada paso volvía a pedir su tarjeta. Claude Cowork, en cambio, sigue trabajando mientras la persona le contesta y deja el plan a la vista. En producción ninguna persona ha aprobado todavía una tarea (no hay eventos `task.*`), así que esto prepara la función antes de que se use.
+
+**Qué cambia**
+
+- **Un mensaje de la persona sigue con la tarea** (`coworkTaskReplyContinues`, `src/lib/cowork/task-plan.ts`) cuando es:
+  - un «sí» («dale», «sigue», «ok, adelante»);
+  - uno de los botones u opciones que ofreció el turno anterior;
+  - la respuesta a lo que ese turno preguntó, aunque la dirija («no, primero lee los informes»).
+- **Lo que la sigue terminando:** «para», «espera», un «no» a secas («no, todavía no»), un pedido que abre con «ahora…» u «otra cosa…», cualquier mensaje después de un turno que no preguntó nada, y los mensajes de más de 280 caracteres.
+- **Lo que la tarea aprueba sola no cambia:** solo el paso siguiente del plan y dentro de su gasto. Enviar, activar o escribir por LinkedIn siempre piden aprobación.
+- **Si un turno de la tarea pregunta algo, espera la respuesta.** Antes el worker seguía solo con el siguiente paso aunque Cowork acabara de preguntar.
+- **Los pasos se ven.** Al final de cada turno de la tarea, el worker guarda dónde va cada paso (`task.progress`). La conversación lo muestra bajo el último turno de la tarea: lo hecho, el paso que sigue y lo que falta.
+- **Los correos que Cowork escribe en su propia respuesta cuentan** para el paso de redactar en ese mismo turno. Antes la continuación pedía escribirlos de nuevo.
+- **Una campaña lleva sus propios correos.** Si Cowork la propone con el texto ya escrito, cuenta también como el paso de redactar cuando es lo único que le falta. Antes ese paso nunca se marcaba: la campaña pedía su tarjeta y, ya creada, la tarea volvía a pedir redactar.
+- **La tarjeta del plan lo dice:** «Si me contestas o me dices “sigue”, continúo; un pedido nuevo o un “para” la detiene».
+
+**El banco, más fiel**
+
+- **Mismo grafo que el worker.** La tarea del banco decide el siguiente paso y lo que se aprueba solo con `coworkTaskGraph`, a partir de todas las lecturas y efectos de cada turno. Antes usaba una regla propia por tipo de paso.
+- **Lotes como en `prepare-batch-run.ts`:** un correo que el proveedor no encontró es un paso hecho con su nota, no un fallo, y la investigación se pide para todos los guardados.
+- **Opciones nuevas:**
+  - `--max-turns=12` da más turnos a los encargos con investigación;
+  - `EVAL_TASK_REPLY=off` juega la regla anterior, para comparar.
+
+**Resultado** (4 encargos × 2, hasta 12 turnos, Haiku):
+
+| | Regla anterior | Regla nueva |
+| --- | --- | --- |
+| Encargos con plan aprobado | 5 | 5 |
+| La tarea se cortó antes de terminar | 5 | 2 |
+| Tarjetas que tuvo que aprobar la persona después del plan | 5 | 3 |
+| Pasos que aprobó la propia tarea | 10 | 13 |
+| Encargos terminados (de 8) | 1 | 1 |
+
+- **En lo que ataca, el cambio funciona:**
+  - Con la regla anterior, las 5 tareas se cortaron cuando la persona contestó una pregunta de Cowork («Sí, crea la campaña pausada…», «Sí, investiga a las 5…»). Desde ahí, cada paso volvió a pedir su tarjeta.
+  - Con la nueva, «tarea-larga-plan» llega a la campaña sin otra aprobación en las dos corridas.
+  - Los 2 cortes que quedaron eran respuestas largas que dirigían la tarea. Por eso se subió el tope de 160 a 280 caracteres y un «no, primero…» ya no la corta.
+- **«Terminado» no se mueve:** 1 de 8 en ambas. Lo que la jueza marca como parcial es de contenido, no de la tarea:
+  - la búsqueda trae 10 personas cuando se pidieron 20;
+  - afirmaciones que el resultado no respalda;
+  - en minería, demasiados turnos verificando las investigaciones.
+- **Con la regla ya ajustada**, minería y tarea larga, 2 veces cada uno:
+  - ningún mensaje de la persona cortó las 4 tareas;
+  - la tarea aprobó 9 pasos sola y la persona, 2 tarjetas.
+  - De esas 2, una era correcta: el segundo lote pedía más créditos que los que el plan aprobó.
+  - La otra fue una campaña propuesta con sus correos ya escritos, con el paso de redactar todavía abierto. Eso llevó a arreglar lo de «una campaña lleva sus propios correos».
+  - El banco, además, ahora cuenta lo que la Redactora entrega dentro del turno, como hace `onWriteDelivery` en producción.
+  - Ninguno de los 4 quedó «terminado» para la jueza, por las mismas razones de contenido de arriba.
+- **Revisión visual:** `cowork-tarea-en-curso` y su versión de teléfono, en claro y oscuro. Los 16 recorridos de Cowork pasan.
+
 ## Lo que sigue
 
 1. **Programar desde el chat**, con aprobación: «cada lunes a las 9…» termina en una tarjeta «Programar», no en instrucciones. Necesita la migración del punto de arriba.
-2. **Tareas largas de verdad.**
-   - Hoy una tarea aprobada termina apenas la persona escribe algo, aunque sea «sí».
-   - Claude Cowork mantiene el plan visible y lo va completando. Falta:
-     - una lista de pasos que se marca en la conversación;
-     - que una respuesta corta no corte la tarea;
-     - un aviso por correo cuando termina.
+2. **Tareas largas: lo que falta.**
+   - Un aviso por correo cuando la tarea termina. La app ya manda correos propios (`self-email.ts`); conviene decidirlo antes, porque es un correo nuevo a cada persona.
+   - Que la búsqueda de una tarea traiga lo que el plan pide (20 personas, no 10).
+   - Que, dentro de una tarea, Cowork no pregunte lo que el plan ya aprobó.
 3. **Contexto más liviano.**
    - Cada llamada del coordinador lee unos 62.000 tokens: 75.000 caracteres de reglas, unos 33.000 del contexto del turno y las herramientas. El 87 % sale de la caché, así que con Haiku cuesta poco.
    - El problema es la atención: con tantas reglas, Haiku se salta algunas.

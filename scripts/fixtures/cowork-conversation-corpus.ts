@@ -248,7 +248,9 @@ export type CorpusTurnResult = {
   /** The web searches and page reads of the turn, as they were recorded (their sources and the beginning of a page read). */
   web?: Array<{ action: string; input: unknown; result: unknown }>;
   /** When the Writer wrote the answer (writer.ts): the coordinator's brief and what each agent did. */
-  writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }> };
+  writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }>;
+    /** The cards the Writer delivered in this turn, as onWriteDelivery hands them to the task graph. */
+    blocks?: CoworkBlock[] | null };
   /** The question the coordinator handed the Analyst (analysis.write, Plan 12, 4b). */
   analyst?: { brief: unknown };
   /** The judge in the turn (G2): its judgement of the first answer, whether it asked for a fix and whether the answer changed. */
