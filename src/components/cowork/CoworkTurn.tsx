@@ -7,7 +7,7 @@ import { COWORK_AUTO_RETRY_SECONDS, coworkAutoRetryDue } from '@/lib/cowork/auto
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkAgentRows, coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkHeldAnswerCopy, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
-  coworkTurnChoices, coworkTurnSuggestions, isCoworkActive, type CoworkArtifact, type CoworkCardStatus,
+  coworkTurnChoices, coworkTurnScheduleOffer, coworkTurnSuggestions, isCoworkActive, type CoworkArtifact, type CoworkCardStatus,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkDraftPhase, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
@@ -20,6 +20,8 @@ import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
 import { CoworkChoicesCard } from './CoworkChoices';
 import { CoworkTaskProgressCard } from './CoworkTaskProgress';
+import { CoworkScheduleOfferCard } from './CoworkScheduleOffer';
+import type { CoworkScheduleOffer } from '@/lib/cowork/schedules';
 import type { CoworkTaskProgress } from '@/lib/cowork/task-graph';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
@@ -229,7 +231,7 @@ function AutoRetry({ onRetry, onStop }: { onRetry: () => void; onStop: () => voi
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, decidable = false, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
   liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null, onContinueNew = null, onSchedule = null,
-  taskProgress = null }: {
+  taskProgress = null, onScheduleOffer = null }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** Its card still waits for a decision after a question about it, asked in the next turn: it keeps its buttons. */
@@ -267,6 +269,8 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   onSchedule?: (() => void) | null;
   /** The steps of the approved task this turn belongs to, as it left them; only on the task's latest turn. */
   taskProgress?: CoworkTaskProgress | null;
+  /** Opens «Tareas programadas» with the task this answer proposed («Programar» card); null when they are off. */
+  onScheduleOffer?: ((offer: CoworkScheduleOffer) => void) | null;
 }) {
   const [editing, setEditing] = useState(false);
   const editOpener = useRef<HTMLDivElement>(null);
@@ -302,6 +306,9 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   const answerable = Boolean(latest && onSuggestion && run.status === 'completed' && !proposal);
   const choices = answerable && question ? coworkTurnChoices(events) : null;
   const suggestions = answerable && !choices ? coworkTurnSuggestions(events) : [];
+  // The task this answer proposed to repeat the request: the person reviews and saves it in «Tareas programadas». With it, the
+  // card is the one way to schedule this turn, and «Programar» under the answer gives way.
+  const scheduleOffer = onScheduleOffer && run.status === 'completed' && !proposal ? coworkTurnScheduleOffer(events) : null;
   // The answer was reviewed after it was shown and came back different: it fades in and says so. With
   // the judge's verdict only a correction it kept counts; polishing the final text is not one. A held
   // answer is never streamed: it shows once, already reviewed.
@@ -315,7 +322,7 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
     </p>}
     {!active && <div className="mt-1"><CoworkAnswerActions text={reply} latest={latest} rating={coworkTurnFeedback(events)?.rating ?? null}
       onFeedback={run.status === 'completed' ? onFeedback : null} onRegenerate={onRegenerate}
-      onSchedule={run.status === 'completed' && !run.automatic ? onSchedule : null} /></div>}
+      onSchedule={run.status === 'completed' && !run.automatic && !scheduleOffer ? onSchedule : null} /></div>}
   </div> : null;
 
   return <article data-cowork-turn={run.id} tabIndex={-1} className="space-y-4" aria-label={run.automatic ? 'Continuación automática' : 'Turno'}>
@@ -355,6 +362,7 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
             : <ArtifactCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />)}
         </div>}
         {taskProgress && !active && <CoworkTaskProgressCard progress={taskProgress} live={live} />}
+        {scheduleOffer && onScheduleOffer && <CoworkScheduleOfferCard offer={scheduleOffer} live={live} onOpen={() => onScheduleOffer(scheduleOffer)} />}
         {question && <NextStep question={question} live={live} />}
         <AnimatePresence initial={false}>
           {choices && onSuggestion && <CoworkChoicesCard key="choices" choices={choices} live={live} onSelect={onSuggestion} />}

@@ -175,3 +175,15 @@ test('what the Writer delivers in a turn marks its write step done in that turn,
   // A campaign carries its own emails: right after its write step's dependencies, the task approves it either way.
   assert.equal(activeTask(history, COWORK_CONTINUE_AFTER_SEARCH)!.approves('campaign_create', { searches: 0, credits: 0 }), true);
 });
+
+test('a task proposed with its «Programar» card is saved by the person, and the work ends there', () => {
+  const weekly = COWORK_TASKS.find(item => item.id === 'cada-lunes')!;
+  assert.deepEqual(weekly.doneAfter, ['schedule']);
+  const schedule = { title: 'Prospectos de logística', prompt: 'Tráeme 5 prospectos nuevos de logística en Santiago para escribirles.', frequency: 'weekly', time: '09:00', weekday: 1 };
+  const next = nextTurn(weekly, { request: weekly.request, at: AT, result: base({ reply: 'Te la dejo para programar.', schedule }), observations: [] }, [], 0)!;
+  assert.equal(next.request, null);
+  assert.equal(next.approved!.kind, 'schedule');
+  assert.equal(next.approved!.reply, 'Programada: los lunes a las 09:00.');
+  assert.equal(nextTurn(weekly, { request: weekly.request, at: AT, result: base({ reply: 'x', schedule: { ...schedule, weekday: null } }), observations: [] }, [], 0), null,
+    'an invalid card is no card: the answer ends the work');
+});

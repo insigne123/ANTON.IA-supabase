@@ -287,6 +287,37 @@ export default () => [
           c.check('el horario sale del pedido: una vez por semana, a las 09:00', await form.locator('select').first().inputValue() === 'weekly' && await form.locator('input[type="time"]').inputValue() === '09:00');
         } },
       ] },
+    { id: 'cowork-programar-tarjeta', persona: 'owner', title: 'Programar la tarea que Cowork me propuso',
+      goal: 'Pedir algo que se repite y dejarlo programado revisando lo que Cowork propone, sin escribirlo de nuevo.',
+      steps: [
+        { say: 'Abro la conversación del pedido semanal', do: async c => { await c.go(`/cowork?work=${run(10)}`); await c.seeRole('region', 'Tarea para programar'); } },
+        { say: 'Veo la tarea propuesta', do: async c => {
+          const card = c.page.getByRole('region', { name: 'Tarea para programar' }).first();
+          const text = await card.innerText();
+          c.check('dice qué hará y cuándo', /Prospectos de logística del lunes/.test(text) && /Los lunes a las 09:00/.test(text), text.replace(/\n/g, ' | ').slice(0, 160));
+          c.check('dice que aún no está programada', /Aún no está programada/.test(text));
+          c.check('una sola acción', await card.getByRole('button').count() === 1);
+          c.check('la respuesta no repite «Programar»', await c.page.getByRole('button', { name: 'Programar', exact: true }).count() === 0);
+        } },
+        { say: 'Pulso «Revisar y programar»', do: async c => {
+          await c.click({ role: 'button', name: 'Revisar y programar' });
+          await c.see('Qué debe hacer');
+          const form = c.page.getByRole('dialog');
+          c.check('el nombre es el que propuso', await form.locator('input[maxlength="80"]').inputValue() === 'Prospectos de logística del lunes');
+          c.check('el pedido es el completo que propuso', /con su cargo y por qué calzan/.test(await form.locator('textarea').inputValue()));
+          c.check('el horario es el que propuso: una vez por semana, a las 09:00', await form.locator('select').first().inputValue() === 'weekly' && await form.locator('input[type="time"]').inputValue() === '09:00');
+        } },
+      ] },
+    { id: 'cowork-programar-tarjeta-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: la tarea que Cowork me propuso',
+      goal: 'Que la tarjeta se lea completa y su botón se alcance en una pantalla angosta.',
+      steps: [
+        { say: 'Abro la conversación del pedido semanal', do: async c => { await c.go(`/cowork?work=${run(10)}`); await c.seeRole('region', 'Tarea para programar'); } },
+        { say: 'Reviso que nada desborde', do: async c => {
+          const overflow = await c.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+          c.check('sin desborde horizontal', overflow <= 1, `${overflow}px`);
+          c.check('el botón se ve', await c.page.getByRole('button', { name: 'Revisar y programar' }).isVisible());
+        } },
+      ] },
     { id: 'cowork-programar-respuesta', persona: 'owner', title: 'Programar lo que le pedí a Cowork, desde su respuesta',
       goal: 'Repetir un pedido que funcionó sin volver a escribirlo (COW-18).',
       steps: [

@@ -8,6 +8,7 @@ import {
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
   coworkThreadResults, coworkMergePreview, coworkEarlierRows, coworkCleanTitle, coworkWebReadCount, coworkLatestTaskProgress, coworkTurnTaskProgress,
+  coworkTurnScheduleOffer,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -530,4 +531,11 @@ test('an approved task\'s steps show under its latest turn, as that turn left th
   assert.equal(coworkTurnTaskProgress(after.events), null);
   assert.equal(coworkLatestTaskProgress([after]), null);
   assert.equal(coworkTurnTaskProgress([event('task.progress', { goal: 'x', steps: 'no' })]), null, 'a shape it does not know reads as none');
+});
+
+test('the task an answer proposed shows as its «Programar» card; an invalid one does not', () => {
+  const schedule = { title: 'Resumen del lunes', prompt: 'Dime quién respondió la semana pasada y a quién escribir hoy.', frequency: 'weekly', time: '09:00', weekday: 1 };
+  assert.deepEqual(coworkTurnScheduleOffer([event('run.completed', { reply: 'Te la dejo lista para programar.', schedule })]), { ...schedule, monthDay: null });
+  assert.equal(coworkTurnScheduleOffer([event('run.completed', { reply: 'Hola.' })]), null);
+  assert.equal(coworkTurnScheduleOffer([event('run.completed', { reply: 'x', schedule: { ...schedule, weekday: null } })]), null);
 });

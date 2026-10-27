@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { CalendarClock, LoaderCircle, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { COWORK_SCHEDULE_LIMITS, coworkScheduleWhen, type CoworkScheduleFrequency } from '@/lib/cowork/schedules';
+import { COWORK_SCHEDULE_LIMITS, coworkScheduleWhen, type CoworkScheduleFrequency, type CoworkScheduleOffer } from '@/lib/cowork/schedules';
 import { coworkScheduleHint } from '@/lib/cowork/schedule-hint';
 import { COWORK_DEFAULT_TIME_ZONE, coworkZoneLabel } from '@/lib/cowork/time-zone';
 import { cn } from '@/lib/utils';
@@ -61,10 +61,12 @@ export function coworkScheduleStatusLine(task: CoworkScheduledTaskView, now = ne
  * «Tareas programadas»: the requests Cowork does by itself at the time you choose («cada lunes, dime a quién escribir hoy»). Each run
  * starts a conversation in your list; whatever needs a decision waits there for your approval. Create, edit, pause, run now and delete.
  */
-export function CoworkSchedules({ open, onOpenChange, onStarted, initialPrompt = '' }: {
+export function CoworkSchedules({ open, onOpenChange, onStarted, initialPrompt = '', initialDraft = null }: {
   open: boolean; onOpenChange: (open: boolean) => void; onStarted?: () => void;
   /** A request to repeat («Programar» in the message box): the form opens with it, and with the when it already says. */
   initialPrompt?: string;
+  /** The task Cowork proposed in its answer («Programar» card): the form opens with it as it came, for the person to save. */
+  initialDraft?: CoworkScheduleOffer | null;
 }) {
   const [tasks, setTasks] = useState<CoworkScheduledTaskView[] | null>(null);
   const [limit, setLimit] = useState<number>(COWORK_SCHEDULE_LIMITS.active);
@@ -92,7 +94,10 @@ export function CoworkSchedules({ open, onOpenChange, onStarted, initialPrompt =
     if (!open) return;
     setNotice(''); setConfirming(null); setProblem('');
     const text = initialPrompt.trim();
-    if (text) {
+    if (initialDraft) {
+      setForm({ editing: null, draft: { title: initialDraft.title.slice(0, COWORK_SCHEDULE_LIMITS.titleMax), prompt: initialDraft.prompt.slice(0, COWORK_SCHEDULE_LIMITS.promptMax),
+        frequency: initialDraft.frequency, weekday: initialDraft.weekday ?? 1, monthDay: initialDraft.monthDay ?? 1, time: initialDraft.time } });
+    } else if (text) {
       const hint = coworkScheduleHint(text);
       setForm({ editing: null, draft: {
         title: hint.title.slice(0, COWORK_SCHEDULE_LIMITS.titleMax), prompt: text.slice(0, COWORK_SCHEDULE_LIMITS.promptMax),
@@ -100,7 +105,7 @@ export function CoworkSchedules({ open, onOpenChange, onStarted, initialPrompt =
       } });
     } else setForm(null);
     void load();
-  }, [open, initialPrompt, load]);
+  }, [open, initialPrompt, initialDraft, load]);
 
   const call = async (id: string, request: () => Promise<Response>, failure: string) => {
     setBusy(id); setNotice('');

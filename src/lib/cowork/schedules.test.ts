@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  COWORK_SCHEDULE_MARK, coworkIsScheduledMessage, coworkScheduleInputSchema, coworkScheduleMessage, coworkScheduleOf, coworkScheduledTitle,
-  describeCoworkSchedule, nextCoworkScheduleRun, type CoworkSchedule,
+  COWORK_SCHEDULE_MARK, coworkIsScheduledMessage, coworkScheduleInputSchema, coworkScheduleMessage, coworkScheduleOf, coworkScheduleOfferSchema, coworkScheduledTitle,
+  coworkStoredScheduleOffer, describeCoworkSchedule, nextCoworkScheduleRun, type CoworkSchedule,
 } from './schedules';
 
 const schedule = (overrides: Partial<CoworkSchedule> = {}): CoworkSchedule => ({ frequency: 'daily', time: '09:00', weekday: null, monthDay: null, timeZone: 'America/Santiago', ...overrides });
@@ -86,4 +86,19 @@ test('the message of a firing says what it is, when it fired, the request word f
   assert.equal(coworkIsScheduledMessage(null), false);
   assert.equal(coworkScheduledTitle(message), 'Resumen del lunes');
   assert.equal(coworkScheduledTitle('Hola'), null);
+});
+
+test('the task Cowork proposes reads back as a task would take it, or as none when it is not one', () => {
+  const offer = { title: 'Prospectos de logística del lunes', prompt: 'Tráeme 5 prospectos nuevos de logística en Santiago para escribirles.',
+    frequency: 'weekly', time: '09:00', weekday: 1, monthDay: null };
+  assert.equal(coworkScheduleOfferSchema.safeParse(offer).success, true, 'the model writes it with plain fields');
+  assert.deepEqual(coworkStoredScheduleOffer(offer), { ...offer, monthDay: null });
+  assert.deepEqual(coworkStoredScheduleOffer({ ...offer, frequency: 'daily' }), { ...offer, frequency: 'daily', weekday: null, monthDay: null },
+    'a day the frequency does not use is dropped, not a reason to lose the task');
+  assert.equal(coworkStoredScheduleOffer({ ...offer, weekday: null }), null, 'a weekly task needs its day');
+  assert.equal(coworkStoredScheduleOffer({ ...offer, time: '9' }), null);
+  assert.equal(coworkStoredScheduleOffer({ ...offer, prompt: 'corto' }), null);
+  assert.equal(coworkStoredScheduleOffer(null), null);
+  assert.deepEqual(coworkStoredScheduleOffer({ ...offer, frequency: 'monthly', weekday: 3, monthDay: 15 }),
+    { ...offer, frequency: 'monthly', weekday: null, monthDay: 15 });
 });

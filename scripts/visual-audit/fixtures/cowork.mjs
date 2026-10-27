@@ -25,6 +25,8 @@ export default function cowork(ctx) {
     run(8, 'Busca 25 gerentes de personas de retail en Santiago', { root: ctx.uid(9008), status: 'waiting_approval', at: ctx.hoursAgo(0.1) }),
     // An approved task half way (Plan 13, 4c): its steps show under its latest answer.
     run(9, 'Sí, sigue con la secuencia', { root: ctx.uid(9009), at: ctx.hoursAgo(0.4) }),
+    // Something to repeat: the answer proposes the task with its «Programar» card, for the person to save.
+    run(10, 'Cada lunes a las 9 tráeme 5 prospectos nuevos de logística en Santiago para escribirles', { root: ctx.uid(9010), at: ctx.hoursAgo(0.35) }),
   ];
   const replies = {
     1: 'Te recomiendo empezar por **3 personas** que calzan con tu cliente ideal y aún no contactas:\n\n1. **Andrea Soto**, Gerente de Personas en Retail Andino: están abriendo tiendas.\n2. **Matías Rojas**, Jefe de Reclutamiento en Logística Sur: contrataciones masivas en temporada.\n3. **Francisca Muñoz**, Gerente de Operaciones en Seguridad Austral.\n\n¿Quieres que prepare el primer correo para Andrea?',
@@ -32,6 +34,7 @@ export default function cowork(ctx) {
     3: 'Armé la campaña **«Logística · centros de distribución»** con 6 jefes de reclutamiento. Quedó en Campañas para que la revises antes de aprobarla.',
     5: 'Aquí va una versión más directa para **Andrea Soto**:\n\n**Asunto:** ¿15 minutos sobre las contrataciones de Retail Andino?\n\nHola Andrea, con las tiendas nuevas su equipo revisa muchos antecedentes. Nosotros lo hacemos en minutos y con trazabilidad. ¿Te muestro cómo el jueves?',
     7: 'Sodexo Chile presta **alimentación y gestión de instalaciones** a empresas e instituciones, y **sí está reclutando en volumen**, sobre todo en minería y regiones.\n\n- **Qué hace:** [Somos Sodexo](https://cl.sodexo.com/acerca-de-nosotros/quienes-somos) la describe como líder en servicios de alimentación y facility management.\n- **Contratación:** [Reclutamiento masivo en Coquimbo, Arica y Hualpén](https://trabajosenminera.com/reclutamiento-masivo-sodexo-chile) (sept. 2026) y [vacantes en Antofagasta](https://www.redimin.cl/sodexo-busca-trabajadores-en-antofagasta).\n\nLas cifras vienen de medios de empleo, que son fuentes secundarias: «masivo» es su titular, no un dato de la empresa.',
+    10: 'Te dejo la tarea lista para programar: **los lunes a las 09:00** te traigo 5 prospectos nuevos de logística en Santiago para escribirles. Revísala y guárdala en la tarjeta.',
     9: 'Guardé a los **10 gerentes** y encontré el correo de 8. Sigo con la secuencia de 3 correos; cuando esté, dejo la campaña pausada para que la revises.',
     4: 'De tus 20 contactos, 8 siguen en Nuevos y 3 ya tienen reunión. El tablero muestra el pipeline por etapa con la tabla de detalle; puedes ordenarla y usar «Ver datos» en el gráfico.',
   };
@@ -80,6 +83,8 @@ export default function cowork(ctx) {
     ] : []),
     { sequence: index * 10 + 8, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null,
       ...(index === 0 ? { blocks: [stagesChart] } : {}),
+      ...(index === 9 ? { schedule: { title: 'Prospectos de logística del lunes', prompt: 'Tráeme 5 prospectos nuevos de logística en Santiago para escribirles, con su cargo y por qué calzan.',
+        frequency: 'weekly', time: '09:00', weekday: 1, monthDay: null } } : {}),
       ...(index === 6 ? { question: '¿Busco contactos de selección y RR. HH. en Sodexo Chile?', suggestions: [{ label: 'Buscar contactos', message: 'Busca contactos de selección y RR. HH. en Sodexo Chile' }] } : {}) }, created_at: item.updated_at },
     ...(index === 4 ? [at(item, index * 10 + 9, 'answer.feedback', { rating: 'up', reason: null, comment: null })] : []),
   ]).filter(event => !((event.run_id === ctx.uid(9006) || event.run_id === ctx.uid(9008)) && event.kind === 'run.completed'));
