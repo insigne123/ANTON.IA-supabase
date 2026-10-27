@@ -354,7 +354,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         const steps: CoworkAgentStep[] = [];
         result.writer = { brief, steps };
         const output = await write(brief, observations, { caseId: entry.id, request: entry.request, userContext, step: async step => { steps.push(step); } });
-        return { ...output, document: null, blocks: coworkWriterBlocks(output) };
+        const blocks = coworkWriterBlocks(output);
+        result.writer.blocks = blocks;
+        return { ...output, document: null, blocks };
       } } : {}),
       ...(design ? { design: async (brief: CoworkDesignBrief) => {
         // As the store does: the code of an artifact of this conversation, or a refusal the coordinator reads.

@@ -5,6 +5,7 @@ import { coworkSearchCriteriaSchema, coworkSearchStrategy } from './search-propo
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
 import { coworkPublishedFiles } from './published-files';
+import { coworkStoredTaskProgress, type CoworkTaskProgress } from './task-graph';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
   coworkIsAssistantEvent, coworkIsWebAction, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent, type CoworkDraftPhase } from './contracts';
 
@@ -455,6 +456,21 @@ export function coworkReadEvents(events: CoworkEvent[]): CoworkEvent[] {
 /** How many of a turn's reads went to the web (a search, a page): the summary tells them apart from the account's. */
 export function coworkWebReadCount(events: CoworkEvent[]): number {
   return coworkReadEvents(events).filter(event => coworkIsWebAction(event.payload?.action)).length;
+}
+
+/** Where an approved task's steps stood after this turn («task.progress»), or null for a turn outside a task. */
+export function coworkTurnTaskProgress(events: CoworkEvent[]): CoworkTaskProgress | null {
+  const event = events.slice().reverse().find(item => item.kind === 'task.progress');
+  return event ? coworkStoredTaskProgress(event.payload) : null;
+}
+
+/** The latest turn of the conversation that left an approved task's steps, and how: they show under that turn only. */
+export function coworkLatestTaskProgress(turns: Array<{ run: Pick<CoworkRun, 'id'>; events: CoworkEvent[] }>): { runId: string; progress: CoworkTaskProgress } | null {
+  for (const turn of turns.slice().reverse()) {
+    const progress = coworkTurnTaskProgress(turn.events);
+    if (progress) return { runId: turn.run.id, progress };
+  }
+  return null;
 }
 
 /** What the assistant wrote next to its proposal, if anything. */

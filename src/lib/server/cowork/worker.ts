@@ -74,7 +74,7 @@ import { coworkCodeArtifactsEnabled, coworkDesignerModel, coworkDesignerTurn } f
 import { coworkAnalystEnabled, coworkAnalystModel, coworkAnalystTurn } from './analyst-run';
 import { coworkArtifactStore } from './artifact-store';
 import { coworkPreferencesEnabled, stageCoworkPreference } from './preference';
-import { coworkTasksEnabled, loadCoworkActiveTask, recordCoworkTaskStep, stageCoworkTaskPlan } from './task';
+import { coworkTasksEnabled, loadCoworkActiveTask, recordCoworkTaskProgress, recordCoworkTaskStep, stageCoworkTaskPlan } from './task';
 import { coworkTaskApproves, coworkTaskContext, coworkTaskThreadBudget } from '@/lib/cowork/task-plan';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
@@ -728,6 +728,15 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       },
     });
     await judgeTurn?.finish(result);
+    // The emails of this turn's own answer deliver the task's write step, as the next turn will read them: the progress and the
+    // next step count them now.
+    const ownBlocks = 'blocks' in result ? result.blocks : null;
+    if (activeTask?.deliveryEvents && ownBlocks?.some(block => block.type === 'email_draft' || block.type === 'sequence')) {
+      activeTask.deliveryEvents.push({ runId: run.id, kind: 'run.completed', payload: { blocks: ownBlocks } });
+      activeTask.graph = coworkTaskGraph(activeTask.startRunId, activeTask.plan, activeTask.deliveryEvents);
+    }
+    // Where the task's steps stand after this turn, shown under its answer. The work itself never depends on it.
+    if (activeTask?.graph) await recordCoworkTaskProgress(client, scope, run.id, activeTask).catch(() => undefined);
     if (waitingApproval) {
       if (pendingMemory) await saveCoworkThreadMemory(client, scope, run,
         coworkPendingProposalMemory(pendingMemory, threadMemory?.memory ?? null));
@@ -735,17 +744,20 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     }
     controller.signal.throwIfAborted();
     await requireCoworkWorkerAccess(client, scope);
+    const answer = (() => {
+      const polished = polishCoworkAnswer(clarificationOnly ? coworkClarificationAnswer(result) : result);
+      if (coworkIsFarewell(run.message)) return coworkAsFarewell(polished);
+      return coworkAsksChatMessage(run.message) ? coworkAsChatMessage(polished, userContext?.fullName ?? null) : polished;
+    })();
     const finished = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'completed',
-      p_payload: { ...(() => {
-        const answer = polishCoworkAnswer(clarificationOnly ? coworkClarificationAnswer(result) : result);
-        if (coworkIsFarewell(run.message)) return coworkAsFarewell(answer);
-        return coworkAsksChatMessage(run.message) ? coworkAsChatMessage(answer, userContext?.fullName ?? null) : answer;
-      })(), telemetry },
+      p_payload: { ...answer, telemetry },
     });
     if (finished.error) throw finished.error;
     if (finished.data === true && pendingMemory) await saveCoworkThreadMemory(client, scope, run, pendingMemory);
-    if (finished.data === true && activeTask?.graph) {
+    // An approved task goes on by itself to its next step, unless this answer asks the person something: then it waits, and
+    // their answer goes on with the task (coworkTaskReplyContinues).
+    if (finished.data === true && activeTask?.graph && !answer.question && !answer.choices) {
       const next = activeTask.graph.find(node => node.state === 'pending' && node.dependsOn.every(id => activeTask.graph!.some(dep => dep.id === id && dep.state === 'succeeded')));
       if (next) {
         const child = await client.from('cowork_runs').select('id').eq('parent_run_id', run.id)

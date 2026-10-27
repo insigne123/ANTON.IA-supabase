@@ -248,7 +248,9 @@ export type CorpusTurnResult = {
   /** The web searches and page reads of the turn, as they were recorded (their sources and the beginning of a page read). */
   web?: Array<{ action: string; input: unknown; result: unknown }>;
   /** When the Writer wrote the answer (writer.ts): the coordinator's brief and what each agent did. */
-  writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }> };
+  writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }>;
+    /** The cards the Writer delivered in this turn, as onWriteDelivery hands them to the task graph. */
+    blocks?: CoworkBlock[] | null };
   /** The question the coordinator handed the Analyst (analysis.write, Plan 12, 4b). */
   analyst?: { brief: unknown };
   /** The judge in the turn (G2): its judgement of the first answer, whether it asked for a fix and whether the answer changed. */
@@ -274,7 +276,11 @@ export type CorpusHistoryTurn = { request: string; reply: string; at: string; ob
   /** What the person said about that answer (👍/👎, Plan 13), as the history carries it. */
   feedback?: { rating: 'up' | 'down'; reason: string | null; comment: string | null };
   /** The code artifacts that turn made (Plan 12, 3b), as the conversation history carries them. */
-  artifacts?: Array<{ name: string; title: string }> };
+  artifacts?: Array<{ name: string; title: string }>;
+  /** What that answer left open for the person, as loadCoworkActiveTask reads it: whether it asked and the answers it offered. Never sent to the model. */
+  open?: { asked: boolean; offered: string[] };
+  /** Every read of that turn, as its run's events keep them for the task graph (observations keeps the newest, as the history). Never sent to the model. */
+  reads?: unknown[] };
 
 export type CorpusCase = {
   id: string;

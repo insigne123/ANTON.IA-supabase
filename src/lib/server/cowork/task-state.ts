@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { coworkTaskPlanSchema, type CoworkActiveTask, type CoworkTaskCost } from '@/lib/cowork/task-plan';
+import { coworkTaskPlanSchema, coworkTaskReplyContinues, type CoworkActiveTask, type CoworkTaskCost } from '@/lib/cowork/task-plan';
+import { coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions } from '@/lib/cowork/contracts';
 import { coworkRunIsAutomatic } from './runs';
-import { coworkTaskGraph } from '@/lib/cowork/task-graph';
+import { coworkTaskGraph, coworkTaskProgress } from '@/lib/cowork/task-graph';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -20,8 +21,9 @@ export function coworkTaskTtlHours(env: Record<string, string | undefined> = pro
   return Number.isInteger(hours) && hours >= 1 && hours <= 168 ? hours : 24;
 }
 
-/** The run events of a task: the plan a turn proposed, the plan once approved, and each step it approved by itself. */
-export const COWORK_TASK_EVENTS = { plan: 'task.plan', started: 'task.started', step: 'task.step' } as const;
+/** The run events of a task: the plan a turn proposed, the plan once approved, each step it approved by itself, and where its
+ * steps stand after each of its turns (what the conversation shows). */
+export const COWORK_TASK_EVENTS = { plan: 'task.plan', started: 'task.started', step: 'task.step', progress: 'task.progress' } as const;
 
 export function parseCoworkTaskTarget(targetId: string) {
   const match = /^task:([0-9a-f]{32})$/.exec(String(targetId || ''));
@@ -37,7 +39,18 @@ export async function coworkTaskRunEvents(client: SupabaseClient, scope: Scope, 
   return (data || []).map(row => row.payload as Record<string, unknown>);
 }
 
-type AncestorRun = { id: string; parent_run_id: string | null; request_id: string | null; depth: number | null };
+type AncestorRun = { id: string; parent_run_id: string | null; request_id: string | null; depth: number | null; message: string | null };
+
+/** What the turn a person answered left open: whether it asked something, and the answers it offered (buttons and choices). */
+async function coworkTaskAnswered(client: SupabaseClient, scope: Scope, runId: string) {
+  const { data, error } = await client.from('cowork_run_events').select('payload')
+    .eq('run_id', runId).eq('user_id', scope.userId).eq('organization_id', scope.organizationId).eq('kind', 'run.completed')
+    .order('sequence', { ascending: false }).limit(1);
+  const payload = (error ? null : (data || [])[0]?.payload ?? null) as { question?: unknown; choices?: unknown; suggestions?: unknown } | null;
+  const choices = coworkStoredChoices(payload?.choices);
+  return { asked: coworkStoredQuestion(payload?.question) !== null || choices !== null,
+    offered: [...coworkStoredSuggestions(payload?.suggestions).map(item => item.message), ...(choices?.options ?? [])] };
+}
 
 /** When the plan was approved: the time of its «task.started» event, or null when it cannot be read. */
 async function coworkTaskStartedAt(client: SupabaseClient, scope: Scope, runId: string): Promise<number | null> {
@@ -49,17 +62,19 @@ async function coworkTaskStartedAt(client: SupabaseClient, scope: Scope, runId: 
 }
 
 /**
- * The task this turn continues, or null. A task goes on only through the worker's own continuations: walking up from this turn,
- * every turn up to the one that started it must be automatic. A message from the person ends it, and so does a thread that
- * never started one. So does time (Plan 14, 3): past COWORK_TASK_TTL_HOURS since it was approved, or when that time cannot be
- * read, its next steps ask for approval again.
+ * The task this turn continues, or null. A task goes on through the worker's own continuations and through the person's
+ * replies that go on with it: walking up from this turn, every turn up to the one that started it must be automatic or a «sí»,
+ * the answer to what the turn before asked, or one of the answers it offered (coworkTaskReplyContinues). Any other message from
+ * the person ends it, a new request or a «para», and so does a thread that never started one. So does time (Plan 14, 3): past
+ * COWORK_TASK_TTL_HOURS since it was approved, or when that time cannot be read, its next steps ask for approval again.
  */
 export async function loadCoworkActiveTask(client: SupabaseClient, scope: Scope, runId: string,
   clock: { now?: number; ttlHours?: number } = {}): Promise<CoworkActiveTask | null> {
   const visited: string[] = [];
   let cursor: string | null = runId;
-  for (let step = 0; step < 10 && cursor; step++) {
-    const found: { data: AncestorRun | null; error: unknown } = await client.from('cowork_runs').select('id,parent_run_id,request_id,depth')
+  // The person's replies reset the depth of the thread, so a task may run longer than one automatic chain (10 deep).
+  for (let step = 0; step < 20 && cursor; step++) {
+    const found: { data: AncestorRun | null; error: unknown } = await client.from('cowork_runs').select('id,parent_run_id,request_id,depth,message')
       .eq('id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
     const run = found.data;
     if (found.error || !run) return null;
@@ -84,7 +99,8 @@ export async function loadCoworkActiveTask(client: SupabaseClient, scope: Scope,
       }
       return { startRunId: run.id, startDepth: run.depth || 0, plan: plan.data, used: { steps: steps.length, searches: sum('searches'), credits: sum('credits') }, ...(graph ? { graph, deliveryEvents } : {}) };
     }
-    if (!coworkRunIsAutomatic(run)) return null;
+    if (!coworkRunIsAutomatic(run) && !(run.parent_run_id
+      && coworkTaskReplyContinues(run.message ?? '', await coworkTaskAnswered(client, scope, run.parent_run_id)))) return null;
     visited.push(run.id);
     cursor = run.parent_run_id;
   }
@@ -98,4 +114,14 @@ export async function recordCoworkTaskStep(client: SupabaseClient, scope: Scope,
     kind: COWORK_TASK_EVENTS.step, payload: step,
   });
   if (recorded.error) throw new Error('No se pudo registrar el paso de la tarea.');
+}
+
+/** Where the task's steps stand after a turn, as the conversation shows them under its answer. Only with the task graph. */
+export async function recordCoworkTaskProgress(client: SupabaseClient, scope: Scope, runId: string, task: CoworkActiveTask) {
+  if (!task.graph) return;
+  const recorded = await client.from('cowork_run_events').insert({
+    run_id: runId, user_id: scope.userId, organization_id: scope.organizationId,
+    kind: COWORK_TASK_EVENTS.progress, payload: coworkTaskProgress(task.plan.goal, task.graph),
+  });
+  if (recorded.error) throw new Error('No se pudo registrar el avance de la tarea.');
 }

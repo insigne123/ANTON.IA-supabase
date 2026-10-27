@@ -7,7 +7,7 @@ import {
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
-  coworkThreadResults, coworkMergePreview, coworkEarlierRows, coworkCleanTitle, coworkWebReadCount,
+  coworkThreadResults, coworkMergePreview, coworkEarlierRows, coworkCleanTitle, coworkWebReadCount, coworkLatestTaskProgress, coworkTurnTaskProgress,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -519,4 +519,15 @@ test('the summary of a turn tells the reads on the web apart from the ones of th
   assert.equal(coworkWebReadCount(events), 2);
   assert.equal(coworkReadEvents(events).length, 3, 'the plan is the assistant\'s own note, not a read');
   assert.equal(coworkWebReadCount([event(1, 'leads.search')]), 0);
+});
+
+test('an approved task\'s steps show under its latest turn, as that turn left them', () => {
+  const steps = (state: string) => [{ label: 'Buscar gerentes', state: 'done' }, { label: 'Escribirles', state }];
+  const first = { run: { id: 'r1' }, events: [event('task.progress', { goal: 'Minería', steps: steps('current') })] };
+  const second = { run: { id: 'r2' }, events: [event('task.progress', { goal: 'Minería', steps: steps('done') })] };
+  const after = { run: { id: 'r3' }, events: [event('run.completed', { reply: 'Hola.' })] };
+  assert.deepEqual(coworkLatestTaskProgress([first, second, after]), { runId: 'r2', progress: { goal: 'Minería', steps: steps('done') } });
+  assert.equal(coworkTurnTaskProgress(after.events), null);
+  assert.equal(coworkLatestTaskProgress([after]), null);
+  assert.equal(coworkTurnTaskProgress([event('task.progress', { goal: 'x', steps: 'no' })]), null, 'a shape it does not know reads as none');
 });

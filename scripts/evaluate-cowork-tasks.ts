@@ -4,7 +4,7 @@
 // Explicit opt-in only. Never loads env files, touches the database or calls any provider but Anthropic's.
 //
 //   ANTHROPIC_API_KEY=... COWORK_WORKSPACE_ENABLED=true COWORK_TASKS_ENABLED=true \
-//   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-tasks.ts --live --max-calls=300 [--tasks=a,b] [--repeat=2] [--output=file.json] [--writer]
+//   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-tasks.ts --live --max-calls=300 [--tasks=a,b] [--repeat=2] [--max-turns=12] [--output=file.json] [--writer]
 //   ... --live --max-calls=1 --rejudge=file.json --output=rejudged.json   (only the judge, again, over a saved run)
 //
 // --writer hands emails to the Writer and the Reviewer, as production does (COWORK_WRITER_MODEL / COWORK_REVIEWER_MODEL; a «claude-» model
@@ -23,7 +23,7 @@ import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '
 import { coworkReadCapabilities } from '../src/lib/server/cowork/read-capabilities';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, type CorpusHistoryTurn, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { runCorpusCase, type CorpusWriter } from './fixtures/cowork-conversation-runner';
-import { activeTask, COWORK_TASKS, nextTurn, taskWorld, type CoworkTask } from './fixtures/cowork-task-corpus';
+import { activeTask, COWORK_TASKS, nextTurn, taskWorld, writtenReads, type CoworkTask } from './fixtures/cowork-task-corpus';
 
 /** USD per million tokens (Anthropic list prices, as the Cowork ledger prices them). */
 const PRICES: Record<string, { input: number; output: number; cache: number; write: number }> = {
@@ -111,6 +111,9 @@ async function main() {
     return;
   }
   const writerOn = process.argv.includes('--writer');
+  // How many turns a task plays at most, unless the task says (default 8): a long task with research needs more.
+  const turnsArg = Number(arg('max-turns'));
+  const turnsOf = (task: CoworkTask) => task.maxTurns ?? (Number.isInteger(turnsArg) && turnsArg > 0 ? turnsArg : 8);
   const writerModels = coworkWriterModels();
   const writerEfforts = coworkWriterEfforts();
 
@@ -159,7 +162,7 @@ async function main() {
       let answered = 0;
       let stopped = 'terminó';
       let finishing = false;
-      for (let index = 0; index < (task.maxTurns ?? 8); index++) {
+      for (let index = 0; index < turnsOf(task); index++) {
         const at = new Date(CORPUS_NOW.getTime() + index * 120_000).toISOString();
         const world = taskWorld(history, request);
         const running = activeTask(history, request);
@@ -179,7 +182,7 @@ async function main() {
           bloques: (result.blocks || []).map(block => block.type), fallo: result.failed,
           aprobado: next?.approved ? { tipo: next.approved.kind, respuesta: next.approved.reply, resultado: JSON.stringify(next.approved.result).slice(0, 1200),
             // Inside an approved task the worker approves what fits the plan by itself: no card reaches the person.
-            por: running?.approves(next.approved.kind, { searches: next.approved.kind === 'search' ? 1 : 0,
+            por: (activeTask(history, request, writtenReads(result)) ?? running)?.approves(next.approved.kind, { searches: next.approved.kind === 'search' ? 1 : 0,
               credits: Number((next.approved.result as { cost?: { lookups?: number } } | null)?.cost?.lookups ?? 0) }) ? 'la tarea aprobada, sin preguntar' : 'la persona' } : null });
         console.log(`  ${task.id}#${attempt} turno ${index + 1}: ${result.failed ? `falló (${result.failed.slice(0, 80)})` : result.search ? 'propone búsqueda' : result.proposal ? `propone ${result.proposal.kind}` : result.question ? 'pregunta' : 'responde'}`);
         if (result.failed) { stopped = 'falló'; break; }
@@ -199,7 +202,7 @@ async function main() {
           next.request = person?.respuesta || 'Sí, adelante.';
         }
         request = next.request;
-        if (index === (task.maxTurns ?? 8) - 1) stopped = 'llegó al máximo de turnos';
+        if (index === turnsOf(task) - 1) stopped = 'llegó al máximo de turnos';
       }
       let judged: z.infer<typeof judgeSchema> | null = null;
       try {

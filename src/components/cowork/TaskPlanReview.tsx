@@ -56,7 +56,7 @@ export function TaskPlanReview({ runId, onApprove, onReject, resolving }: { runI
           <Ban className="h-3.5 w-3.5 shrink-0 text-cw-muted" aria-hidden="true" />{item}</li>)}</ul>
       </div>
     </div>
-    <p className="text-[12.5px] leading-5 text-cw-muted">Al aprobarlo, sigo paso a paso y te cuento el avance. Si escribes un mensaje, la tarea se detiene ahí, y si no termina en {ttlHours === 1 ? '1 hora' : `${ttlHours} horas`}, lo que falte te lo pregunto antes.</p>
+    <p className="text-[12.5px] leading-5 text-cw-muted">Al aprobarlo, sigo paso a paso y te cuento el avance. Si me contestas o me dices «sigue», continúo; un pedido nuevo o un «para» la detiene. Si no termina en {ttlHours === 1 ? '1 hora' : `${ttlHours} horas`}, lo que falte te lo pregunto antes.</p>
     <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Aprobar el plan" rejectLabel="Descartar plan" resolving={resolving} />
   </div>;
 }

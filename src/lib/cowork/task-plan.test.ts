@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkTaskApproves, coworkTaskContext, coworkTaskPlanLabel, coworkTaskPlanProblem, coworkTaskPlanSchema, coworkTaskThreadBudget,
-  type CoworkActiveTask, type CoworkTaskPlan } from './task-plan';
+import { coworkTaskApproves, coworkTaskContext, coworkTaskPlanLabel, coworkTaskPlanProblem, coworkTaskPlanSchema, coworkTaskReplyContinues,
+  coworkTaskThreadBudget, type CoworkActiveTask, type CoworkTaskPlan } from './task-plan';
 
 const plan: CoworkTaskPlan = {
   goal: 'Escribirles una secuencia a los 10 mejores gerentes de RR. HH. de retail en Santiago',
@@ -62,4 +62,37 @@ test('a turn of the task reads the plan, what it spent and what is left', () => 
   assert.deepEqual(context.left, { searches: 0, credits: 10 });
   assert.match(context.instruction, /siguiente paso pendiente del plan/);
   assert.match(context.instruction, /enviar, activar, LinkedIn o un gasto mayor/);
+});
+
+test('a reply of the person goes on with the task when it is a «sí», the answer it asked for or one it offered; a stop or a new request ends it', () => {
+  const quiet = { asked: false, offered: [] };
+  for (const yes of ['Sí', 'sí, dale', 'Dale, sigue.', 'ok adelante por favor', '¡Perfecto, continúa!', 'Ya', 'de acuerdo, hazlo', 'Con todo']) {
+    assert.equal(coworkTaskReplyContinues(yes, quiet), true, yes);
+  }
+  // An answer goes on only when the turn before asked: without a question it is a new request.
+  const asked = { asked: true, offered: [] };
+  assert.equal(coworkTaskReplyContinues('Solo Santiago y Valparaíso.', asked), true);
+  assert.equal(coworkTaskReplyContinues('Sí, dale con la investigación de Camila y Felipe', asked), true);
+  assert.equal(coworkTaskReplyContinues('Solo Santiago y Valparaíso.', quiet), false);
+  assert.equal(coworkTaskReplyContinues('Ahora búscame gerentes de minería en Antofagasta', quiet), false);
+  // A button or a choice the turn offered, as the app sends it.
+  const offered = { asked: false, offered: ['Crear la campaña pausada', 'Solo a los 5 con correo'] };
+  assert.equal(coworkTaskReplyContinues('Crear la campaña pausada', offered), true);
+  assert.equal(coworkTaskReplyContinues('Crear otra campaña', offered), false);
+  // A stop or a plain «no» ends it even after a question; «para» inside a sentence is not a stop.
+  for (const stop of ['Para', 'para, no sigas', 'Espera.', 'Esperá un poco', 'No, mejor no', 'No', 'No, gracias', 'No, todavía no', 'no, espera',
+    'sí pero no sigas con la campaña', 'Cancela la tarea', 'detenla']) {
+    assert.equal(coworkTaskReplyContinues(stop, asked), false, stop);
+  }
+  assert.equal(coworkTaskReplyContinues('Prepara los correos para Camila y Felipe', asked), true);
+  // A «no» that answers or steers goes on, as the task bench's person wrote it.
+  assert.equal(coworkTaskReplyContinues('No, solo Santiago', asked), true);
+  assert.equal(coworkTaskReplyContinues('No, todavía no. Primero lee los informes de Valentina y Matías y confirma las dos señales en fuentes reales, no solo en la portada. Después escribe los correos.', asked), true);
+  assert.equal(coworkTaskReplyContinues('No, solo Santiago', quiet), false, 'after a turn that asked nothing it is a new request');
+  // A long message, or one that opens as a new request, is a new request whatever came before.
+  assert.equal(coworkTaskReplyContinues(`Sí, ${'y además '.repeat(40)}`, asked), false);
+  assert.equal(coworkTaskReplyContinues(`Solo Santiago, ${'y también Valparaíso '.repeat(14)}`, asked), false);
+  assert.equal(coworkTaskReplyContinues('Ahora busca gerentes de minería', asked), false);
+  assert.equal(coworkTaskReplyContinues('Otra cosa: ¿cuántos créditos me quedan?', asked), false);
+  assert.equal(coworkTaskReplyContinues('   ', asked), false);
 });

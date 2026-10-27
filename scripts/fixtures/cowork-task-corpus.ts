@@ -5,7 +5,8 @@
 // the worker writes in production (src/lib/cowork/continuation-messages.ts), and the history carries the result as production loads it
 // (server/cowork/conversation-context.ts: the turn's newest reads and the effects that ran). Everything here is pure: no model, no database.
 import { COWORK_CONTINUE_AFTER_PLAN, COWORK_CONTINUE_AFTER_SEARCH, coworkContinuationAfter, coworkContinueTask } from '../../src/lib/cowork/continuation-messages';
-import { coworkTaskApproves, coworkTaskContext, type CoworkActiveTask, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
+import { coworkTaskApproves, coworkTaskContext, coworkTaskReplyContinues, type CoworkActiveTask, type CoworkTaskPlan } from '../../src/lib/cowork/task-plan';
+import { coworkTaskGraph, type CoworkTaskDeliveryEvent } from '../../src/lib/cowork/task-graph';
 import { coworkResearchNoticeMessage } from '../../src/lib/cowork/research-notice';
 import { COWORK_SEARCH_ROLE_NOTE } from '../../src/lib/cowork/search-ranking';
 import { CORPUS_NOW, CORPUS_SAVED_EMAILS, corpusRead, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
@@ -146,11 +147,12 @@ export function simulateEffect(proposal: NonNullable<CorpusTurnResult['proposal'
         const email = person.email ?? (looked ? emailOf(person, person.n) : null);
         const steps = [{ step: 'save', status: person.known ? 'reused' : 'done' },
           ...(goal === 'linkedin' ? [{ step: 'linkedin', status: 'done' }] : []),
-          ...(needsEmail ? [!looked ? { step: 'enrich', status: 'reused' } : email ? { step: 'enrich', status: 'done' } : { step: 'enrich', status: 'failed', detail: 'El proveedor no encontró su correo.' }] : []),
-          ...(goal === 'research' ? [email ? { step: 'research', status: 'done' } : { step: 'research', status: 'skipped', detail: 'No se investigó: primero hay que buscar su correo.' }] : [])];
+          // As prepare-batch-run.ts: an email the provider did not find is a done lookup with its note, and the research goes on.
+          ...(needsEmail ? [!looked ? { step: 'enrich', status: 'reused' } : email ? { step: 'enrich', status: 'done' } : { step: 'enrich', status: 'done', detail: 'El proveedor no encontró su correo.' }] : []),
+          ...(goal === 'research' ? [{ step: 'research', status: 'done' }] : [])];
         return { id: person.id, name: person.name, company: person.company, status: steps.every(step => step.status !== 'failed' && step.status !== 'skipped') ? 'ready' : 'partial', steps,
           email, emailStatus: email ? 'verified' : null, linkedinUrl: goal === 'linkedin' ? `https://www.linkedin.com/in/sim-${person.n}` : null,
-          research: goal === 'research' && email ? 'queued' : null };
+          research: goal === 'research' ? 'queued' : null };
       });
       const withEmail = items.filter(item => item.email).length;
       const researched = items.filter(item => item.research).length;
@@ -287,28 +289,61 @@ export function taskWorld(history: CorpusHistoryTurn[], request = ''): CorpusWor
   };
 }
 
-/** A request the worker wrote on its own (a continuation or a notice), not the person: an approved task goes on only through these. */
+/** A request the worker wrote on its own (a continuation or a notice), not the person. */
 const automatic = (request: string) => /^(?:Continúa |El usuario aprobó el plan de la tarea|Termin(?:ó la investigación|aron las investigaciones) que pediste)/.test(request);
 
-/** The approved task the next turn continues, as loadCoworkActiveTask finds it: approved in this work and with no message of the person since. */
-export function activeTask(history: CorpusHistoryTurn[], nextRequest: string) {
+/** Whether a turn's request goes on with an approved task: the worker's own, or a reply of the person that goes on with it, after what the turn before left open.
+ * EVAL_TASK_REPLY=off plays the rule before 27 October, when any message of the person ended the task. */
+const goesOn = (request: string, before: CorpusHistoryTurn | undefined) =>
+  automatic(request) || (process.env.EVAL_TASK_REPLY !== 'off' && coworkTaskReplyContinues(request, before?.open ?? { asked: false, offered: [] }));
+
+/** What an answer leaves open for the person (its question, its buttons and choices), as the next turn's task reads it. */
+const leftOpen = (result: CorpusTurnResult) => {
+  const offered = [...(result.suggestions || []).map(item => item.message), ...(result.choices?.options || [])];
+  const asked = Boolean(result.question) || (result.choices?.options?.length ?? 0) > 0;
+  return asked || offered.length ? { open: { asked, offered } } : {};
+};
+
+/** The events of a turn the task graph reads, as the run keeps them: every read (the history keeps the newest), the effects it ran and
+ * the emails it wrote. */
+function deliveryEvents(turn: CorpusHistoryTurn, runId: string): CoworkTaskDeliveryEvent[] {
+  const read = (turn.reads ?? turn.observations ?? []).filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && 'action' in (item as object));
+  const ran = ((turn.actions || []) as Array<{ kind?: string; outcome?: string; result?: unknown }>).filter(action => action.outcome === 'ejecutada');
+  const written = (turn.blocks || []).filter(block => block.type === 'email_draft' || block.type === 'sequence');
+  return [...read.map(payload => ({ runId, kind: 'tool.completed', payload })),
+    ...ran.map(action => ({ runId, kind: 'effect.completed', payload: { kind: action.kind, result: action.result } as Record<string, unknown> })),
+    ...(written.length ? [{ runId, kind: 'run.completed', payload: { blocks: turn.blocks } as Record<string, unknown> }] : [])];
+}
+
+/** What the Writer delivered in a turn, as onWriteDelivery records it for the task graph (worker.ts): the write step is done from that moment,
+ * so a campaign proposed in the same turn finds it done. */
+export function writtenReads(result: CorpusTurnResult): unknown[] {
+  const blocks = result.writer?.blocks ?? [];
+  return blocks.some(block => block.type === 'email_draft' || block.type === 'sequence')
+    ? [{ action: 'assistant.written', input: '', result: { scope: 'task_delivery', blocks } }] : [];
+}
+
+/** The approved task the next turn continues, as loadCoworkActiveTask finds it: approved in this work, and since then only the worker's
+ * own turns and the person's replies that go on with it (a «sí», the answer to what it asked). */
+export function activeTask(history: CorpusHistoryTurn[], nextRequest: string, during: unknown[] = []) {
   let start = -1;
   history.forEach((turn, index) => { if ((turn.actions as Array<{ kind?: string }> | undefined)?.some(action => action.kind === 'task_plan')) start = index; });
-  if (start < 0 || !automatic(nextRequest) || history.slice(start + 1).some(turn => !automatic(turn.request))) return null;
+  if (start < 0 || !goesOn(nextRequest, history.at(-1)) || history.slice(start + 1).some((turn, index) => !goesOn(turn.request, history[start + index]))) return null;
   const plan = ((history[start].actions as Array<{ kind?: string; result?: { plan?: CoworkTaskPlan | null } }>).find(action => action.kind === 'task_plan')?.result?.plan) ?? null;
   if (!plan) return null;
   const after = history.slice(start + 1);
   const effects = after.flatMap(turn => (turn.actions || []) as Array<{ kind?: string; result?: { cost?: { lookups?: number } } }>);
   const searches = after.filter(turn => (turn.observations || []).some(observation => (observation as { action?: string } | null)?.action === 'prospecting.search')).length;
   const credits = effects.reduce((sum, action) => sum + (action.result?.cost?.lookups ?? 0), 0);
-  const done = new Set<string>([
-    ...(searches ? ['search'] : []),
-    ...(effects.some(action => ['lead_prepare_batch', 'save_contact', 'enrich_contact', 'start_research', 'enrich_batch'].includes(String(action.kind))) ? ['prepare'] : []),
-    ...(after.some(turn => (turn.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence')) ? ['write'] : []),
-    ...(effects.some(action => action.kind === 'campaign_create') ? ['campaign'] : []),
-  ]);
-  const task: CoworkActiveTask = { startRunId: '00000000-0000-4000-9500-000000000001', startDepth: 0, plan, used: { steps: effects.length + searches, searches, credits } };
-  return { plan, next: plan.steps.find(step => !done.has(step.kind)) ?? null, context: coworkTaskContext(task),
+  // The graph of the task, as the worker rebuilds it from the events of the turns since it started (COWORK_TASK_GRAPH_ENABLED=true in production).
+  const startRunId = '00000000-0000-4000-9500-000000000001';
+  // `during`: what the next turn itself delivered so far (the Writer's emails), which its own proposals already find done.
+  const graph = coworkTaskGraph(startRunId, plan, [...after, { request: nextRequest, reply: '', at: '', reads: during }]
+    .flatMap((turn, index) => deliveryEvents(turn, `00000000-0000-4000-9500-${String(index + 2).padStart(12, '0')}`)));
+  const task: CoworkActiveTask = { startRunId, startDepth: 0, plan, used: { steps: effects.length + searches, searches, credits }, graph };
+  // The step the worker goes on with: the first pending one whose steps before it are done (worker.ts).
+  const next = graph.find(node => node.state === 'pending' && node.dependsOn.every(id => graph.some(dep => dep.id === id && dep.state === 'succeeded')));
+  return { plan, graph, next: next ? { label: next.label, kind: next.kind } : null, context: coworkTaskContext(task),
     /** Whether the worker approves this proposal by itself (worker.ts, coworkTaskApproves): the person never sees its card. */
     approves: (kind: string, cost: { searches: number; credits: number }) => coworkTaskApproves(task, kind === 'search' ? null : kind, cost) };
 }
@@ -328,31 +363,34 @@ export function nextTurn(task: CoworkTask, turn: { request: string; at: string; 
   if (result.search) {
     const found = simulateSearch(result.search);
     return { request: COWORK_CONTINUE_AFTER_SEARCH, approved: { kind: 'search', reply: `Búsqueda completada: ${found.returned} resultados.`, result: found },
-      turn: { request: turn.request, reply: said, at: turn.at, observations: [...turn.observations.slice(-2), { action: 'prospecting.search', input: result.search, result: found }] } };
+      turn: { request: turn.request, reply: said, at: turn.at, observations: [...turn.observations.slice(-2), { action: 'prospecting.search', input: result.search, result: found }],
+        reads: [...turn.observations, { action: 'prospecting.search', input: result.search, result: found }] } };
   }
   if (result.proposal) {
     const effect = simulateEffect(result.proposal, history);
     if (!resumesAfter(result.proposal.kind)) return null;
     return { request: coworkContinuationAfter(result.proposal.kind), approved: { kind: result.proposal.kind, ...effect },
-      turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3),
+      turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: [...turn.observations, ...writtenReads(result)],
         actions: [{ kind: result.proposal.kind, label: result.proposal.label, outcome: 'ejecutada', result: effect.result }] } };
   }
   // Inside an approved task, a delivery with steps left goes on by itself: the worker admits the next step (worker.ts, with the task graph).
   // What this turn delivered counts: a turn that wrote the emails completed the write step.
-  const kept: CorpusHistoryTurn = { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), ...shown(result) };
-  const running = automatic(turn.request) ? activeTask([...history, kept], COWORK_CONTINUE_AFTER_PLAN) : null;
-  if (running?.next && !result.question) return { request: coworkContinueTask(running.next.label), approved: null, turn: kept };
+  // An answer that asks the person waits for them (worker.ts), and their answer goes on with the task.
+  const kept: CorpusHistoryTurn = { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), reads: [...turn.observations, ...writtenReads(result)],
+    ...shown(result), ...leftOpen(result) };
+  const running = activeTask([...history, kept], COWORK_CONTINUE_AFTER_PLAN);
+  if (running?.next && !kept.open?.asked) return { request: coworkContinueTask(running.next.label), approved: null, turn: kept };
   // Researches asked for in this work finish a few minutes later: the worker resumes the conversation with its notice (research-notice.ts),
   // whatever the last answer asked.
   const research = researchesOf([...history, kept]);
   if (research.waiting.length) {
     const saved = savedByTheWork(history);
     const done = research.waiting.map(leadId => { const person = saved.find(item => item.id === leadId); return { leadId, name: person?.name ?? null, company: person?.company ?? null, status: 'completed' }; });
-    return { request: coworkResearchNoticeMessage(done), approved: null, turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), ...shown(result) } };
+    return { request: coworkResearchNoticeMessage(done), approved: null, turn: kept };
   }
   // An answer that asks something: the person answers it (with the task's own words first) and the work goes on.
   const asks = Boolean(result.question) || (result.choices?.options?.length ?? 0) > 0;
   if (!asks) return null;
   // null: the person answers in their own words (the evaluator asks its simulated person; offline it is «Sí, adelante.»).
-  return { request: task.answers?.[answered] ?? null, approved: null, turn: { request: turn.request, reply: said, at: turn.at, observations: turn.observations.slice(-3), ...shown(result) } };
+  return { request: task.answers?.[answered] ?? null, approved: null, turn: kept };
 }
