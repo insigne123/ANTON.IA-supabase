@@ -40,6 +40,9 @@ for (const result of run.results) {
       ...evalSet.seller.services.map((service: string) => `${evalSet.seller.companyName} ofrece: ${service}`),
       evalSet.seller.valueProposition,
       ...(evalSet.seller.proofPoints || []),
+      // Lo que la «Ficha de la empresa» suma al vendedor (APP-06): lo que la distingue y a quién atiende son hechos que el correo puede decir.
+      ...(evalSet.seller.differentiators || []),
+      ...(evalSet.seller.referenceClients || []).map((client: string) => `Cliente de ${evalSet.seller.companyName}: ${client}`),
     ],
     // El pedido que fija el estilo aprobado (p. ej. «15 minutos») y, en una secuencia, qué pide su paso: no son hechos inventados.
     ...(result.cta ? { cta_aprobado: result.cta } : {}),
