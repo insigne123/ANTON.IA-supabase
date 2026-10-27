@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ExtensionRequestSchema, assertExtensionScope } from '@/lib/extension-contracts';
 import { AuthError, handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import { findExtensionLead, saveExtensionLead, extensionResearchSubject } from '@/lib/server/extension-leads';
+import { leadClaimRefusal } from '@/lib/lead-claim';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -220,6 +221,9 @@ export async function POST(req: NextRequest) {
     if (error instanceof AuthError) return handleAuthError(error);
     if (error?.name === 'LinkedinMessageQualityError') return json({ error: 'LINKEDIN_MESSAGE_REVIEW_REQUIRED', message: error.message }, 422);
     if (error?.name === 'ZodError' || error instanceof SyntaxError) return json({ error: 'Revisa los datos del formulario.', issues: error.issues }, 400);
+    // Another member of the organization saved this person in the last 30 days: it is theirs, and the extension says who holds it.
+    const claim = leadClaimRefusal(error);
+    if (claim) return json({ error: 'LEAD_CLAIMED', message: claim.message }, 409);
     console.error('[extension] workspace operation failed', error);
     return json({ error: 'No se pudo completar la operación. Revisa el estado antes de reintentar.' }, 500);
   }

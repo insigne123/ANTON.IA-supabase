@@ -12,6 +12,9 @@ import {
 } from '@/lib/cowork/contacts-import';
 import { requireCoworkWorkerAccess } from './access';
 import { getCoworkRun } from './runs';
+import { readLeadClaims } from '@/lib/server/team-locks';
+import { leadClaimRefusal } from '@/lib/lead-claim';
+import { normalizeLockEmail, normalizeLockLinkedin } from '@/lib/team-lock';
 import { downloadCoworkUpload, findCoworkUpload, type CoworkUploadMatch } from './extended-reads';
 import { coworkExcelTable } from './file-binary';
 
@@ -181,7 +184,20 @@ export async function executeCoworkContactsImport(auth: AuthContext, runId: stri
     throw new Error('La importación cambió desde tu revisión. Pide una nueva revisión.');
   }
   const saved = await savedContactKeys(client, scope);
-  const fresh = contacts.filter(contact => !coworkContactKeys(contact).some(key => saved.has(key)));
+  const unsaved = contacts.filter(contact => !coworkContactKeys(contact).some(key => saved.has(key)));
+  // Whoever another member saved in the last 30 days is theirs: left out here, or the database refuses the whole batch.
+  const claims = [];
+  for (let start = 0; start < unsaved.length; start += 200) {
+    const part = unsaved.slice(start, start + 200);
+    claims.push(...await readLeadClaims(client, scope, {
+      emails: part.flatMap(contact => contact.email ? [contact.email] : []),
+      linkedinUrls: part.flatMap(contact => contact.linkedinUrl ? [contact.linkedinUrl] : []),
+    }));
+  }
+  const heldEmails = new Set(claims.filter(claim => claim.match_kind === 'email').map(claim => normalizeLockEmail(claim.match_key)));
+  const heldLinkedins = new Set(claims.filter(claim => claim.match_kind === 'linkedin').map(claim => `linkedin.com/in/${claim.match_key}`));
+  const fresh = unsaved.filter(contact => !heldEmails.has(normalizeLockEmail(contact.email)) && !heldLinkedins.has(normalizeLockLinkedin(contact.linkedinUrl)));
+  const claimed = unsaved.length - fresh.length;
   let imported = 0;
   for (let start = 0; start < fresh.length; start += 100) {
     const rows = fresh.slice(start, start + 100).map(contact => ({
@@ -191,15 +207,20 @@ export async function executeCoworkContactsImport(auth: AuthContext, runId: stri
       linkedin_url: contact.linkedinUrl, location: contact.location, status: 'saved', source_provider: 'cowork_import',
     }));
     const result = await client.from('leads').upsert(rows, { onConflict: 'id', ignoreDuplicates: true }).select('id');
-    if (result.error) throw new Error(imported ? `Se guardaron ${imported} contactos y el resto falló; revisa tus contactos antes de proponer otra importación para los pendientes.` : 'No se pudieron guardar los contactos.');
+    if (result.error) {
+      const held = leadClaimRefusal(result.error);
+      if (held) throw new Error(`${imported ? `Se guardaron ${imported} contactos y el resto no: ` : 'No se guardaron los contactos: '}alguien del archivo quedó adjudicado a otra persona del equipo mientras tanto (${held.message}). Propón de nuevo la importación de los pendientes.`);
+      throw new Error(imported ? `Se guardaron ${imported} contactos y el resto falló; revisa tus contactos antes de proponer otra importación para los pendientes.` : 'No se pudieron guardar los contactos.');
+    }
     imported += (result.data || []).length;
   }
-  const alreadySaved = contacts.length - imported;
+  const alreadySaved = contacts.length - imported - claimed;
   const file = String(row.data.file_name);
+  const held = claimed ? ` ${claimed} ${claimed === 1 ? 'quedó fuera porque está adjudicado' : 'quedaron fuera porque están adjudicados'} a otra persona del equipo, que ${claimed === 1 ? 'lo' : 'los'} guardó en los últimos 30 días.` : '';
   return {
     reply: imported
-      ? `Importé ${imported} contacto${imported === 1 ? '' : 's'} de ${file} a tus contactos${alreadySaved ? ` (${alreadySaved} ya ${alreadySaved === 1 ? 'estaba' : 'estaban'})` : ''}.`
-      : `No hubo contactos nuevos que importar de ${file}: ya estaban en tus contactos.`,
-    result: { file, imported, alreadySaved, withoutEmail: fresh.filter(contact => !contact.email).length },
+      ? `Importé ${imported} contacto${imported === 1 ? '' : 's'} de ${file} a tus contactos${alreadySaved ? ` (${alreadySaved} ya ${alreadySaved === 1 ? 'estaba' : 'estaban'})` : ''}.${held}`
+      : claimed ? `No importé contactos de ${file}.${held}` : `No hubo contactos nuevos que importar de ${file}: ya estaban en tus contactos.`,
+    result: { file, imported, alreadySaved, claimed, withoutEmail: fresh.filter(contact => !contact.email).length },
   };
 }

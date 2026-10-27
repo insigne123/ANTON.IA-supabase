@@ -20,6 +20,7 @@ import { enrichedLeadRow, revealedIdentity, revealedLead } from '@/lib/server/le
 import { forgetInVault, isLeadsFinderId, LeadsFinderVaultError, readFromVault } from '@/lib/server/leads-finder/vault';
 import { requestAuthErrorResponse, requireSessionOrTrustedInternalRequest } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { leadClaimRefusal } from '@/lib/lead-claim';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -169,7 +170,10 @@ export async function POST(request: NextRequest) {
         : admin.from('enriched_leads').insert(row);
       const { error,data:persisted } = await mutationQuery.select('*').maybeSingle();
       if (error||!persisted) {
-        enriched.push({ clientRef: lead.clientRef, sourceProvider: LEADS_FINDER_PROVIDER, sourceProviderId: lead.id, enrichmentStatus: 'failed', errorCode: 'LEADS_FINDER_PERSIST_FAILED' });
+        // Another member saved them in the last 30 days: they are theirs, and the result says who holds them.
+        const claim = leadClaimRefusal(error);
+        enriched.push({ clientRef: lead.clientRef, sourceProvider: LEADS_FINDER_PROVIDER, sourceProviderId: lead.id, enrichmentStatus: 'failed',
+          errorCode: claim ? 'LEAD_CLAIMED' : 'LEADS_FINDER_PERSIST_FAILED', ...(claim ? { message: claim.message } : {}) });
         continue;
       }
       const entry=vault.get(lead.id)!;

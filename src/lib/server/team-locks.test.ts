@@ -24,6 +24,19 @@ function fake(tables: Record<string, (op: Op) => unknown>) {
   return { log, client: { from } };
 }
 
+/** The fake with lead_claims_v1: the rows it returns for a call, or an error. */
+function withClaims(fakeClient: ReturnType<typeof fake>, claims: unknown[] | Error) {
+  const calls: Array<Record<string, unknown>> = [];
+  const rpc = (fn: string, args: Record<string, unknown>) => {
+    calls.push({ fn, ...args });
+    return Promise.resolve(claims instanceof Error ? { data: null, error: { message: claims.message } } : { data: claims, error: null });
+  };
+  return { ...fakeClient, calls, client: { ...fakeClient.client, rpc } };
+}
+
+const claim = (kind: string, key: string, until = '2026-11-08T12:00:00Z') =>
+  ({ match_kind: kind, match_key: key, owner_id: 'user-ana', owner_name: 'Ana Pérez', claimed_at: '2026-10-09T12:00:00Z', claimed_until: until });
+
 const scope = { userId: 'user-beto', organizationId: 'org-1' };
 const members = () => [
   { user_id: 'user-ana', profiles: { full_name: 'Ana Pérez', email: 'ana@team.cl' } },
@@ -119,4 +132,32 @@ test('«Guardado por Ana»: whoever saved the person first, by email in any case
   assert.match(String(emailRead.filters.find(([kind]) => kind === 'or')![2]), /^email\.ilike\.rafael@empresa\.cl,email\.ilike\.marcela@sodexo\.cl/);
   assert.ok(log.filter(op => op.table === 'leads' || op.table === 'enriched_leads')
     .every(op => op.filters.some(([, column, value]) => column === 'organization_id' && value === 'org-1')), 'only the organization\'s contacts');
+});
+
+test('without collaboration, the people another member saved in the last 30 days are still theirs, by email, provider id or LinkedIn', async () => {
+  const { client, calls } = withClaims(fake({ organizations: () => ({ collaboration_v1_enabled: false }) }),
+    [claim('email', 'marta@acme.cl'), claim('provider', 'ap-1'), claim('linkedin', 'marta-r')]);
+  const locks = await readTeamLocks(client, scope, { emails: ['MARTA@acme.cl'], providerIds: ['ap-1'], linkedinUrls: ['https://www.linkedin.com/in/Marta-R/'] });
+  assert.equal(locks.enabled, true);
+  const held = { status: 'claimed', ownerName: 'Ana Pérez', mine: false, replied: false, lastContactedAt: null, claimedUntil: '2026-11-08T12:00:00Z' };
+  assert.deepEqual(locks.byEmail['marta@acme.cl'], held);
+  assert.deepEqual(locks.byProviderId['ap-1'], held);
+  assert.deepEqual(locks.byLinkedin['linkedin.com/in/marta-r'], held);
+  assert.deepEqual(calls, [{ fn: 'lead_claims_v1', p_organization_id: 'org-1', p_user_id: 'user-beto', p_emails: ['marta@acme.cl'], p_provider_ids: ['ap-1'],
+    p_linkedins: ['linkedin.com/in/marta-r'] }], 'asked as the person, for their organization, with the keys normalized');
+});
+
+test('a conversation stays over a claim, a claim replaces «Guardado por Ana», and a failed read of claims changes nothing', async () => {
+  const tables = {
+    organizations: () => ({ collaboration_v1_enabled: true }),
+    organization_contact_threads: () => [{ recipient_key: 'talking@acme.cl', status: 'active', opened_by_user_id: 'user-ana', first_contacted_at: '2026-10-01T00:00:00Z', last_contacted_at: '2026-10-02T00:00:00Z', reopened_at: null }],
+    organization_members: members,
+    leads: () => [{ user_id: 'user-ana', email: 'saved@acme.cl', created_at: '2026-10-20T00:00:00Z' }],
+  };
+  const { client } = withClaims(fake(tables), [claim('email', 'talking@acme.cl'), claim('email', 'saved@acme.cl')]);
+  const locks = await readTeamLocks(client, scope, { emails: ['talking@acme.cl', 'saved@acme.cl'] });
+  assert.equal(locks.byEmail['talking@acme.cl'].status, 'active');
+  assert.equal(locks.byEmail['saved@acme.cl'].status, 'claimed');
+  const failed = await readTeamLocks(withClaims(fake(tables), new Error('function lead_claims_v1 does not exist')).client, scope, { emails: ['saved@acme.cl'] });
+  assert.equal(failed.byEmail['saved@acme.cl'].status, 'saved', 'before the migration, the screens work as before');
 });

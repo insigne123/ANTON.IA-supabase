@@ -6,6 +6,7 @@ import { TeamLockBadge } from '@/components/collaboration/TeamLockBadge';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { teamLockClaimed } from '@/lib/team-lock';
 import type { Lead as UILaed } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -13,7 +14,8 @@ type TeamLock = Parameters<typeof TeamLockBadge>[0]['lock'];
 
 /**
  * One person in the results of «Buscar prospectos»: checkbox, initials, name and role, company and the marks that matter
- * before saving. Someone already saved or contacted cannot be selected again, and the row says why.
+ * before saving. Someone already saved or contacted, or held by another member («Adjudicado a Ana · le quedan 12 días»),
+ * cannot be selected, and the row says why.
  */
 export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock, showCompany = true, details, fit }: {
   lead: UILaed;
@@ -28,7 +30,8 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
   /** The «probabilidad de calce» (LeadFitBadge). */
   fit?: ReactNode;
 }) {
-  const disabled = saved || contacted;
+  const claimed = !saved && !contacted && teamLockClaimed(lock);
+  const disabled = saved || contacted || claimed;
   const place = [lead.company && showCompany ? lead.company : '', lead.location && lead.location !== '—' ? lead.location : '']
     .filter((part) => part && part !== '—')
     .join(' · ');
@@ -41,7 +44,7 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
       )}
     >
       <Checkbox
-        aria-label={disabled ? `${lead.name}: ${saved ? 'ya guardado' : 'ya contactado'}` : `Seleccionar ${lead.name}`}
+        aria-label={disabled ? `${lead.name}: ${saved ? 'ya guardado' : contacted ? 'ya contactado' : 'adjudicado a otra persona del equipo'}` : `Seleccionar ${lead.name}`}
         disabled={disabled}
         checked={selected}
         onCheckedChange={(checked) => onSelect(Boolean(checked))}
@@ -57,7 +60,8 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {fit}
-            {saved ? <Badge variant="success" className="shrink-0">Guardado</Badge> : contacted ? <Badge variant="info" className="shrink-0">Contactado</Badge> : null}
+            {saved ? <Badge variant="success" className="shrink-0">Guardado</Badge> : contacted ? <Badge variant="info" className="shrink-0">Contactado</Badge>
+              : claimed ? <Badge variant="warning" className="shrink-0">Adjudicado</Badge> : null}
           </div>
         </div>
         {place ? <p className="mt-1 truncate text-xs text-foreground/70">{place}</p> : null}

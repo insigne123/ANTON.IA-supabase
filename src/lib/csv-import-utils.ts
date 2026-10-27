@@ -188,26 +188,29 @@ export function csvRowRepeats(rows: CsvLeadInput[]): Array<number | null> {
     });
 }
 
-export type CsvImportPlan = { porEscribir: CsvLeadInput[]; porCompletar: CsvLeadInput[]; alreadyContacted: CsvLeadInput[]; repeated: CsvLeadInput[] };
+export type CsvImportPlan = { porEscribir: CsvLeadInput[]; porCompletar: CsvLeadInput[]; alreadyContacted: CsvLeadInput[]; repeated: CsvLeadInput[];
+    /** Held by another member of the organization for 30 days since they saved them (lead-claim.ts): not imported. */
+    claimed: CsvLeadInput[] };
 
 /**
  * Splits the valid rows by destination, imports each person of the file once and leaves out the people already contacted
  * (by email), so nobody is written twice.
  */
-export function planCsvImport(rows: CsvLeadInput[], contactedEmails: Set<string>): CsvImportPlan {
-    const plan: CsvImportPlan = { porEscribir: [], porCompletar: [], alreadyContacted: [], repeated: [] };
+export function planCsvImport(rows: CsvLeadInput[], contactedEmails: Set<string>, claimed: (row: CsvLeadInput) => boolean = () => false): CsvImportPlan {
+    const plan: CsvImportPlan = { porEscribir: [], porCompletar: [], alreadyContacted: [], repeated: [], claimed: [] };
     const repeats = csvRowRepeats(rows);
     rows.forEach((row, index) => {
         if (csvRowProblem(row)) return;
         if (repeats[index] !== null) plan.repeated.push(row);
         else if (row.email && contactedEmails.has(row.email.toLowerCase())) plan.alreadyContacted.push(row);
+        else if (claimed(row)) plan.claimed.push(row);
         else if (csvRowDestination(row) === 'por-escribir') plan.porEscribir.push(row);
         else plan.porCompletar.push(row);
     });
     return plan;
 }
 
-export type CsvImportResult = { porEscribir: number; porCompletar: number; duplicates: number; alreadyContacted: number; repeated: number };
+export type CsvImportResult = { porEscribir: number; porCompletar: number; duplicates: number; alreadyContacted: number; repeated: number; claimed?: number };
 
 const contacts = (count: number) => `${count} contacto${count === 1 ? '' : 's'}`;
 
@@ -221,6 +224,10 @@ export function csvImportSummary(result: CsvImportResult) {
     if (result.duplicates > 0) notes.push(`${contacts(result.duplicates)} ya ${result.duplicates === 1 ? 'estaba guardado' : 'estaban guardados'}.`);
     if (result.alreadyContacted > 0) {
         notes.push(`${contacts(result.alreadyContacted)} ya ${result.alreadyContacted === 1 ? 'fue contactado y no se importó' : 'fueron contactados y no se importaron'}.`);
+    }
+    if (result.claimed) {
+        notes.push(`${contacts(result.claimed)} ${result.claimed === 1 ? 'está adjudicado a otra persona del equipo, que lo guardó en los últimos 30 días, y no se importó'
+            : 'están adjudicados a otras personas del equipo, que los guardaron en los últimos 30 días, y no se importaron'}.`);
     }
     return { title: added === 0 ? 'No se agregó nadie nuevo' : `Importaste ${contacts(added)}`, notes };
 }

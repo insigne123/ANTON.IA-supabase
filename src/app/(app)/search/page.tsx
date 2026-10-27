@@ -69,7 +69,8 @@ import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Badge } from '@/components/ui/badge';
 import { TeamLockBadge } from '@/components/collaboration/TeamLockBadge';
 import { useTeamLocks } from '@/hooks/use-team-locks';
-import { normalizeLockEmail, normalizeLockLinkedin } from '@/lib/team-lock';
+import { normalizeLockEmail, normalizeLockLinkedin, teamLockClaimed } from '@/lib/team-lock';
+import { leadClaimRefusal } from '@/lib/lead-claim';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import {
@@ -218,6 +219,8 @@ export default function SearchPage() {
   const savedLeadIds = useMemo<SavedLeadIds>(() => ({ ids: savedIds, providerIds: savedApolloIds }), [savedIds, savedApolloIds]);
   const isSavedLead = (lead: UILaed) => isLeadSaved(lead, savedLeadIds);
   const isContactedLead = (lead: UILaed) => isLeadContacted(lead, contactedIds);
+  // Saved by another member in the last 30 days («Adjudicado a Ana · le quedan 12 días»): it is theirs and cannot be saved here.
+  const isClaimedLead = (lead: UILaed) => teamLockClaimed(teamLockFor(lead));
   // The filters each list was searched with. Editing a filter marks the list as old instead of erasing it.
   const [companySearchSignature, setCompanySearchSignature] = useState('');
   const [peopleSearchSignature, setPeopleSearchSignature] = useState('');
@@ -828,11 +831,13 @@ export default function SearchPage() {
 
   const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
-    // Filter out already contacted
-    const selectedNotContacted = selected.filter(l => !isContactedLead(l));
+    // Filter out already contacted, and whoever another member holds
+    const selectedNotContacted = selected.filter(l => !isContactedLead(l) && !isClaimedLead(l));
 
     if (selectedNotContacted.length === 0) {
-      toast({ title: 'Nada que guardar', description: 'Todos los seleccionados ya fueron contactados o no hay selección.' });
+      toast(selected.length && selected.every(isClaimedLead)
+        ? { title: 'Ya están adjudicados', description: 'Otra persona del equipo los guardó en los últimos 30 días: son suyos hasta que se cumpla el plazo.' }
+        : { title: 'Nada que guardar', description: 'Todos los seleccionados ya fueron contactados o no hay selección.' });
       return;
     }
 
@@ -890,7 +895,11 @@ export default function SearchPage() {
 
     } catch (error) {
       console.error('Error saving leads:', error);
-      toast({ variant: "destructive", title: "No pudimos guardar", description: "Los contactos no se guardaron. Intenta de nuevo en unos segundos." });
+      // Someone else saved one of them meanwhile: the database refused it and says who holds it.
+      const claim = leadClaimRefusal(error);
+      toast(claim
+        ? { variant: "destructive", title: "Ya está adjudicado", description: `${claim.message} Actualiza la búsqueda para ver a quién puedes guardar.` }
+        : { variant: "destructive", title: "No pudimos guardar", description: "Los contactos no se guardaron. Intenta de nuevo en unos segundos." });
     } finally {
       setIsSaving(false);
     }
@@ -1592,15 +1601,16 @@ export default function SearchPage() {
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;
-    const selectable = pagedLeads.filter(lead => !isLeadSaved(lead, savedLeadIds) && !isLeadContacted(lead, contactedIds));
+    const selectable = pagedLeads.filter(lead => !isLeadSaved(lead, savedLeadIds) && !isLeadContacted(lead, contactedIds) && !isClaimedLead(lead));
     if (selectable.length === 0) return false;
     return selectable.every(lead => selectedLeads.has(lead.id));
-  }, [pagedLeads, selectedLeads, savedLeadIds, contactedIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagedLeads, selectedLeads, savedLeadIds, contactedIds, teamLocks]);
 
   const handleSelectAll = (checked: boolean) => {
     const newSelectedLeads = new Set(selectedLeads);
     pagedLeads.forEach(lead => {
-      if (!isSavedLead(lead) && !isContactedLead(lead)) {
+      if (!isSavedLead(lead) && !isContactedLead(lead) && !isClaimedLead(lead)) {
         if (checked) newSelectedLeads.add(lead.id);
         else newSelectedLeads.delete(lead.id);
       }
@@ -2485,12 +2495,13 @@ export default function SearchPage() {
                 {pagedLeads.map((lead) => {
                   const saved = isSavedLead(lead);
                   const contacted = isContactedLead(lead);
+                  const claimed = !saved && !contacted && isClaimedLead(lead);
                   return (
                     <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? 'selected' : ''}>
                       <TableCell>
                         <Checkbox
-                          aria-label={saved || contacted ? `${lead.name}: ${saved ? 'ya guardado' : 'ya contactado'}` : `Seleccionar ${lead.name}`}
-                          disabled={saved || contacted}
+                          aria-label={saved || contacted || claimed ? `${lead.name}: ${saved ? 'ya guardado' : contacted ? 'ya contactado' : 'adjudicado a otra persona del equipo'}` : `Seleccionar ${lead.name}`}
+                          disabled={saved || contacted || claimed}
                           checked={selectedLeads.has(lead.id)}
                           onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
                         />
@@ -2522,7 +2533,8 @@ export default function SearchPage() {
                         <LeadFitBadge lead={searchFitLead(lead)} stage="search" view={fitView} />
                       </TableCell>
                       <TableCell>
-                        {saved ? <Badge variant="success">Guardado</Badge> : contacted ? <Badge variant="info">Contactado</Badge> : <span className="text-xs text-foreground/70">Nuevo</span>}
+                        {saved ? <Badge variant="success">Guardado</Badge> : contacted ? <Badge variant="info">Contactado</Badge>
+                          : claimed ? <Badge variant="warning">Adjudicado</Badge> : <span className="text-xs text-foreground/70">Nuevo</span>}
                       </TableCell>
                     </TableRow>
                   );

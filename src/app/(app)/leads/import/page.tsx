@@ -14,7 +14,9 @@ import {
     csvImportSummary, csvRowToEnrichedLead, csvRowToLead, planCsvImport, rowsFromMapping, type ColumnMapping, type CsvImportResult,
     type CsvLeadInput,
 } from '@/lib/csv-import-utils';
+import { leadClaimRefusal } from '@/lib/lead-claim';
 import { contactedKeys } from '@/lib/search/lead-ui';
+import { normalizeLockEmail, normalizeLockLinkedin, teamLockClaimed, type TeamLock } from '@/lib/team-lock';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { supabaseService } from '@/lib/supabase-service';
@@ -41,6 +43,24 @@ const DEFAULT_BACK = { href: '/sheet', label: 'Tabla de datos' };
  * «Por completar», like contacts saved from Búsqueda; people already contacted are left out, and the end says what
  * happened with real counts.
  */
+/** Who of the file another member holds («Adjudicado a Ana · le quedan 12 días»), by email or LinkedIn, in reads of 200.
+ * If the read fails nobody is left out here, and the database still refuses whoever is held. */
+async function readClaimed(rows: CsvLeadInput[]) {
+    const emails = [...new Set(rows.map((row) => normalizeLockEmail(row.email)).filter((email) => email.includes('@')))];
+    const linkedinUrls = [...new Set(rows.map((row) => normalizeLockLinkedin(row.linkedinUrl)).filter(Boolean))];
+    const held = { emails: new Set<string>(), linkedins: new Set<string>() };
+    for (let start = 0; start < Math.max(emails.length, linkedinUrls.length); start += 200) {
+        const response = await fetch('/api/team-locks', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ emails: emails.slice(start, start + 200), linkedinUrls: linkedinUrls.slice(start, start + 200) }),
+        }).catch(() => null);
+        const locks = response?.ok ? await response.json().catch(() => null) as { byEmail?: Record<string, TeamLock>; byLinkedin?: Record<string, TeamLock> } | null : null;
+        for (const [email, lock] of Object.entries(locks?.byEmail || {})) if (teamLockClaimed(lock)) held.emails.add(email);
+        for (const [url, lock] of Object.entries(locks?.byLinkedin || {})) if (teamLockClaimed(lock)) held.linkedins.add(url);
+    }
+    return (row: CsvLeadInput) => held.emails.has(normalizeLockEmail(row.email)) || held.linkedins.has(normalizeLockLinkedin(row.linkedinUrl));
+}
+
 export default function ImportLeadsPage() {
     const [step, setStep] = useState<Step>('upload');
     const [fileName, setFileName] = useState('');
@@ -73,8 +93,9 @@ export default function ImportLeadsPage() {
         setSubmitError('');
         try {
             // Nobody is written twice: whoever was already contacted stays out of the lists.
-            const contacted = await contactedLeadsStorage.get();
-            const plan = planCsvImport(rows, contactedKeys(contacted));
+            // Nor anyone another member of the team holds: they saved them in the last 30 days.
+            const [contacted, claimed] = await Promise.all([contactedLeadsStorage.get(), readClaimed(rows)]);
+            const plan = planCsvImport(rows, contactedKeys(contacted), claimed);
             const now = new Date().toISOString();
             const enriched = plan.porEscribir.length
                 ? await enrichedLeadsStorage.addDedup(plan.porEscribir.map((row) => csvRowToEnrichedLead(row, crypto.randomUUID(), now)))
@@ -88,11 +109,16 @@ export default function ImportLeadsPage() {
                 duplicates: enriched.duplicateCount + saved.duplicateCount,
                 alreadyContacted: plan.alreadyContacted.length,
                 repeated: plan.repeated.length,
+                claimed: plan.claimed.length,
             });
             setStep('done');
         } catch (error) {
             console.error('[import] failed', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
-            setSubmitError('Revisa tu conexión e inténtalo de nuevo. Los contactos que alcanzaron a guardarse no se van a duplicar.');
+            // Someone in the file was saved by another member meanwhile: the database refused it and says who holds them.
+            const claim = leadClaimRefusal(error);
+            setSubmitError(claim
+                ? `${claim.message} Vuelve a importar el archivo: quienes ya están adjudicados quedan fuera y el resto se guarda.`
+                : 'Revisa tu conexión e inténtalo de nuevo. Los contactos que alcanzaron a guardarse no se van a duplicar.');
         } finally {
             setIsSubmitting(false);
         }

@@ -23,6 +23,7 @@ import { submitApolloEnrichment } from '@/lib/server/apollo-enrichment';
 import { verifiedEmailEvidence } from '@/lib/cowork/list-quality';
 import { applyEnrichedIdentity, identityFromProvider, providerFullName } from '@/lib/server/lead-identity';
 import { checkEmailAgainstName, isMaskedName } from '@/lib/lead-name';
+import { leadClaimRefusal } from '@/lib/lead-claim';
 
 /** Fase 2B: enrich one own saved lead (email-basic only) through the same shared
  * primitives as the app's enrich flow: quota claim lifecycle, callback row for
@@ -181,7 +182,7 @@ export async function enrichCoworkSavedLead(
       data: { sourceProvider: 'apollo', sourceProviderId: apolloPersonId, sourceSavedLeadId: leadId, companyDomain },
       created_at: now, updated_at: now,
     }).select('id,enrichment_status').maybeSingle();
-    if (inserted.error || !inserted.data) throw new Error('No se pudo preparar el enriquecimiento.');
+    if (inserted.error || !inserted.data) throw new Error(leadClaimRefusal(inserted.error)?.message ?? 'No se pudo preparar el enriquecimiento.');
     const callback = await createApolloEnrichmentCallback({
       operationId, claimToken: claim.claimToken, userId, organizationId, quotaResource: 'enrich',
       targetTable: 'enriched_leads', targetId, apolloPersonId, requestedFields: ['person.email'],
