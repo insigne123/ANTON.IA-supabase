@@ -1,4 +1,4 @@
-import { normalizeLockEmail, normalizeLockLinkedin, type TeamLock, type TeamLockStatus } from '@/lib/team-lock';
+import { lockLinkedinForms, normalizeLockEmail, normalizeLockLinkedin, type TeamLock, type TeamLockStatus } from '@/lib/team-lock';
 
 type Client = { from: (table: string) => any; rpc?: (fn: string, args: Record<string, unknown>) => any };
 type Scope = { userId: string; organizationId: string };
@@ -40,7 +40,8 @@ export type LeadClaimRow = { match_kind: 'email' | 'provider' | 'linkedin'; matc
 export async function readLeadClaims(client: Client, scope: Scope, input: TeamLockQuery): Promise<LeadClaimRow[]> {
   const emails = unique((input.emails || []).map(normalizeLockEmail).filter(email => email.includes('@')));
   const providerIds = unique((input.providerIds || []).map(value => String(value || '').trim()));
-  const linkedins = unique((input.linkedinUrls || []).map(normalizeLockLinkedin));
+  // Every form a profile may be stored in: the database compares them as written.
+  const linkedins = unique((input.linkedinUrls || []).flatMap(lockLinkedinForms));
   if (!client.rpc || (!emails.length && !providerIds.length && !linkedins.length)) return [];
   try {
     const { data, error } = await client.rpc('lead_claims_v1', {
@@ -61,7 +62,7 @@ export function withLeadClaims(locks: TeamLocks, claims: LeadClaimRow[]): TeamLo
     const lock: TeamLock = { status: 'claimed', ownerName: claim.owner_name || null, mine: false, replied: false, lastContactedAt: null, claimedUntil: claim.claimed_until };
     const [map, key] = claim.match_kind === 'email' ? [result.byEmail, normalizeLockEmail(claim.match_key)]
       : claim.match_kind === 'provider' ? [result.byProviderId, claim.match_key]
-        : [result.byLinkedin, `linkedin.com/in/${claim.match_key}`];
+        : [result.byLinkedin, normalizeLockLinkedin(`linkedin.com/in/${claim.match_key}`)];
     if (!map[key] || map[key].status === 'saved') map[key] = lock;
   }
   return result;
