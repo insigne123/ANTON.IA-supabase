@@ -147,6 +147,13 @@ test('without collaboration, the people another member saved in the last 30 days
     p_linkedins: ['linkedin.com/in/marta-r'] }], 'asked as the person, for their organization, with the keys normalized');
 });
 
+test('a LinkedIn with accents is asked in both forms it may be stored in, and found as the screens write it', async () => {
+  const { client, calls } = withClaims(fake({ organizations: () => ({ collaboration_v1_enabled: false }) }), [claim('linkedin', 'jos%c3%a9-p')]);
+  const locks = await readTeamLocks(client, scope, { linkedinUrls: ['https://www.linkedin.com/in/Jos%C3%A9-P/', 'linkedin.com/in/%e0%a4%a'] });
+  assert.deepEqual(calls[0].p_linkedins, ['linkedin.com/in/josé-p', 'linkedin.com/in/jos%c3%a9-p', 'linkedin.com/in/%e0%a4%a']);
+  assert.equal(locks.byLinkedin['linkedin.com/in/josé-p']?.status, 'claimed');
+});
+
 test('a conversation stays over a claim, a claim replaces «Guardado por Ana», and a failed read of claims changes nothing', async () => {
   const tables = {
     organizations: () => ({ collaboration_v1_enabled: true }),

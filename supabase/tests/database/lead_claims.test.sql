@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(15);
+select plan(17);
 
 -- An organization with Ana, Beto and Carla, and Diego in another one.
 insert into auth.users (id, email, email_confirmed_at)
@@ -68,8 +68,14 @@ select throws_ok(
   'P0001', 'lead_claimed', 'Carla, who never had him, cannot: Ana holds him');
 
 select is(
-  (select owner_name || ' · ' || match_kind from public.lead_claims_v1('ce000000-0000-4000-8000-0000000000a1', 'ce000000-0000-4000-8000-000000000001', array['luis@acme.test'])),
-  'Beto Soto · email', 'Luis is now Beto''s, as Ana reads it');
+  (select owner_name || ' · ' || match_kind from public.lead_claims_v1('ce000000-0000-4000-8000-0000000000a1', 'ce000000-0000-4000-8000-000000000004', array['luis@acme.test'])),
+  'Beto Soto · email', 'Luis is now Beto''s, as Carla reads it');
+select is(
+  (select count(*)::int from public.lead_claims_v1('ce000000-0000-4000-8000-0000000000a1', 'ce000000-0000-4000-8000-000000000001', array['luis@acme.test'])),
+  0, 'Ana still has Luis: the screens let her keep working with him, as the database does');
+select is(
+  (select count(*)::int from public.lead_claims_v1('ce000000-0000-4000-8000-0000000000a1', 'ce000000-0000-4000-8000-000000000002', array['pedro@acme.test'], array['ap-claims-2'])),
+  0, 'and Beto still has Pedro, although Ana holds him for the rest');
 select is(
   (select ceil(extract(epoch from claimed_until - now()) / 86400)::int from public.lead_claims_v1('ce000000-0000-4000-8000-0000000000a1', 'ce000000-0000-4000-8000-000000000002', array['marta@acme.test'])),
   12, 'Marta has 12 days left with Ana');

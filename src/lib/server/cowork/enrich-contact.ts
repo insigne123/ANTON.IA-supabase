@@ -19,11 +19,11 @@ import {
   markApolloEnrichmentCallbackSubmitted,
   settleApolloEnrichmentCallback,
 } from '@/lib/server/apollo-enrichment-callbacks';
-import { submitApolloEnrichment } from '@/lib/server/apollo-enrichment';
+import { ApolloEnrichmentError, submitApolloEnrichment, takeApolloEnrichmentRateSlot } from '@/lib/server/apollo-enrichment';
 import { verifiedEmailEvidence } from '@/lib/cowork/list-quality';
 import { applyEnrichedIdentity, identityFromProvider, providerFullName } from '@/lib/server/lead-identity';
 import { checkEmailAgainstName, isMaskedName } from '@/lib/lead-name';
-import { leadClaimRefusal } from '@/lib/lead-claim';
+import { leadClaimRefusal, withLeadClaimMessage } from '@/lib/lead-claim';
 
 /** Fase 2B: enrich one own saved lead (email-basic only) through the same shared
  * primitives as the app's enrich flow: quota claim lifecycle, callback row for
@@ -103,6 +103,17 @@ export async function enrichCoworkContact(
   return enrichCoworkSavedLead(auth, runId, leadId);
 }
 
+/**
+ * The provider had no room for this lookup this minute (the gateway's lookups a minute): nothing was asked nor paid, and the
+ * same lookup can run again after the pause. A batch waits it once (prepare-batch-run.ts).
+ */
+export class CoworkLookupBusyError extends Error {
+  constructor(readonly retryAfterSeconds: number) {
+    super(`El proveedor está atendiendo muchas búsquedas en este minuto: inténtalo de nuevo en ${retryAfterSeconds} s. No se gastó el crédito.`);
+    this.name = 'CoworkLookupBusyError';
+  }
+}
+
 /** The lookup itself, for a saved contact the caller already tied to this work (a batch checks who is in it). Same quota and
  * the same operation id per work and contact, so running it again reuses the result instead of paying twice. */
 export async function enrichCoworkSavedLead(
@@ -157,6 +168,9 @@ export async function enrichCoworkSavedLead(
   if (!await hasUserEnrichmentSearchCreditAccess(userId)) {
     throw new Error('Tu cuenta no tiene acceso a créditos de enriquecimiento.');
   }
+  // The provider's slot first: without one, nothing is claimed nor paid.
+  const slot = takeApolloEnrichmentRateSlot();
+  if (!slot.taken) throw new CoworkLookupBusyError(slot.retryAfterSeconds);
   const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });
   const claim = await claimEnrichmentQuotaOperation({
     userId, organizationId, resource: 'enrich', operationId, requestFingerprint: fingerprint, limit: limits.enrich, count: 1,
@@ -168,6 +182,7 @@ export async function enrichCoworkSavedLead(
   const now = new Date().toISOString();
   const targetId = randomUUID();
   let providerBoundaryCrossed = false;
+  let callbackId: string | null = null;
   const failTarget = async () => {
     await client.from('enriched_leads').update({ enrichment_status: 'failed', updated_at: now })
       .eq('id', targetId).eq('user_id', userId).eq('organization_id', organizationId);
@@ -182,11 +197,14 @@ export async function enrichCoworkSavedLead(
       data: { sourceProvider: 'apollo', sourceProviderId: apolloPersonId, sourceSavedLeadId: leadId, companyDomain },
       created_at: now, updated_at: now,
     }).select('id,enrichment_status').maybeSingle();
-    if (inserted.error || !inserted.data) throw new Error(leadClaimRefusal(inserted.error)?.message ?? 'No se pudo preparar el enriquecimiento.');
+    if (inserted.error || !inserted.data) {
+      throw leadClaimRefusal(inserted.error) ? withLeadClaimMessage(inserted.error) : new Error('No se pudo preparar el enriquecimiento.');
+    }
     const callback = await createApolloEnrichmentCallback({
       operationId, claimToken: claim.claimToken, userId, organizationId, quotaResource: 'enrich',
       targetTable: 'enriched_leads', targetId, apolloPersonId, requestedFields: ['person.email'],
     });
+    callbackId = callback.callbackId;
     await markApolloEnrichmentCallbackSubmitted({ callbackId: callback.callbackId, tokenHash: callback.tokenHash, claimToken: claim.claimToken });
     await requireCoworkWorkerAccess(client, { userId, organizationId });
     providerBoundaryCrossed = true;
@@ -196,11 +214,11 @@ export async function enrichCoworkSavedLead(
         fullName: name.fullName || undefined, linkedinUrl: linkedinUrl || undefined,
         organizationName: text(saved.company, 200) || undefined, organizationDomain: companyDomain,
       },
-      revealEmail: true, revealPhone: false,
+      revealEmail: true, revealPhone: false, rateSlotTaken: true,
     });
     if (apolloPersonId) {
       const resultPersonId = text((result.extractedData?.source_provider_id || result.extractedData?.apollo_id) as unknown, 255);
-      if (resultPersonId && resultPersonId !== apolloPersonId) throw new Error('La identidad devuelta por el proveedor no coincide.');
+      if (resultPersonId && resultPersonId !== apolloPersonId) throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false);
     }
     if (result.providerRequestId) {
       const bound = await bindApolloEnrichmentCallback({
@@ -257,9 +275,19 @@ export async function enrichCoworkSavedLead(
     await failTarget().catch(() => undefined);
     if (!providerBoundaryCrossed) {
       await releaseEnrichmentQuotaOperation(identity).catch(() => undefined);
+      // Someone else in the organization holds this person: said as the database says it.
+      if (error instanceof Error && error.name === 'LeadClaimedError') throw error;
       if (code === 'ENRICHMENT_TARGET_SUPPRESSED') throw new Error('Este contacto está suprimido y no se puede enriquecer.');
       if (code === 'APOLLO_ENRICHMENT_TARGET_BUSY') throw new Error('Otro proceso está enriqueciendo este contacto ahora mismo.');
       throw new Error('No se pudo preparar el enriquecimiento. No se consultó al proveedor.');
+    }
+    // A known answer (the provider refused the request, or returned someone else): the lookup ends here, as in the search's
+    // (enrich-apollo route), instead of waiting for the reconciler as if the outcome were unknown.
+    if (error instanceof ApolloEnrichmentError && !error.providerOutcomeUnknown && callbackId) {
+      await settleApolloEnrichmentCallback({ callbackId, terminalState: 'failed', errorCode: error.code }).catch(() => undefined);
+      throw new Error(error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH'
+        ? 'El proveedor devolvió a otra persona: no se guardó nada.'
+        : `El proveedor no pudo buscar a esta persona (${error.code}).`);
     }
     // Keep submitted state for the shared reconciler; a terminal failure here
     // would lose the distinction between an unknown outcome and a failed request.

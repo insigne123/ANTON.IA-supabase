@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeLockEmail, normalizeLockLinkedin, teamLockClaimed, teamLockFreeFrom, teamLockNotice, type TeamLock } from '@/lib/team-lock';
+import { lockLinkedinForms, normalizeLockEmail, normalizeLockLinkedin, teamLockClaimed, teamLockFreeFrom, teamLockNotice, type TeamLock } from '@/lib/team-lock';
 
 const NOW = Date.parse('2026-10-10T12:00:00Z');
 const lock = (patch: Partial<TeamLock> = {}): TeamLock => ({
@@ -39,6 +39,11 @@ test('people are compared by lowercased email and by LinkedIn profile, whatever 
   assert.equal(normalizeLockLinkedin('http://cl.linkedin.com/in/marcela-rojas'), 'linkedin.com/in/marcela-rojas');
   assert.equal(normalizeLockLinkedin('https://www.linkedin.com/company/sodexo'), '');
   assert.equal(normalizeLockLinkedin(null), '');
+  assert.equal(normalizeLockLinkedin('https://www.linkedin.com/in/Jos%C3%89-P'), 'linkedin.com/in/josé-p', 'decoded, then lowercased');
+  assert.equal(normalizeLockLinkedin('linkedin.com/in/maria%e0%a4%a'), 'linkedin.com/in/maria%e0%a4%a', 'a broken %-sequence stays, without throwing');
+  assert.deepEqual(lockLinkedinForms('linkedin.com/in/josé-p'), ['linkedin.com/in/josé-p', 'linkedin.com/in/jos%c3%a9-p']);
+  assert.deepEqual(lockLinkedinForms('https://linkedin.com/in/marcela-rojas/'), ['linkedin.com/in/marcela-rojas']);
+  assert.deepEqual(lockLinkedinForms(''), []);
 });
 
 test('a contact another member saved first only says so: «Guardado por Ana», without blocking (Plan 6, PR-E)', () => {

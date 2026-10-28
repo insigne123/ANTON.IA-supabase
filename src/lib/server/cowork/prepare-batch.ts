@@ -171,7 +171,8 @@ export async function coworkOwnSavedByProvider(client: Client, scope: Scope, pro
 async function creditsLeftToday(scope: Scope): Promise<CoworkCreditsLeft | null> {
   try {
     const limits = await getEffectiveDailyQuotaLimits({ userId: scope.userId, organizationId: scope.organizationId });
-    const status = await getDailyQuotaStatus({ userId: scope.userId, organizationId: scope.organizationId, resource: 'search', limit: limits.leadSearch });
+    // Strict: a balance that cannot be read is unknown (null), not a full or an empty day.
+    const status = await getDailyQuotaStatus({ userId: scope.userId, organizationId: scope.organizationId, resource: 'search', limit: limits.leadSearch, strict: true });
     return { left: Math.max(0, (status.limit || 0) - (status.count || 0)), limit: status.limit || 0 };
   } catch {
     return null;

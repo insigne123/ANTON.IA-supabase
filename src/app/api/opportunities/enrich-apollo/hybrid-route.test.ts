@@ -33,6 +33,7 @@ function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boole
     '@/lib/server/antonia-event-ledger':{safeAppendAntoniaEvent:async()=>{}},
     '@/lib/server/request-auth':{requireSessionOrTrustedInternalRequest:async()=>({source:'session',user:{id:'me',email:'me@demo.test'},organizationId:'org'}),requestAuthErrorResponse:()=>null},
     '@/lib/server/supabase-admin':{getSupabaseAdminClient:()=>db},
+    '@/lib/lead-claim':{leadClaimRefusal:()=>null},
     '@/lib/server/enrichment-search-access':{hasEnrichmentSearchCreditAccess:()=>true,hasUserEnrichmentSearchCreditAccess:async()=>true},
     '@/lib/server/provider-routing':{resolveLeadProvider:()=>({provider:'apollo',requestedProvider:'apollo',defaultProvider:'apollo'})},
     '@/lib/server/microworlds/contracts':{hybridEnabled:()=>true},

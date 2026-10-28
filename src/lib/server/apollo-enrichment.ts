@@ -86,6 +86,15 @@ function providerStatus(error: ApolloGatewayError): 429 | 502 | 503 | 504 {
         : 502;
 }
 
+/**
+ * One of the gateway's lookups a minute (APOLLO_BACKEND_ENRICH_MAX_REQUESTS), taken before the caller commits its quota: one that
+ * gets none has not reached the provider and gives the credit back. The submit that follows gets `rateSlotTaken: true`.
+ */
+export function takeApolloEnrichmentRateSlot(environment: Record<string, string | undefined> = process.env) {
+  const rateLimit = consumeEndpointRateLimit('enrich', getGatewayConfig(environment));
+  return { taken: rateLimit.allowed, retryAfterSeconds: rateLimit.retryAfterSeconds };
+}
+
 export async function submitApolloEnrichment(input: {
   lead: {
     id?: string;
@@ -101,6 +110,8 @@ export async function submitApolloEnrichment(input: {
   revealPhone: boolean;
   webhookUrl?: string;
   matchOnly?: boolean;
+  /** The caller already took this lookup's slot (takeApolloEnrichmentRateSlot). */
+  rateSlotTaken?: boolean;
   environment?: Record<string, string | undefined>;
 }) {
   const environment = input.environment || process.env;
@@ -134,9 +145,11 @@ export async function submitApolloEnrichment(input: {
     throw new ApolloEnrichmentError(502, 'INVALID_REQUEST', false);
   }
 
-  const rateLimit = consumeEndpointRateLimit('enrich', config);
-  if (!rateLimit.allowed) {
-    throw new ApolloEnrichmentError(429, 'RATE_LIMITED', false);
+  if (!input.rateSlotTaken) {
+    const rateLimit = consumeEndpointRateLimit('enrich', config);
+    if (!rateLimit.allowed) {
+      throw new ApolloEnrichmentError(429, 'RATE_LIMITED', false);
+    }
   }
 
   try {

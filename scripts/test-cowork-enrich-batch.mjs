@@ -74,7 +74,9 @@ const sources = {
     export const bindApolloEnrichmentCallback=async()=>'bound';
     export const applyApolloEnrichmentCandidate=async()=>'processed';
     export const settleApolloEnrichmentCallback=async()=>{};`,
-  '@/lib/server/apollo-enrichment': 'export const submitApolloEnrichment=async input=>globalThis.__coworkEnrichBatch.submit(input);',
+  '@/lib/server/apollo-enrichment': `export const submitApolloEnrichment=async input=>globalThis.__coworkEnrichBatch.submit(input);
+    export class ApolloEnrichmentError extends Error{constructor(status,code,providerOutcomeUnknown){super(code);this.code=code;this.providerOutcomeUnknown=providerOutcomeUnknown;}}
+    export const takeApolloEnrichmentRateSlot=()=>({taken:true,retryAfterSeconds:0});`,
   '@/lib/messaging-contracts': 'export const canonicalSha256=o=>{const c=require("node:crypto").createHash("sha256").update(JSON.stringify(o)).digest("hex");return c;};',
 };
 globalThis.__coworkEnrichBatch.table = tableHandler;

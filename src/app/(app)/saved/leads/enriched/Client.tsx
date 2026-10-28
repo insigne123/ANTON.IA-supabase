@@ -203,7 +203,7 @@ export default function EnrichedLeadsClient() {
 
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            const reason = String(data?.error || data?.message || '').slice(0, 200);
+            const reason = String((data?.error === 'LEAD_CLAIMED' && data?.message) || data?.error || data?.message || '').slice(0, 200);
             throw new Error(reason || `El servidor respondió ${res.status}. Intenta de nuevo en unos minutos.`);
           }
 
