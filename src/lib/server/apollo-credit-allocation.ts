@@ -36,6 +36,8 @@ export async function loadApolloCreditAllocation(
     startsAt: String(row.starts_at),
     endsAt: String(row.ends_at),
     note: typeof row.note === 'string' && row.note.trim() ? row.note.trim() : null,
+    usedBefore: number(row.used_before),
+    showLimit: row.show_limit !== false,
   };
 }
 

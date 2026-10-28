@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { ApolloAllocationRefusal, assertApolloAllocationAllows, loadApolloCreditAllocation } from './apollo-credit-allocation';
 
-const row = { credits: 300, used: 18, remaining: 282, starts_at: '2026-10-28T20:00:00+00:00', ends_at: '2026-11-01T20:17:52+00:00', note: ' Ya se usaron los 2.500 créditos del plan. ' };
+const row = { credits: 300, used: 18, remaining: 282, starts_at: '2026-10-28T20:00:00+00:00', ends_at: '2026-11-01T20:17:52+00:00', note: ' Ya se usaron los 2.500 créditos del plan. ', used_before: 2300, show_limit: true };
 const client = (result: { data?: unknown; error?: unknown }, calls: unknown[] = []) => ({
   rpc: async (name: string, args: unknown) => { calls.push([name, args]); return { data: result.data ?? null, error: result.error ?? null }; },
 });
@@ -12,7 +12,8 @@ test('the share is read for the organization only, with what is left', async () 
   const calls: unknown[] = [];
   const share = await loadApolloCreditAllocation('org-1', client({ data: [row] }, calls));
   assert.deepEqual(calls, [['apollo_credit_allocation_status_v1', { p_organization_id: 'org-1' }]]);
-  assert.deepEqual(share, { credits: 300, used: 18, remaining: 282, startsAt: row.starts_at, endsAt: row.ends_at, note: 'Ya se usaron los 2.500 créditos del plan.' });
+  assert.deepEqual(share, { credits: 300, used: 18, remaining: 282, startsAt: row.starts_at, endsAt: row.ends_at, note: 'Ya se usaron los 2.500 créditos del plan.', usedBefore: 2300, showLimit: true });
+  assert.equal((await loadApolloCreditAllocation('org-1', client({ data: [{ ...row, show_limit: false }] })))?.showLimit, false);
   assert.equal(await loadApolloCreditAllocation('org-1', client({ data: [] })), null, 'no open share');
 });
 
@@ -22,9 +23,9 @@ test('before the migration no organization has a share; any other failure is not
 });
 
 test('a lookup that does not fit is refused, and one that cannot be checked is not asked either', async () => {
-  const exhausted = async () => ({ credits: 300, used: 300, remaining: 0, startsAt: row.starts_at, endsAt: row.ends_at, note: null });
+  const exhausted = async () => ({ credits: 300, used: 300, remaining: 0, startsAt: row.starts_at, endsAt: row.ends_at, note: null, usedBefore: 2300, showLimit: true });
   await assert.rejects(assertApolloAllocationAllows('org-1', 1, exhausted),
-    (error: unknown) => error instanceof ApolloAllocationRefusal && /ya usó los 300 créditos de Apollo/.test(error.message));
+    (error: unknown) => error instanceof ApolloAllocationRefusal && /usó los créditos de Apollo disponibles hasta el 1 de noviembre/.test(error.message));
   assert.equal(await assertApolloAllocationAllows('org-1', 0, async () => { throw new Error('never read'); }), null, 'nothing asked of Apollo');
   assert.equal(await assertApolloAllocationAllows('org-1', 9, async () => null), null, 'no share');
   await assert.rejects(assertApolloAllocationAllows('org-1', 1, async () => { throw new Error('db down: secret'); }),

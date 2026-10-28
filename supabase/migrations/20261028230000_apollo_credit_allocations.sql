@@ -1,13 +1,17 @@
 -- Apollo credits split between organizations for a window. The shared Apollo account is one balance for every company;
 -- when credits are bought for some of them (28 Oct 2026: the cycle's plan was spent and more were bought for two
 -- companies), each one gets its share here. While an organization has an open allocation, its email and phone lookups
--- stop when its share is used. Searches are not counted and are never stopped by this.
+-- stop when its share is used. Searches are not counted and are never stopped by this. `used_before` is what the
+-- organization had used earlier in the cycle, shown with the window's use in the admin panel (it does not limit anything);
+-- `show_limit` false shows the organization only what it used, not its share nor what is left.
 create table if not exists public.apollo_credit_allocations (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   starts_at timestamptz not null,
   ends_at timestamptz not null,
   credits integer not null check (credits between 1 and 100000),
+  used_before integer not null default 0 check (used_before between 0 and 1000000),
+  show_limit boolean not null default true,
   note text check (note is null or char_length(note) <= 300),
   created_at timestamptz not null default now(),
   constraint apollo_credit_allocations_window_check check (ends_at > starts_at)
@@ -32,7 +36,10 @@ create or replace function public.apollo_credit_allocation_status_v1(
   p_organization_id uuid,
   p_at timestamptz default now()
 )
-returns table (credits integer, used integer, remaining integer, starts_at timestamptz, ends_at timestamptz, note text)
+returns table (
+  credits integer, used integer, remaining integer, starts_at timestamptz, ends_at timestamptz, note text,
+  used_before integer, show_limit boolean
+)
 language sql
 stable
 security invoker
@@ -40,7 +47,8 @@ set search_path = public, pg_temp
 as $$
   with allocation as (
     select sum(a.credits)::integer as credits, min(a.starts_at) as starts_at, max(a.ends_at) as ends_at,
-      (array_agg(a.note order by a.created_at desc) filter (where a.note is not null))[1] as note
+      (array_agg(a.note order by a.created_at desc) filter (where a.note is not null))[1] as note,
+      sum(a.used_before)::integer as used_before, bool_and(a.show_limit) as show_limit
     from public.apollo_credit_allocations a
     where a.organization_id = p_organization_id and a.starts_at <= p_at and a.ends_at > p_at
   ), spent as (
@@ -53,7 +61,7 @@ as $$
       and (c.terminal_state is null or c.terminal_state = 'succeeded')
   )
   select allocation.credits, spent.used, greatest(allocation.credits - spent.used, 0), allocation.starts_at,
-    allocation.ends_at, allocation.note
+    allocation.ends_at, allocation.note, allocation.used_before, allocation.show_limit
   from allocation, spent
   where allocation.credits is not null;
 $$;

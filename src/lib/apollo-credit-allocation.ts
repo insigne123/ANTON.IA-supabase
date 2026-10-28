@@ -13,12 +13,18 @@ export const APOLLO_ALLOCATION_PHONE_CREDITS = 8;
 export const APOLLO_ALLOCATION_ERROR = 'APOLLO_CREDITS_ALLOCATION_USED';
 
 export type ApolloCreditAllocation = {
+  /** The share for the window: what limits the lookups. */
   credits: number;
+  /** Used in the window (what is under way included). */
   used: number;
   remaining: number;
   startsAt: string;
   endsAt: string;
   note: string | null;
+  /** Used earlier in the cycle, shown with the window's use; it limits nothing. */
+  usedBefore: number;
+  /** False: the organization sees only what it used, not its share nor what is left. */
+  showLimit: boolean;
 };
 
 export function apolloAllocationCost(fields: { revealEmail: boolean; revealPhone: boolean }) {
@@ -32,30 +38,44 @@ export function apolloAllocationEndLabel(endsAt: string) {
   return new Date(endsAt).toLocaleDateString('es-CL', { day: 'numeric', month: 'long', timeZone: 'America/Santiago' });
 }
 
-/** What the person reads when the lookups do not fit in the organization's share; null when they fit or there is no share. */
+/**
+ * What the person reads when the lookups do not fit in the organization's share; null when they fit or there is no share.
+ * It names how many are left only to an organization that sees its share.
+ */
 export function apolloAllocationRefusal(allocation: ApolloCreditAllocation | null, needed: number): string | null {
   if (!allocation || needed <= 0 || allocation.remaining >= needed) return null;
   const until = apolloAllocationEndLabel(allocation.endsAt);
   if (allocation.remaining <= 0) {
-    return `Tu organización ya usó los ${count(allocation.credits)} créditos de Apollo que tiene hasta el ${until}. `
+    return `Tu organización usó los créditos de Apollo disponibles hasta el ${until}. `
       + 'Los correos y teléfonos se pausan hasta entonces; las búsquedas siguen disponibles.';
   }
-  return `A tu organización le quedan ${count(allocation.remaining)} créditos de Apollo hasta el ${until} y esto usa hasta `
-    + `${count(needed)}. Pide menos contactos o solo correos (${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito cada uno).`;
+  const left = allocation.showLimit
+    ? `A tu organización le quedan ${count(allocation.remaining)} créditos de Apollo hasta el ${until} y esto usa hasta ${count(needed)}.`
+    : `Esto usa hasta ${count(needed)} créditos de Apollo y a tu organización no le alcanzan hasta el ${until}.`;
+  return `${left} Pide menos contactos o solo correos (${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito cada uno).`;
 }
 
-/** What the admin panel's card says, apart from the numbers. */
+/** What the admin panel's card says and shows: the cycle's use, and what is left only when the organization sees its share. */
 export function apolloAllocationCopy(allocation: ApolloCreditAllocation) {
   const until = apolloAllocationEndLabel(allocation.endsAt);
+  const used = allocation.usedBefore + Math.min(allocation.used, allocation.credits);
+  const total = allocation.usedBefore + allocation.credits;
+  const costs = `Cada correo usa ${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito y cada teléfono, ${APOLLO_ALLOCATION_PHONE_CREDITS}. `
+    + 'Lo que está en curso ya se cuenta. Las búsquedas no usan estos créditos.';
+  if (!allocation.showLimit) {
+    return {
+      until, used, total: null, remaining: null, spent: false,
+      summary: `Tu organización lleva ${count(used)} créditos de Apollo usados en este ciclo, que termina el ${until}.`,
+      footnote: costs,
+    };
+  }
   const spent = allocation.remaining <= 0;
   return {
-    until,
-    spent,
+    until, used, total, remaining: allocation.remaining, spent,
     summary: spent
-      ? `Tu organización usó sus ${count(allocation.credits)} créditos adicionales. Los correos y teléfonos están pausados hasta el ${until}; las búsquedas siguen disponibles.`
-      : `Tu organización tiene ${count(allocation.credits)} créditos adicionales hasta el ${until}.`,
-    footnote: `Cada correo usa ${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito y cada teléfono, ${APOLLO_ALLOCATION_PHONE_CREDITS}. `
-      + 'Lo que está en curso ya se descuenta. Las búsquedas no usan estos créditos.',
+      ? `Se usaron los ${count(total)} créditos disponibles. Los correos y teléfonos están pausados hasta el ${until}; las búsquedas siguen disponibles.`
+      : `Quedan solo ${count(allocation.remaining)} créditos disponibles hasta el ${until}: ya se usaron ${count(used)}.`,
+    footnote: costs,
   };
 }
 

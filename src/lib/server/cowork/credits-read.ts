@@ -4,13 +4,16 @@ import {
 } from '@/lib/apollo-credit-allocation';
 import { isApolloCreditBalanceStale, loadLatestApolloCreditBalance, type ApolloCreditBalance } from '@/lib/server/apollo-credit-balance';
 
-/** The organization's own share of the provider credits, when it has one for this window: it is what limits its lookups. */
+/** The organization's own share of the provider credits, when it has one for this window: it is what limits its lookups. An
+ * organization that does not see its share in the panel reads here only what it used in the cycle. */
 function organizationShare(allocation: ApolloCreditAllocation | null) {
   if (!allocation) return null;
+  const used = allocation.usedBefore + Math.min(allocation.used, allocation.credits);
+  const until = apolloAllocationEndLabel(allocation.endsAt);
+  const costs = { emailEnrichment: APOLLO_ALLOCATION_EMAIL_CREDITS, phoneEnrichment: APOLLO_ALLOCATION_PHONE_CREDITS };
+  if (!allocation.showLimit) return { usedThisCycle: used, until, costs };
   return {
-    credits: allocation.credits, used: Math.min(allocation.used, allocation.credits), remaining: allocation.remaining,
-    until: apolloAllocationEndLabel(allocation.endsAt),
-    costs: { emailEnrichment: APOLLO_ALLOCATION_EMAIL_CREDITS, phoneEnrichment: APOLLO_ALLOCATION_PHONE_CREDITS },
+    usedThisCycle: used, remaining: allocation.remaining, until, costs,
     affords: {
       emailEnrichments: Math.floor(allocation.remaining / APOLLO_ALLOCATION_EMAIL_CREDITS),
       phoneReveals: Math.floor(allocation.remaining / APOLLO_ALLOCATION_PHONE_CREDITS),
@@ -19,7 +22,8 @@ function organizationShare(allocation: ApolloCreditAllocation | null) {
 }
 
 const SHARE_LIMITATION = ' La organización tiene créditos asignados hasta una fecha (organizationShare): esos limitan sus correos (1 crédito '
-  + 'cada uno) y teléfonos (8), no el saldo compartido; cuando se acaban, los correos y teléfonos se pausan hasta esa fecha y las búsquedas siguen.';
+  + 'cada uno) y teléfonos (8), no el saldo compartido; cuando se acaban, los correos y teléfonos se pausan hasta esa fecha y las búsquedas siguen. '
+  + 'Si organizationShare no dice cuántos quedan, no lo calcules ni lo supongas: di solo lo usado.';
 
 /** What is left of the provider credits and what each kind of enrichment costs, so «¿me alcanzan para…?» is answered with the
  * balance and not with a guess. The balance is the shared provider account's last snapshot (the same the app shows), so it says
