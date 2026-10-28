@@ -15,6 +15,7 @@ import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { linkedinProfilesMatch, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
+import { enrichmentRefusalMessage } from '@/lib/apollo-credit-allocation';
 import {readCachedAuthScope} from '@/lib/auth-scope-cache';
 import {
   ProfileSearchProblemError, profileProblemFromHttp, profileProblemFromProviderCode, profileUrlProblem,
@@ -325,7 +326,8 @@ export async function enrichLinkedInProfileLead(input: {
     if (res.status === 429) {
       throw new ProfileSearchProblemError(problem, 'Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
     }
-    if (json?.error === 'LEAD_CLAIMED' && typeof json?.message === 'string') throw new ProfileSearchProblemError(problem, json.message);
+    const refusal = enrichmentRefusalMessage(json);
+    if (refusal) throw new ProfileSearchProblemError(problem, refusal);
     throw new ProfileSearchProblemError(problem, 'No pudimos iniciar la búsqueda de datos de contacto. Inténtalo nuevamente.');
   }
   if ((!json?.queued && json?.operationStatus !== 'completed' && !recoverablePending)

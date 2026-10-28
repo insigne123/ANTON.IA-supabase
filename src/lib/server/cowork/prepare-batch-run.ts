@@ -111,6 +111,7 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
         } catch (error) {
           const message = reasonOf(error, 'No se pudo buscar su correo.');
           if (/cupo diario/i.test(message)) lookupsStopped = 'Se alcanzó el cupo diario de búsquedas de correo; se renueva mañana.';
+          else if (error instanceof Error && error.name === 'ApolloAllocationRefusal') lookupsStopped = message;
           steps.push(/Ya existe una solicitud/.test(message)
             ? { step: 'enrich', status: 'skipped', detail: 'Ya había una búsqueda de su correo en curso: llega sola, sin pagar dos veces.' }
             : message === BUSY ? { step: 'enrich', status: 'skipped', detail: BUSY }
@@ -132,6 +133,7 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
         } catch (error) {
           const message = reasonOf(error, 'No se pudo buscar su LinkedIn.');
           if (/cupo diario/i.test(message)) lookupsStopped = 'Se alcanzó el cupo diario de búsquedas; se renueva mañana.';
+          else if (error instanceof Error && error.name === 'ApolloAllocationRefusal') lookupsStopped = message;
           steps.push(/Ya existe una solicitud/.test(message)
             ? { step: 'linkedin', status: 'skipped', detail: 'Ya había una búsqueda de esta persona en curso: llega sola, sin pagar dos veces.' }
             : message === BUSY ? { step: 'linkedin', status: 'skipped', detail: BUSY }

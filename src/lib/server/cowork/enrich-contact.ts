@@ -24,6 +24,8 @@ import { verifiedEmailEvidence } from '@/lib/cowork/list-quality';
 import { applyEnrichedIdentity, identityFromProvider, providerFullName } from '@/lib/server/lead-identity';
 import { checkEmailAgainstName, isMaskedName } from '@/lib/lead-name';
 import { leadClaimRefusal, withLeadClaimMessage } from '@/lib/lead-claim';
+import { APOLLO_ALLOCATION_EMAIL_CREDITS } from '@/lib/apollo-credit-allocation';
+import { assertApolloAllocationAllows } from '@/lib/server/apollo-credit-allocation';
 
 /** Fase 2B: enrich one own saved lead (email-basic only) through the same shared
  * primitives as the app's enrich flow: quota claim lifecycle, callback row for
@@ -168,7 +170,8 @@ export async function enrichCoworkSavedLead(
   if (!await hasUserEnrichmentSearchCreditAccess(userId)) {
     throw new Error('Tu cuenta no tiene acceso a créditos de enriquecimiento.');
   }
-  // The provider's slot first: without one, nothing is claimed nor paid.
+  // The organization's Apollo share (when it has one), then the provider's slot: without either, nothing is claimed nor paid.
+  await assertApolloAllocationAllows(organizationId, APOLLO_ALLOCATION_EMAIL_CREDITS);
   const slot = takeApolloEnrichmentRateSlot();
   if (!slot.taken) throw new CoworkLookupBusyError(slot.retryAfterSeconds);
   const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });

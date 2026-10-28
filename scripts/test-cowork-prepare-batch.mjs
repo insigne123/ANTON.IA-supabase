@@ -98,7 +98,7 @@ const sources = {
       const lead={id:"00000000-0000-4000-8000-0000000000c"+s.saves.length,name:observed.name,company:observed.company};s.leads.push({...lead,user_id:auth.user.id,organization_id:auth.organizationId,apollo_id:providerId.slice(7)});return {lead,reused:false};};`,
   './enrich-contact': `export const enrichCoworkSavedLead=async(auth,runId,leadId)=>{const s=globalThis.__prepBatch;s.lookups.push(leadId);
       if(s.busy&&s.busy.times>0){s.busy.times--;const e=new Error("El proveedor está atendiendo muchas búsquedas en este minuto.");e.name="CoworkLookupBusyError";e.retryAfterSeconds=1;throw e;}
-      if(s.lookupError&&s.lookups.length>=s.lookupError.after)throw new Error(s.lookupError.message);
+      if(s.lookupError&&s.lookups.length>=s.lookupError.after)throw Object.assign(new Error(s.lookupError.message),s.lookupError.name?{name:s.lookupError.name}:{});
       if(s.lookupDelay){s.inFlight++;s.maxInFlight=Math.max(s.maxInFlight,s.inFlight);await new Promise(r=>setTimeout(r,s.lookupDelay));s.inFlight--;}
       return leadId==="${'00000000-0000-4000-8000-0000000000c1'}"
         ?{email:"rduran@rdmontajes.cl",emailStatus:"verified",found:true,reused:false,fullName:"Rafael Durán",linkedinUrl:"https://www.linkedin.com/in/rafael-duran",emailWarning:null}
@@ -230,6 +230,19 @@ try {
   assert.ok(state.lookups.length < eight.length, 'whoever had not started is not tried after the quota ran out');
   const untried = stopped.result.items.filter(item => !state.lookups.includes(item.id));
   assert.ok(untried.length > 0 && untried.every(item => item.steps[0].status === 'skipped' && /cupo diario de búsquedas de correo/.test(item.steps[0].detail)));
+  // The organization's Apollo share runs out the same way: whoever had not started is not tried, with its words.
+  reset();
+  const shared = Array.from({ length: 8 }, (_, n) => `00000000-0000-4000-8000-0000000003${String(n).padStart(2, '0')}`);
+  state.leads.push(...shared.map((id, n) => ({ id, user_id: USER, organization_id: ORG, name: `Persona ${n}`, company: 'Acme', title: 'Gerente',
+    email: null, apollo_id: `s${n}`, source_provider_id: `s${n}` })));
+  state.events.push(savedEvent(RUN, shared));
+  const share = await api.stageCoworkPrepareBatch(scope, RUN, { goal: 'email', people: shared.map(leadId => ({ leadId })) });
+  approve(share.hash);
+  state.lookupError = { after: 3, name: 'ApolloAllocationRefusal', message: 'Tu organización ya usó los 300 créditos de Apollo que tiene hasta el 1 de noviembre.' };
+  const shareStopped = await api.executeCoworkPrepareBatch(auth, RUN, `preparebatch:${share.hash}`);
+  assert.ok(state.lookups.length < shared.length, 'whoever had not started is not tried after the share ran out');
+  const notTried = shareStopped.result.items.filter(item => !state.lookups.includes(item.id));
+  assert.ok(notTried.length > 0 && notTried.every(item => item.steps[0].status === 'skipped' && /ya usó los 300 créditos de Apollo/.test(item.steps[0].detail)));
 
   // 8. Nobody could be prepared: the effect fails and says why; a list that changed or an approval no longer valid runs nothing.
   reset();

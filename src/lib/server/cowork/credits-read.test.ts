@@ -31,3 +31,19 @@ test('with no balance, or one that cannot be read, it gives the costs and claims
     assert.doesNotMatch(JSON.stringify(result), /secret detail/);
   }
 });
+
+test('with an organization share it says what is left of it and what it affords, apart from the shared balance', async () => {
+  const share = { credits: 300, used: 18, remaining: 282, startsAt: '2026-10-28T20:00:00Z', endsAt: '2026-11-01T20:17:52Z', note: null };
+  const result = await readCoworkCredits(async () => balance('2026-09-30T17:00:00Z', 1000), now, async () => share) as any;
+  assert.equal(result.remaining, 1000, 'the shared balance stays as it is');
+  assert.deepEqual(result.organizationShare, { credits: 300, used: 18, remaining: 282, until: '1 de noviembre',
+    costs: { emailEnrichment: 1, phoneEnrichment: 8 }, affords: { emailEnrichments: 282, phoneReveals: 35 } });
+  assert.match(result.limitation, /organizationShare/);
+  const unread = await readCoworkCredits(async () => null, now, async () => share) as any;
+  assert.equal(unread.available, false);
+  assert.equal(unread.organizationShare.remaining, 282);
+  const failing = await readCoworkCredits(async () => balance('2026-09-30T17:00:00Z'), now, async () => { throw new Error('db down'); }) as any;
+  assert.equal('organizationShare' in failing, false);
+  assert.doesNotMatch(failing.limitation, /organizationShare/);
+});
+

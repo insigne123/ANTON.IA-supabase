@@ -9,6 +9,7 @@ import * as Quota from '@/lib/quota-client';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 import { enrichmentAttempt } from '@/lib/enrichment-attempt';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
+import { enrichmentRefusalMessage } from '@/lib/apollo-credit-allocation';
 import { enrichmentCreditReceipt, partitionEnrichmentLeads } from '@/lib/leads-workspace/enrichment-provider';
 import { classifyEnrichmentResults } from '@/lib/leads-workspace/saved-enrichment';
 import { v4 as uuid } from 'uuid';
@@ -78,7 +79,8 @@ async function lookUp(chosen: Lead[], revealPhone: boolean) {
       });
       const body = await response.clone().json().catch(async () => ({ nonJson: true, text: await response.text() }));
       if (!response.ok) {
-        if ((body as any)?.error === 'LEAD_CLAIMED' && (body as any)?.message) throw new Error(String((body as any).message).slice(0, 200));
+        const refusal = enrichmentRefusalMessage(body);
+        if (refusal) throw new Error(refusal);
         const snippet = (body as any)?.error || (body as any)?.message || (body as any)?.text || 'Error interno';
         throw new Error(`HTTP ${response.status}: ${String(snippet).slice(0, 200)}`);
       }
