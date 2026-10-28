@@ -17,7 +17,8 @@
    Las personas son resultados de búsqueda (`providerId`) o contactos guardados (`leadId`) que la conversación ya vio. Admite hasta 50 personas, sea para guardar, buscar el correo o el perfil, o investigar. Al aprobarlo, el lote prepara a 6 personas a la vez, cada una en su orden (guardar, buscar el correo, investigar), para que 50 quepan en el tiempo del worker: una búsqueda de correo tarda unos 4 segundos.
 2. **Nunca más de lo que la persona puede gastar hoy.** Las búsquedas de personas, las de correo o perfil y las investigaciones usan los mismos créditos diarios de cada persona: el límite por persona y por equipo que fija el administrador (`consume_antonia_organization_credits_v2`).
    - Antes de proponer, el lote cuenta sus créditos y los compara con lo que le queda a la persona hoy. Si no alcanzan, vuelve al modelo con el número («Este lote usa 20 créditos y hoy te quedan 12 de 50…»), y Cowork propone uno que quepa.
-   - Lo mismo con el plan de una tarea: no puede pedir más créditos de los que quedan.
+   - Lo mismo con el plan de una tarea: sus búsquedas de personas más sus créditos no pueden pasar de lo que queda.
+   - Si el saldo no se puede leer, no se inventa: ni «te quedan 50» ni «te quedan 0». La tarjeta no lo muestra y el lote se propone igual, porque cada crédito se reclama al gastarlo.
    - La tarjeta muestra lo que le queda a la persona («Hoy te quedan 38 de tus 50 créditos»). El saldo de Apollo de la organización solo aparece si es menor.
    - Al ejecutar, cada crédito se reclama de nuevo, de forma atómica: aunque el saldo no se haya podido leer al proponer, nadie gasta más que su límite.
 3. **Solo lo que falta:** antes de proponer, el servidor lee el estado real de cada persona y salta lo hecho. Revisa si ya está guardada, si su correo ya está o ya se buscó (por cualquier camino) y si tiene una investigación hecha o en curso.
@@ -32,6 +33,7 @@
 
    Al aprobar se ejecuta a varias personas a la vez, cada una en su orden: guardar, buscar el correo e investigar.
    - Un cupo agotado detiene ese paso para el resto y lo dice.
+   - Si el proveedor no tiene espacio en ese minuto (60 búsquedas por minuto, `APOLLO_BACKEND_ENRICH_MAX_REQUESTS`), la búsqueda no se hace ni se cobra. El lote espera la pausa una vez, hasta 30 s, y la reintenta. Si no alcanza el tiempo, lo dice, y al pedirlo de nuevo sigue donde quedó.
    - Una investigación sin correo buscado no se pide.
    - El trabajo se corta a los 75 s y avisa qué faltó, sin pagar dos veces al repetirlo.
 6. **El resultado por persona:** nombre real, correo con su estado, LinkedIn e investigación (del PR-1 en adelante).

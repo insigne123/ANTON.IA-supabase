@@ -35,7 +35,7 @@ const reset = () => Object.assign(state, {
     savedEvent(RUN, [L(1), L(2), L(3)]),
   ],
   batch: null, proposal: null, saves: [], lookups: [], researches: [], lookupError: null, researchError: null,
-  lookupDelay: 0, inFlight: 0, maxInFlight: 0,
+  lookupDelay: 0, inFlight: 0, maxInFlight: 0, busy: null,
   creditsUsed: 0, creditLimit: 50, creditError: false,
 });
 
@@ -97,6 +97,7 @@ const sources = {
     export const insertCoworkContact=async(auth,providerId,observed)=>{const s=globalThis.__prepBatch;s.saves.push({providerId,observed});
       const lead={id:"00000000-0000-4000-8000-0000000000c"+s.saves.length,name:observed.name,company:observed.company};s.leads.push({...lead,user_id:auth.user.id,organization_id:auth.organizationId,apollo_id:providerId.slice(7)});return {lead,reused:false};};`,
   './enrich-contact': `export const enrichCoworkSavedLead=async(auth,runId,leadId)=>{const s=globalThis.__prepBatch;s.lookups.push(leadId);
+      if(s.busy&&s.busy.times>0){s.busy.times--;const e=new Error("El proveedor está atendiendo muchas búsquedas en este minuto.");e.name="CoworkLookupBusyError";e.retryAfterSeconds=1;throw e;}
       if(s.lookupError&&s.lookups.length>=s.lookupError.after)throw new Error(s.lookupError.message);
       if(s.lookupDelay){s.inFlight++;s.maxInFlight=Math.max(s.maxInFlight,s.inFlight);await new Promise(r=>setTimeout(r,s.lookupDelay));s.inFlight--;}
       return leadId==="${'00000000-0000-4000-8000-0000000000c1'}"
@@ -287,6 +288,28 @@ try {
   state.events.push(savedEvent(RUN, ten));
   state.creditError = true;
   assert.equal((await api.stageCoworkPrepareBatch(scope, RUN, asked)).cost.lookups, 8);
+
+  // 11. The provider has no room this minute: the lookup waits its pause once and runs, nothing paid twice; busy again, it says so.
+  reset();
+  const pair = ten.slice(0, 2);
+  state.leads.push(...pair.map((id, n) => ({ id, user_id: USER, organization_id: ORG, name: `Persona ${n}`, company: 'Acme', title: 'Gerente',
+    email: null, apollo_id: `r${n}`, source_provider_id: `r${n}` })));
+  state.events.push(savedEvent(RUN, pair));
+  const busy = await api.stageCoworkPrepareBatch(scope, RUN, { goal: 'email', people: [{ leadId: pair[0] }] });
+  approve(busy.hash);
+  state.busy = { times: 1 };
+  const waited = await api.executeCoworkPrepareBatch(auth, RUN, `preparebatch:${busy.hash}`);
+  assert.deepEqual(state.lookups, [pair[0], pair[0]], 'tried again after the pause');
+  assert.equal(waited.result.items[0].steps[0].status, 'done');
+  reset();
+  state.leads.push(...pair.map((id, n) => ({ id, user_id: USER, organization_id: ORG, name: `Persona ${n}`, company: 'Acme', title: 'Gerente',
+    email: null, apollo_id: `r${n}`, source_provider_id: `r${n}` })));
+  state.events.push(savedEvent(RUN, pair));
+  const twice = await api.stageCoworkPrepareBatch(scope, RUN, { goal: 'email', people: pair.map(leadId => ({ leadId })) });
+  approve(twice.hash);
+  state.busy = { times: 4 };
+  await assert.rejects(api.executeCoworkPrepareBatch(auth, RUN, `preparebatch:${twice.hash}`), /No se pudo preparar a nadie del lote\. El proveedor está atendiendo muchas búsquedas/);
+  assert.equal(state.lookups.length, 4, 'once more each, never a third time');
 
   console.log('PASS: prepare batch stages only observed own people with what is missing, says when all is done, single actions skip what is done, card removals, run several at a time with real identity, quotas and pinned approval, and 50 lookups in one batch, never over the daily credits of the person.');
 } finally {

@@ -19,10 +19,13 @@ const RUN_BUDGET_MS = 75_000;
 /**
  * People prepared at the same time. An email lookup takes about 4 s in production (27 Oct: 10 lookups in 42 to 49 s, one after the
  * other), so a batch of 50 takes about 35 s, or 65 s when it researches too, within the budget and under the gateway's 60 lookups
- * a minute (APOLLO_BACKEND_ENRICH_MAX_REQUESTS).
+ * a minute (APOLLO_BACKEND_ENRICH_MAX_REQUESTS). A second batch in the same minute waits for the next one (lookup below).
  */
 const PARALLEL = 6;
 const LATE = 'No alcanzó el tiempo de esta tanda: pídelo de nuevo y sigue donde quedó, sin pagar dos veces.';
+/** The longest pause a batch waits for the provider's next minute of lookups (CoworkLookupBusyError). */
+const BUSY_WAIT_MAX_MS = 30_000;
+const BUSY = 'El proveedor estaba ocupado y no alcanzó el tiempo de esta tanda: pídelo de nuevo y sigue donde quedó, sin pagar dos veces.';
 
 const reasonOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback).slice(0, 240);
 
@@ -64,6 +67,19 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
   const late = () => Date.now() - startedAt > RUN_BUDGET_MS;
   let lookupsStopped: string | null = null;
   let researchStopped: string | null = null;
+  // A lookup the provider had no room for this minute is retried once after its pause, if this batch has the time: nothing was
+  // asked nor paid (enrich-contact.ts). Otherwise it says so, and asking again continues where it was.
+  const lookup = async (leadId: string) => {
+    try {
+      return await enrichCoworkSavedLead(auth, runId, leadId);
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== 'CoworkLookupBusyError') throw error;
+      const wait = Math.min(BUSY_WAIT_MAX_MS, Math.max(1, Number((error as { retryAfterSeconds?: unknown }).retryAfterSeconds) || 1) * 1000);
+      if (Date.now() + wait - startedAt > RUN_BUDGET_MS) throw new Error(BUSY);
+      await new Promise(resolve => setTimeout(resolve, wait));
+      return enrichCoworkSavedLead(auth, runId, leadId);
+    }
+  };
   const prepare = async (item: (typeof staged.items)[number]): Promise<CoworkPrepareResult> => {
     if (removed.has(item.id)) return { id: item.id, name: item.name, company: item.company, status: 'removed', steps: [] };
     const steps: CoworkPrepareStepResult[] = [];
@@ -88,7 +104,7 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
       else if (late()) steps.push({ step: 'enrich', status: 'skipped', detail: LATE });
       else {
         try {
-          const found = await enrichCoworkSavedLead(auth, runId, leadId);
+          const found = await lookup(leadId);
           if (found.fullName) result.name = found.fullName;
           Object.assign(result, { email: found.email, emailStatus: found.emailStatus, linkedinUrl: found.linkedinUrl ?? null, emailWarning: found.emailWarning ?? null });
           steps.push({ step: 'enrich', status: found.reused ? 'reused' : 'done', ...(found.found ? {} : { detail: 'El proveedor no encontró su correo.' }) });
@@ -97,7 +113,8 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
           if (/cupo diario/i.test(message)) lookupsStopped = 'Se alcanzó el cupo diario de búsquedas de correo; se renueva mañana.';
           steps.push(/Ya existe una solicitud/.test(message)
             ? { step: 'enrich', status: 'skipped', detail: 'Ya había una búsqueda de su correo en curso: llega sola, sin pagar dos veces.' }
-            : { step: 'enrich', status: 'failed', detail: lookupsStopped || message });
+            : message === BUSY ? { step: 'enrich', status: 'skipped', detail: BUSY }
+              : { step: 'enrich', status: 'failed', detail: lookupsStopped || message });
         }
       }
     }
@@ -108,7 +125,7 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
       else if (late()) steps.push({ step: 'linkedin', status: 'skipped', detail: LATE });
       else {
         try {
-          const found = await enrichCoworkSavedLead(auth, runId, leadId);
+          const found = await lookup(leadId);
           if (found.fullName) result.name = found.fullName;
           Object.assign(result, { email: found.email, emailStatus: found.emailStatus, linkedinUrl: found.linkedinUrl ?? null, emailWarning: found.emailWarning ?? null });
           steps.push({ step: 'linkedin', status: found.reused ? 'reused' : 'done', ...(found.linkedinUrl ? {} : { detail: 'El proveedor no encontró su perfil de LinkedIn.' }) });
@@ -117,7 +134,8 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
           if (/cupo diario/i.test(message)) lookupsStopped = 'Se alcanzó el cupo diario de búsquedas; se renueva mañana.';
           steps.push(/Ya existe una solicitud/.test(message)
             ? { step: 'linkedin', status: 'skipped', detail: 'Ya había una búsqueda de esta persona en curso: llega sola, sin pagar dos veces.' }
-            : { step: 'linkedin', status: 'failed', detail: lookupsStopped || message });
+            : message === BUSY ? { step: 'linkedin', status: 'skipped', detail: BUSY }
+              : { step: 'linkedin', status: 'failed', detail: lookupsStopped || message });
         }
       }
     }

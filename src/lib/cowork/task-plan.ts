@@ -54,9 +54,12 @@ export function coworkTaskPlanProblem(plan: CoworkTaskPlan): string | null {
  * model passes on, or null when it fits. Each step checks its credits again when it spends them.
  */
 export function coworkTaskPlanOverBudget(plan: CoworkTaskPlan, creditsLeft: number): string | null {
-  if (plan.limits.credits <= creditsLeft) return null;
+  // Each people search uses a credit too: the plan needs its searches plus its credits.
+  const needed = plan.limits.searches + plan.limits.credits;
+  if (needed <= creditsLeft) return null;
   if (creditsLeft <= 0) return 'Hoy no te quedan créditos: arma un plan que no los use (guardar y escribir) o déjalo para mañana, cuando se renuevan.';
-  return `El plan pide hasta ${plan.limits.credits} créditos y hoy te quedan ${creditsLeft}: baja limits.credits a ${creditsLeft} o menos, con menos personas.`;
+  return `El plan pide hasta ${needed} créditos (limits.searches ${plan.limits.searches} + limits.credits ${plan.limits.credits}) y hoy te quedan `
+    + `${creditsLeft}: bájalos hasta que sumen ${creditsLeft} o menos, con menos personas.`;
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;

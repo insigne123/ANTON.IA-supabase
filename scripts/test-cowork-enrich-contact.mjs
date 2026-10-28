@@ -9,7 +9,7 @@ const state = {
   quotaOp: null, claim: { claimed: true, allowed: true, claimToken: '00000000-0000-4000-8000-000000000002' },
   submit: async () => ({ success: true, enrichmentStatus: 'completed', providerRequestId: 'pr-1', creditsConsumed: 1,
     extractedData: { email: 'ana@logisticasur.cl', email_status: 'verified', source_provider_id: 'apollo-1' } }),
-  calls: [], updates: [], completes: [], releases: [],
+  calls: [], updates: [], completes: [], releases: [], slot: { taken: true, retryAfterSeconds: 0 },
 };
 globalThis.__coworkEnrich = state;
 
@@ -42,8 +42,10 @@ const sources = {
     export const markApolloEnrichmentCallbackSubmitted=async()=>{};
     export const bindApolloEnrichmentCallback=async()=> 'bound';
     export const applyApolloEnrichmentCandidate=async()=>{globalThis.__coworkEnrich.calls.push(['apply']);return 'processed';};
-    export const settleApolloEnrichmentCallback=async()=>{globalThis.__coworkEnrich.calls.push(['settle']);};`,
-  '@/lib/server/apollo-enrichment': 'export const submitApolloEnrichment=(...args)=>globalThis.__coworkEnrich.submit(...args);',
+    export const settleApolloEnrichmentCallback=async(args)=>{globalThis.__coworkEnrich.calls.push(['settle',args]);};`,
+  '@/lib/server/apollo-enrichment': `export const submitApolloEnrichment=(...args)=>globalThis.__coworkEnrich.submit(...args);
+    export class ApolloEnrichmentError extends Error{constructor(status,code,providerOutcomeUnknown){super(code);this.status=status;this.code=code;this.providerOutcomeUnknown=providerOutcomeUnknown;}}
+    export const takeApolloEnrichmentRateSlot=()=>globalThis.__coworkEnrich.slot;`,
 };
 globalThis.__coworkEnrich.client = client;
 const bundle = await build({ entryPoints: ['src/lib/server/cowork/enrich-contact.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
@@ -103,7 +105,40 @@ try {
   assert.equal(state.completes.length, 0, 'unknown outcome stays available for reconciliation');
   assert.equal(state.releases.length, 0);
 
-  console.log('PASS: enrich success with provider email, replay reuse, quota message, unknown outcome without retry.');
+  // 5. No room at the provider this minute: nothing is claimed nor asked, and it says when to try again.
+  state.calls = []; providerCalls = 0;
+  state.submit = async () => { providerCalls++; return { success: false, extractedData: null }; };
+  state.slot = { taken: false, retryAfterSeconds: 12 };
+  await assert.rejects(module.exports.enrichCoworkContact(auth, 'run-1', LEAD),
+    error => error.name === 'CoworkLookupBusyError' && error.retryAfterSeconds === 12 && /inténtalo de nuevo en 12 s\. No se gastó el crédito/.test(error.message));
+  assert.equal(state.calls.some(([kind]) => kind === 'claim'), false, 'no credit claimed');
+  assert.equal(providerCalls, 0);
+  state.slot = { taken: true, retryAfterSeconds: 0 };
+
+  // 6. A known answer from the provider ends the lookup (settled as failed), instead of waiting as if it were unknown.
+  state.calls = [];
+  state.submit = async () => { const error = new Error('INVALID_REQUEST'); throw error; };
+  await assert.rejects(module.exports.enrichCoworkContact(auth, 'run-1', LEAD), /No pudimos confirmar/, 'a plain error stays unknown');
+  state.calls = [];
+  state.submit = async () => ({ success: true, providerRequestId: 'pr-2', extractedData: { email: 'otra@x.cl', source_provider_id: 'apollo-9' } });
+  await assert.rejects(module.exports.enrichCoworkContact(auth, 'run-1', LEAD), /El proveedor devolvió a otra persona: no se guardó nada/);
+  assert.deepEqual(state.calls.find(([kind]) => kind === 'settle')?.[1], { callbackId: '00000000-0000-4000-8000-000000000003', terminalState: 'failed', errorCode: 'APOLLO_PERSON_IDENTITY_MISMATCH' });
+
+  // 7. Someone else in the organization holds the person: the database's words, and the credit back.
+  state.releases = [];
+  const insertError = { message: 'lead_claimed', details: '{"ownerName":"Ana Pérez","daysLeft":12}', hint: 'Adjudicado a Ana Pérez: le quedan 12 días.' };
+  const realFrom = client.from;
+  client.from = table => {
+    const chain = realFrom(table);
+    if (table !== 'enriched_leads') return chain;
+    return { ...chain, insert: () => ({ select: () => ({ maybeSingle: async () => ({ data: null, error: insertError }) }) }) };
+  };
+  await assert.rejects(module.exports.enrichCoworkContact(auth, 'run-1', LEAD),
+    error => error.name === 'LeadClaimedError' && error.message === 'Adjudicado a Ana Pérez: le quedan 12 días.');
+  assert.equal(state.releases.length, 1);
+  client.from = realFrom;
+
+  console.log('PASS: enrich success with provider email, replay reuse, quota message, unknown outcome without retry, busy provider without a claim, known answers settled, held person.');
 } finally {
   delete globalThis.__coworkEnrich;
 }
