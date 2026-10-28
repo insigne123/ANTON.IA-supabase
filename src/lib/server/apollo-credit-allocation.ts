@@ -22,7 +22,7 @@ export async function loadApolloCreditAllocation(
   organizationId: string,
   admin: any = getSupabaseAdminClient(),
 ): Promise<ApolloCreditAllocation | null> {
-  const { data, error } = await admin.rpc('apollo_credit_allocation_status_v1', { p_organization_id: organizationId });
+  const { data, error } = await admin.rpc('apollo_credit_allocation_status_v2', { p_organization_id: organizationId });
   if (error) {
     if (MISSING_FUNCTION.has(String(error.code || ''))) return null;
     throw error;
@@ -36,6 +36,8 @@ export async function loadApolloCreditAllocation(
     startsAt: String(row.starts_at),
     endsAt: String(row.ends_at),
     note: typeof row.note === 'string' && row.note.trim() ? row.note.trim() : null,
+    usedBefore: number(row.used_before),
+    showLimit: row.show_limit !== false,
   };
 }
 
