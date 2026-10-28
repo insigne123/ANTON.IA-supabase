@@ -7,7 +7,7 @@ import { OPPORTUNITY_BUCKET, opportunityFinancialScenario, type WorkScope } from
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
 import { runOpportunitySpecialists } from './workspace-specialists';
-import { opportunityGenerate, opportunityGenerateReport, type OpportunityJob } from './workspace-ai';
+import { OPPORTUNITY_REPORT_OUTPUT_TOKENS, opportunityGenerate, opportunityGenerateReport, type OpportunityJob } from './workspace-ai';
 import { reportBudgetCheck } from './workspace-budget';
 import { opportunityModel } from '@/lib/commercial-opportunities/model-policy';
 import { readOpportunityParts } from './workspace-reading';
@@ -186,7 +186,7 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   // Writing the report takes up to 230 s: after a long reading it starts in the next tick, where the read blocks come
   // back from their paid results in a few seconds.
   if (Date.now() - started > 45_000) return { waiting: true as const };
-  const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
+  const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: OPPORTUNITY_REPORT_OUTPUT_TOKENS,
     prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
       specialists: review.notes.map(({ id, ...note }) => note),
       sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }, item.kind) });

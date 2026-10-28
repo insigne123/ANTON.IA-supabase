@@ -28,6 +28,12 @@ export function prices(model: string) {
   throw new AuthError('Falta configurar el precio verificable del modelo.', 503);
 }
 export const PRICING_VERSION = '2026-10-12';
+/**
+ * Room for the written report, besides its reasoning (8k at «medium»). 16k fell short on 28 Oct 2026: a private tender of seven
+ * documents and 101 pages gave about 127k tokens of facts, and the report, a JSON inside a string, was cut at the 24k of output
+ * twice (CLAUDE_MAX_TOKENS, «La evaluación no terminó»). At about 240 tokens a second, the 40k fit in the 230 s of the call.
+ */
+export const OPPORTUNITY_REPORT_OUTPUT_TOKENS = 32_000;
 
 /**
  * The lease, the budget and the replay of one paid step, for the one-shot calls below and for each round of an agent (workspace-agent.ts).
@@ -95,7 +101,7 @@ export async function opportunityGenerate<T extends z.ZodTypeAny>(client: Supaba
       // (openai-json.ts, isRetryableError). The parts of a report are read four at a time, so a short limit may say no for a moment.
       // The report is not: it runs alone at the start of its tick, and a second try could outlast the route.
       openAiModel: model, allowDefaultModelFallback: false, provider: 'openai', maxAttempts: input.role === 'report' ? 1 : 3,
-      // The report writes up to 16k tokens and runs at the start of its own tick (route limit 300 s), so it gets 230 s.
+      // The report writes up to 32k tokens and runs at the start of its own tick (route limit 300 s), so it gets 230 s.
       reasoningEffort: effort, maxOutputTokens: output, timeoutMs: input.role === 'report' ? 230_000 : 110_000 });
     const charged = billed(answer.telemetry);
     const cost = answer.telemetry.modelName === model ? opportunityUsageCost(answer.telemetry, charged) : null;

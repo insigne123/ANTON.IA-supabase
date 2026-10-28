@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 
 const entry = await build({
-  stdin: { contents: `export {opportunityGenerate, opportunityGenerateReport} from './src/lib/server/commercial-opportunities/workspace-ai';`, loader: 'ts', resolveDir: process.cwd() },
+  stdin: { contents: `export {OPPORTUNITY_REPORT_OUTPUT_TOKENS, opportunityGenerate, opportunityGenerateReport} from './src/lib/server/commercial-opportunities/workspace-ai';`, loader: 'ts', resolveDir: process.cwd() },
   bundle: true, write: false, format: 'cjs', platform: 'node', packages: 'external',
   plugins: [{ name: 'isolated-report-services', setup(builder) {
     builder.onResolve({ filter: /auth-utils|workspace-store|ai\/openai-json/ }, args => ({ path: args.path, namespace: 'fixture' }));
@@ -17,7 +17,7 @@ const entry = await build({
 });
 const compiled: { exports: any } = { exports: {} };
 new Function('require', 'module', 'exports', entry.outputFiles[0].text)(createRequire(import.meta.url), compiled, compiled.exports);
-const { opportunityGenerate, opportunityGenerateReport } = compiled.exports;
+const { OPPORTUNITY_REPORT_OUTPUT_TOKENS, opportunityGenerate, opportunityGenerateReport } = compiled.exports;
 const previous = { key: process.env.ANTHROPIC_API_KEY, model: process.env.OPPORTUNITIES_REPORT_MODEL };
 before(() => { process.env.ANTHROPIC_API_KEY = 'synthetic-not-a-credential'; process.env.OPPORTUNITIES_REPORT_MODEL = 'claude-haiku-5-5'; });
 after(() => {
@@ -46,7 +46,7 @@ function fixture() {
     throw Error('Unexpected RPC');
   } };
   const job = { id: 'job', organization_id: 'org', lease_token: 'lease', payload: {}, kind: 'research' };
-  const input = { step: 'synthesis-envelope-v1:fixture', prompt: 'Contrato y hechos sintéticos', output: 16_000 };
+  const input = { step: 'synthesis-envelope-v1:fixture', prompt: 'Contrato y hechos sintéticos', output: OPPORTUNITY_REPORT_OUTPUT_TOKENS };
   let json = JSON.stringify(report), error: Error | null = null, promptTokens = 100;
   const generate = async (options: any) => {
     requests.push(options); if (error) throw error;
@@ -77,10 +77,19 @@ test('a seven-document report stays under the 0.75 USD cap of one research, and 
   const prompt = 'á'.repeat(60_000); // 120 kB of UTF-8, the size of the synthesis that was refused in production
   await opportunityGenerateReport(f.client, f.job, { ...f.input, prompt }, f.generate);
   const bytes = Buffer.byteLength(prompt, 'utf8');
-  // Haiku above its 100k line costs 0.5 USD per million input tokens and 2.5 per million output, 24k output with reasoning; bytes bound tokens.
+  // Haiku above its 100k line costs 0.5 USD per million input tokens and 2.5 per million output, 40k output with reasoning; bytes bound tokens.
   // The report cannot be split, so it is reserved at that price instead of being refused (reading and screening are: see below).
-  assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 24_000 * 2.5, 'the documents and the whole output stay reserved');
+  assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 40_000 * 2.5, 'the documents and the whole output stay reserved');
   assert.ok(f.reservations[0].p_micro <= 727_000, `fits next to the reading steps (${f.reservations[0].p_micro})`);
+  assert.equal(f.requests[0].maxOutputTokens, 32_000, 'room for the report of a long tender');
+});
+
+test('the 28 Oct tender (seven documents, 101 pages, about 380 kB of facts) is reserved, not refused as too long', async () => {
+  const f = fixture();
+  const prompt = 'á'.repeat(190_000);
+  await opportunityGenerateReport(f.client, f.job, { ...f.input, prompt }, f.generate);
+  assert.ok(f.reservations[0].p_micro <= 750_000, `under the cap of one research (${f.reservations[0].p_micro})`);
+  assert.equal(f.requests.length, 1);
 });
 
 test('a report reserved at the long-context price is settled at the price billed: the short one up to 100k tokens', async () => {
