@@ -192,7 +192,9 @@ const sources = {
     export const markApolloEnrichmentCallbackSubmitted = async () => {}; export const bindApolloEnrichmentCallback = async () => 'bound';
     export const applyApolloEnrichmentCandidate = async () => 'processed'; export const settleApolloEnrichmentCallback = async () => {};`,
   // The provider's person lookup: by the person id the search returned, with the whole name, the email and the LinkedIn.
-  '@/lib/server/apollo-enrichment': `export const submitApolloEnrichment = async ({ lead }) => {
+  '@/lib/server/apollo-enrichment': `export class ApolloEnrichmentError extends Error { constructor(status, code, providerOutcomeUnknown) { super(code); this.code = code; this.providerOutcomeUnknown = providerOutcomeUnknown; } }
+    export const takeApolloEnrichmentRateSlot = () => ({ taken: true, retryAfterSeconds: 0 });
+    export const submitApolloEnrichment = async ({ lead }) => {
     const w = globalThis.__pruebasDeApp; w.calls.lookups.push(lead);
     const person = Object.values(w.PEOPLE).find(item => item.lookup.source_provider_id === lead.sourceProviderId);
     return person ? { success: true, providerRequestId: null, creditsConsumed: 1, extractedData: { ...person.lookup, title: person.search.title } }

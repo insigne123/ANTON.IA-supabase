@@ -681,14 +681,16 @@ export async function checkAndConsumeDailyQuota(
 }
 
 export async function getDailyQuotaStatus(
-  params: { userId: string; organizationId?: string; resource: string; limit: number }
+  // strict: a failed read reaches the caller instead of reading as an empty or a closed quota (Cowork says what is left with it).
+  params: { userId: string; organizationId?: string; resource: string; limit: number; strict?: boolean }
 ): Promise<DailyQuotaResult> {
   // Similar to above but read-only
   const { userId, resource, limit } = params;
   let orgId: string;
   try {
     orgId = await resolveOrganizationIdForQuota(userId, params.organizationId);
-  } catch {
+  } catch (error) {
+    if (params.strict) throw error;
     return { allowed: false, count: 0, limit, dayKey: todayKeyUTC(), resetAtISO: nextDayStartISOUTC() };
   }
 
@@ -700,7 +702,8 @@ export async function getDailyQuotaStatus(
       if (!hasCreditAccess) {
         return { allowed: false, count: 0, limit: 0, dayKey: date, resetAtISO: nextDayStartISOUTC() };
       }
-    } catch {
+    } catch (error) {
+      if (params.strict) throw error;
       return { allowed: false, count: 0, limit: 0, dayKey: date, resetAtISO: nextDayStartISOUTC() };
     }
   }
@@ -710,7 +713,8 @@ export async function getDailyQuotaStatus(
       const contactQuota = await getContactQuotaUsage({ userId, organizationId: orgId, limit });
       const used = contactQuota.count;
       return { allowed: used < contactQuota.limit, count: used, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
-    } catch {
+    } catch (error) {
+      if (params.strict) throw error;
       return { allowed: false, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
     }
   }
@@ -718,7 +722,8 @@ export async function getDailyQuotaStatus(
   if (ATOMIC_DAILY_QUOTA_RESOURCES.has(resource as AtomicDailyQuotaResource)) {
     try {
       return await getDailyCreditQuotaStatus({ userId, organizationId: orgId });
-    } catch {
+    } catch (error) {
+      if (params.strict) throw error;
       return { allowed: false, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
     }
   }
