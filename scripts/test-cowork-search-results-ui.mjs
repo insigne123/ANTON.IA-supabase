@@ -62,7 +62,7 @@ try {
   assert.match(text, /Hasta 100 empresas de esos rubros y, dentro de ellas, las personas con esos cargos o parecidos\./);
   assert.match(text, /Hasta 25 personas/);
   assert.match(text, /Rubros de las empresas/);
-  assert.match(text, /Se buscan empresas de esos rubros y, dentro de ellas, hasta 25 contactos nuevos en el proveedor \(1 búsqueda de tu cuota\)\./);
+  assert.match(text, /Se buscan empresas de esos rubros y, dentro de ellas, hasta 25 contactos nuevos en el proveedor \(no gasta créditos\)\./);
   assert.match(text, /Los posibles compradores aparecen primero, agrupados por empresa; nadie se descarta\./);
 } finally { dom.window.close(); }
 

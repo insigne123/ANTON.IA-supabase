@@ -474,7 +474,7 @@ export function corpusSearchText(search: unknown) {
   const data = parsed.data;
   const strategy = coworkSearchStrategy(data);
   if (strategy === 'profile') return fields([['Buscar', 'La persona de este perfil exacto'], ['Perfil de LinkedIn', data.linkedinUrl],
-    ['Costo', 'Aproximadamente 1 crédito del proveedor y 1 búsqueda de tu cuota.']]);
+    ['Costo', 'No gasta créditos']]);
   const more = (data.page || 1) > 1 || Boolean(data.offset);
   const noun = strategy === 'companies' ? (data.limit === 1 ? 'empresa' : 'empresas') : (data.limit === 1 ? 'persona' : 'personas');
   const role = data.rolePolicy;
