@@ -59,12 +59,11 @@ $$;
 
 revoke all on function public.enforce_lead_claim_v1() from public, anon, authenticated;
 
-drop trigger if exists enforce_lead_claim on public.leads;
-create trigger enforce_lead_claim
+-- create or replace keeps it repeatable without a drop.
+create or replace trigger enforce_lead_claim
   before insert on public.leads
   for each row execute function public.enforce_lead_claim_v1();
 
-drop trigger if exists enforce_lead_claim on public.enriched_leads;
-create trigger enforce_lead_claim
+create or replace trigger enforce_lead_claim
   before insert on public.enriched_leads
   for each row execute function public.enforce_lead_claim_v1();
