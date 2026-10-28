@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  coworkPrepareBatchLabel, coworkPrepareBatchPeople, coworkPrepareBatchSummary, coworkPrepareCost, coworkPrepareStatus, coworkPrepareSteps,
-  hashCoworkPrepareBatch, planCoworkPrepareBatch, type CoworkPrepareCandidate, type CoworkPrepareState,
-} from './prepare-batch';
+  coworkPrepareBatchLabel, coworkPrepareBatchPeople, coworkPrepareBatchSummary, coworkPrepareCost, coworkPrepareCredits, coworkPrepareOverBudget,
+  coworkPrepareStatus, coworkPrepareSteps, hashCoworkPrepareBatch, planCoworkPrepareBatch, type CoworkPrepareCandidate, type CoworkPrepareState } from './prepare-batch';
 
 const LEAD = (n: number) => `00000000-0000-4000-8000-0000000000a${n}`;
 const fresh = { saved: false, emailChecked: false, researched: false };
@@ -21,6 +20,15 @@ test('the people of a proposal: each once, by search result or saved contact, up
     assert.throws(() => coworkPrepareBatchPeople({ goal, people: people(51) }), /hasta 50 personas: propón el resto en otro lote/, goal);
   }
   assert.throws(() => coworkPrepareBatchPeople({ goal: 'everything', people: [{ leadId: LEAD(1) }] }));
+});
+
+test('a batch spends one daily credit per lookup and per research, and never more than the person has left today', () => {
+  assert.equal(coworkPrepareCredits({ lookups: 10, research: 10 }), 20);
+  assert.equal(coworkPrepareOverBudget(20, { left: 20, limit: 50 }), null);
+  assert.match(coworkPrepareOverBudget(20, { left: 12, limit: 50 }) ?? '', /usa 20 créditos y hoy te quedan 12 de 50.*hasta 12/);
+  assert.match(coworkPrepareOverBudget(1, { left: 0, limit: 50 }) ?? '', /Hoy ya usaste tus 50 créditos del día; se renuevan mañana/);
+  assert.match(coworkPrepareOverBudget(1, { left: 0, limit: 0 }) ?? '', /Tu cuenta no tiene créditos/);
+  assert.equal(coworkPrepareOverBudget(0, { left: 0, limit: 0 }), null, 'saving costs nothing');
 });
 
 test('each person gets only what is missing, in order: save, look up the email, research', () => {

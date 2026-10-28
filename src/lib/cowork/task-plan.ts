@@ -49,6 +49,16 @@ export function coworkTaskPlanProblem(plan: CoworkTaskPlan): string | null {
   return null;
 }
 
+/**
+ * A plan that asks for more credits than the person has left today (searches, lookups and researches share them), in words the
+ * model passes on, or null when it fits. Each step checks its credits again when it spends them.
+ */
+export function coworkTaskPlanOverBudget(plan: CoworkTaskPlan, creditsLeft: number): string | null {
+  if (plan.limits.credits <= creditsLeft) return null;
+  if (creditsLeft <= 0) return 'Hoy no te quedan créditos: arma un plan que no los use (guardar y escribir) o déjalo para mañana, cuando se renuevan.';
+  return `El plan pide hasta ${plan.limits.credits} créditos y hoy te quedan ${creditsLeft}: baja limits.credits a ${creditsLeft} o menos, con menos personas.`;
+}
+
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /** The card's line: «Tarea de 4 pasos · hasta 1 búsqueda y 10 créditos». */

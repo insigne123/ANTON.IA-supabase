@@ -2,9 +2,11 @@ import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { isApolloCreditBalanceStale, loadLatestApolloCreditBalance } from '@/lib/server/apollo-credit-balance';
+import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import {
-  COWORK_PREPARE_BATCH_EFFECT, coworkPrepareBatchLabel, coworkPrepareBatchPeople, coworkPrepareCost, hashCoworkPrepareBatch,
+  COWORK_PREPARE_BATCH_EFFECT, coworkPrepareBatchLabel, coworkPrepareBatchPeople, coworkPrepareCost, coworkPrepareCredits, coworkPrepareOverBudget,
+  hashCoworkPrepareBatch, type CoworkCreditsLeft,
   planCoworkPrepareBatch, type CoworkPrepareCandidate, type CoworkPrepareItem, type CoworkPrepareReady, type CoworkPrepareResult,
   type CoworkPrepareState,
 } from '@/lib/cowork/prepare-batch';
@@ -163,6 +165,20 @@ export async function coworkOwnSavedByProvider(client: Client, scope: Scope, pro
 }
 
 /**
+ * The person's daily credits left, read as the worker reads them (searches, lookups and researches share them), or null when they
+ * cannot be read: the run checks each credit as it spends it, so an unknown balance never lets anything through.
+ */
+async function creditsLeftToday(scope: Scope): Promise<CoworkCreditsLeft | null> {
+  try {
+    const limits = await getEffectiveDailyQuotaLimits({ userId: scope.userId, organizationId: scope.organizationId });
+    const status = await getDailyQuotaStatus({ userId: scope.userId, organizationId: scope.organizationId, resource: 'search', limit: limits.leadSearch });
+    return { left: Math.max(0, (status.limit || 0) - (status.count || 0)), limit: status.limit || 0 };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Stage the batch to propose: every person must be someone this conversation saw (a search result or a saved contact of the
  * person); what each one already has is read now and skipped, and the list is kept as the card will show it. Nothing runs here.
  * When nobody has anything left to do it says so, and the model moves on without asking for an approval.
@@ -210,6 +226,11 @@ export async function stageCoworkPrepareBatch(scope: Scope, runId: string, input
     throw new Error(`No queda nada por hacer con ${plan.ready.length === 1 ? 'esa persona' : 'esas personas'} (${who}): ${plan.ready[0]?.reason || ''} `
       + 'No hace falta aprobar nada: sigue con el paso siguiente que pidió el usuario.');
   }
+  // Never more than the person can spend today: a batch over their credits goes back to the model with the number.
+  const credits = coworkPrepareCredits(coworkPrepareCost(plan.items));
+  const credit = credits ? await creditsLeftToday(scope) : null;
+  const overBudget = credit && coworkPrepareOverBudget(credits, credit);
+  if (overBudget) throw new Error(overBudget);
   const hash = hashCoworkPrepareBatch(runId, plan.items);
   const staged = await client.from('cowork_batch_proposals').upsert({
     run_id: runId, user_id: scope.userId, organization_id: scope.organizationId, kind: COWORK_PREPARE_BATCH_EFFECT,
@@ -270,6 +291,8 @@ export async function readCoworkPrepareBatchPreview(auth: AuthContext, runId: st
     .eq('run_id', runId).eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
   const cost = coworkPrepareCost(staged.items);
   let balance: { remaining: number; stale: boolean } | null = null;
+  // What the person has left today, which is what limits them; the organization's balance only shows when it is shorter.
+  const credit = coworkPrepareCredits(cost) ? await creditsLeftToday(scope) : null;
   if (cost.lookups) {
     try {
       const latest = await loadLatestApolloCreditBalance();
@@ -280,7 +303,7 @@ export async function readCoworkPrepareBatchPreview(auth: AuthContext, runId: st
   return {
     items: staged.items.map(({ contact: _contact, ...item }) => item), ready: staged.deferred || [], excluded: staged.excluded || [], matches,
     // Only a proposal that still awaits the decision lets people be taken off.
-    open: proposal.data?.status === 'proposed', cost, balance,
+    open: proposal.data?.status === 'proposed', cost, balance, credit,
     results: Array.isArray(results) ? results : null,
   };
 }

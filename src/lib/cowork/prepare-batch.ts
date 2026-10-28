@@ -113,6 +113,26 @@ export function hashCoworkPrepareBatch(runId: string, items: Array<Pick<CoworkPr
 
 /** lookups: every provider lookup, of an email or of a LinkedIn profile (1 credit each); profiles: how many of them are for LinkedIn. */
 export type CoworkPrepareCost = { saves: number; lookups: number; research: number; profiles?: number };
+
+/** The credits a batch spends: each email or LinkedIn lookup and each research takes one of the person's daily credits, the same
+ * ones searches use (consume_antonia_organization_credits_v2, per person and per team as the admin set them). */
+export const coworkPrepareCredits = (cost: Pick<CoworkPrepareCost, 'lookups' | 'research'>) => cost.lookups + cost.research;
+
+/** What the person has left of their daily credits: the tighter of their own limit and their team's. */
+export type CoworkCreditsLeft = { left: number; limit: number };
+
+/**
+ * Why a batch cannot be proposed with the credits the person has left today, in words the model passes on, or null when it fits.
+ * The run checks each credit again as it spends it, so this keeps Cowork from proposing more than the person can use.
+ */
+export function coworkPrepareOverBudget(credits: number, credit: CoworkCreditsLeft): string | null {
+  if (credits <= credit.left) return null;
+  const save = 'Puedes proponer guardarlas sin gastar (goal save).';
+  if (credit.limit <= 0) return `Tu cuenta no tiene créditos para buscar correos ni investigar. ${save}`;
+  if (credit.left <= 0) return `Hoy ya usaste tus ${credit.limit} créditos del día; se renuevan mañana. ${save}`;
+  return `Este lote usa ${credits} créditos y hoy te quedan ${credit.left} de ${credit.limit} (cada búsqueda de correo o de perfil y cada `
+    + `investigación usa 1): propón uno que use hasta ${credit.left}, con menos personas o solo buscando su correo.`;
+}
 export function coworkPrepareCost(items: Array<Pick<CoworkPrepareItem, 'steps'>>): CoworkPrepareCost {
   const count = (step: CoworkPrepareStep) => items.filter(item => item.steps.includes(step)).length;
   const profiles = count('linkedin');

@@ -12,7 +12,7 @@ const preview = {
     { id: L(2), name: 'Susana Cáceres', company: 'MSTI', title: 'RR. HH.', steps: ['research'], done: ['save', 'enrich'] },
   ],
   ready: [{ id: L(3), name: 'Ana Pérez', company: 'Acme', reason: 'Ya está guardado, con su correo buscado y su investigación hecha o en curso.' }],
-  excluded: [], matches: true, open: true, cost: { saves: 1, lookups: 1, research: 2 }, balance: { remaining: 120, stale: false },
+  excluded: [], matches: true, open: true, cost: { saves: 1, lookups: 1, research: 2 }, balance: { remaining: 120, stale: false }, credit: { left: 38, limit: 50 },
   results: [
     { id: L(1), name: 'Rafael Durán', company: 'R&D Montajes', status: 'ready', email: 'rduran@rdmontajes.cl', emailStatus: 'verified',
       linkedinUrl: 'https://www.linkedin.com/in/rafael-duran', research: 'queued',
@@ -54,10 +54,13 @@ try {
   assert.match(rows[1], /Ya guardadoCorreo ya buscadoInvestigar/, 'what is done reads as done and only the research is left');
   assert.doesNotMatch(document.body.textContent, /\*\*\*/, 'the asterisks never reach the card');
   assert.match(document.body.textContent, /2 de 2 personas quedan listas con esta aprobación/);
-  assert.match(document.body.textContent, /Usa hasta 1 crédito para buscar correos \(1 por persona\) y 2 investigaciones de tu cupo diario\. Te quedan 120 créditos\./);
+  // A lookup and a research take one daily credit each; what limits the person is what they have left today, not the organization.
+  assert.match(document.body.textContent, /Usa hasta 3 créditos de tu cupo de hoy: 1 para buscar correos y 2 para investigar\. Hoy te quedan 38 de tus 50 créditos\./);
+  assert.doesNotMatch(document.body.textContent, /A la organización le quedan/, 'the organization balance shows only when it is the shorter one');
+  assert.doesNotMatch(document.body.textContent, /no alcanzan/);
   assert.match(document.body.textContent, /1 persona ya estaba lista/);
   const approve = () => [...document.querySelectorAll('button')].find(button => /^Preparar a/.test(button.textContent));
-  assert.equal(approve().textContent, 'Preparar a 2 personas · 1 crédito', 'the button says what it costs');
+  assert.equal(approve().textContent, 'Preparar a 2 personas · 3 créditos', 'the button says what it costs');
 
   // Taking Rafael off: his steps go grey, the cost drops and the approval names one person.
   const box = document.querySelector('input[aria-label="Quitar de la lista a Rafael D."]');
@@ -65,13 +68,23 @@ try {
   box.click();
   await settle(dom, 'input[aria-label="Volver a incluir a Rafael D."]');
   assert.match(document.body.textContent, /1 de 2 personas quedan listas/);
-  assert.match(document.body.textContent, /Usa 1 investigación de tu cupo diario\./);
-  assert.equal(approve().textContent, 'Preparar a 1 persona');
+  assert.match(document.body.textContent, /Usa hasta 1 crédito de tu cupo de hoy para investigar \(1 por persona\)\./);
+  assert.equal(approve().textContent, 'Preparar a 1 persona · 1 crédito');
   approve().click();
   for (let i = 0; i < 100 && !dom.window.__approved; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.deepEqual(posts, [{ url: '/api/cowork/runs/run-1/preparebatch', body: { excluded: [L(1)] } }], 'who was taken off is saved before approving');
   assert.equal(dom.window.__approved, 1);
 } finally { card.dom.window.close(); }
+
+// With fewer credits left today than the batch needs, the card says so before approving and asks to take people off.
+preview.credit = { left: 2, limit: 50 };
+const short = await render('<PrepareBatchReview runId="run-1" resolving={false} onApprove={()=>{}} onReject={()=>{}} />');
+try {
+  await settle(short.dom, 'ul[aria-label="Personas de la lista"] li');
+  assert.match(short.dom.window.document.body.textContent, /Hoy te quedan 2 de tus 50 créditos\./);
+  assert.match(short.dom.window.document.body.textContent, /Los créditos que te quedan no alcanzan para todo el lote/);
+} finally { short.dom.window.close(); }
+preview.credit = { left: 38, limit: 50 };
 
 const results = await render('<PrepareBatchResults runId="run-1" />');
 try {
@@ -88,5 +101,5 @@ try {
   assert.match(rows[2], /La quitaste de la lista/);
   const link = dom.window.document.querySelector('a[href="https://www.linkedin.com/in/rafael-duran"]');
   assert.equal(link?.getAttribute('rel'), 'noreferrer');
-  console.log('PASS: prepare batch card shows each person with only the missing steps, ready people, cost and balance, removal before approval, and per-person results with real name, email, LinkedIn and research. DOM only, not visual certification.');
+  console.log('PASS: prepare batch card shows each person with only the missing steps, ready people, the cost in daily credits and what the person has left, removal before approval, and per-person results with real name, email, LinkedIn and research. DOM only, not visual certification.');
 } finally { results.dom.window.close(); }
