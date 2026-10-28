@@ -61,7 +61,7 @@ test('the chat reads the conversation so far, and a greeting owes no citation', 
   const { runOpportunityChat } = await load(`export { runOpportunityChat } from './src/lib/server/commercial-opportunities/workspace-research';`, {
     '@/lib/server/auth-utils': AUTH,
     './workspace-access': 'export async function assertOpportunityRead(){} export function assertOpportunityAdmin(){} export async function readableOpportunityIds(){ return null }',
-    './workspace-ai': 'export async function opportunityGenerate(client, job, options){ globalThis.__prompt = options.prompt; return globalThis.__reply() } export async function opportunityGenerateReport(){}',
+    './workspace-ai': 'export const OPPORTUNITY_REPORT_OUTPUT_TOKENS = 32000; export async function opportunityGenerate(client, job, options){ globalThis.__prompt = options.prompt; return globalThis.__reply() } export async function opportunityGenerateReport(){}',
     './workspace-agent': 'export function opportunityAgentEnabled(){ return false } export async function runOpportunityAgent(){ throw new Error("no agent here") } export async function runOpportunityChatAgent(){ throw new Error("no agent here") }',
     './workspace-documents': 'export async function saveOpportunityDocument(){}',
     './workspace-download': 'export async function downloadOpportunitySource(){} export function opportunityAttachmentLinks(){ return [] } export async function createOpportunityPublicSession(){ return null }',
@@ -106,7 +106,7 @@ test('with the agent on, the chat keeps the citations of fragments it read with 
     const { runOpportunityChat } = await load(`export { runOpportunityChat } from './src/lib/server/commercial-opportunities/workspace-research';`, {
       '@/lib/server/auth-utils': AUTH,
       './workspace-access': 'export async function assertOpportunityRead(){} export function assertOpportunityAdmin(){} export async function readableOpportunityIds(){ return null }',
-      './workspace-ai': 'export async function opportunityGenerate(){ throw new Error("the single call must not run") } export async function opportunityGenerateReport(){}'
+      './workspace-ai': 'export const OPPORTUNITY_REPORT_OUTPUT_TOKENS = 32000; export async function opportunityGenerate(){ throw new Error("the single call must not run") } export async function opportunityGenerateReport(){}'
         + ' export const PRICING_VERSION = "t"; export function prices(){ return { input: .1, output: .5, cache: .01, write: .2 } }'
         + ' export async function reserveOpportunityStep(client, job, input){ (globalThis.__steps ||= []).push(input.step); return { fresh: true, id: "res-" + globalThis.__steps.length } }'
         + ' export async function settleOpportunityStep(){}',
