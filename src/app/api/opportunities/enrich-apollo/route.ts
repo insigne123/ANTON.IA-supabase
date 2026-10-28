@@ -40,6 +40,7 @@ import {
   requireSessionOrTrustedInternalRequest,
 } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { leadClaimRefusal } from '@/lib/lead-claim';
 import { hybridEnabled } from '@/lib/server/microworlds/contracts';
 import { observeConfirmedApolloIdentity } from '@/lib/server/microworlds/search';
 import { findHybridHint, frozenHybridItems, registerHybridItem, applyHybridCache, hybridFieldPlan, cancelHybridItems, settleHybrid,
@@ -1414,6 +1415,16 @@ export async function POST(request: NextRequest) {
       if (claim?.operationId) response.headers.set('x-operation-id', claim.operationId);
       response.headers.set('retry-after', '5');
       return response;
+    }
+
+    // Leads adjudicados: the database refused to save a person another member holds. Said as it is, not as a failure.
+    const leadClaim = providerBoundaryCrossed ? null : leadClaimRefusal(error);
+    if (leadClaim) {
+      return NextResponse.json({
+        error: 'LEAD_CLAIMED',
+        message: leadClaim.message,
+        ...(claim?.operationId ? { operationId: claim.operationId } : {}),
+      }, { status: 409 });
     }
 
     const exposed = new Set([
