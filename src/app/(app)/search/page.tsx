@@ -28,7 +28,6 @@ import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
 import { companySearchPrefill } from '@/lib/search/company-prefill';
 import {
@@ -1114,11 +1113,9 @@ export default function SearchPage() {
   };
 
   const executeSearch = async ({
-    countQuota = true,
     selectedOrg = null,
     revealOverride,
   }: {
-    countQuota?: boolean;
     selectedOrg?: CompanySearchOrganization | null;
     revealOverride?: { revealEmail: boolean; revealPhone: boolean };
   } = {}) => {
@@ -1158,14 +1155,7 @@ export default function SearchPage() {
     submittingRef.current = true;
     const searchRunId = ++searchRunIdRef.current;
 
-    const canUseClientQuota = typeof (Quota as any).canUseClientQuota === 'function' ? (Quota as any).canUseClientQuota : (_k: any) => true;
-    const incClientQuota = typeof (Quota as any).incClientQuota === 'function' ? (Quota as any).incClientQuota : (_k: any) => { };
-    const getClientLimit = typeof (Quota as any).getClientLimit === 'function' ? (Quota as any).getClientLimit : (_k: any) => 50;
-
-    if (countQuota && !canUseClientQuota('leadSearch')) {
-      toast({ title: 'Comprobando disponibilidad', description: `Validaremos si aún tienes búsquedas disponibles hoy (límite estimado: ${getClientLimit('leadSearch')}).` });
-    }
-
+    // Searching spends no credit (28 Oct 2026): nothing to count or check here.
     setIsLoading(true);
     setHasSearched(true);
     setLeads([]);
@@ -1236,7 +1226,6 @@ export default function SearchPage() {
       }
 
       if (searchRunIdRef.current !== searchRunId) return;
-      if (countQuota) incClientQuota('leadSearch');
       applySearchResult(result, filters.searchMode, { revealEmail: activeRevealEmail, revealPhone: activeRevealPhone });
     } catch (error: any) {
       if (searchRunIdRef.current !== searchRunId) return;
@@ -1271,7 +1260,7 @@ export default function SearchPage() {
 
   const handleSelectOrganization = async (organization: CompanySearchOrganization) => {
     setSelectedOrganization(organization);
-    await executeSearch({ countQuota: false, selectedOrg: organization });
+    await executeSearch({ selectedOrg: organization });
   };
 
   const handleSearch = async () => {

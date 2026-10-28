@@ -58,14 +58,12 @@ test('a thread running a task has room for its steps, never past 10 deep', () =>
   assert.equal(coworkTaskThreadBudget(base, { ...task(), startDepth: 8 }).maxDepth, 10);
 });
 
-test('a plan never asks for more credits than the person has left today, its searches included', () => {
-  assert.equal(coworkTaskPlanOverBudget(plan, 11), null, 'its search and its 10 credits');
+test('a plan never asks for more credits than the person has left today; its searches spend none', () => {
+  assert.equal(coworkTaskPlanOverBudget(plan, 10), null, 'its 10 credits; the search is free');
   assert.equal(coworkTaskPlanOverBudget(plan, 40), null);
-  assert.match(coworkTaskPlanOverBudget(plan, 10) ?? '', /pide hasta 11 créditos \(limits\.searches 1 \+ limits\.credits 10\) y hoy te quedan 10/);
-  assert.match(coworkTaskPlanOverBudget(plan, 6) ?? '', /bájalos hasta que sumen 6 o menos/);
+  assert.match(coworkTaskPlanOverBudget(plan, 6) ?? '', /pide hasta 10 créditos y hoy te quedan 6: baja limits\.credits a 6 o menos/);
   assert.match(coworkTaskPlanOverBudget(plan, 0) ?? '', /Hoy no te quedan créditos/);
-  assert.match(coworkTaskPlanOverBudget({ ...plan, limits: { searches: 1, credits: 0 } }, 0) ?? '', /Hoy no te quedan créditos/, 'a search uses a credit too');
-  assert.equal(coworkTaskPlanOverBudget({ ...plan, limits: { searches: 0, credits: 0 } }, 0), null, 'a plan that spends nothing always fits');
+  assert.equal(coworkTaskPlanOverBudget({ ...plan, limits: { searches: 1, credits: 0 } }, 0), null, 'a plan that only searches always fits');
 });
 
 test('a turn of the task reads the plan, what it spent and what is left', () => {

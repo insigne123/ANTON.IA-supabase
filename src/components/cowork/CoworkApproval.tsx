@@ -81,7 +81,7 @@ function SearchDetails({ criteria }: { criteria: unknown }) {
         className="break-all rounded text-cw-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
         {data.linkedinUrl}
       </a></ReviewField>
-      <ReviewField label="Costo">Aproximadamente 1 crédito del proveedor y 1 búsqueda de tu cuota.</ReviewField>
+      <ReviewField label="Costo">No gasta créditos</ReviewField>
     </ReviewFields>
     <ReviewNote>Solo se consulta este perfil. Guardarlo y preparar la invitación son pasos posteriores, con su aprobación.</ReviewNote>
   </div>;

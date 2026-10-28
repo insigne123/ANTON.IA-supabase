@@ -252,7 +252,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
               <div>
                 <h3 id="company-similar" className="text-sm font-medium">Empresas parecidas</h3>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {company.industry ? `Del mismo rubro${company.size ? ' y tamaño' : ''}, que aún no están en tu CRM. La IA elige las más parecidas con lo que informa el proveedor y lo que sabe de empresas conocidas, y dice por qué. Usa una búsqueda de tu cupo diario.`
+                  {company.industry ? `Del mismo rubro${company.size ? ' y tamaño' : ''}, que aún no están en tu CRM. La IA elige las más parecidas con lo que informa el proveedor y lo que sabe de empresas conocidas, y dice por qué. Buscar no gasta créditos.`
                     : 'Esta empresa no tiene rubro guardado: búscala en «Buscar prospectos» para completarlo.'}
                 </p>
               </div>

@@ -623,13 +623,11 @@ export async function checkAndConsumeDailyQuota(
   const orgId = await resolveOrganizationIdForQuota(userId, params.organizationId);
   const date = todayKeyUTC();
 
+  // Searching is free (28 Oct 2026): companies, people in a company, Leads Finder and Cowork's searches spend no credit and have
+  // no daily limit. Credits go to what costs: the email or phone lookup that saving a lead runs, and research. The Apollo gateway
+  // still caps the searches a minute (APOLLO_BACKEND_LEAD_SEARCH_MAX_REQUESTS).
   if (resource === 'search' || resource === 'leadSearch') {
-    const hasCreditAccess = await hasUserEnrichmentSearchCreditAccess(userId);
-    if (!hasCreditAccess) {
-      const result = { allowed: false, count: 0, limit: 0, dayKey: date, resetAtISO: nextDayStartISOUTC() };
-      await recordQuotaDecision({ userId, organizationId: orgId, resource, requestedCount: count, scope: 'user', result });
-      return result;
-    }
+    return { allowed: true, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
   }
 
   if (resource === 'contact') {

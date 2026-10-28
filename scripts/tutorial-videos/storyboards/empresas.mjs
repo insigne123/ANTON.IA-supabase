@@ -62,7 +62,7 @@ export default {
     },
     {
       title: 'Empresas parecidas', text: 'Del mismo rubro y tamaño, que aún no están en tu CRM. La IA dice por qué se parecen.',
-      say: 'Busca empresas parecidas a las que ya trabajas.', postit: 'Usa una búsqueda de tu cupo diario.',
+      say: 'Busca empresas parecidas a las que ya trabajas.', postit: 'Buscar no gasta créditos.',
       target: { role: 'button', name: 'Buscar empresas parecidas' }, zoom: 1.5, arrow: true,
       waitFor: { text: 'Retail Pacífico', exact: true },
     },

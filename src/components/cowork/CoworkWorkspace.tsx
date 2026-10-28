@@ -1032,7 +1032,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         : latest.run.status === 'completed' ? 'Responde o pide el siguiente paso…' : 'Reformula o indica cómo seguir…';
   // The searches left today only show when they are about to run out.
   const quotaNote = searchQuota && searchQuota.remaining <= COWORK_LOW_SEARCH_QUOTA
-    ? (searchQuota.remaining === 0 ? 'Ya usaste las búsquedas de prospectos de hoy.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 búsqueda' : `quedan ${searchQuota.remaining} búsquedas`} de prospectos hoy.`) : '';
+    ? (searchQuota.remaining === 0 ? 'Ya usaste tus créditos de hoy: puedes seguir buscando prospectos, pero no buscar correos ni investigar.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 crédito' : `quedan ${searchQuota.remaining} créditos`} hoy para buscar correos e investigar.`) : '';
   const queuedView = queued ? coworkMessageAttachments(queued) : null;
   // When little of the assistant's use is left, it says so before the limit (COW-14, COW-15), with the way on when there is one.
   const usageWarning = coworkUsageWarning(state?.usage);

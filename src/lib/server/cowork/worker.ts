@@ -257,7 +257,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       intents: coworkIntentPromptsEnabled() ? coworkTurnIntents(run.message, history.turns) : null,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
-      threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. ${remainingSearches === null ? 'Créditos disponibles hoy: no se pudieron leer; cada búsqueda los revisa al gastarlos.' : `Créditos disponibles hoy: ${remainingSearches} (1 por cada búsqueda de personas, búsqueda de correo o perfil e investigación): no propongas gastar más.`} Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
+      threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. ${remainingSearches === null ? 'Créditos disponibles hoy: no se pudieron leer; cada búsqueda los revisa al gastarlos.' : `Créditos disponibles hoy: ${remainingSearches} (1 por cada búsqueda de correo o perfil y cada investigación; buscar prospectos no gasta): no propongas gastar más.`} Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
     });
     // Reads, notes, the plan and each agent's step, as events of the run.
     const recordEvent = async (payload: unknown) => {
@@ -487,8 +487,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         if (clarificationOnly) throw new Error('Una aclaración no admite nuevas búsquedas externas.');
         if (process.env.COWORK_EXTERNAL_SEARCH_ENABLED !== 'true') throw new Error('External search disabled');
         if (stats.searches >= budgets.maxSearches) throw new Error('Thread search budget exhausted');
-        // An unread balance does not stop the proposal: the search checks its credit when it runs.
-        if (searchQuota && !searchQuota.allowed) throw new Error('Daily search quota exhausted');
+        // Searching spends no credit (28 Oct 2026): the credits left today never stop a search.
         const proposed = await client.rpc('cowork_propose_search', { p_run_id: run.id, p_token: run.lease_token, p_criteria: criteria });
         if (proposed.error || proposed.data !== true) throw new Error('Could not prepare search review');
         waitingApproval = true;

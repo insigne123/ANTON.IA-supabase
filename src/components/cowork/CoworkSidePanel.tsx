@@ -115,7 +115,7 @@ export function CoworkSidePanel({ steps, artifacts, openArtifactId, onOpenArtifa
           {budget?.exhausted && <p className="text-cw-muted">Llegó al tope de pasos automáticos de esta conversación: escríbele para seguir.</p>}
           {usage && <p className="tabular-nums text-cw-muted">{coworkUsageLine(usage)}</p>}
           {searchQuota && searchQuota.remaining <= COWORK_LOW_SEARCH_QUOTA && <p className="text-cw-muted">
-            {searchQuota.remaining === 0 ? 'Ya usaste las búsquedas de prospectos de hoy.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 búsqueda' : `quedan ${searchQuota.remaining} búsquedas`} de prospectos hoy.`}
+            {searchQuota.remaining === 0 ? 'Ya usaste tus créditos de hoy: puedes seguir buscando prospectos, pero no buscar correos ni investigar.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 crédito' : `quedan ${searchQuota.remaining} créditos`} hoy para buscar correos e investigar.`}
           </p>}
         </div>
       </Section>

@@ -62,7 +62,7 @@ const sources = {
   './enrich-phone': 'export const executeCoworkPhoneReveal=async()=>{throw new Error("unexpected phone reveal")};',
   './campaign-ops': 'export const createCoworkCampaign=async()=>{throw new Error("unexpected campaign")};export const reviewCoworkCampaign=createCoworkCampaign;',
   '@/lib/server/supabase-admin': 'export const getSupabaseAdminClient=()=>globalThis.__coworkSearch.client;',
-  '@/lib/server/daily-quota-store': 'export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:10});export const checkAndConsumeDailyQuota=()=>globalThis.__coworkSearch.quota();',
+  '@/lib/server/daily-quota-store': 'export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:10});export const checkAndConsumeDailyQuota=()=>globalThis.__coworkSearch.quota();export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:10});',
   '@/lib/server/apollo-search-client': 'export const requestApolloSearch=p=>globalThis.__coworkSearch.provider(p);',
   '@/lib/cowork/capabilities': 'export const createCoworkGateway=()=>{throw new Error("gateway unused in this suite")};',
   './access': 'export const requireCoworkWorkerAccess=async()=>{};',

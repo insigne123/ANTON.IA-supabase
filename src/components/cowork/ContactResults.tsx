@@ -140,7 +140,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
       {Boolean(full?.payload.snapshot) && <p className="text-[12px] text-cw-muted">La lista se actualizó al abrir «Ver todos». Se conserva esa misma versión para descargarla.</p>}
       {partial && <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-[12px] text-cw-warning">Una consulta alcanzó el límite de resultados. Esta lista no representa toda tu base.</p>}
       {more && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
-        <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Hay más resultados con estos criterios. Cowork propone la búsqueda y tú la apruebas (usa 1 búsqueda de tu cupo diario).</p>
+        <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Hay más resultados con estos criterios. Cowork propone la búsqueda y tú la apruebas. Buscar no gasta créditos.</p>
         <CwButton size="sm" variant="secondary" disabled={!onSend} onClick={() => onSend?.(COWORK_MORE_RESULTS_MESSAGE)}><SearchCheck aria-hidden="true" />Traer más</CwButton>
         {!onSend && <p className="w-full text-[12px] text-cw-muted">{sendHint}</p>}
       </div>}
