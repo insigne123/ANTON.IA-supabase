@@ -376,14 +376,14 @@ export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' 
     const parsed = coworkSearchCriteriaSchema.safeParse(proposal.payload.criteria);
     const more = parsed.success && ((parsed.data.page || 1) > 1 || Boolean(parsed.data.offset)) ? ' más' : '';
     if (parsed.success && parsed.data.linkedinUrl) {
-      return { happens: 'Se consulta solo la persona de este perfil en el proveedor (aproximadamente 1 crédito y 1 búsqueda de tu cuota).',
+      return { happens: 'Se consulta solo la persona de este perfil en el proveedor (no gasta créditos).',
         not: 'No se revelan correos ni teléfonos, no se guarda el contacto y no se envía una invitación.' };
     }
     if (parsed.success && coworkSearchStrategy(parsed.data) === 'companies_first') {
-      return { happens: `Se buscan empresas de esos rubros y, dentro de ellas, hasta ${parsed.data.limit} contactos nuevos${more} en el proveedor (1 búsqueda de tu cuota).`,
+      return { happens: `Se buscan empresas de esos rubros y, dentro de ellas, hasta ${parsed.data.limit} contactos nuevos${more} en el proveedor (no gasta créditos).`,
         not: 'No se revelan correos ni se guardan contactos, y no se envía nada.' };
     }
-    return { happens: `Se buscan hasta ${criteria.limit ?? 25} ${companies ? 'empresas' : 'contactos nuevos'}${more} en el proveedor (1 búsqueda de tu cuota).`,
+    return { happens: `Se buscan hasta ${criteria.limit ?? 25} ${companies ? 'empresas' : 'contactos nuevos'}${more} en el proveedor (no gasta créditos).`,
       not: 'No se revelan correos ni se guardan contactos, y no se envía nada.' };
   }
   if (proposal.type === 'note') {

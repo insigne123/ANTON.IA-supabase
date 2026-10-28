@@ -9,9 +9,9 @@ const KIND: Record<CoworkTaskStepKind, string> = { search: 'Búsqueda', prepare:
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-/** What the task may spend, in words: «hasta 1 búsqueda de tu cupo diario y 10 créditos», or that it spends nothing. */
+/** What the task may spend, in words: «hasta 1 búsqueda y 10 créditos» (a search spends no credit), or that it spends nothing. */
 export function coworkTaskSpend(limits: CoworkTaskPlan['limits']) {
-  const parts = [limits.searches ? `${plural(limits.searches, 'búsqueda', 'búsquedas')} de tu cupo diario` : '',
+  const parts = [limits.searches ? plural(limits.searches, 'búsqueda', 'búsquedas') : '',
     limits.credits ? `${plural(limits.credits, 'crédito', 'créditos')} (1 por correo buscado)` : ''].filter(Boolean);
   return parts.length ? `Hasta ${parts.join(' y ')}.` : 'No gasta búsquedas ni créditos.';
 }
