@@ -78,6 +78,7 @@ async function lookUp(chosen: Lead[], revealPhone: boolean) {
       });
       const body = await response.clone().json().catch(async () => ({ nonJson: true, text: await response.text() }));
       if (!response.ok) {
+        if ((body as any)?.error === 'LEAD_CLAIMED' && (body as any)?.message) throw new Error(String((body as any).message).slice(0, 200));
         const snippet = (body as any)?.error || (body as any)?.message || (body as any)?.text || 'Error interno';
         throw new Error(`HTTP ${response.status}: ${String(snippet).slice(0, 200)}`);
       }

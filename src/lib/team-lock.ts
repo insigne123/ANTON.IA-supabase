@@ -62,5 +62,21 @@ export const normalizeLockEmail = (value: unknown) => String(value || '').trim()
 export function normalizeLockLinkedin(value: unknown) {
   const text = String(value || '').trim().toLowerCase();
   const match = text.match(/linkedin\.com\/in\/([^/?#\s]+)/);
-  return match ? `linkedin.com/in/${decodeURIComponent(match[1])}` : '';
+  if (!match) return '';
+  let handle = match[1];
+  // A broken %-sequence («%e0%a4%a») stays as written: decoding it would throw and take the whole screen down.
+  try { handle = decodeURIComponent(handle).toLowerCase(); } catch { /* as written */ }
+  return `linkedin.com/in/${handle}`;
+}
+
+/**
+ * The forms a LinkedIn profile can be stored in, for the database's comparison (lead_claim_linkedin_v1), which does not decode:
+ * «linkedin.com/in/josé» and «linkedin.com/in/jos%c3%a9»; one when both are the same.
+ */
+export function lockLinkedinForms(value: unknown): string[] {
+  const key = normalizeLockLinkedin(value);
+  if (!key) return [];
+  const handle = key.slice('linkedin.com/in/'.length);
+  const encoded = `linkedin.com/in/${handle.replace(/[^\x00-\x7f]+/g, part => encodeURIComponent(part).toLowerCase())}`;
+  return encoded === key ? [key] : [key, encoded];
 }

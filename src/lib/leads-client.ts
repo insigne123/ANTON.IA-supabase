@@ -325,6 +325,7 @@ export async function enrichLinkedInProfileLead(input: {
     if (res.status === 429) {
       throw new ProfileSearchProblemError(problem, 'Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
     }
+    if (json?.error === 'LEAD_CLAIMED' && typeof json?.message === 'string') throw new ProfileSearchProblemError(problem, json.message);
     throw new ProfileSearchProblemError(problem, 'No pudimos iniciar la búsqueda de datos de contacto. Inténtalo nuevamente.');
   }
   if ((!json?.queued && json?.operationStatus !== 'completed' && !recoverablePending)
