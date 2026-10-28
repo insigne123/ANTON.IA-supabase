@@ -125,7 +125,10 @@ export function jobAdFromJSearch(raw: Record<string, unknown>): JobAd | null {
   const externalId = text(raw.job_id, 300), title = text(raw.job_title, 300), company = text(raw.employer_name, 300);
   if (!externalId || !title) return null;
   const location = [raw.job_city, raw.job_state, raw.job_country].map(value => text(value, 80)).filter(Boolean).join(', ') || text(raw.job_location, 200) || null;
-  const country = adCountry(location, raw.job_country);
+  // The code the source gives wins over a place's words; an ad in another country («US») is not read.
+  const code = text(raw.job_country, 8).toUpperCase();
+  if (/^[A-Z]{2}$/.test(code) && !adCountry(null, code)) return null;
+  const country = adCountry(location, code);
   return {
     source: 'jsearch', externalId, title, company,
     companyDomain: domainOf(raw.employer_website), companyLinkedinUrl: null, companySize: null, companyIndustry: null,
@@ -147,8 +150,11 @@ export function jobAdFromFantastic(raw: Record<string, unknown>): JobAd | null {
     : first && typeof first === 'object' ? ['city', 'admin', 'country'].map(key => text((first as Record<string, unknown>)[key], 80)).filter(Boolean).join(', ')
     : text(raw.location, 200);
   const headcount = typeof raw.org_linkedin_headcount === 'number' ? String(raw.org_linkedin_headcount) : text(raw.org_linkedin_size ?? raw.linkedin_org_size, 40);
-  const derivedCountry = Array.isArray(raw.countries_derived) && typeof raw.countries_derived[0] === 'string' ? raw.countries_derived[0] : '';
-  const country = adCountry(location) ?? adCountry(derivedCountry);
+  const derivedCountry = Array.isArray(raw.countries_derived) && typeof raw.countries_derived[0] === 'string' ? text(raw.countries_derived[0], 80) : '';
+  // The country the source derived wins over a place's words («Peru, Indiana» is in the United States); an ad in another
+  // country is not read. Without it, the place says it.
+  const country = derivedCountry ? adCountry(derivedCountry) : adCountry(location);
+  if (derivedCountry && !country) return null;
   return {
     source: 'linkedin', externalId, title, company,
     companyDomain: domainOf(raw.org_linkedin_website) || domainOf(raw.organization_url ?? raw.linkedin_org_url_website ?? raw.linkedin_org_url),

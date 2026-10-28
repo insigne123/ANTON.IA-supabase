@@ -39,6 +39,10 @@ test('an ad becomes evidence with the company fields only, and comes back as the
   assert.equal(back?.postedAt, new Date(item.signals[0].postedAt!).toISOString());
   assert.equal(jobAdFromSignal({ ...signal, posted_at: null, data: signal.data })?.postedAt, NOW, 'an ad without a date counts from when it was seen');
   assert.equal(jobAdFromSignal({ ...signal, source: 'mercado_publico', data: signal.data }), null);
+  // An ad stored before ads had a country kept the region its words suggested: outside Chile it is dropped.
+  const cali = jobAdFromSignal({ ...signal, location: 'Santiago de Cali, Valle del Cauca, Colombia', data: { ...signal.data, region: 'Metropolitana' } });
+  assert.deepEqual([cali?.country, cali?.region], ['CO', null]);
+  assert.equal(jobAdFromSignal({ ...signal, data: signal.data })?.region, 'Antofagasta', 'in Chile the stored region stays');
 });
 
 test('long texts are cut to the limits of the tables', () => {
