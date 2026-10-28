@@ -33,10 +33,10 @@ test('with no balance, or one that cannot be read, it gives the costs and claims
 });
 
 test('with an organization share it says what is left of it and what it affords, apart from the shared balance', async () => {
-  const share = { credits: 300, used: 18, remaining: 282, startsAt: '2026-10-28T20:00:00Z', endsAt: '2026-11-01T20:17:52Z', note: null };
+  const share = { credits: 300, used: 18, remaining: 282, startsAt: '2026-10-28T20:00:00Z', endsAt: '2026-11-01T20:17:52Z', note: null, usedBefore: 2300, showLimit: true };
   const result = await readCoworkCredits(async () => balance('2026-09-30T17:00:00Z', 1000), now, async () => share) as any;
   assert.equal(result.remaining, 1000, 'the shared balance stays as it is');
-  assert.deepEqual(result.organizationShare, { credits: 300, used: 18, remaining: 282, until: '1 de noviembre',
+  assert.deepEqual(result.organizationShare, { usedThisCycle: 2318, remaining: 282, until: '1 de noviembre',
     costs: { emailEnrichment: 1, phoneEnrichment: 8 }, affords: { emailEnrichments: 282, phoneReveals: 35 } });
   assert.match(result.limitation, /organizationShare/);
   const unread = await readCoworkCredits(async () => null, now, async () => share) as any;
@@ -47,3 +47,9 @@ test('with an organization share it says what is left of it and what it affords,
   assert.doesNotMatch(failing.limitation, /organizationShare/);
 });
 
+test('an organization that does not see its share reads only what it used', async () => {
+  const share = { credits: 700, used: 50, remaining: 650, startsAt: '2026-10-28T20:00:00Z', endsAt: '2026-11-01T20:17:52Z', note: null, usedBefore: 29, showLimit: false };
+  const result = await readCoworkCredits(async () => balance('2026-09-30T17:00:00Z', 1000), now, async () => share) as any;
+  assert.deepEqual(result.organizationShare, { usedThisCycle: 79, until: '1 de noviembre', costs: { emailEnrichment: 1, phoneEnrichment: 8 } });
+  assert.doesNotMatch(JSON.stringify(result.organizationShare), /700|650/);
+});

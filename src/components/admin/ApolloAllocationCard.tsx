@@ -22,7 +22,6 @@ export function ApolloAllocationCard() {
 
   if (!allocation) return null;
   const copy = apolloAllocationCopy(allocation);
-  const usedShare = allocation.credits > 0 ? Math.min(100, Math.round((allocation.used / allocation.credits) * 100)) : 100;
 
   return (
     <Card className="border-border/60" role="region" aria-labelledby="apollo-allocation-title">
@@ -32,11 +31,18 @@ export function ApolloAllocationCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className={cn('text-sm leading-6', copy.spent && 'font-medium')} role={copy.spent ? 'status' : undefined}>{copy.summary}</p>
-        <Progress value={usedShare} aria-label={`Usados ${n(Math.min(allocation.used, allocation.credits))} de ${n(allocation.credits)} créditos`} />
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 text-sm">
-          <p><span className="font-semibold tabular-nums">{n(Math.min(allocation.used, allocation.credits))}</span> <span className="text-muted-foreground">usados</span></p>
-          <p><span className="font-semibold tabular-nums">{n(allocation.remaining)}</span> <span className="text-muted-foreground">quedan de {n(allocation.credits)}</span></p>
-        </div>
+        {copy.total !== null && copy.remaining !== null ? (
+          <>
+            <Progress value={copy.total > 0 ? Math.min(100, Math.round((copy.used / copy.total) * 100)) : 100}
+              aria-label={`Usados ${n(copy.used)} de ${n(copy.total)} créditos`} />
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 text-sm">
+              <p><span className="font-semibold tabular-nums">{n(copy.used)}</span> <span className="text-muted-foreground">usados</span></p>
+              <p><span className="font-semibold tabular-nums">{n(copy.remaining)}</span> <span className="text-muted-foreground">disponibles</span></p>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm"><span className="text-3xl font-semibold tabular-nums tracking-tight">{n(copy.used)}</span> <span className="text-muted-foreground">usados</span></p>
+        )}
         <p className="text-xs leading-5 text-muted-foreground">{copy.footnote}</p>
       </CardContent>
     </Card>
