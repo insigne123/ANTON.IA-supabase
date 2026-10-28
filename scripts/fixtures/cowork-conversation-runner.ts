@@ -117,12 +117,12 @@ export const corpusCeiling = coworkTurnCeiling();
 
 export const corpusInstructions = coworkAgentInstructions({
   turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false,
-  threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
+  threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Créditos disponibles hoy: 49 (1 por cada búsqueda de personas, búsqueda de correo o perfil e investigación): no propongas gastar más.',
 });
 /** The same instructions with the Writer on (COWORK_WRITER_ENABLED). */
 export const corpusWriterInstructions = coworkAgentInstructions({
   turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer: true,
-  threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
+  threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Créditos disponibles hoy: 49 (1 por cada búsqueda de personas, búsqueda de correo o perfil e investigación): no propongas gastar más.',
 });
 
 /** As in production: the prompt carries only the parts of the turn's intents (intents.ts) with COWORK_INTENT_PROMPTS_ENABLED=true. */
@@ -146,7 +146,7 @@ export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, optio
     tasks: process.env.COWORK_TASKS_ENABLED === 'true' && !entry.task,
     prepareBatch: corpusPrepareBatch,
     intents: corpusIntentPrompts ? coworkTurnIntents(entry.request, entry.history || []) : null,
-    threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
+    threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Créditos disponibles hoy: 49 (1 por cada búsqueda de personas, búsqueda de correo o perfil e investigación): no propongas gastar más.',
   });
 }
 
