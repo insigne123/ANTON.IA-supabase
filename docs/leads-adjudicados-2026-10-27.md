@@ -22,7 +22,7 @@ En GrupoExpro (32 personas) y PSOL (7), las búsquedas les muestran a todos las 
   - `20261027120100_lead_claims_enforce.sql`: el bloqueo. Un trigger antes de insertar en `leads` y `enriched_leads` rechaza a la persona adjudicada a otro integrante, con el error `lead_claimed`; el error lleva quién la tiene y cuántos días le quedan.
     - Solo al insertar. Reasignar un contacto no cambia.
     - No rechaza a quien ya tiene guardada a la persona. Esto importa porque Postgres corre el trigger también en un `upsert` que termina actualizando, y así guarda «Por escribir» un enriquecimiento (`enriched-leads-service.ts`). Sin esta excepción, quien tuvo a la persona antes no podría actualizarla una vez que otro la guardó.
-    - Con la lectura de las dos primeras migraciones, el trigger costaba unos 15 ms por fila en la organización más grande (medido en producción el 28 de octubre). Una importación de 1.000 personas sumaba unos 15 segundos y pasaba el límite de 8 s por sentencia. La cuarta migración lo corrige.
+    - Con la lectura de las dos primeras migraciones, el trigger costaba entre 140 y 275 ms por fila en la organización más grande (7.687 contactos) y unos 15 ms en GrupoExpro (648), medido en producción el 28 de octubre. En la más grande, guardar unas 40 personas de una vez ya pasaba el límite de 8 s por sentencia. La cuarta migración lo corrige.
   - `20261028130000_lead_claims_lookup_indexed.sql` (revisión del 28 de octubre):
     - **Por índices.** Busca cada persona por igualdad en índices de la organización (correo, id del proveedor y LinkedIn), sin leer todos sus contactos. En una prueba local con 8.000 contactos: 200 personas, de 85 ms a 9 ms; una fila, de 76 ms a 2,5 ms; una importación de 2.000 filas, de 162 s a 2,7 s.
     - **Lo que ya tienes no te aparece adjudicado.** Si quien pregunta ya tiene guardada a la persona, no se la muestra «Adjudicado a Ana»: el bloqueo ya le permitía seguir con ella, pero la búsqueda y Cowork se la negaban.
@@ -37,6 +37,7 @@ En GrupoExpro (32 personas) y PSOL (7), las búsquedas les muestran a todos las 
 1. Migraciones de lectura en producción: no cambian nada de lo que se puede guardar. Se aplicaron el 27 de octubre: permisos, índice, advisors y logs, sin errores.
 2. Despliegue de la app: los avisos aparecen. Antes de la migración, la lectura falla en silencio y las pantallas siguen como antes.
 3. Migración del bloqueo.
+4. Migración de la lectura por índices: aplicada el 28 de octubre como `20261028131536`. Los 7 índices son válidos y los permisos no cambian. En la organización más grande, 100 lecturas seguidas toman 36 ms, unos 0,4 ms por fila guardada: una importación de 1.000 personas suma menos de medio segundo.
 
 ## Rollback
 
