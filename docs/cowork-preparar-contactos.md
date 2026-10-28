@@ -14,7 +14,7 @@
    - **research:** además, investigarlas. Sin correo buscado no se investiga, así que el lote lo busca antes;
    - **linkedin:** guardarlas si falta y buscar su perfil de LinkedIn (1 crédito por persona), aunque ya tengan correo. Es la misma consulta al proveedor que la del correo y solo completa lo que le falta al contacto. Se salta a quien ya tiene perfil o ya pasó por esa consulta. Sirve para invitar por LinkedIn cuando ningún contacto tiene perfil guardado.
 
-   Las personas son resultados de búsqueda (`providerId`) o contactos guardados (`leadId`) que la conversación ya vio. Admite hasta 50 para guardar y 10 para correo, perfil o investigación.
+   Las personas son resultados de búsqueda (`providerId`) o contactos guardados (`leadId`) que la conversación ya vio. Admite hasta 50 personas, sea para guardar, buscar el correo o el perfil, o investigar. Al aprobarlo, el lote prepara a 6 personas a la vez, cada una en su orden (guardar, buscar el correo, investigar), para que 50 quepan en el tiempo del worker: una búsqueda de correo tarda unos 4 segundos.
 2. **Solo lo que falta:** antes de proponer, el servidor lee el estado real de cada persona y salta lo hecho. Revisa si ya está guardada, si su correo ya está o ya se buscó (por cualquier camino) y si tiene una investigación hecha o en curso.
    - Nada se cobra dos veces.
    - Si a nadie le falta nada, no hay tarjeta: Cowork sigue con el paso siguiente sin pedir aprobación.

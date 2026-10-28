@@ -9,15 +9,17 @@ import {
 const LEAD = (n: number) => `00000000-0000-4000-8000-0000000000a${n}`;
 const fresh = { saved: false, emailChecked: false, researched: false };
 
-test('the people of a proposal: each once, by search result or saved contact, within the size of the goal', () => {
+test('the people of a proposal: each once, by search result or saved contact, up to 50 whatever the goal', () => {
   assert.deepEqual(coworkPrepareBatchPeople({ goal: 'research', people: [{ providerId: 'apollo:r1' }, { leadId: LEAD(1) }] }),
     { goal: 'research', people: [{ providerId: 'apollo:r1' }, { leadId: LEAD(1) }] });
   assert.throws(() => coworkPrepareBatchPeople({ goal: 'save', people: [{ providerId: 'apollo:r1' }, { providerId: 'apollo:r1' }] }), /repetidas/);
   assert.throws(() => coworkPrepareBatchPeople({ goal: 'save', people: [{ providerId: 'apollo:r1', leadId: LEAD(1) }] }), /una de las dos/);
   assert.throws(() => coworkPrepareBatchPeople({ goal: 'save', people: [{}] }), /una de las dos/);
-  const eleven = Array.from({ length: 11 }, (_, n) => ({ providerId: `apollo:p${n}` }));
-  assert.throws(() => coworkPrepareBatchPeople({ goal: 'email', people: eleven }), /hasta 10 personas/);
-  assert.equal(coworkPrepareBatchPeople({ goal: 'save', people: eleven }).people.length, 11, 'saving takes up to 50');
+  const people = (count: number) => Array.from({ length: count }, (_, n) => ({ providerId: `apollo:p${n}` }));
+  for (const goal of ['save', 'email', 'research', 'linkedin']) {
+    assert.equal(coworkPrepareBatchPeople({ goal, people: people(50) }).people.length, 50, goal);
+    assert.throws(() => coworkPrepareBatchPeople({ goal, people: people(51) }), /hasta 50 personas: propón el resto en otro lote/, goal);
+  }
   assert.throws(() => coworkPrepareBatchPeople({ goal: 'everything', people: [{ leadId: LEAD(1) }] }));
 });
 
