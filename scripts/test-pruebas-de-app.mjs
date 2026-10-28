@@ -188,6 +188,7 @@ const sources = {
     export const claimEnrichmentQuotaOperation = async () => ({ claimed: true, allowed: true, claimToken: 'claim' });
     export const releaseEnrichmentQuotaOperation = async () => {};`,
   '@/lib/server/enrichment-search-access': 'export const hasUserEnrichmentSearchCreditAccess = async () => true;',
+  '@/lib/server/apollo-credit-allocation': 'export const assertApolloAllocationAllows = async () => null;',
   '@/lib/server/apollo-enrichment-callbacks': `export const createApolloEnrichmentCallback = async input => ({ callbackId: 'callback-' + input.targetId, tokenHash: 'hash' });
     export const markApolloEnrichmentCallbackSubmitted = async () => {}; export const bindApolloEnrichmentCallback = async () => 'bound';
     export const applyApolloEnrichmentCandidate = async () => 'processed'; export const settleApolloEnrichmentCallback = async () => {};`,

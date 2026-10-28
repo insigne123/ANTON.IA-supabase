@@ -42,7 +42,8 @@ export async function queryCoworkDomainRead(client: SupabaseClient, scope: Scope
   if (action === 'credits.balance') {
     z.literal('').parse(value);
     const { readCoworkCredits } = await import('./credits-read');
-    return readCoworkCredits();
+    const { loadApolloCreditAllocation } = await import('@/lib/server/apollo-credit-allocation');
+    return readCoworkCredits(undefined, undefined, () => loadApolloCreditAllocation(scope.organizationId));
   }
   if (action === 'gmail.contact_history') {
     const { readCoworkGmailContact } = await import('./gmail-contact');

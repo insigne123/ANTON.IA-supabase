@@ -6,10 +6,12 @@ import ts from 'typescript';
 import {normalizeLinkedinProfileUrl} from '@/lib/linkedin-url';
 import {hybridFieldPlan} from '@/lib/server/microworlds/fulfillment';
 import type {CachedContact} from '@/lib/server/microworlds/contracts';
+import * as allocation from '@/lib/apollo-credit-allocation';
 class ProviderError extends Error {constructor(readonly status:number,readonly code:string,readonly providerOutcomeUnknown:boolean){super(code);}}
+class AllocationRefusal extends Error {}
 const contact:CachedContact={firstName:'Ana',lastName:'Pérez',fullName:'Ana Pérez',domain:'demo.test',title:'CEO',linkedinUrl:'https://linkedin.com/in/ana-demo',email:'ana@demo.test',emailStatus:'unknown',mobile:'+56912345678'};
-function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boolean;providerEmail?:string}={}){
-  const rows=new Map<string,any>(),callbacks:any[]=[],calls={claims:0,provider:[] as any[],registered:[] as any[],applied:[] as any[]};
+function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boolean;providerEmail?:string;shareUsed?:string}={}){
+  const rows=new Map<string,any>(),callbacks:any[]=[],calls={claims:0,provider:[] as any[],registered:[] as any[],applied:[] as any[],share:[] as number[]};
   let claim:any=null,stored:any=null;
   const db:any={from(table:string){let value:any,selected:any,ids:any={};const chain:any={
     select(){return chain;},eq(k:string,v:any){ids[k]=v;return chain;},in(){return chain;},limit(){return chain;},order(){return chain;},
@@ -34,6 +36,9 @@ function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boole
     '@/lib/server/request-auth':{requireSessionOrTrustedInternalRequest:async()=>({source:'session',user:{id:'me',email:'me@demo.test'},organizationId:'org'}),requestAuthErrorResponse:()=>null},
     '@/lib/server/supabase-admin':{getSupabaseAdminClient:()=>db},
     '@/lib/lead-claim':{leadClaimRefusal:()=>null},
+    '@/lib/apollo-credit-allocation':allocation,
+    '@/lib/server/apollo-credit-allocation':{ApolloAllocationRefusal:AllocationRefusal,assertApolloAllocationAllows:async(_org:string,needed:number)=>{
+      calls.share.push(needed);if(options.shareUsed&&needed>0)throw new AllocationRefusal(options.shareUsed);return null;}},
     '@/lib/server/enrichment-search-access':{hasEnrichmentSearchCreditAccess:()=>true,hasUserEnrichmentSearchCreditAccess:async()=>true},
     '@/lib/server/provider-routing':{resolveLeadProvider:()=>({provider:'apollo',requestedProvider:'apollo',defaultProvider:'apollo'})},
     '@/lib/server/microworlds/contracts':{hybridEnabled:()=>true},
@@ -87,4 +92,16 @@ test('cached email and missing phone request only writable phone fallback; diffe
 test('known Apollo failure preserves the cached email instead of turning a partial success into no data',async()=>{
   const f=fixture({cache:{...contact,mobile:null},fail:true});const response=await f.run();assert.equal(response.status,200);
   const body=await response.json();assert.equal(body.enriched[0].email,contact.email);assert.equal(f.calls.claims,1);assert.equal(f.calls.provider.length,1);
+});
+test('the organization Apollo share counts only what Apollo is asked: a full cache costs nothing, a missing phone costs 8',async()=>{
+  const cached=fixture();assert.equal((await cached.run()).status,200);assert.deepEqual(cached.calls.share,[0]);
+  const phone=fixture({cache:{...contact,mobile:null},pending:true});assert.equal((await phone.run()).status,202);assert.deepEqual(phone.calls.share,[8]);
+  const none=fixture({cache:null,pending:true});await none.run();assert.deepEqual(none.calls.share,[9],'email 1 and phone 8');
+});
+test('a used organization share is said as it is, before any credit is claimed or Apollo is asked',async()=>{
+  const message='Tu organización ya usó los 300 créditos de Apollo que tiene hasta el 1 de noviembre.';
+  const f=fixture({cache:null,shareUsed:message});const response=await f.run();assert.equal(response.status,409);
+  assert.deepEqual(await response.json(),{error:'APOLLO_CREDITS_ALLOCATION_USED',message});
+  assert.equal(f.calls.claims,0);assert.equal(f.calls.provider.length,0);assert.equal(f.callbacks.length,0);
+  const cached=fixture({shareUsed:message});assert.equal((await cached.run()).status,200,'what the cache already holds is still delivered');
 });

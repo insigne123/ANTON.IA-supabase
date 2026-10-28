@@ -39,6 +39,8 @@ const sources = {
     export const claimEnrichmentQuotaOperation=async(args)=>{globalThis.__phoneTest.calls.push(['claim',args]);return globalThis.__phoneTest.claim;};
     export const releaseEnrichmentQuotaOperation=async()=>{globalThis.__phoneTest.releases.push(true);};`,
   '@/lib/server/enrichment-search-access': 'export const hasUserEnrichmentSearchCreditAccess=async()=>globalThis.__phoneTest.creditAccess;',
+  '@/lib/server/apollo-credit-allocation': `export const assertApolloAllocationAllows=async(organizationId,needed)=>{const s=globalThis.__phoneTest;s.calls.push(['allocation',organizationId,needed]);
+    if(s.allocationRefusal)throw Object.assign(new Error(s.allocationRefusal),{name:'ApolloAllocationRefusal'});return null;};`,
   '@/lib/server/apollo-enrichment-callbacks': `export const createApolloEnrichmentCallback=async(args)=>{globalThis.__phoneTest.calls.push(['callback',args]);return{callbackId:'00000000-0000-4000-8000-000000000003',tokenHash:'${'a'.repeat(64)}',webhookUrl:'https://app.test/api/apollo-webhook/token'};};
     export const markApolloEnrichmentCallbackSubmitted=async()=>{globalThis.__phoneTest.calls.push(['submitted']);};
     export const bindApolloEnrichmentCallback=async(args)=>{globalThis.__phoneTest.binds.push(args);return 'bound';};
@@ -62,7 +64,7 @@ const scope = { userId: USER, organizationId: ORG };
 const auth = { user: { id: USER }, organizationId: ORG };
 const flag = process.env.COWORK_PHONE_REVEAL_ENABLED;
 const reset = () => {
-  Object.assign(state, { access: true, runStatus: 'waiting_approval', lead: lead(), creditAccess: true, balanceThrows: false, quotaOp: null,
+  Object.assign(state, { access: true, runStatus: 'waiting_approval', lead: lead(), creditAccess: true, balanceThrows: false, quotaOp: null, allocationRefusal: null,
     claim: { claimed: true, allowed: true, claimToken: CLAIM }, calls: [], inserts: [], updates: [], releases: [], settles: [], binds: [],
     balance: { remaining: 1840, used: 660, limit: 2500, cycleEnd: null, capturedAt: new Date().toISOString() },
     submit: async () => ({ success: true, enrichmentStatus: 'pending', providerRequestId: 'pr-phone-1', creditsConsumed: 10, extractedData: {} }) });
@@ -181,7 +183,16 @@ try {
   state.submit = async () => { throw new Error('socket hang up'); };
   await refuse(executeCoworkPhoneReveal(auth, RUN, third.targetId), /No pudimos confirmar el pedido al proveedor[\s\S]*otros créditos/);
   assert.equal(state.releases.length, 0, 'an unknown outcome is not given back: it may have been charged');
-  console.log('PASS: staging pins who the card names and the cost; the card shows the balance; every refusal asks and spends nothing; the approved request asks for one phone with the webhook; a refusal or an unknown outcome is told as it is.');
+
+  // The organization used its Apollo share: its words, and nothing is claimed nor asked (the phone is 8 credits of the share).
+  reset(); state.runStatus = 'running'; const fourth = await stageCoworkPhoneReveal(scope, RUN, LEAD); state.runStatus = 'waiting_approval';
+  state.proposal = { status: 'executing', kind: 'enrich_phone', target_id: fourth.targetId };
+  state.allocationRefusal = 'Tu organización ya usó los 300 créditos de Apollo que tiene hasta el 1 de noviembre.';
+  await refuse(executeCoworkPhoneReveal(auth, RUN, fourth.targetId), /ya usó los 300 créditos/);
+  assert.deepEqual(state.calls.find(call => call[0] === 'allocation'), ['allocation', ORG, 8]);
+  assert.equal(providerCalls() + state.inserts.length, 0, 'nothing asked nor written');
+  assert.equal(state.calls.some(call => call[0] === 'claim'), false, 'no credit claimed');
+  console.log('PASS: staging pins who the card names and the cost; the card shows the balance; every refusal asks and spends nothing; the approved request asks for one phone with the webhook; a refusal or an unknown outcome is told as it is; a used organization share stops it before anything.');
 } finally {
   if (flag === undefined) delete process.env.COWORK_PHONE_REVEAL_ENABLED; else process.env.COWORK_PHONE_REVEAL_ENABLED = flag;
   delete globalThis.__phoneTest;

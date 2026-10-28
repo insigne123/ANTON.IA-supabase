@@ -12,6 +12,8 @@ import {
   bindApolloEnrichmentCallback, createApolloEnrichmentCallback, markApolloEnrichmentCallbackSubmitted, settleApolloEnrichmentCallback,
 } from '@/lib/server/apollo-enrichment-callbacks';
 import { submitApolloEnrichment } from '@/lib/server/apollo-enrichment';
+import { APOLLO_ALLOCATION_PHONE_CREDITS } from '@/lib/apollo-credit-allocation';
+import { assertApolloAllocationAllows } from '@/lib/server/apollo-credit-allocation';
 import { isApolloCreditBalanceStale, loadLatestApolloCreditBalance } from '@/lib/server/apollo-credit-balance';
 import { leadClaimRefusal } from '@/lib/lead-claim';
 import {
@@ -137,6 +139,8 @@ export async function executeCoworkPhoneReveal(auth: AuthContext, runId: string,
     throw new Error('El contacto cambió desde tu revisión. No se pidió el teléfono: pide una nueva revisión.');
   }
   if (!await hasUserEnrichmentSearchCreditAccess(userId)) throw new Error('Tu cuenta no tiene acceso a créditos de enriquecimiento. No se pidió el teléfono.');
+  // The organization's Apollo share (when it has one): the phone alone, the email is not asked here.
+  await assertApolloAllocationAllows(organizationId, APOLLO_ALLOCATION_PHONE_CREDITS);
   // The balance is the shared account's last reading: when it says there is not enough, nothing is asked; when it cannot be read, the provider decides.
   try {
     const latest = await loadLatestApolloCreditBalance();

@@ -38,6 +38,8 @@ const sources = {
     export const releaseEnrichmentQuotaOperation=async()=>{globalThis.__coworkEnrich.releases.push(true);};
     export const completeEnrichmentQuotaOperation=async(args)=>{globalThis.__coworkEnrich.completes.push(args);};`,
   '@/lib/server/enrichment-search-access': 'export const hasUserEnrichmentSearchCreditAccess=async()=>true;',
+  '@/lib/server/apollo-credit-allocation': `export const assertApolloAllocationAllows=async(organizationId,needed)=>{const s=globalThis.__coworkEnrich;s.calls.push(['allocation',organizationId,needed]);
+    if(s.allocationRefusal)throw Object.assign(new Error(s.allocationRefusal),{name:'ApolloAllocationRefusal'});return null;};`,
   '@/lib/server/apollo-enrichment-callbacks': `export const createApolloEnrichmentCallback=async()=>({callbackId:'00000000-0000-4000-8000-000000000003',token:'t',tokenHash:'${'a'.repeat(64)}',webhookUrl:'https://x.example/hook',claimToken:'c'});
     export const markApolloEnrichmentCallbackSubmitted=async()=>{};
     export const bindApolloEnrichmentCallback=async()=> 'bound';
@@ -138,7 +140,18 @@ try {
   assert.equal(state.releases.length, 1);
   client.from = realFrom;
 
-  console.log('PASS: enrich success with provider email, replay reuse, quota message, unknown outcome without retry, busy provider without a claim, known answers settled, held person.');
+  // 8. The organization used its Apollo share: its words, and nothing is claimed nor asked (one email is 1 credit of the share).
+  state.calls = []; providerCalls = 0;
+  state.submit = async () => { providerCalls++; return { success: false, extractedData: null }; };
+  state.allocationRefusal = 'Tu organización ya usó los 300 créditos de Apollo que tiene hasta el 1 de noviembre.';
+  await assert.rejects(module.exports.enrichCoworkContact(auth, 'run-1', LEAD),
+    error => error.name === 'ApolloAllocationRefusal' && /ya usó los 300 créditos/.test(error.message));
+  assert.deepEqual(state.calls.find(([kind]) => kind === 'allocation'), ['allocation', 'org', 1]);
+  assert.equal(state.calls.some(([kind]) => kind === 'claim'), false, 'no credit claimed');
+  assert.equal(providerCalls, 0);
+  state.allocationRefusal = null;
+
+  console.log('PASS: enrich success with provider email, replay reuse, quota message, unknown outcome without retry, busy provider without a claim, known answers settled, held person, organization share used.');
 } finally {
   delete globalThis.__coworkEnrich;
 }

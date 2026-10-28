@@ -41,6 +41,8 @@ import {
 } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { leadClaimRefusal } from '@/lib/lead-claim';
+import { APOLLO_ALLOCATION_ERROR, apolloAllocationCost } from '@/lib/apollo-credit-allocation';
+import { ApolloAllocationRefusal, assertApolloAllocationAllows } from '@/lib/server/apollo-credit-allocation';
 import { hybridEnabled } from '@/lib/server/microworlds/contracts';
 import { observeConfirmedApolloIdentity } from '@/lib/server/microworlds/search';
 import { findHybridHint, frozenHybridItems, registerHybridItem, applyHybridCache, hybridFieldPlan, cancelHybridItems, settleHybrid,
@@ -980,6 +982,21 @@ export async function POST(request: NextRequest) {
     let setupFailure: string | undefined;
     try { assertApolloEnrichmentConfigured(); }
     catch(error){if(!hasHybrid)throw error;setupFailure='APOLLO_PROVIDER_NOT_CONFIGURED';}
+
+    // The organization's Apollo share (when it has one) before any credit is claimed: what the cache already holds costs nothing.
+    if (!matchOnly && !setupFailure) {
+      const needed = leads.reduce((sum, _lead, index) => sum + apolloAllocationCost({
+        revealEmail: revealEmail.value && !hints[index]?.contact.email,
+        revealPhone: revealPhone.value && !hints[index]?.contact.mobile,
+      }), 0);
+      try {
+        await assertApolloAllocationAllows(organizationId, needed);
+      } catch (error) {
+        if (!(error instanceof ApolloAllocationRefusal)) throw error;
+        return NextResponse.json({ error: APOLLO_ALLOCATION_ERROR, message: error.message },
+          { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
+      }
+    }
 
     const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });
     claim = await claimEnrichmentQuotaOperation({

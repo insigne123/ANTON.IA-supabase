@@ -66,6 +66,7 @@ import { enrichWithLeadsFinder } from '@/lib/leads-finder-client';
 import { enrichmentCreditReceipt, partitionEnrichmentLeads } from '@/lib/leads-workspace/enrichment-provider';
 import { enrichmentAttempt } from '@/lib/enrichment-attempt';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
+import { enrichmentRefusalMessage } from '@/lib/apollo-credit-allocation';
 import { createCoalescedRunner } from '@/lib/leads-workspace/coalesced-runner';
 import {
   ENRICHED_EXPORT_HEADERS,
@@ -203,7 +204,7 @@ export default function EnrichedLeadsClient() {
 
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            const reason = String((data?.error === 'LEAD_CLAIMED' && data?.message) || data?.error || data?.message || '').slice(0, 200);
+            const reason = String(enrichmentRefusalMessage(data) || data?.error || data?.message || '').slice(0, 300);
             throw new Error(reason || `El servidor respondió ${res.status}. Intenta de nuevo en unos minutos.`);
           }
 

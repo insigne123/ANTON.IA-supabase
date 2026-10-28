@@ -18,6 +18,7 @@ import {USAGE_MODULES,usageReportCsv,type AdminUsageReport,type CommercialCounts
 import {dayInZone,lastDaysInZone,shiftDay} from '@/lib/admin/chile-time';
 import {cn} from '@/lib/utils';
 import {SEGMENT_TRACK,chipClass,segmentClass} from '@/components/ui/chip';
+import {ApolloAllocationCard} from '@/components/admin/ApolloAllocationCard';
 
 const n=(value:number|null|undefined)=>value===null||value===undefined?'—':value.toLocaleString('es-CL');
 const date=(value:string)=>new Date(value+'T12:00:00Z').toLocaleDateString('es-CL',{day:'numeric',month:'short',timeZone:'UTC'}).replace('.','');
@@ -99,6 +100,8 @@ export function UsageDashboard(){
       </div>
       {data&&!data.platform&&<p className="mt-3 text-xs text-muted-foreground">{data.organizations.find(o=>o.id===effectiveOrg)?.name||'Tu organización'} · Los filtros se aplican al informe completo.</p>}
     </section>
+    {/* Only while the organization has Apollo credits assigned for a window (apollo-credit-allocation.ts). */}
+    {!person&&<ApolloAllocationCard/>}
     {error&&<div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm"><p>{error}</p><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={()=>void load()}>Reintentar</Button><Button variant="ghost" size="sm" onClick={()=>{setOrg('');setGroup('');setPerson('');}}>Restablecer alcance</Button></div></div>}
     {exportError&&<p role="alert" className="text-sm text-destructive">{exportError}</p>}
     {loading&&!data&&<Loading/>}
