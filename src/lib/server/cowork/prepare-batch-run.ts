@@ -11,11 +11,17 @@ import { enrichCoworkSavedLead } from './enrich-contact';
 import { startCoworkResearchForLead } from './start-research';
 import { coworkPrepareBatchEnabled, parseCoworkPrepareBatchTarget, readStaged } from './prepare-batch';
 
-/** The approved «preparar contactos» batch, run person by person (docs/cowork-preparar-contactos.md). Apart from the staging
+/** The approved «preparar contactos» batch, several people at a time (docs/cowork-preparar-contactos.md). Apart from the staging
  * module so the worker, which only proposes, does not load the provider and research code. */
 
 /** The approved batch runs inside the worker's two minutes: no new provider call starts after this. */
 const RUN_BUDGET_MS = 75_000;
+/**
+ * People prepared at the same time. An email lookup takes about 4 s in production (27 Oct: 10 lookups in 42 to 49 s, one after the
+ * other), so a batch of 50 takes about 35 s, or 65 s when it researches too, within the budget and under the gateway's 60 lookups
+ * a minute (APOLLO_BACKEND_ENRICH_MAX_REQUESTS).
+ */
+const PARALLEL = 6;
 const LATE = 'No alcanzó el tiempo de esta tanda: pídelo de nuevo y sigue donde quedó, sin pagar dos veces.';
 
 const reasonOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback).slice(0, 240);
@@ -28,9 +34,10 @@ const researchMessage = (error: unknown) => {
 };
 
 /**
- * Run the approved batch person by person: save, look up the email, research; each step only if it is still missing, and each one
- * with the same rules, quotas and operation ids as the single action, so running it again reuses instead of paying twice. A quota
- * that runs out stops that step for the rest, with the reason; nothing is done for someone who was taken off.
+ * Run the approved batch, several people at a time and each one in order: save, look up the email, research; each step only if
+ * it is still missing, and each one with the same rules, quotas and operation ids as the single action, so running it again
+ * reuses instead of paying twice. A quota that runs out stops that step for whoever has not reached it, with the reason; nothing
+ * is done for someone who was taken off.
  */
 export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string, targetId: string) {
   if (!coworkPrepareBatchEnabled()) throw new Error('Preparar contactos en lote está desactivado por ahora: no se hizo nada.');
@@ -57,9 +64,8 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
   const late = () => Date.now() - startedAt > RUN_BUDGET_MS;
   let lookupsStopped: string | null = null;
   let researchStopped: string | null = null;
-  const results: CoworkPrepareResult[] = [];
-  for (const item of staged.items) {
-    if (removed.has(item.id)) { results.push({ id: item.id, name: item.name, company: item.company, status: 'removed', steps: [] }); continue; }
+  const prepare = async (item: (typeof staged.items)[number]): Promise<CoworkPrepareResult> => {
+    if (removed.has(item.id)) return { id: item.id, name: item.name, company: item.company, status: 'removed', steps: [] };
     const steps: CoworkPrepareStepResult[] = [];
     const result: CoworkPrepareResult = { id: item.id, name: item.name, company: item.company, status: 'ready', steps };
     let leadId: string | null = item.steps.includes('save') ? null : item.id;
@@ -134,8 +140,17 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
       }
     }
     result.status = coworkPrepareStatus(steps);
-    results.push(result);
-  }
+    return result;
+  };
+  // The results keep the order of the list, whoever finished first.
+  const results: CoworkPrepareResult[] = new Array(staged.items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, staged.items.length) }, async () => {
+    while (next < staged.items.length) {
+      const index = next++;
+      results[index] = await prepare(staged.items[index]);
+    }
+  }));
   const ran = results.filter(result => result.status !== 'removed');
   if (ran.length && ran.every(result => result.status === 'failed')) {
     const reasons = [...new Set(ran.flatMap(result => result.steps.flatMap(step => step.detail ? [step.detail] : [])))].slice(0, 3).join(' · ');

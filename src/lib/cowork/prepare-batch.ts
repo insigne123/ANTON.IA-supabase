@@ -14,8 +14,8 @@ export type CoworkPrepareGoal = 'save' | 'email' | 'research' | 'linkedin';
 export type CoworkPrepareStep = 'save' | 'enrich' | 'linkedin' | 'research';
 export const COWORK_PREPARE_STEPS: readonly CoworkPrepareStep[] = ['save', 'enrich', 'linkedin', 'research'];
 export const COWORK_PREPARE_BATCH_EFFECT = 'lead_prepare_batch';
-/** Saving is a write per person; looking up an email and researching call the provider, so they go in smaller batches. */
-export const COWORK_PREPARE_MAX: Record<CoworkPrepareGoal, number> = { save: 50, email: 10, research: 10, linkedin: 10 };
+/** The people of one batch, whatever it does with them: the run looks several up at a time (server/cowork/prepare-batch-run.ts). */
+export const COWORK_PREPARE_MAX = 50;
 
 const PROVIDER_ID = /^apollo:[A-Za-z0-9_-]{1,200}$/;
 
@@ -25,18 +25,16 @@ export const coworkPrepareBatchSchema = z.object({
   people: z.array(z.object({
     providerId: z.string().regex(PROVIDER_ID).nullable().optional(),
     leadId: z.string().uuid().nullable().optional(),
-  }).strict()).min(1).max(COWORK_PREPARE_MAX.save),
+  // A longer list still parses, so the model reads why it was refused (coworkPrepareBatchPeople) and splits it.
+  }).strict()).min(1).max(200),
 }).strict();
 export type CoworkPrepareBatchInput = z.infer<typeof coworkPrepareBatchSchema>;
 export type CoworkPreparePerson = { providerId: string } | { leadId: string };
 
-const GOAL_TEXT: Record<CoworkPrepareGoal, string> = { save: 'guardar', email: 'buscar correos', research: 'investigar', linkedin: 'buscar perfiles de LinkedIn' };
-
 /** The goal and the people of a proposal, each once. Throws in words the model can pass on. */
 export function coworkPrepareBatchPeople(input: unknown): { goal: CoworkPrepareGoal; people: CoworkPreparePerson[] } {
   const parsed = coworkPrepareBatchSchema.parse(input);
-  const max = COWORK_PREPARE_MAX[parsed.goal];
-  if (parsed.people.length > max) throw new Error(`Un lote para ${GOAL_TEXT[parsed.goal]} lleva hasta ${max} personas: propón el resto en otro lote.`);
+  if (parsed.people.length > COWORK_PREPARE_MAX) throw new Error(`Un lote lleva hasta ${COWORK_PREPARE_MAX} personas: propón el resto en otro lote.`);
   const people = parsed.people.map((person): CoworkPreparePerson => {
     if (Boolean(person.providerId) === Boolean(person.leadId)) {
       throw new Error('Cada persona del lote va con providerId (un resultado de búsqueda) o con leadId (un contacto guardado), una de las dos.');

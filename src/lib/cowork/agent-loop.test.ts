@@ -586,7 +586,7 @@ test('preparing several people is one proposal: search results and saved contact
   for (const [decision, pattern] of [
     [prepare({ goal: 'save', people: [{ providerId: 'apollo:p1' }, { providerId: 'apollo:p1' }] }), /repetidas/],
     [prepare({ goal: 'email', people: [{ providerId: 'apollo:p1', leadId: lead(1) }] }), /una de las dos/],
-    [prepare({ goal: 'email', people: Array.from({ length: 11 }, (_, n) => ({ providerId: `apollo:x${n}` })) }), /hasta 10 personas/],
+    [prepare({ goal: 'email', people: Array.from({ length: 51 }, (_, n) => ({ providerId: `apollo:x${n}` })) }), /hasta 50 personas/],
     [prepare(null), /Faltan datos de la propuesta/],
   ] as const) {
     const feedback: string[] = [];

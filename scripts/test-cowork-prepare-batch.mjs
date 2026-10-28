@@ -35,6 +35,7 @@ const reset = () => Object.assign(state, {
     savedEvent(RUN, [L(1), L(2), L(3)]),
   ],
   batch: null, proposal: null, saves: [], lookups: [], researches: [], lookupError: null, researchError: null,
+  lookupDelay: 0, inFlight: 0, maxInFlight: 0,
 });
 
 function table(name) {
@@ -93,6 +94,7 @@ const sources = {
       const lead={id:"00000000-0000-4000-8000-0000000000c"+s.saves.length,name:observed.name,company:observed.company};s.leads.push({...lead,user_id:auth.user.id,organization_id:auth.organizationId,apollo_id:providerId.slice(7)});return {lead,reused:false};};`,
   './enrich-contact': `export const enrichCoworkSavedLead=async(auth,runId,leadId)=>{const s=globalThis.__prepBatch;s.lookups.push(leadId);
       if(s.lookupError&&s.lookups.length>=s.lookupError.after)throw new Error(s.lookupError.message);
+      if(s.lookupDelay){s.inFlight++;s.maxInFlight=Math.max(s.maxInFlight,s.inFlight);await new Promise(r=>setTimeout(r,s.lookupDelay));s.inFlight--;}
       return leadId==="${'00000000-0000-4000-8000-0000000000c1'}"
         ?{email:"rduran@rdmontajes.cl",emailStatus:"verified",found:true,reused:false,fullName:"Rafael Durán",linkedinUrl:"https://www.linkedin.com/in/rafael-duran",emailWarning:null}
         :{email:null,emailStatus:null,found:false,reused:false};};`,
@@ -192,22 +194,36 @@ try {
   assert.deepEqual(susana.steps.map(step => [step.step, step.status]), [['enrich', 'done'], ['research', 'done']]);
   assert.equal(susana.steps[0].detail, 'El proveedor no encontró su correo.');
   assert.equal(ana.status, 'removed');
-  assert.deepEqual(state.researches, ['00000000-0000-4000-8000-0000000000c1', L(1)], 'nobody taken off is researched');
+  // Several people go at a time, so the researches start in any order.
+  assert.deepEqual([...state.researches].sort(), [L(1), '00000000-0000-4000-8000-0000000000c1'].sort(), 'nobody taken off is researched');
   assert.match(ran.reply, /^Listo con 2 de 2 personas: 1 quedó guardada, 1 de 2 con correo y 2 investigaciones en curso o listas\./);
   assert.match(ran.reply, /Susana Cáceres: El proveedor no encontró su correo\./);
   assert.match(ran.reply, /Quitaste a 1 persona de la lista\./);
 
-  // 7. A quota that runs out stops that step for the rest, with the reason; a research without its lookup is not asked.
+  // 7. A quota that runs out stops that step for whoever has not reached it, with the reason; a research without its lookup is not
+  //    asked. The lookups already under way when it ran out are refused by the quota's claim, without calling the provider.
   reset();
   const quota = await api.stageCoworkPrepareBatch(scope, RUN, { goal: 'research', people: [{ providerId: 'apollo:rafael' }, { leadId: L(1) }] });
   approve(quota.hash);
   state.lookupError = { after: 1, message: 'Se alcanzó el cupo diario de enriquecimiento. Se renueva mañana.' };
   const capped = await api.executeCoworkPrepareBatch(auth, RUN, `preparebatch:${quota.hash}`);
-  assert.equal(state.lookups.length, 1, 'no lookup is tried after the quota ran out');
   assert.deepEqual(capped.result.items.map(item => item.status), ['partial', 'failed']);
   assert.match(capped.result.items[1].steps[0].detail, /cupo diario de búsquedas de correo/);
   assert.match(capped.result.items[0].steps[2].detail, /primero hay que buscar su correo/);
   assert.deepEqual(state.researches, [], 'nothing is researched without its email looked up');
+  reset();
+  const eight = Array.from({ length: 8 }, (_, n) => `00000000-0000-4000-8000-0000000002${String(n).padStart(2, '0')}`);
+  state.leads.push(...eight.map((id, n) => ({ id, user_id: USER, organization_id: ORG, name: `Persona ${n}`, company: 'Acme', title: 'Gerente',
+    email: null, apollo_id: `q${n}`, source_provider_id: `q${n}` })));
+  state.events.push(savedEvent(RUN, eight));
+  const out = await api.stageCoworkPrepareBatch(scope, RUN, { goal: 'email', people: eight.map(leadId => ({ leadId })) });
+  approve(out.hash);
+  // The first two lookups fit the quota; the third one runs it out.
+  state.lookupError = { after: 3, message: 'Se alcanzó el cupo diario de enriquecimiento. Se renueva mañana.' };
+  const stopped = await api.executeCoworkPrepareBatch(auth, RUN, `preparebatch:${out.hash}`);
+  assert.ok(state.lookups.length < eight.length, 'whoever had not started is not tried after the quota ran out');
+  const untried = stopped.result.items.filter(item => !state.lookups.includes(item.id));
+  assert.ok(untried.length > 0 && untried.every(item => item.steps[0].status === 'skipped' && /cupo diario de búsquedas de correo/.test(item.steps[0].detail)));
 
   // 8. Nobody could be prepared: the effect fails and says why; a list that changed or an approval no longer valid runs nothing.
   reset();
@@ -226,7 +242,22 @@ try {
   await assert.rejects(api.executeCoworkPrepareBatch(auth, RUN, `preparebatch:${pinned.hash}`), /desactivado por ahora/);
   delete process.env.COWORK_PREPARE_BATCH_ENABLED;
 
-  console.log('PASS: prepare batch stages only observed own people with what is missing, says when all is done, single actions skip what is done, card removals, run person by person with real identity, quotas and pinned approval.');
+  // 9. A batch of 50 lookups: all of them run, several at a time and never more than 6, and the results keep the list's order.
+  reset();
+  const fifty = Array.from({ length: 50 }, (_, n) => `00000000-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`);
+  state.leads.push(...fifty.map((id, n) => ({ id, user_id: USER, organization_id: ORG, name: `Persona ${n}`, company: 'Acme', title: 'Gerente',
+    email: null, apollo_id: `p${n}`, source_provider_id: `p${n}` })));
+  state.events.push(savedEvent(RUN, fifty));
+  const big = await api.stageCoworkPrepareBatch(scope, RUN, { goal: 'email', people: fifty.map(leadId => ({ leadId })) });
+  approve(big.hash);
+  state.lookupDelay = 5;
+  const many = await api.executeCoworkPrepareBatch(auth, RUN, `preparebatch:${big.hash}`);
+  assert.equal(state.lookups.length, 50, 'every lookup runs');
+  assert.ok(state.maxInFlight > 1 && state.maxInFlight <= 6, `several at a time, at most 6 (${state.maxInFlight})`);
+  assert.deepEqual(many.result.items.map(item => item.id), fifty, 'the results keep the order of the list');
+  assert.ok(many.result.items.every(item => item.steps[0].step === 'enrich' && item.steps[0].status === 'done'));
+
+  console.log('PASS: prepare batch stages only observed own people with what is missing, says when all is done, single actions skip what is done, card removals, run several at a time with real identity, quotas and pinned approval, and 50 lookups in one batch.');
 } finally {
   delete globalThis.__prepBatch;
 }
