@@ -104,11 +104,13 @@ export function jobAdFromSignal(row: {
   if (!SOURCES.has(row.source as JobAdSource)) return null;
   const data = row.data && typeof row.data === 'object' ? row.data : {};
   const field = (key: string) => (typeof data[key] === 'string' && data[key] ? String(data[key]) : null);
+  const country = adCountry(row.location, field('country'));
   return {
     source: row.source as JobAdSource, externalId: row.external_id, title: row.title, company: field('company') || '',
     companyDomain: field('companyDomain'), companyLinkedinUrl: field('companyLinkedinUrl'), companySize: field('companySize'),
-    companyIndustry: field('companyIndustry'), location: row.location, region: field('region'),
-    country: adCountry(row.location, field('country')), publisher: row.publisher, url: row.url,
+    // A region stored before ads had a country («Santiago de Cali, Colombia» read as the Metropolitana) is not kept outside Chile.
+    companyIndustry: field('companyIndustry'), location: row.location, region: country && country !== 'CL' ? null : field('region'),
+    country, publisher: row.publisher, url: row.url,
     // An ad without a date counts from the last time a source brought it, never as published today forever.
     postedAt: row.posted_at || row.seen_at,
   };

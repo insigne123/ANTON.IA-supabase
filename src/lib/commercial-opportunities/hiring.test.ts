@@ -25,6 +25,20 @@ test('ads from Peru and Colombia carry their country, and a Chilean region only 
   assert.deepEqual([chile?.country, chile?.region], ['CL', 'Antofagasta']);
 });
 
+test('the country the source gives wins over the words of a place, and ads in other countries are not read', () => {
+  // «Peru, Indiana» is in the United States, and «Santiago» in the Dominican Republic.
+  assert.equal(jobAdFromFantastic({ id: 7002, title: 'Operario', organization: 'Acme', locations_derived: ['Peru, Indiana, United States'],
+    countries_derived: ['United States'] }), null);
+  assert.equal(jobAdFromJSearch({ job_id: 'us-1', job_title: 'Operario', employer_name: 'Acme', job_city: 'Peru', job_state: 'IN', job_country: 'US' }), null);
+  assert.equal(jobAdFromJSearch({ job_id: 'do-1', job_title: 'Operario', employer_name: 'Acme', job_city: 'Santiago', job_country: 'DO' }), null);
+  const lima = jobAdFromFantastic({ id: 7003, title: 'Operario', organization: 'Acme', locations_derived: ['Lima'], countries_derived: ['Peru'] });
+  assert.deepEqual([lima?.country, lima?.region], ['PE', null]);
+  const santiago = jobAdFromFantastic({ id: 7004, title: 'Operario', organization: 'Acme', locations_derived: ['Santiago, Santiago Metropolitan'], countries_derived: ['Chile'] });
+  assert.deepEqual([santiago?.country, santiago?.region], ['CL', 'Metropolitana']);
+  const unknown = jobAdFromFantastic({ id: 7005, title: 'Operario', organization: 'Acme', locations_derived: ['Remoto'] });
+  assert.deepEqual([unknown?.country, unknown?.region], [null, null], 'without a country, the ad is kept and its place decides');
+});
+
 test('the same company hiring in Chile and in Peru is one opportunity per country', () => {
   const ads = [
     ad('c1', 'Operario de bodega', 'Acme', { country: 'CL' }), ad('c2', 'Bodeguero', 'Acme', { country: 'CL' }),
