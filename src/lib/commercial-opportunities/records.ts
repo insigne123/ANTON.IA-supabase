@@ -1,4 +1,4 @@
-import type { HiringOpportunity, JobAd, JobAdSource } from './hiring';
+import { adCountry, hiringCountryName, type HiringOpportunity, type JobAd, type JobAdSource } from './hiring';
 import { tenderUrl, type Tender, type TenderAiVerdict, type TenderSource } from './tenders';
 import type { SeiaProject } from './projects';
 
@@ -59,7 +59,8 @@ export function hiringOpportunityRow(item: HiringOpportunity, scope: { organizat
     company_name: clip(item.company, 300),
     company_domain: clip(item.domain, 253),
     company_linkedin_url: clip(httpUrl(item.linkedinUrl), 500),
-    region: clip(item.regions[0]?.region, 120),
+    // Outside Chile there is no region to read: the country says where («Perú»).
+    region: clip(item.regions[0]?.region ?? (item.country && item.country !== 'CL' ? hiringCountryName(item.country) : null), 120),
     published_at: isoOrNull(item.lastPostedAt),
     url: item.domain ? `https://${item.domain}` : httpUrl(item.linkedinUrl),
     score: Math.max(0, Math.min(100, Math.round(item.score))),
@@ -88,6 +89,7 @@ export function hiringSignalRow(ad: JobAd, scope: { organizationId: string; oppo
     data: {
       company: clip(ad.company, 300), companyDomain: clip(ad.companyDomain, 253), companyLinkedinUrl: clip(httpUrl(ad.companyLinkedinUrl), 500),
       companySize: clip(ad.companySize, 40), companyIndustry: clip(ad.companyIndustry, 120), region: clip(ad.region, 60),
+      ...(ad.country ? { country: ad.country } : {}),
     },
   };
 }
@@ -105,7 +107,8 @@ export function jobAdFromSignal(row: {
   return {
     source: row.source as JobAdSource, externalId: row.external_id, title: row.title, company: field('company') || '',
     companyDomain: field('companyDomain'), companyLinkedinUrl: field('companyLinkedinUrl'), companySize: field('companySize'),
-    companyIndustry: field('companyIndustry'), location: row.location, region: field('region'), publisher: row.publisher, url: row.url,
+    companyIndustry: field('companyIndustry'), location: row.location, region: field('region'),
+    country: adCountry(row.location, field('country')), publisher: row.publisher, url: row.url,
     // An ad without a date counts from the last time a source brought it, never as published today forever.
     postedAt: row.posted_at || row.seen_at,
   };

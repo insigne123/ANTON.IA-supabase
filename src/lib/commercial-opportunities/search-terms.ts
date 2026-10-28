@@ -108,6 +108,20 @@ export function linkedinTitles(roles: string[], variants: RoleVariants) {
   return [...new Set([...roles, ...roles.flatMap(role => variants[role] || [])])].slice(0, LINKEDIN_TITLES);
 }
 
+/** Spanish country names LinkedIn's provider knows in English. */
+const ENGLISH_COUNTRIES: Record<string, string> = { peru: 'Peru', mexico: 'Mexico', brasil: 'Brazil', espana: 'Spain', 'estados unidos': 'United States' };
+/**
+ * The company's territories as LinkedIn's provider (Fantastic Jobs) searches them: English names without accents. «Perú» or
+ * «Bogotá» would find nothing; «Peru» and «Bogota» do. Up to 20, each once.
+ */
+export function linkedinLocationTerms(territories: string[]) {
+  const terms = territories.map(place => {
+    const plain = place.normalize('NFD').replace(/\p{M}/gu, '').replace(/\s+/g, ' ').trim();
+    return ENGLISH_COUNTRIES[plain.toLowerCase()] ?? plain;
+  }).filter(Boolean);
+  return [...new Map(terms.map(term => [term.toLowerCase(), term])).values()].slice(0, 20);
+}
+
 /** The places LinkedIn is asked for: each chosen region in Chile, or all of Chile. */
 export function linkedinLocations(regions: string[]) {
   return regions.length ? regions.map(region => `${regionQueryName(region)}, Chile`) : ['Chile'];

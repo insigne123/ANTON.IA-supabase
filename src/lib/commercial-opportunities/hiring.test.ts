@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chileanRegion, companyKey, domainOf, employerKind, groupHiring, jobAdFromFantastic, jobAdFromJSearch, type JobAd } from './hiring';
+import { adCountry, chileanRegion, companyKey, domainOf, employerKind, groupHiring, jobAdFromFantastic, jobAdFromJSearch, type JobAd } from './hiring';
 
 const NOW = '2026-10-02T12:00:00Z';
 const PROFILE = { roles: ['operario', 'bodeguero', 'conductor', 'guardia'], regions: ['Antofagasta'], minAds: 3, clients: ['Retail Andes'], contactsCompanies: ['Minera Norte S.A.'] };
@@ -8,6 +8,33 @@ const ad = (externalId: string, title: string, company: string, extra: Partial<J
   source: 'jsearch', externalId, title, company, companyDomain: null, companyLinkedinUrl: null, companySize: null, companyIndustry: null,
   location: 'Antofagasta, Antofagasta, Chile', region: 'Antofagasta', publisher: 'Computrabajo', url: `https://cl.computrabajo.com/${externalId}`,
   postedAt: '2026-09-28T12:00:00Z', ...extra });
+
+test('ads from Peru and Colombia carry their country, and a Chilean region only in Chile', () => {
+  assert.equal(adCountry('Lima, Lima, Peru'), 'PE');
+  assert.equal(adCountry('Medellín, Antioquia, Colombia'), 'CO');
+  assert.equal(adCountry('Santiago, Región Metropolitana, Chile'), 'CL');
+  assert.equal(adCountry('Remoto', 'pe'), 'PE', 'the code the source gives wins');
+  assert.equal(adCountry('Remoto'), null);
+  // «Santiago de Cali» names Santiago, but it is in Colombia: no Chilean region.
+  const cali = jobAdFromFantastic({ id: 7001, title: 'Operario de bodega', organization: 'Andina Logística',
+    locations_derived: [{ city: 'Santiago de Cali', admin: 'Valle del Cauca', country: 'Colombia' }] });
+  assert.deepEqual([cali?.country, cali?.region], ['CO', null]);
+  const lima = jobAdFromJSearch({ job_id: 'pe-1', job_title: 'Operario', employer_name: 'Acme', job_city: 'Lima', job_state: 'Lima', job_country: 'PE' });
+  assert.deepEqual([lima?.country, lima?.region], ['PE', null]);
+  const chile = jobAdFromJSearch({ job_id: 'cl-1', job_title: 'Operario', employer_name: 'Acme', job_city: 'Antofagasta', job_country: 'CL' });
+  assert.deepEqual([chile?.country, chile?.region], ['CL', 'Antofagasta']);
+});
+
+test('the same company hiring in Chile and in Peru is one opportunity per country', () => {
+  const ads = [
+    ad('c1', 'Operario de bodega', 'Acme', { country: 'CL' }), ad('c2', 'Bodeguero', 'Acme', { country: 'CL' }),
+    ad('p1', 'Operario', 'Acme', { location: 'Lima, Lima, Peru', region: null, country: 'PE' }),
+    ad('p2', 'Conductor', 'Acme', { location: 'Callao, Peru', region: null, country: 'PE' }),
+  ];
+  const { opportunities } = groupHiring(ads, { ...PROFILE, regions: [], minAds: 2 }, { now: NOW });
+  assert.deepEqual(opportunities.map(item => [item.key, item.country, item.ads]).sort(), [['name:acme', 'CL', 2], ['name:acme|pe', 'PE', 2]]);
+  assert.ok(opportunities.find(item => item.country === 'PE')!.reasons.includes('en Perú'));
+});
 
 test('regions are found by name or city, in Spanish or English', () => {
   assert.equal(chileanRegion('Calama, Antofagasta, Chile'), 'Antofagasta');
@@ -40,7 +67,7 @@ test('JSearch and Fantastic Jobs ads become the same shape, without the person w
     job_publisher: 'Computrabajo', job_apply_link: 'https://cl.computrabajo.com/oferta/j1', job_city: 'Calama', job_state: 'Antofagasta', job_country: 'CL',
     job_posted_at_datetime_utc: '2026-09-30T10:00:00.000Z', job_description: 'texto largo' });
   assert.deepEqual(jsearch, { source: 'jsearch', externalId: 'j1', title: 'Operario de bodega', company: 'Acme', companyDomain: 'acme.cl', companyLinkedinUrl: null,
-    companySize: null, companyIndustry: null, location: 'Calama, Antofagasta, CL', region: 'Antofagasta', publisher: 'Computrabajo',
+    companySize: null, companyIndustry: null, location: 'Calama, Antofagasta, CL', region: 'Antofagasta', country: 'CL', publisher: 'Computrabajo',
     url: 'https://cl.computrabajo.com/oferta/j1', postedAt: '2026-09-30T10:00:00.000Z' });
   const linkedin = jobAdFromFantastic({ id: '4100', title: 'Conductor Clase A', organization: 'Transportes Sur', organization_url: 'https://www.tsur.cl',
     organization_linkedin_url: 'https://www.linkedin.com/company/tsur', org_linkedin_size: '201-500', org_linkedin_industry: 'Truck Transportation',
@@ -48,6 +75,7 @@ test('JSearch and Fantastic Jobs ads become the same shape, without the person w
     recruiter_name: 'Ana Pérez', recruiter_url: 'https://www.linkedin.com/in/ana' });
   assert.equal(linkedin?.companyDomain, 'tsur.cl');
   assert.equal(linkedin?.region, 'Antofagasta');
+  assert.equal(linkedin?.country, 'CL');
   assert.equal(linkedin?.companySize, '201-500');
   assert.ok(!JSON.stringify(linkedin).includes('Ana'), 'the recruiter is not kept');
   assert.equal(jobAdFromJSearch({ job_title: 'Sin id' }), null);
