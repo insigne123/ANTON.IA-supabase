@@ -75,7 +75,7 @@ import { coworkAnalystEnabled, coworkAnalystModel, coworkAnalystTurn } from './a
 import { coworkArtifactStore } from './artifact-store';
 import { coworkPreferencesEnabled, stageCoworkPreference } from './preference';
 import { coworkTasksEnabled, loadCoworkActiveTask, recordCoworkTaskProgress, recordCoworkTaskStep, stageCoworkTaskPlan } from './task';
-import { coworkTaskApproves, coworkTaskContext, coworkTaskThreadBudget } from '@/lib/cowork/task-plan';
+import { coworkTaskApproves, coworkTaskContext, coworkTaskPlanOverBudget, coworkTaskThreadBudget } from '@/lib/cowork/task-plan';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -256,7 +256,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       intents: coworkIntentPromptsEnabled() ? coworkTurnIntents(run.message, history.turns) : null,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
-      threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
+      threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Créditos disponibles hoy: ${remainingSearches} (1 por cada búsqueda de personas, búsqueda de correo o perfil e investigación): no propongas gastar más. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
     });
     // Reads, notes, the plan and each agent's step, as events of the run.
     const recordEvent = async (payload: unknown) => {
@@ -696,6 +696,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!tasksEnabled) throw new Error('Las tareas largas no están disponibles.');
           if (activeTask) throw new Error('Ya hay una tarea en curso en este hilo: sigue con su siguiente paso.');
           if (!proposal.task) throw new Error('Missing task plan');
+          const overBudget = coworkTaskPlanOverBudget(proposal.task, remainingSearches);
+          if (overBudget) throw new Error(overBudget);
           const staged = await stageCoworkTaskPlan(scope, run.id, proposal.task);
           targetId = staged.targetId;
           label = staged.label;

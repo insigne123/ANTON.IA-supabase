@@ -11,29 +11,34 @@
 1. **Un lote para varias personas: `contacts.prepare_batch`** (efecto `lead_prepare_batch`). Lleva un objetivo:
    - **save:** guardarlas;
    - **email:** guardarlas si falta y buscar su correo (1 crédito por persona);
-   - **research:** además, investigarlas. Sin correo buscado no se investiga, así que el lote lo busca antes;
+   - **research:** además, investigarlas (1 crédito por investigación). Sin correo buscado no se investiga, así que el lote lo busca antes;
    - **linkedin:** guardarlas si falta y buscar su perfil de LinkedIn (1 crédito por persona), aunque ya tengan correo. Es la misma consulta al proveedor que la del correo y solo completa lo que le falta al contacto. Se salta a quien ya tiene perfil o ya pasó por esa consulta. Sirve para invitar por LinkedIn cuando ningún contacto tiene perfil guardado.
 
    Las personas son resultados de búsqueda (`providerId`) o contactos guardados (`leadId`) que la conversación ya vio. Admite hasta 50 personas, sea para guardar, buscar el correo o el perfil, o investigar. Al aprobarlo, el lote prepara a 6 personas a la vez, cada una en su orden (guardar, buscar el correo, investigar), para que 50 quepan en el tiempo del worker: una búsqueda de correo tarda unos 4 segundos.
-2. **Solo lo que falta:** antes de proponer, el servidor lee el estado real de cada persona y salta lo hecho. Revisa si ya está guardada, si su correo ya está o ya se buscó (por cualquier camino) y si tiene una investigación hecha o en curso.
+2. **Nunca más de lo que la persona puede gastar hoy.** Las búsquedas de personas, las de correo o perfil y las investigaciones usan los mismos créditos diarios de cada persona: el límite por persona y por equipo que fija el administrador (`consume_antonia_organization_credits_v2`).
+   - Antes de proponer, el lote cuenta sus créditos y los compara con lo que le queda a la persona hoy. Si no alcanzan, vuelve al modelo con el número («Este lote usa 20 créditos y hoy te quedan 12 de 50…»), y Cowork propone uno que quepa.
+   - Lo mismo con el plan de una tarea: no puede pedir más créditos de los que quedan.
+   - La tarjeta muestra lo que le queda a la persona («Hoy te quedan 38 de tus 50 créditos»). El saldo de Apollo de la organización solo aparece si es menor.
+   - Al ejecutar, cada crédito se reclama de nuevo, de forma atómica: aunque el saldo no se haya podido leer al proponer, nadie gasta más que su límite.
+3. **Solo lo que falta:** antes de proponer, el servidor lee el estado real de cada persona y salta lo hecho. Revisa si ya está guardada, si su correo ya está o ya se buscó (por cualquier camino) y si tiene una investigación hecha o en curso.
    - Nada se cobra dos veces.
    - Si a nadie le falta nada, no hay tarjeta: Cowork sigue con el paso siguiente sin pedir aprobación.
-3. **Las acciones de a una también revisan:** guardar, buscar correo o investigar a alguien que ya lo tiene vuelve al modelo con «ya está hecho», en vez de pedir una aprobación inútil (`coworkEffectAlreadyDone`).
-4. **La tarjeta** (`PrepareBatchReview`) muestra:
+4. **Las acciones de a una también revisan:** guardar, buscar correo o investigar a alguien que ya lo tiene vuelve al modelo con «ya está hecho», en vez de pedir una aprobación inútil (`coworkEffectAlreadyDone`).
+5. **La tarjeta** (`PrepareBatchReview`) muestra:
    - a cada persona, con sus pasos (lo hecho aparece como hecho);
    - quiénes ya estaban listos;
-   - el costo de quienes quedan y el saldo de créditos;
+   - el costo de quienes quedan, en créditos del día, y lo que le queda a la persona;
    - un botón para quitar a alguien antes de aprobar.
 
-   Al aprobar se ejecuta persona por persona: guardar, buscar el correo e investigar.
+   Al aprobar se ejecuta a varias personas a la vez, cada una en su orden: guardar, buscar el correo e investigar.
    - Un cupo agotado detiene ese paso para el resto y lo dice.
    - Una investigación sin correo buscado no se pide.
    - El trabajo se corta a los 75 s y avisa qué faltó, sin pagar dos veces al repetirlo.
-5. **El resultado por persona:** nombre real, correo con su estado, LinkedIn e investigación (del PR-1 en adelante).
+6. **El resultado por persona:** nombre real, correo con su estado, LinkedIn e investigación (del PR-1 en adelante).
    - Cowork continúa con una tabla de esas mismas personas, tomadas del resultado y no buscadas de nuevo por nombre.
    - Esas son «las personas de este trabajo».
-6. **Guardar desde el panel queda en el hilo:** evento `contact.saved`. El historial lo muestra como acción hecha y el lote lo reconoce.
-7. **Una búsqueda de correo hecha desde la app también cuenta para investigar.** «Buscar correo» de «Por completar» liga el resultado a la persona por el id del proveedor, no al contacto guardado.
+7. **Guardar desde el panel queda en el hilo:** evento `contact.saved`. El historial lo muestra como acción hecha y el lote lo reconoce.
+8. **Una búsqueda de correo hecha desde la app también cuenta para investigar.** «Buscar correo» de «Por completar» liga el resultado a la persona por el id del proveedor, no al contacto guardado.
    - Antes, Cowork pedía buscar el correo de nuevo. Ahora lo reconoce y la investigación usa ese correo (`start-research.ts`).
    - Una investigación «parcial» cuenta como hecha. Repetirla queda para el PR de investigación (Plan 5, PR-5).
 

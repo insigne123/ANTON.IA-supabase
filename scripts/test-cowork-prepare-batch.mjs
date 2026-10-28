@@ -36,6 +36,7 @@ const reset = () => Object.assign(state, {
   ],
   batch: null, proposal: null, saves: [], lookups: [], researches: [], lookupError: null, researchError: null,
   lookupDelay: 0, inFlight: 0, maxInFlight: 0,
+  creditsUsed: 0, creditLimit: 50, creditError: false,
 });
 
 function table(name) {
@@ -88,6 +89,9 @@ const sources = {
   '@/lib/server/supabase-admin': 'export const getSupabaseAdminClient=()=>({from:t=>globalThis.__prepBatch.table(t)});',
   '@/lib/server/apollo-credit-balance': 'export const loadLatestApolloCreditBalance=async()=>({remaining:120,capturedAt:new Date().toISOString()});export const isApolloCreditBalanceStale=()=>false;',
   './access': 'export const requireCoworkWorkerAccess=async()=>{};',
+  '@/lib/server/daily-quota-store': `export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50,enrich:50,research:50,contact:50});
+    export const getDailyQuotaStatus=async()=>{const s=globalThis.__prepBatch;if(s.creditError)throw new Error('quota down');
+      return {allowed:s.creditsUsed<s.creditLimit,count:s.creditsUsed,limit:s.creditLimit,dayKey:'2026-10-28',resetAtISO:''};};`,
   './runs': 'export const getCoworkRun=async()=>({run:{status:globalThis.__prepBatch.runStatus},events:[]});',
   './save-contact': `export const coworkSavedContactId=(org,user,providerId)=>"00000000-0000-4000-8000-"+providerId.length.toString(16).padStart(12,"b");
     export const insertCoworkContact=async(auth,providerId,observed)=>{const s=globalThis.__prepBatch;s.saves.push({providerId,observed});
@@ -174,6 +178,7 @@ try {
   assert.equal(preview.matches, true);
   assert.equal(preview.open, true);
   assert.deepEqual(preview.balance, { remaining: 120, stale: false });
+  assert.deepEqual(preview.credit, { left: 50, limit: 50 }, 'the card reads what the person has left of their daily credits');
   assert.ok(preview.items.every(item => !('contact' in item)), 'the card does not carry what saving needs');
   assert.equal((await api.readCoworkPrepareBatchPreview(auth, RUN, 'preparebatch:' + 'f'.repeat(64))).matches, false);
   await assert.rejects(api.setCoworkPrepareBatchExclusions(auth, RUN, [L(9)]), /Solo se puede quitar a personas del lote/);
@@ -257,7 +262,33 @@ try {
   assert.deepEqual(many.result.items.map(item => item.id), fifty, 'the results keep the order of the list');
   assert.ok(many.result.items.every(item => item.steps[0].step === 'enrich' && item.steps[0].status === 'done'));
 
-  console.log('PASS: prepare batch stages only observed own people with what is missing, says when all is done, single actions skip what is done, card removals, run several at a time with real identity, quotas and pinned approval, and 50 lookups in one batch.');
+  // 10. Never more than the person can spend today: a batch over their daily credits goes back to the model with the number.
+  reset();
+  const ten = Array.from({ length: 8 }, (_, n) => `00000000-0000-4000-8000-0000000003${String(n).padStart(2, '0')}`);
+  state.leads.push(...ten.map((id, n) => ({ id, user_id: USER, organization_id: ORG, name: `Persona ${n}`, company: 'Acme', title: 'Gerente',
+    email: null, apollo_id: `r${n}`, source_provider_id: `r${n}` })));
+  state.events.push(savedEvent(RUN, ten));
+  const asked = { goal: 'email', people: ten.map(leadId => ({ leadId })) };
+  state.creditsUsed = 45;
+  await refuse(asked, /Este lote usa 8 créditos y hoy te quedan 5 de 50 .*propón uno que use hasta 5/);
+  assert.equal(state.batch, null, 'nothing is staged');
+  await refuse({ goal: 'research', people: ten.slice(0, 3).map(leadId => ({ leadId })) }, /Este lote usa 6 créditos y hoy te quedan 5/, );
+  state.creditsUsed = 50;
+  await refuse(asked, /Hoy ya usaste tus 50 créditos del día; se renuevan mañana\. Puedes proponer guardarlas sin gastar/);
+  state.creditLimit = 0; state.creditsUsed = 0;
+  await refuse(asked, /Tu cuenta no tiene créditos para buscar correos ni investigar/);
+  // Saving costs nothing; an unreadable balance does not stop the proposal, because the run checks every credit as it spends it.
+  state.creditLimit = 50; state.creditsUsed = 45;
+  const fits = await api.stageCoworkPrepareBatch(scope, RUN, { goal: 'email', people: ten.slice(0, 5).map(leadId => ({ leadId })) });
+  assert.equal(fits.cost.lookups, 5, 'a batch within what is left is proposed');
+  reset();
+  state.leads.push(...ten.map((id, n) => ({ id, user_id: USER, organization_id: ORG, name: `Persona ${n}`, company: 'Acme', title: 'Gerente',
+    email: null, apollo_id: `r${n}`, source_provider_id: `r${n}` })));
+  state.events.push(savedEvent(RUN, ten));
+  state.creditError = true;
+  assert.equal((await api.stageCoworkPrepareBatch(scope, RUN, asked)).cost.lookups, 8);
+
+  console.log('PASS: prepare batch stages only observed own people with what is missing, says when all is done, single actions skip what is done, card removals, run several at a time with real identity, quotas and pinned approval, and 50 lookups in one batch, never over the daily credits of the person.');
 } finally {
   delete globalThis.__prepBatch;
 }

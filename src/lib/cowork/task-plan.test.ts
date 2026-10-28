@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkTaskApproves, coworkTaskContext, coworkTaskPlanLabel, coworkTaskPlanProblem, coworkTaskPlanSchema, coworkTaskReplyContinues,
+import { coworkTaskApproves, coworkTaskContext, coworkTaskPlanLabel, coworkTaskPlanOverBudget, coworkTaskPlanProblem, coworkTaskPlanSchema, coworkTaskReplyContinues,
   coworkTaskThreadBudget, type CoworkActiveTask, type CoworkTaskPlan } from './task-plan';
 import { coworkTaskGraph } from './task-graph';
 
@@ -56,6 +56,14 @@ test('a thread running a task has room for its steps, never past 10 deep', () =>
   assert.deepEqual(coworkTaskThreadBudget(base, null), base);
   assert.deepEqual(coworkTaskThreadBudget(base, { ...task(), startDepth: 3 }), { maxDepth: 9, maxEffects: 6, maxSearches: 2, maxDrafts: 3 });
   assert.equal(coworkTaskThreadBudget(base, { ...task(), startDepth: 8 }).maxDepth, 10);
+});
+
+test('a plan never asks for more credits than the person has left today', () => {
+  assert.equal(coworkTaskPlanOverBudget(plan, 10), null);
+  assert.equal(coworkTaskPlanOverBudget(plan, 40), null);
+  assert.match(coworkTaskPlanOverBudget(plan, 6) ?? '', /pide hasta 10 créditos y hoy te quedan 6: baja limits\.credits a 6 o menos/);
+  assert.match(coworkTaskPlanOverBudget(plan, 0) ?? '', /Hoy no te quedan créditos/);
+  assert.equal(coworkTaskPlanOverBudget({ ...plan, limits: { searches: 1, credits: 0 } }, 0), null, 'a plan that spends nothing always fits');
 });
 
 test('a turn of the task reads the plan, what it spent and what is left', () => {

@@ -17,6 +17,8 @@ type Result = {
 type Preview = {
   items: Item[]; ready: Ready[]; excluded: string[]; matches: boolean; open: boolean;
   cost: { saves: number; lookups: number; research: number }; balance: { remaining: number; stale: boolean } | null; results: Result[] | null;
+  /** The person's daily credits left (searches, lookups and researches share them); null when they could not be read. */
+  credit?: { left: number; limit: number } | null;
 };
 
 const endpoint = (runId: string) => `/api/cowork/runs/${runId}/preparebatch`;
@@ -25,6 +27,9 @@ const DONE: Record<Step, string> = { save: 'Ya guardado', enrich: 'Correo ya bus
 /** Both lookups go to the provider and cost 1 credit each. */
 const LOOKUPS: Step[] = ['enrich', 'linkedin'];
 const looksUp = (item: Item) => item.steps.some(step => LOOKUPS.includes(step));
+/** A lookup and a research take one daily credit each. */
+const creditsOf = (items: Item[]) => items.filter(looksUp).length + items.filter(item => item.steps.includes('research')).length;
+const creditWord = (count: number) => `${count} ${count === 1 ? 'crédito' : 'créditos'}`;
 /** Only one lookup to run per person (emails, or LinkedIn profiles): the button and the outcome say it, so each row is just the person. */
 const onlyStep = (items: Item[]) => {
   const step = items[0]?.steps.length === 1 ? items[0].steps[0] : null;
@@ -76,16 +81,26 @@ function PersonRow({ item, included, disabled, onToggle, steps = true }: { item:
   </li>;
 }
 
-/** «Usa hasta 2 créditos para buscar correos y 2 investigaciones de tu cupo diario». Only what costs, counted over who stays. */
+/** «Usa hasta 4 créditos de tu cupo de hoy: 2 para buscar correos y 2 para investigar». Only what costs, counted over who stays. */
 function costLine(kept: Item[]) {
   const emails = kept.filter(item => item.steps.includes('enrich')).length;
   const profiles = kept.filter(item => item.steps.includes('linkedin')).length;
   const lookups = emails + profiles;
   const what = emails && profiles ? 'buscar correos y perfiles de LinkedIn' : profiles ? 'buscar perfiles de LinkedIn' : 'buscar correos';
   const research = kept.filter(item => item.steps.includes('research')).length;
-  const parts = [lookups ? `hasta ${lookups} ${lookups === 1 ? 'crédito' : 'créditos'} para ${what} (1 por persona)` : '',
-    research ? `${research} ${research === 1 ? 'investigación' : 'investigaciones'} de tu cupo diario` : ''].filter(Boolean);
-  return parts.length ? `Usa ${parts.join(' y ')}.` : 'Solo guarda contactos: no gasta créditos.';
+  if (!lookups && !research) return 'Solo guarda contactos: no gasta créditos.';
+  const parts = [lookups ? `${lookups} para ${what}` : '', research ? `${research} para investigar` : ''].filter(Boolean);
+  const total = `Usa hasta ${creditWord(lookups + research)} de tu cupo de hoy`;
+  return parts.length > 1 ? `${total}: ${parts.join(' y ')}.` : `${total} para ${lookups ? what : 'investigar'} (1 por persona).`;
+}
+
+/** «Hoy te quedan 38 de tus 50 créditos.», and the organization's balance only when it is the shorter one. */
+function creditLine(preview: Preview, needed: number) {
+  if (!needed) return '';
+  const own = preview.credit ? ` Hoy te quedan ${preview.credit.left} de tus ${creditWord(preview.credit.limit)}.` : '';
+  const org = preview.balance && (!preview.credit || preview.balance.remaining < preview.credit.left)
+    ? ` A la organización le quedan ${creditWord(preview.balance.remaining)}${preview.balance.stale ? ' (dato de hace un rato)' : ''}.` : '';
+  return own + org;
 }
 
 /** The button says what it does and what it costs: «Buscar 3 correos · 3 créditos» when only emails are missing (round 2 readings:
@@ -93,7 +108,8 @@ function costLine(kept: Item[]) {
 function approveLabel(kept: Item[]) {
   if (!kept.length) return 'Aprobar';
   const lookups = kept.filter(looksUp).length;
-  const credits = lookups ? ` · ${lookups} ${lookups === 1 ? 'crédito' : 'créditos'}` : '';
+  const spend = creditsOf(kept);
+  const credits = spend ? ` · ${creditWord(spend)}` : '';
   const only = onlyStep(kept);
   if (only === 'linkedin') return `Buscar ${lookups} ${lookups === 1 ? 'perfil' : 'perfiles'}${credits}`;
   return only === 'enrich' ? `Buscar ${lookups} ${lookups === 1 ? 'correo' : 'correos'}${credits}` : `Preparar a ${people(kept.length)}${credits}`;
@@ -126,8 +142,10 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
   const locked = saving || resolving || !preview.open;
   const changed = removed.size !== preview.excluded.length || preview.excluded.some(id => !removed.has(id));
   const toggle = (id: string) => setRemoved(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const needed = creditsOf(kept);
   const lookups = kept.filter(looksUp).length;
-  const short = preview.balance && lookups > preview.balance.remaining;
+  // The person's own daily credits are what stops the batch; the organization's balance only limits the lookups.
+  const short = (preview.credit && needed > preview.credit.left) || (preview.balance && lookups > preview.balance.remaining);
   async function approve() {
     setError('');
     setSaving(true);
@@ -155,8 +173,7 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
       {/* Next to the count, not only folded below: the message, the card and the list say the same numbers. */}
       {!!preview.ready.length && <p className="text-[13px] text-cw-muted">
         {preview.ready.length === 1 ? 'Otra persona ya estaba lista y no se toca.' : `Otras ${preview.ready.length} ya estaban listas y no se tocan.`}</p>}
-      <p className="text-[12.5px] text-cw-muted">{costLine(kept)}{preview.balance
-        ? ` Te quedan ${preview.balance.remaining} créditos${preview.balance.stale ? ' (dato de hace un rato)' : ''}.` : ''}</p>
+      <p className="text-[12.5px] text-cw-muted">{costLine(kept)}{creditLine(preview, needed)}</p>
     </div>
     <ul aria-label="Personas de la lista" className="cw-scroll max-h-96 divide-y divide-cw-border overflow-y-auto rounded-xl border border-cw-border bg-cw-panel">
       {preview.items.map(item => <PersonRow key={item.id} item={item} included={!removed.has(item.id)} disabled={locked} onToggle={() => toggle(item.id)} steps={!oneLookup} />)}
@@ -171,7 +188,7 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
           <span className="block text-[12.5px] text-cw-muted">{person.reason}</span></li>)}
       </ul>
     </details>}
-    {short && <ReviewNote ok={false}>Los créditos que quedan no alcanzan para todas las búsquedas: las que no alcancen quedan sin hacer y se avisa en cada persona.</ReviewNote>}
+    {short && <ReviewNote ok={false}>Los créditos que te quedan no alcanzan para todo el lote: lo que no alcance queda sin hacer y se avisa en cada persona. Quita a algunas personas para que alcance.</ReviewNote>}
     {error && <ReviewError message={error} />}
     {/* «Qué va a pasar» already says what approving does: the note speaks only when something is off. */}
     {(!preview.matches || !preview.open) && <ReviewNote ok={false}>{!preview.matches
