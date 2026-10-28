@@ -41,6 +41,16 @@ Ejemplo de motivos: «14 avisos en 30 días (5 en la última semana) · cargos: 
 
 Los clientes van al final; los que ya son contactos se marcan.
 
+## Perú y Colombia (28 de octubre de 2026)
+
+GrupoExpro, y después PSOL, buscan empresas que contratan también en Perú y Colombia.
+
+- **Cómo se activa:** agregando «Perú» y «Colombia» a los territorios de la ficha de la empresa (`opportunity_company_context.territories`). Con la búsqueda de la organización (`OPPORTUNITIES_WORKSPACE_ENABLED=true`), los avisos de LinkedIn se piden en esos territorios. Hoy las dos empresas tienen solo «Chile».
+- **Nombres para LinkedIn:** el proveedor (Fantastic Jobs) busca lugares en inglés y sin tildes. «Perú» no encontraría nada; los territorios se le pasan como «Peru», «Colombia» y «Bogota» (`linkedinLocationTerms`).
+- **El país de cada aviso:** sale del código que da la fuente (JSearch, «PE») o del país que nombra su lugar («Lima, Lima, Peru»). La región chilena se busca solo en avisos de Chile. Antes, «Santiago de Cali, Colombia» se contaba como Región Metropolitana.
+- **Una oportunidad por país:** la misma empresa contratando en Chile y en Perú son dos oportunidades, porque cada país lo vende otro equipo. En Perú y Colombia la clave lleva el país («name:acme|pe») y el título lo dice («Actividad de contratación: Acme (Perú)»). En Chile la clave no cambia, así que no se duplica nada de lo ya guardado.
+- **Presupuesto:** la búsqueda de avisos usa el mismo tope por corrida (US$0,30 con prioridad equilibrada, unos 58 avisos) para todos los territorios. Con tres países, cada uno recibe menos avisos que Chile solo. Dar a cada país lo mismo que hoy tiene Chile costaría unos US$9 al mes por país, y el tope mensual de Oportunidades es de US$20 por organización.
+
 ## Medición con las claves
 
 `scripts/measure-opportunity-sources.ts --live` corre la búsqueda del piloto en las dos fuentes, sin escribir en la base, y reporta:

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  cleanRoleVariants, hiringQueries, linkedinLocations, linkedinTitles, regionQueryName, regionsFromPlaces, searchRoles,
+  cleanRoleVariants, hiringQueries, linkedinLocations, linkedinLocationTerms, linkedinTitles, regionQueryName, regionsFromPlaces, searchRoles,
 } from './search-terms';
 
 test('the roles of a search are trimmed, each once and at most fifteen', () => {
@@ -39,4 +39,9 @@ test('each role is asked in each region chosen, the roles first and then their v
 test('the places of «Tu cliente ideal» become regions of the country, in their order', () => {
   assert.deepEqual(regionsFromPlaces(['Santiago', 'Calama', 'Concepción', 'Perú', 'Antofagasta']), ['Antofagasta', 'Metropolitana', 'Biobío']);
   assert.deepEqual(regionsFromPlaces(['Chile']), [], 'the whole country is no region');
+});
+
+test('the company territories reach LinkedIn in English and without accents, each once', () => {
+  assert.deepEqual(linkedinLocationTerms(['Chile', 'Perú', 'Colombia', 'Bogotá', 'perú', ' ']), ['Chile', 'Peru', 'Colombia', 'Bogota']);
+  assert.deepEqual(linkedinLocationTerms(['México', 'Brasil']), ['Mexico', 'Brazil']);
 });

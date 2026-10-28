@@ -18,6 +18,8 @@ export type JobAd = {
   companyIndustry: string | null;
   location: string | null;
   region: string | null;
+  /** Where it is, when the ad says it (28 Oct 2026: Peru and Colombia besides Chile). A Chilean region is only looked for in Chile. */
+  country?: HiringCountry | null;
   /** The board that published it (Computrabajo, LinkedIn, Indeed…). */
   publisher: string | null;
   url: string | null;
@@ -79,6 +81,21 @@ export function chileanRegion(location: string | null | undefined) {
   return REGIONS.find(item => item.terms.some(term => wordIn(folded, term)))?.region ?? null;
 }
 
+/** The countries ads are read in: Chile, and Peru and Colombia, where GrupoExpro and PSOL are expanding (28 Oct 2026). */
+export type HiringCountry = 'CL' | 'PE' | 'CO';
+const COUNTRIES: Array<{ code: HiringCountry; name: string; term: string }> = [
+  { code: 'CL', name: 'Chile', term: 'chile' }, { code: 'PE', name: 'Perú', term: 'peru' }, { code: 'CO', name: 'Colombia', term: 'colombia' },
+];
+export const hiringCountryName = (code: HiringCountry) => COUNTRIES.find(item => item.code === code)!.name;
+/** The country of an ad: the code the source gives (JSearch, «PE»), or the country its place names («Lima, Lima, Peru»). */
+export function adCountry(location: string | null | undefined, code?: unknown): HiringCountry | null {
+  const iso = typeof code === 'string' ? code.trim().toUpperCase() : '';
+  const named = location ? fold(location) : '';
+  return COUNTRIES.find(item => item.code === iso)?.code ?? COUNTRIES.find(item => named && wordIn(named, item.term))?.code ?? null;
+}
+/** An ad's Chilean region, only for an ad in Chile or of unknown country: «Santiago de Cali, Colombia» is not the Metropolitana. */
+const regionIn = (location: string | null, country: HiringCountry | null) => (country && country !== 'CL' ? null : chileanRegion(location));
+
 /** Staffing agencies and boards post for others: they are competitors or noise, not the company that hires. */
 const AGENCY = /(servicios transitorios|\best\b|outsourcing|recursos humanos|\brr\.? ?hh\b|reclutamiento|seleccion de personal|headhunt|consultora (de |en )?(rr\.? ?hh|recursos humanos|personal|seleccion)|staffing|empleos temporales|trabajo temporal|manpower|adecco|randstad|kelly services|\bhays\b|michael page|page personnel|gi group|grupo expro|\bexpro\b|trabajando\.com|laborum|computrabajo|bumeran|chiletrabajos|indeed)/;
 /** Ads that hide who hires cannot become a company to contact. */
@@ -108,10 +125,11 @@ export function jobAdFromJSearch(raw: Record<string, unknown>): JobAd | null {
   const externalId = text(raw.job_id, 300), title = text(raw.job_title, 300), company = text(raw.employer_name, 300);
   if (!externalId || !title) return null;
   const location = [raw.job_city, raw.job_state, raw.job_country].map(value => text(value, 80)).filter(Boolean).join(', ') || text(raw.job_location, 200) || null;
+  const country = adCountry(location, raw.job_country);
   return {
     source: 'jsearch', externalId, title, company,
     companyDomain: domainOf(raw.employer_website), companyLinkedinUrl: null, companySize: null, companyIndustry: null,
-    location, region: chileanRegion(location), publisher: text(raw.job_publisher, 120) || null,
+    location, region: regionIn(location, country), country, publisher: text(raw.job_publisher, 120) || null,
     url: https(raw.job_apply_link) || https(raw.job_google_link), postedAt: iso(raw.job_posted_at_datetime_utc ?? raw.job_posted_at_timestamp),
   };
 }
@@ -129,13 +147,15 @@ export function jobAdFromFantastic(raw: Record<string, unknown>): JobAd | null {
     : first && typeof first === 'object' ? ['city', 'admin', 'country'].map(key => text((first as Record<string, unknown>)[key], 80)).filter(Boolean).join(', ')
     : text(raw.location, 200);
   const headcount = typeof raw.org_linkedin_headcount === 'number' ? String(raw.org_linkedin_headcount) : text(raw.org_linkedin_size ?? raw.linkedin_org_size, 40);
+  const derivedCountry = Array.isArray(raw.countries_derived) && typeof raw.countries_derived[0] === 'string' ? raw.countries_derived[0] : '';
+  const country = adCountry(location) ?? adCountry(derivedCountry);
   return {
     source: 'linkedin', externalId, title, company,
     companyDomain: domainOf(raw.org_linkedin_website) || domainOf(raw.organization_url ?? raw.linkedin_org_url_website ?? raw.linkedin_org_url),
     companyLinkedinUrl: https(raw.organization_linkedin_url ?? raw.linkedin_org_url)
       || (/^[a-z0-9-]+$/i.test(text(raw.org_linkedin_slug)) ? `https://www.linkedin.com/company/${text(raw.org_linkedin_slug)}` : null),
     companySize: headcount || null, companyIndustry: text(raw.org_linkedin_industry ?? raw.linkedin_org_industry, 120) || null,
-    location: location || null, region: chileanRegion(location), publisher: 'LinkedIn', url: https(raw.url), postedAt: iso(raw.date_posted),
+    location: location || null, region: regionIn(location || null, country), country, publisher: 'LinkedIn', url: https(raw.url), postedAt: iso(raw.date_posted),
   };
 }
 
@@ -183,8 +203,10 @@ export function groupHiring(ads: JobAd[], profile: HiringProfile, options: { now
     if (posted < since) { skipped.old++; continue; }
     const kind = employerKind(ad.company);
     if (kind !== 'company' && !(kind === 'agency' && profile.excludeAgencies === false)) { skipped[kind]++; continue; }
-    const key = companyKey(ad);
-    if (!key) { skipped.noCompany++; continue; }
+    // The same company hiring in Chile and in Peru is two opportunities: each country is a different team selling there.
+    const company = companyKey(ad);
+    if (!company) { skipped.noCompany++; continue; }
+    const key = ad.country && ad.country !== 'CL' ? `${company}|${ad.country.toLowerCase()}` : company;
     const entry = byCompany.get(key) || { ads: [], all: [], seen: new Set<string>() };
     entry.all.push(ad);
     // One posting seen in two boards the same week is one ad.
@@ -221,8 +243,10 @@ export function groupHiring(ads: JobAd[], profile: HiringProfile, options: { now
     }
     const topRegions = [...regions].sort((a, b) => b[1] - a[1]);
     const inProfileRegion = profile.regions.length ? topRegions.find(([region]) => profile.regions.some(wanted => fold(wanted) === fold(region))) : undefined;
+    const country = list.find(ad => ad.country)?.country ?? null;
     if (inProfileRegion) { score += 10; reasons.push(`en ${inProfileRegion[0]}`); }
     else if (topRegions.length) reasons.push(`en ${topRegions.slice(0, 2).map(([region]) => region).join(' y ')}`);
+    else if (country && country !== 'CL') reasons.push(`en ${hiringCountryName(country)}`);
     if (headcount !== null) {
       if (headcount >= 200) score += 10; else if (headcount >= 50) score += 5;
       reasons.push(`${size} empleados`);
@@ -234,7 +258,7 @@ export function groupHiring(ads: JobAd[], profile: HiringProfile, options: { now
     else reasons.push('aún no es contacto');
     const sorted = [...list].sort((a, b) => (b.postedAt || '').localeCompare(a.postedAt || ''));
     return [{
-      key, company, domain: pick(entry.all.map(ad => ad.companyDomain)), linkedinUrl: pick(entry.all.map(ad => ad.companyLinkedinUrl)),
+      key, company, country, domain: pick(entry.all.map(ad => ad.companyDomain)), linkedinUrl: pick(entry.all.map(ad => ad.companyLinkedinUrl)),
       size, industry: pick(entry.all.map(ad => ad.companyIndustry)), ads: list.length, adsLastWeek: lastWeek,
       roles: [...roles].sort((a, b) => b[1] - a[1]).map(([role, count]) => ({ role, ads: count })),
       regions: topRegions.map(([region, count]) => ({ region, ads: count })),

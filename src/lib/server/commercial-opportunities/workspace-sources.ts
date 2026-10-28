@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { AuthError } from '@/lib/server/auth-utils';
 import { canonicalLinkedInPost } from '@/lib/commercial-opportunities/workspace';
 import { linkedinRunCap, linkedinWindow, opportunitySourceItemLimit } from '@/lib/commercial-opportunities/source-budget';
-import { groupHiring, jobAdFromFantastic } from '@/lib/commercial-opportunities/hiring';
+import { groupHiring, hiringCountryName, jobAdFromFantastic } from '@/lib/commercial-opportunities/hiring';
+import { linkedinLocationTerms } from '@/lib/commercial-opportunities/search-terms';
 import { tenderUrl, type Tender } from '@/lib/commercial-opportunities/tenders';
 import { listOpenLicitaciones } from './mercado-publico';
 import { resolveTicketForOrganization } from './tickets';
@@ -163,12 +164,13 @@ export async function captureOpportunityLinkedIn(client: SupabaseClient, job: Op
   const limit = opportunitySourceItemLimit({ cap, price, start, max: 100 });
   const roles = context.criteria?.roles || [];
   if (limit < 10 || !roles.length) throw new AuthError('Faltan criterios o presupuesto para consultar avisos laborales.', 409);
-  const data = await apifyOpportunityItems(client, job, 'fantastic-jobs~advanced-linkedin-job-search-api', { titleSearch: roles.slice(0, 20), locationSearch: context.territories.length ? context.territories : ['Chile'],
+  const data = await apifyOpportunityItems(client, job, 'fantastic-jobs~advanced-linkedin-job-search-api', { titleSearch: roles.slice(0, 20), locationSearch: context.territories.length ? linkedinLocationTerms(context.territories) : ['Chile'],
     timeRange: lookback, limit, removeAgency: false, descriptionType: 'text', recruiterOnly: false }, cap);
   if (data.waiting) return { waiting: true as const };
   const ads = data.items.flatMap(item => { const ad = jobAdFromFantastic(item); return ad ? [ad] : []; });
   const grouped = groupHiring(ads, { roles, regions: [], minAds: 1, clients: [], contactsCompanies: [], excludeAgencies: false }, { now: new Date().toISOString(), windowDays: 30 });
-  const candidates = grouped.opportunities.map(c => ({ kind: 'hiring', key: `hiring:${c.key}`, title: `Actividad de contratación: ${c.company}`, company: c.company,
+  const candidates = grouped.opportunities.map(c => ({ kind: 'hiring', key: `hiring:${c.key}`,
+    title: `Actividad de contratación: ${c.company}${c.country && c.country !== 'CL' ? ` (${hiringCountryName(c.country)})` : ''}`, company: c.company,
     domain: c.domain, description: c.signals.map(s => `${s.title} · ${s.location || ''} · ${s.url || ''}`).join('\n').slice(0, 6000), url: c.signals[0]?.url || null, raw: { ads: c.ads } }));
   return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), coverage: 'bounded_daily_ads' };
 }

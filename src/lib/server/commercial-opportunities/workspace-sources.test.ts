@@ -90,6 +90,10 @@ test('LinkedIn searches ask for a week of ads after a pause, five post queries, 
     const ads = calls[0];
     assert.match(ads.url, /fantastic-jobs~advanced-linkedin-job-search-api\/runs\?maxTotalChargeUsd=0\.4&/);
     assert.deepEqual([ads.body.timeRange, ads.body.limit, ads.body.locationSearch], ['7d', 78, ['Chile']]);
+    // Peru and Colombia among the territories: LinkedIn is asked for them by their English names.
+    calls.length = 0;
+    await captureOpportunityLinkedIn(memoryClient({ opportunity_jobs: null }) as any, job as any, { ...context, territories: ['Chile', 'Perú', 'Colombia'] });
+    assert.deepEqual(calls[0].body.locationSearch, ['Chile', 'Peru', 'Colombia']);
 
     calls.length = 0;
     const recent = new Date(Date.now() - 3 * 3_600_000).toISOString();
