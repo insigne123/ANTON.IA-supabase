@@ -43,7 +43,7 @@ for (const theme of ['light', 'dark']) {
     window.eval(bundle.outputFiles[0].text);
     await waitFor(() => button('Consultar perfil'));
     assert.match(window.document.body.textContent, /Se consulta solo la persona de este perfil/);
-    assert.match(window.document.body.textContent, /aproximadamente 1 crédito/);
+    assert.match(window.document.body.textContent, /no gasta créditos/);
     assert.match(window.document.body.textContent, /no se envía una invitación/);
     assert.doesNotMatch(window.document.body.textContent, /Cargos \(y parecidos\)|Ubicación de la persona/);
     const link = window.document.querySelector(`a[href="${profile}"]`);
