@@ -6,11 +6,12 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 
 - **El contacto trae:**
   - su correo, conseguido con Apify y no con los créditos de Apollo;
-  - una breve investigación;
+  - por qué se lo recomendamos: qué calza con su cliente ideal y por qué le sirve para lo que vende;
+  - quién es la persona y qué hace su empresa;
   - un primer correo sugerido.
 - **Llega por correo**, en el aviso de la mañana:
   - en el cuerpo, un bloque con el contacto (nombre, cargo y empresa, por qué calza) y su botón «Ver y guardar»;
-  - adjunto, un PDF con la investigación y el borrador;
+  - adjunto, un PDF con el porqué, la persona, su empresa, cómo abordarla y el borrador;
   - un enlace a «Buscar prospectos», donde se ve la búsqueda que lo encontró, con el contacto ya listo.
 - **Guardarlo no gasta créditos:** ya viene con correo.
 - **Sin correo, desde «Hoy»:** quien no lo recibe por correo lo abre en «Hoy», y se prepara en ese momento.
@@ -27,7 +28,7 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 
      Sin nada de eso no hay contacto, y queda dicho por qué (`status = empty`).
    - **Grupos para ahorrar Apify** (`groupDropPeople`): cada búsqueda paga el mínimo de Apify aunque traiga pocos contactos, así que quienes buscan algo parecido comparten una.
-     - Alguien entra a un grupo si la mitad o más de las palabras de sus cargos y de sus rubros ya están en el grupo, y busca en un país que el grupo busca. Se comparan sin el nivel del cargo («Gerente», «Jefe») y en singular; «RR. HH.», «HR», «Personas», «Capital humano» y «Talento humano» cuentan como lo mismo.
+     - Alguien entra a un grupo si la mitad o más de las palabras de sus cargos y de sus rubros ya están en el grupo, y busca en un país que el grupo busca. Se comparan sin el nivel del cargo («Gerente», «Jefe») y en singular; «RR. HH.», «HR», «Personas», «Capital humano», «Talento humano», «People» y «Talento» cuentan como lo mismo.
      - La búsqueda del grupo suma los cargos y rubros de quien entra, hasta 6 de cada uno, y busca en el país de quien lo abrió.
      - Quien no se parece a ningún grupo tiene su propia búsqueda. El cliente ideal más repetido abre el primer grupo.
      - **Tope:** `LEAD_DROPS_MAX_GROUPS` búsquedas por empresa al día (5 por defecto). Pasado el tope, cada grupo chico se suma al más parecido.
@@ -44,29 +45,43 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
    - **Dónde queda:**
      - el correo y el teléfono, cifrados en `lead_search_vault` (30 días);
      - lo visible, en `lead_drops.items`: nombre, cargo, empresa, por qué calza y los datos de la empresa.
+     - Desde el 29 de octubre también: el nivel y el área de la persona en español («Gerencia o jefatura», «Recursos humanos»), su región y país, el sitio y la página de LinkedIn de la empresa (públicos; el LinkedIn de la persona sigue en la bóveda) y **cómo calza, criterio por criterio** (`dropFit`):
+       - **Cargo y rubro:** por sus palabras, sin el nivel del cargo y con los mismos sinónimos de los grupos («Head of People» calza con «Gerente de Personas»). Un rubro calza también si la búsqueda lo nombra igual: «servicios transitorios» se busca como *staffing & recruiting*, que es «Reclutamiento y personal».
+       - **Lugar:** por nombre o por país. Si no nombra ninguno de los lugares pedidos pero está en el país, es «En parte» («Las Condes» para «Santiago»); si está en otro país, «No».
+       - **Tamaño:** solo si el cliente ideal lo pide.
+       - Lo que la búsqueda no trajo dice «Sin dato»: no se adivina.
      - El cargo va con «de» e «y» en minúscula («Jefe de Reclutamiento y Selección»), y el rubro en español, como lo dice «Empresas» del CRM (`industryLabel`): «logistics & supply chain» es «Logística».
 2. **Redacción**, en la misma pasada o la siguiente:
    - Haiku resume en una frase qué hace la empresa, solo con la descripción que trajo la búsqueda.
+   - **Por qué le sirve** (`adviseOn`, desde el 29 de octubre; idea del dueño: «agrégale más info para que el usuario sepa por qué es recomendado»): Haiku conecta la oferta de la persona («Perfil» o la ficha de la empresa: oferta, servicios, resultados, diferenciadores) con el cargo, el área y la empresa del contacto. Da 2 o 3 razones y una sugerencia de cómo abrir la conversación, sin redactar el correo.
+     - Solo con esos datos: nunca el correo ni el teléfono. Una razón con una cifra que no está en los datos («baja la rotación un 30%») se descarta.
+     - Sin oferta no hay nada que conectar y no se pide; si falla, el contacto queda igual, con la tabla de calce.
+     - Corre a la vez que la Redactora y cuesta una llamada corta por contacto.
    - La **Redactora de Cowork**, con sus mismas reglas, sus chequeos y la Revisora, escribe el primer correo. Usa la oferta, las pruebas y la firma de «Perfil» (o la oferta del workspace).
    - El contacto queda `ready`.
 3. **Envío:** el aviso de la mañana (`dailyAlertsTick`, 08:00) lo lleva, así que nunca hay dos correos el mismo día.
    - **Asunto:** «Tu contacto de hoy: Gerente de Personas en Ripley», salvo que haya algo más urgente, como una respuesta o un compromiso.
-   - **Cuerpo:** un bloque por contacto (nombre, cargo · empresa, por qué calza), no una tabla: una tabla de tres columnas se rompe en un teléfono. Con el contacto va su botón «Ver y guardar», el único botón principal del correo: «Abrir ANTON.IA» pasa a ser un enlace. Si hay otras cosas en el aviso (una respuesta, un compromiso), van en la lista y el contacto no se repite como una línea más; si el contacto es lo único, el saludo lo dice («Tu contacto del día ya está listo») y no hay lista ni título.
+   - **Cuerpo:** un bloque por contacto (nombre, cargo · empresa, por qué calza y la primera razón de por qué le sirve), no una tabla: una tabla de tres columnas se rompe en un teléfono. Con el contacto va su botón «Ver y guardar», el único botón principal del correo: «Abrir ANTON.IA» pasa a ser un enlace. Si hay otras cosas en el aviso (una respuesta, un compromiso), van en la lista y el contacto no se repite como una línea más; si el contacto es lo único, el saludo lo dice («Tu contacto del día ya está listo») y no hay lista ni título.
    - **Por qué calza:** lo que coincidió, sin repetir el cargo que se ve al lado: «Calza con tu cliente ideal por su cargo y su rubro (logística), en Santiago.» («de tu equipo» o «de tu empresa» para quien no declaró uno) (`whyText`).
    - **Adjunto:** `contacto-del-dia-AAAA-MM-DD.pdf`, armado con el motor de documentos de la app (`dropDocument`, `src/lib/documents`), con el mismo diseño de los demás documentos:
      - el nombre como título, cargo y empresa debajo, y «Para» y la fecha en español («28 de octubre de 2026»);
      - «Ver y guardar en ANTON.IA» como enlace, no la dirección completa;
-     - «Por qué te lo recomiendo» en un recuadro, «Lo que sabemos de la empresa» en viñetas y el primer correo en su propio recuadro, con el asunto en su primera línea y la firma junta;
+     - «Por qué te lo recomendamos» en un recuadro: por qué calza y, debajo, las razones de por qué le sirve;
+     - «Cómo calza con tu cliente ideal», una tabla: criterio, este contacto, lo que buscas y ¿calza? (Sí, En parte, No, Sin dato);
+     - «Sobre la persona»: nivel, área y qué datos de contacto trae (el lugar ya está en la tabla);
+     - «Sobre <empresa>»: qué hace, y en una línea rubro y tamaño (si no están en la tabla), su sitio y su LinkedIn como enlaces;
+     - «Cómo abordarlo» y el primer correo en su propio recuadro, con el asunto en su primera línea y la firma junta;
      - si hay varios contactos, uno por página.
+     - Un contacto de antes del 29 de octubre, sin esas partes, muestra lo que tiene: por qué calza, «Lo que sabemos de la empresa» y el correo.
      Hasta el 29 de octubre se dibujaba a mano con jsPDF: la dirección larga a la vista, la fecha «2026-10-28» y todo con el mismo peso.
    - Una vez enviado, pasa a `sent`.
 4. **En la app** (`/search/contactos/<id>`, dentro de «Buscar prospectos»):
    - **Título:** «Tu contacto del día» («Tus contactos del día» si son varios), no «Buscar prospectos».
    - **«Así lo buscamos»:** la primera vez que se abre en ese dispositivo, los filtros usados y los pasos de la búsqueda, uno a uno: «Buscando…», «Revisando que tengan correo verificado», «Quitando a quienes tu equipo ya tiene» y «Escribiendo un primer correo». Con movimiento reducido o con «Ver ahora», aparecen de inmediato. Al terminar se guarda que ya se vio (`localStorage`, `anton:drop-played:<id>`): volver a escribirle no espera la animación otra vez.
    - **Después, plegado:** «Así lo buscamos» queda como una fila bajo el contacto, con los filtros en una línea («Gerente de Personas +2 · Retail +1 · Chile»); se abre para ver cargo, rubro y lugar. Lo que se ve primero es el contacto.
-   - **El contacto:** su nombre como título, cargo y empresa, por qué calza, «Correo verificado» y «Teléfono» si lo hay. La investigación y el primer correo, con «Copiar», están a la vista; el asunto va con su nombre («Asunto: …»).
+   - **El contacto:** su nombre como título, cargo y empresa, y debajo nivel, área y lugar. «Por qué te lo recomendamos»: por qué calza, las razones de por qué le sirve, «Correo verificado» y «Teléfono» si lo hay. Luego cómo calza criterio por criterio («Calza», «Calza en parte», «No calza», «Sin dato», con lo que buscas debajo), su empresa con sus enlaces, cómo abordarlo y el primer correo, con «Copiar»; el asunto va con su nombre («Asunto: …»). Con varios contactos, el calce, la empresa y el correo van plegados en cada uno.
    - **Una acción a la vez:**
-     - «Guardar en «Por escribir»» usa el correo y el teléfono de la bóveda, **sin créditos ni otra búsqueda**. Si ya estaba en «Por escribir» con ese correo, se enlaza sin duplicarse. La investigación y el borrador quedan en `enriched_leads.data.leadDrop`.
+     - «Guardar en «Por escribir»» usa el correo y el teléfono de la bóveda, **sin créditos ni otra búsqueda**. Si ya estaba en «Por escribir» con ese correo, se enlaza sin duplicarse. La investigación, el borrador y las razones quedan en `enriched_leads.data.leadDrop`.
      - Después, «Investigar y escribirle» abre «Por escribir» con su investigación completa ya en marcha (`?investigar=<id>&empezar=1`). Toma unos minutos (3 en la prueba real del 20 de octubre); luego «Preparar correos» deja el correo listo para revisarlo y enviarlo desde ANTON.IA.
      - **Por qué no se envía el correo sugerido tal cual:** en ANTON.IA todo lo que se envía sale de una investigación completa, con sus chequeos y revisión. El sugerido sirve para decidir y se puede copiar con «Copiar»; «Redactar» sin investigación solo ofrece investigar.
      - «Investigar a este contacto», en «Redactar», también la deja en marcha. Si el contacto ya tiene una investigación, o una en curso, se abre para leerla y no se repite.

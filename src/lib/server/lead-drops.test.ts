@@ -12,7 +12,9 @@ const WEDNESDAY_MORNING = new Date('2026-10-21T10:00:00.000Z');
 const actorItem = (n: number, company: string, extra: Record<string, unknown> = {}) => ({
   first_name: `Nombre${n}`, last_name: `Apellido${n}`, full_name: `Nombre${n} Apellido${n}`, email: `p${n}@${company.toLowerCase()}.cl`,
   job_title: 'Gerente de Personas', company_name: company, company_domain: `${company.toLowerCase()}.cl`, industry: 'Retail', company_size: '500',
-  city: 'Santiago', linkedin: `linkedin.com/in/p${n}`, company_description: `${company} vende productos para el hogar en Chile.`, ...extra,
+  city: 'Santiago', state: 'Santiago Metropolitan Region', country: 'Chile', seniority_level: 'manager', functional_level: 'human_resources',
+  company_website: `www.${company.toLowerCase()}.cl`, company_linkedin: `linkedin.com/company/${company.toLowerCase()}`,
+  linkedin: `linkedin.com/in/p${n}`, company_description: `${company} vende productos para el hogar en Chile.`, ...extra,
 });
 const POOL = ['Ripley', 'Falabella', 'Paris', 'Lider', 'Tottus', 'Unimarc', 'Jumbo', 'Hites', 'Abcdin', 'Easy', 'Sodimac', 'Corona'];
 const searchCalls: any[] = [];
@@ -35,8 +37,15 @@ const seed = () => ({
 const writerDraft = (name: string) => ({ reply: `Le escribí a ${name}.`, question: null, suggestions: ['Sí'],
   blocks: [{ type: 'email_draft', title: `Correo para ${name}`, to: [name], subject: 'Ingresos en temporada alta',
     body: `Hola ${name.split(' ')[0]},\n\nEn retail, cuando entra un grupo grande antes de la temporada, cada antecedente pendiente es un puesto que sigue vacío.\n\nAXIS consulta antecedentes laborales en el PJUD.\n\n¿Cuántos ingresos revisan al mes?\n\nPersona u-ana` }] });
+const adviceCalls: any[] = [];
 const fakeGenerate = async (options: any) => {
   if (options.prompt.includes('"companies"')) return { companies: JSON.parse(options.prompt).companies.map((item: any) => ({ leadId: item.leadId, about: `${item.company} vende productos para el hogar.` })) };
+  if (String(options.systemPrompt).startsWith('Le explicas a un vendedor')) {
+    adviceCalls.push(JSON.parse(options.prompt));
+    return { contacts: JSON.parse(options.prompt).contacts.map((item: any) => ({ leadId: item.leadId,
+      reasons: [`- ${item.firstName} decide cómo se revisa a quien entra en ${item.company}: AXIS lo hace en el PJUD.`, 'Baja la rotación un 30%.', 'Una razón larga. '.repeat(20), `Con ${item.employees} personas, cada ingreso cuenta.`],
+      approach: 'Pregúntale cuántos ingresos revisan al mes.' })) };
+  }
   if (String(options.systemPrompt).startsWith('Eres la Revisora')) return { verdict: 'ok', issues: [] };
   const name = JSON.parse(options.prompt).brief.recipients[0];
   return writerDraft(name);
@@ -142,6 +151,44 @@ test('writing a drop: what each company does and a first email by the Writer', a
   assert.ok(saved.items.every((item: any) => !('description' in item)), 'the raw description stays out');
   assert.equal(saved.items[0].draft.subject, 'Ingresos en temporada alta');
   assert.match(saved.items[0].draft.body, /^Hola Nombre\d+,/);
+  assert.match(saved.items[0].summary, /vende productos para el hogar\.$/);
+});
+
+test('planning keeps who the person is and how they fit; the reasons connect them with what the person sells, and only with an offer', async () => {
+  const { client, tables } = memory(seed(), { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0 });
+  const [item] = tables.lead_drops[0].items;
+  assert.deepEqual([item.seniority, item.department, item.state, item.country], ['Gerencia o jefatura', 'Recursos humanos', 'Santiago Metropolitan Region', 'Chile']);
+  assert.equal(item.website, `https://www.${item.domain}/`);
+  assert.equal(item.companyLinkedin, `https://linkedin.com/company/${item.domain.replace('.cl', '')}`);
+  assert.ok(!JSON.stringify(item).includes('linkedin.com/in/'), 'the person\'s LinkedIn stays in the vault');
+  assert.deepEqual(item.fit.map((entry: any) => [entry.criterion, entry.match]), [['Cargo', 'yes'], ['Rubro', 'yes'], ['Lugar', 'yes']]);
+
+  // The person's offer is read as Cowork reads it, which takes a real user id.
+  const ANA_ID = '00000000-0000-4000-8000-00000000a0a0';
+  const withId = (data: ReturnType<typeof seed>) => JSON.parse(JSON.stringify(data).replaceAll('u-ana', ANA_ID)) as ReturnType<typeof seed>;
+  const advised = memory(withId(seed()), { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
+  await planOrganizationDrops(advised.client, ORG, [ANA_ID], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0 });
+  adviceCalls.length = 0;
+  await writeDrop(advised.client, advised.tables.lead_drops[0], { generate: fakeGenerate, now: TUESDAY });
+  const [ready] = advised.tables.lead_drops[0].items;
+  assert.equal(adviceCalls.length, 1);
+  assert.equal(adviceCalls[0].seller.offer, 'AXIS consulta antecedentes laborales en el PJUD.');
+  assert.deepEqual(adviceCalls[0].contacts[0].fit, ['Cargo: Sí', 'Rubro: Sí', 'Lugar: Sí']);
+  assert.ok(!JSON.stringify(adviceCalls[0]).includes('@'), 'never the email');
+  assert.deepEqual(ready.reasons, [`${ready.name.split(' ')[0]} decide cómo se revisa a quien entra en ${ready.company}: AXIS lo hace en el PJUD.`,
+    'Con 500 personas, cada ingreso cuenta.'], 'a figure that is not in the data («30%») is left out, one too long to read at a glance too, and the bullet the model wrote');
+  assert.equal(ready.approach, 'Pregúntale cuántos ingresos revisan al mes.');
+  assert.ok(ready.draft, 'the first email too');
+  // Without an offer there is nothing to connect: no reasons are asked for.
+  const data = withId(seed());
+  data.profiles = data.profiles.map(row => ({ ...row, signatures: { profile_extended: { ...row.signatures.profile_extended, valueProposition: '' } } }));
+  const quiet = memory(data, { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
+  await planOrganizationDrops(quiet.client, ORG, [ANA_ID], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0 });
+  adviceCalls.length = 0;
+  await writeDrop(quiet.client, quiet.tables.lead_drops[0], { generate: fakeGenerate, now: TUESDAY });
+  assert.equal(adviceCalls.length, 0);
+  assert.equal(quiet.tables.lead_drops[0].items[0].reasons, undefined);
 });
 
 test('saving puts the contact in «Por escribir» with its email, once, and the vault forgets it', async () => {
@@ -201,6 +248,26 @@ test('the PDF: who, why, what we know and the first email, with the link as a bu
   assert.equal(dropDocument([item, { ...item, leadId: 'lf_2', name: 'Leo Rojas' }], meta).blocks.filter(block => block.type === 'pageBreak').length, 1, 'each contact on its own page');
   const pdf = await dropPdf([item], meta);
   assert.equal(pdf.subarray(0, 4).toString(), '%PDF');
+  const plain = (block: any) => (block.runs || []).map((run: any) => run.text).join('');
+  assert.deepEqual(spec.blocks.filter(block => block.type === 'heading').map(plain), ['Lo que sabemos de la empresa', 'Primer correo sugerido'], 'a drop from before: what it has');
+
+  // Since 29 Oct 2026: the reasons, the fit, the person, the company, how to open.
+  const full = { ...item, company: 'Ripley S.A.', industry: 'Retail', size: 500, city: 'Santiago', country: 'Chile', seniority: 'Gerencia o jefatura', department: 'Recursos humanos',
+    website: 'https://www.ripley.cl/', companyLinkedin: 'https://linkedin.com/company/ripley', summary: 'Ripley vende ropa y artículos para el hogar.', hasPhone: true,
+    fit: [{ criterion: 'Cargo' as const, theirs: 'Gerente', wanted: 'Gerente de Personas', match: 'partial' as const }, { criterion: 'Lugar' as const, theirs: 'Santiago, Chile', wanted: 'Chile', match: 'yes' as const }],
+    reasons: ['Decide cómo se revisa a quien entra.', 'Ripley contrata mucho en temporada.'], approach: 'Pregúntale por la temporada alta.' };
+  const blocks = dropDocument([full], meta).blocks as any[];
+  assert.deepEqual(blocks.filter(block => block.type === 'heading').map(plain), ['Cómo calza con tu cliente ideal', 'Sobre la persona', 'Sobre Ripley', 'Cómo abordarlo', 'Primer correo sugerido']);
+  assert.equal(plain(blocks[1]), 'Calza.\n\n- Decide cómo se revisa a quien entra.\n- Ripley contrata mucho en temporada.');
+  assert.deepEqual(blocks.find(block => block.type === 'table').rows.map((row: any[]) => row.map(cell => plain({ runs: cell }))),
+    [['Cargo', 'Gerente', 'Gerente de Personas', 'En parte'], ['Lugar', 'Santiago, Chile', 'Chile', 'Sí']]);
+  assert.deepEqual(blocks.find(block => block.type === 'list').items.map(plain), ['Nivel: Gerencia o jefatura', 'Área: Recursos humanos',
+    'Datos de contacto: correo verificado y teléfono móvil, que ves al guardarlo'], 'the place is in the table already');
+  const facts = blocks[blocks.findIndex(block => plain(block) === 'Sobre Ripley') + 2];
+  assert.equal(plain(facts), 'Retail  ·  500 personas  ·  ripley.cl  ·  LinkedIn de la empresa');
+  assert.deepEqual(facts.runs.filter((run: any) => run.href).map((run: any) => run.href), ['https://www.ripley.cl/', 'https://linkedin.com/company/ripley']);
+  assert.equal(blocks.at(-1).type, 'callout', 'the email last');
+  assert.equal((await dropPdf([full], meta)).subarray(0, 4).toString(), '%PDF');
 });
 
 // ─── From «Hoy», for whoever gets no email ─────────────────────────────────────────────────────────────────────────
