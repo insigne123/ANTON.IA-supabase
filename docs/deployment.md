@@ -74,7 +74,7 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 | Campanas | `campaignProcessingTick` | cada 5 minutos | Invoca el bridge privado `/api/cron/process-campaigns`. |
 | Reconciliacion outbound | `outboundReconciliationTick` | cada 5 minutos | Invoca `/api/cron/outbound-reconciliation`. |
 | Reconciliacion Apollo | `apolloReconciliationTick` | cada 5 minutos | Recupera callbacks y polling pendientes mediante `/api/cron/apollo-reconciliation`. |
-| Uso Apollo y saldo de Apify | `apolloUsageTick` | cada hora | Captura snapshots sanitizados mediante `/api/cron/apollo-usage`. En la misma pasada lee el saldo del plan de Apify (`/v2/users/me/limits`), lo guarda en `antonia_provider_usage_snapshots` (`provider = 'apify'`) y escribe a `APIFY_ALERT_EMAILS` cuando quedan `APIFY_LOW_CREDIT_USD` (US$0,10) o menos y cuando se acaba: un correo de cada tipo por ciclo y límite, por Resend. Si el correo falla, lo reintenta en la pasada siguiente. |
+| Uso Apollo y saldo de Apify | `apolloUsageTick` | cada hora | Captura snapshots sanitizados mediante `/api/cron/apollo-usage`. En la misma pasada lee el saldo del plan de Apify (`/v2/users/me/limits`), lo guarda en `antonia_provider_usage_snapshots` (`provider = 'apify'`) y escribe a `APIFY_ALERT_EMAILS` cuando quedan `APIFY_LOW_CREDIT_USD` (US$0,10) o menos y cuando se acaba: un correo de cada tipo por ciclo y límite, por Resend. Si el correo falla, lo reintenta en la pasada siguiente. También lee los créditos de Apollo (`lead_credit` del mismo snapshot) y de Reoon (`check-account-balance`) y escribe a `PROVIDER_ALERT_EMAILS` cuando queda una décima del plan o menos (50 créditos en Reoon; `APOLLO_LOW_CREDITS`, `REOON_LOW_CREDITS`) y cuando se acaban; vuelve a avisar solo después de una lectura con saldo (`src/lib/server/provider-alerts.ts`). |
 | Reply sync | `replySyncTick` | cada 5 minutos | Invoca `/api/cron/reply-sync` por par organizacion/usuario. |
 | Retencion de privacidad | `privacyRetentionTick` | 03:30 UTC diario | Invoca `/api/cron/privacy-retention`. |
 | Rollups ANTON.IA | `antoniaRollupsTick` | 00:10 UTC diario | Invoca `/api/cron/antonia-rollups`. |
@@ -99,6 +99,22 @@ Pasos de plataforma antes del deploy:
 4. Desplegar primero las rutas Next y la eliminacion de cron de Vercel, y despues `firebase deploy --only functions`. Verificar que Firebase cree o actualice los jobs de Cloud Scheduler (y que borre `antoniaTick`, `antoniaTickHttp` y `antoniaWorker`, retirados) y que Vercel no conserve los jobs retirados.
 5. Conceder `roles/run.invoker` solo a la cuenta de servicio operativa que pueda disparar manualmente los endpoints privados. Los ticks `onSchedule` no exponen endpoints HTTP publicos: dejar que Firebase gestione la binding del job de Cloud Scheduler y, si una politica de organizacion la bloquea, concederla solo a la identidad del job correspondiente, nunca a `allUsers`.
 6. Las bindings de App Hosting `ANTONIA_FIREBASE_TICK_URL` y `ANTONIA_FIREBASE_TICK_SECRET` ya se retiraron de `apphosting.yaml` junto con el agente. El secreto histórico `ANTONIA_TICK_SECRET` sigue en uso como `CRON_SECRET`: rotarlo es un paso aparte.
+
+## Avisos de saldo de los servicios
+
+Cada servicio que la app paga avisa por correo cuando le queda poco y cuando se acaba. Los avisos van a `PROVIDER_ALERT_EMAILS` (o a `APIFY_ALERT_EMAILS` si aquella no está) y salen por Resend; el aviso de Resend, y cualquiera que Resend no acepte, sale del buzón conectado de quien lo recibe. Cada aviso queda en `antonia_provider_usage_snapshots` con `source = 'provider_alert'` (los de Apify, con `provider = 'apify'` y `usage.alert`).
+
+| Servicio | Cómo se sabe | Cuándo avisa |
+| --- | --- | --- |
+| Apify | Saldo del plan, cada hora (`apify-credit.ts`) | US$0,10 o menos, y sin saldo; una vez por ciclo y límite |
+| Apollo | Créditos `lead_credit` del snapshot horario | Una décima del plan o menos (`APOLLO_LOW_CREDITS`), y sin créditos; de nuevo tras una recarga |
+| Reoon | `check-account-balance`, cada hora, y su rechazo al verificar | 50 créditos o menos (`REOON_LOW_CREDITS`), y sin créditos o con la clave rechazada |
+| JSearch | Encabezados de RapidAPI en cada consulta, y su rechazo | Una décima de las consultas del plan o menos (`JSEARCH_LOW_CREDITS`), cupo mensual acabado o clave rechazada |
+| OpenAI y Claude | Su error de saldo (`insufficient_quota`, `credit balance is too low`) | Al primer error; a lo más una vez al día mientras siga |
+| Serper | Su rechazo (401/403, o 400/402 por créditos) | Igual: a lo más una vez al día |
+| Resend | Su rechazo (401/403, o 429 por cupo diario o mensual) | Igual, y sale desde el buzón conectado |
+
+`PROVIDER_ALERTS=off` apaga los avisos que nacen de un error (los de saldo siguen en el tick horario). Mercado Público, Google, Microsoft y Supabase no tienen créditos que se acaben por uso de la app.
 
 ## Verificaciones previas al release
 

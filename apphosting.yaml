@@ -375,6 +375,12 @@ env:
   - variable: APIFY_ALERT_EMAILS
     value: "nicolas.yarur.g@yago.cl"
     availability: [RUNTIME]
+  # Los avisos de saldo de los demás servicios (src/lib/server/provider-alerts.ts): Apollo y Reoon cada hora, JSearch en
+  # cada consulta (poco = una décima del plan o APOLLO_/REOON_/JSEARCH_LOW_CREDITS), y OpenAI, Claude, Serper y Resend
+  # cuando responden que no hay saldo (a lo más uno al día). Salen por Resend; el de Resend, desde el buzón de quien lo recibe.
+  - variable: PROVIDER_ALERT_EMAILS
+    value: "nicolas.yarur.g@yago.cl"
+    availability: [RUNTIME]
   - variable: JSEARCH_API_KEY
     secret: JSEARCH_API_KEY
     availability: [RUNTIME]
@@ -402,12 +408,12 @@ env:
     value: apollo
     availability: [RUNTIME]
   # Cuando Apollo identifica a la persona pero no tiene su correo, el tick de reconciliación de Apollo arma los correos
-  # probables y los verifica con Reoon (src/lib/server/email-finder). No corre sin REOON_API_KEY. La clave es un secreto:
-  # crearlo antes de agregar aquí
-  #   - variable: REOON_API_KEY
-  #     secret: REOON_API_KEY
-  #     availability: [RUNTIME]
-  # porque un secreto que no existe hace fallar el despliegue. Los leads de los últimos 60 días entran a la cola.
+  # probables y los verifica con Reoon (src/lib/server/email-finder). No corre sin REOON_API_KEY, un secreto: si se borra
+  # del proyecto, el despliegue falla. Los leads de los últimos 60 días entran a la cola. Su saldo se revisa cada hora
+  # (provider-alerts.ts): aviso con 50 créditos o menos (REOON_LOW_CREDITS) y cuando se acaba.
+  - variable: REOON_API_KEY
+    secret: REOON_API_KEY
+    availability: [RUNTIME]
   - variable: EMAIL_FINDER_ENABLED
     value: "true"
     availability: [RUNTIME]

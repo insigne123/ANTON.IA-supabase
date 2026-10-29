@@ -1,4 +1,5 @@
 import { jobAdFromJSearch, type JobAd } from '@/lib/commercial-opportunities/hiring';
+import { signalProviderBalance, signalProviderOutage } from '@/lib/server/provider-outage';
 
 /**
  * JSearch (OpenWeb Ninja, on RapidAPI): job ads from Google for Jobs, filtered to Chile. Each page is billed as one request;
@@ -42,15 +43,25 @@ Promise<{ ads: JobAd[]; requests: number; costUsd: number; cursor?: string | nul
     const fail = (message: string, stopQueries = false, rejected = false): never => {
       throw new JSearchRequestError(message, (requests - (rejected ? 1 : 0)) * JSEARCH_USD_PER_REQUEST, [...ads.values()], stopQueries);
     };
-    if (response.status === 401 || response.status === 403) fail('JSearch rechazó la clave o la suscripción.', true, true);
+    if (response.status === 401 || response.status === 403) {
+      signalProviderOutage('jsearch', 'refused', `HTTP ${response.status}`);
+      fail('JSearch rechazó la clave o la suscripción.', true, true);
+    }
     if (response.status === 429) {
       // RapidAPI uses 429 both for burst limits and monthly quotas. Never call
       // a temporary rate limit "monthly quota exhausted" without evidence.
       const detail = await response.json().catch(() => ({})) as { message?: unknown } | null;
       const monthly = typeof detail?.message === 'string' && /monthly|month|cuota mensual/i.test(detail.message);
+      if (monthly) signalProviderOutage('jsearch', 'empty', 'cupo mensual del plan');
       fail(monthly ? 'JSearch: se acabó el cupo del plan este mes.' : 'JSearch limitó temporalmente las consultas. Espera un minuto antes de reintentar.', true, true);
     }
     if (!response.ok) fail(`JSearch respondió ${response.status}.`);
+    // RapidAPI tells the plan's requests and what is left of them on every answer.
+    const limit = Number(response.headers.get('x-ratelimit-requests-limit'));
+    const left = Number(response.headers.get('x-ratelimit-requests-remaining'));
+    if (response.headers.has('x-ratelimit-requests-remaining') && Number.isFinite(left) && Number.isFinite(limit) && limit > 0) {
+      signalProviderBalance('jsearch', { left, limit });
+    }
     const body = await response.json().catch(() => null) as { status?: string; data?: { jobs?: unknown[]; cursor?: unknown } } | null;
     if (body?.status !== 'OK' || !Array.isArray(body.data?.jobs)) {
       fail('JSearch respondió sin una lista de avisos válida.');

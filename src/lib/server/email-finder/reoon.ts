@@ -1,5 +1,6 @@
 // Reoon Email Verifier, "power" mode: asks the company's mail server whether the mailbox exists, without sending mail.
 // https://www.reoon.com/articles/api-documentation-of-reoon-email-verifier/
+import { signalProviderOutage } from '@/lib/server/provider-outage';
 
 const REOON_VERIFY_URL = 'https://emailverifier.reoon.com/api/v1/verify';
 
@@ -49,6 +50,7 @@ export async function verifyEmailWithReoon(
   const reason = String(body?.reason || '').toLowerCase();
   if (response.status === 401 || response.status === 402 || response.status === 403
     || /\b(api )?key\b|credit|balance|quota|inactive|suspend/.test(reason)) {
+    signalProviderOutage('reoon', response.status === 402 || /credit|balance|quota/.test(reason) ? 'empty' : 'refused', reason || `HTTP ${response.status}`);
     throw new ReoonError('reoon_account_refused', true);
   }
   if (response.status === 429) throw new ReoonError('reoon_rate_limited', true);

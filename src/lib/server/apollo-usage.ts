@@ -114,5 +114,6 @@ export async function captureApolloCreditUsageSnapshot(input: {
     capturedAt,
     identity: { userId: providerUserId, teamId: providerTeamId },
     snapshots: data || [],
+    creditUsage: object(payload.credit_usage),
   };
 }
