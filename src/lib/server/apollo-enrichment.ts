@@ -14,6 +14,8 @@ export class ApolloEnrichmentError extends Error {
     readonly status: 409 | 429 | 502 | 503 | 504,
     readonly code: string,
     readonly providerOutcomeUnknown: boolean,
+    /** Why an identity was refused (`url_differs:low`), kept on the callback; no personal data. */
+    readonly reason?: string,
   ) {
     super(code);
   }
@@ -169,7 +171,7 @@ export async function submitApolloEnrichment(input: {
   } catch (error) {
     if (error instanceof ApolloEnrichmentError) throw error;
     if (error instanceof ApolloGatewayError) {
-      throw new ApolloEnrichmentError(providerStatus(error), error.code, isUnknownProviderCode(error.code));
+      throw new ApolloEnrichmentError(providerStatus(error), error.code, isUnknownProviderCode(error.code), error.reason);
     }
     if ((error as { name?: string } | null)?.name === 'TimeoutError') {
       throw new ApolloEnrichmentError(504, 'APOLLO_GATEWAY_TIMEOUT', true);

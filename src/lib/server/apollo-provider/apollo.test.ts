@@ -720,3 +720,89 @@ test('a people search inside the companies a search chose sends their ids in gro
     globalThis.fetch = originalFetch;
   }
 });
+
+test('a phone asked by LinkedIn alone confirms the person first and asks the phone only with the id that answered', async () => {
+  const requests: URL[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    const second = requests.length === 2;
+    return Response.json({
+      request_id: second ? '555' : '444',
+      credits_consumed: 1,
+      person: { id: 'p-9', name: 'María José Pérez', title: 'Gerente de Personas', match_confidence: 'high',
+        linkedin_url: 'http://www.linkedin.com/in/maria-jose-perez', ...(second ? {} : { email: 'mjp@example.test', email_status: 'verified' }) },
+    });
+  };
+  try {
+    const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/maria-jose-perez' },
+      reveal_email: true, reveal_phone: true, enrichment_level: 'deep',
+      webhook_url: 'https://studio.example.com/api/apollo-webhook/opaque-token' });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    const result = await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig());
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].searchParams.get('id'), null);
+    assert.equal(requests[0].searchParams.get('reveal_phone_number'), 'false');
+    assert.equal(requests[0].searchParams.get('webhook_url'), null);
+    assert.equal(requests[1].searchParams.get('id'), 'p-9');
+    assert.equal(requests[1].searchParams.get('reveal_phone_number'), 'true');
+    assert.equal(requests[1].searchParams.get('webhook_url'), 'https://studio.example.com/api/apollo-webhook/opaque-token');
+    assert.equal(result.success, true);
+    assert.equal(result.enrichment_status, 'pending_phone');
+    assert.equal(result.provider_request_id, '555');
+    assert.equal(result.credits_consumed, 2);
+    assert.equal(result.extracted_data?.email, 'mjp@example.test');
+    assert.equal(result.extracted_data?.email_status, 'verified');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('another person answering a LinkedIn phone lookup is refused before any phone is asked, with its reason', async () => {
+  const requests: URL[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    requests.push(new URL(String(input)));
+    return Response.json({ request_id: '444', person: { id: 'other', name: 'Otra Persona', match_confidence: 'low',
+      linkedin_url: 'https://www.linkedin.com/in/otra-persona', email: 'other@example.test' } });
+  };
+  try {
+    const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/maria-jose-perez' },
+      reveal_email: true, reveal_phone: true, enrichment_level: 'deep',
+      webhook_url: 'https://studio.example.com/api/apollo-webhook/opaque-token' });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    await assert.rejects(() => executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig()),
+      (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH'
+        && error.reason === 'url_differs:low');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].searchParams.get('reveal_phone_number'), 'false');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('a LinkedIn phone lookup that finds nobody, or whose phone step answers another id, never binds a phone', async () => {
+  const originalFetch = globalThis.fetch;
+  const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/maria-jose-perez' },
+    reveal_email: true, reveal_phone: true, enrichment_level: 'deep',
+    webhook_url: 'https://studio.example.com/api/apollo-webhook/opaque-token' });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  try {
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return Response.json({ request_id: '444', person: null }); };
+    const missing = await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig());
+    assert.equal(missing.success, false);
+    assert.equal(calls, 1);
+
+    calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return Response.json({ request_id: String(calls), person: { id: calls === 1 ? 'p-9' : 'p-10', name: 'María José Pérez',
+        linkedin_url: 'https://www.linkedin.com/in/maria-jose-perez' } });
+    };
+    await assert.rejects(() => executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig()),
+      (error: unknown) => error instanceof ApolloGatewayError && error.reason === 'phone_person_differs');
+    assert.equal(calls, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});

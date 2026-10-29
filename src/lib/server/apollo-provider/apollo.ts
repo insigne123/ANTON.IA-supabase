@@ -28,6 +28,8 @@ export class ApolloGatewayError extends Error {
       | 'APOLLO_UPSTREAM_TIMEOUT'
       | 'APOLLO_UPSTREAM_INVALID_RESPONSE'
       | 'APOLLO_PERSON_IDENTITY_MISMATCH',
+    /** Why a match was refused and how sure Apollo was (`url_differs:low`); no personal data. */
+    readonly reason?: string,
   ) {
     super(code);
   }
@@ -637,7 +639,39 @@ export async function executeApolloLeadSearch(input: LeadSearchInput, apiKey: st
 
 export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: string, config: GatewayConfig) {
   if (!apiKey) throw new ApolloGatewayError(503, 'APOLLO_PROVIDER_NOT_CONFIGURED');
+  if (input.lead.sourceProviderId || input.lead.id || !input.revealPhone) return matchApolloPerson(input, apiKey, config);
 
+  // Without an Apollo id the person is known only by LinkedIn or name. Apollo charges the phone it finds (8 credits) even
+  // when the check below then refuses the person, so it first confirms who it is without the phone, and asks for the phone
+  // only with the id that answered.
+  const confirmed = await matchApolloPerson({ ...input, revealPhone: false, webhookUrl: undefined }, apiKey, config);
+  const personId = firstText(confirmed.extracted_data?.source_provider_id, confirmed.extracted_data?.apollo_id);
+  // Nobody confirmed: the phone is never asked. A match without an id cannot be asked again, so it keeps what it found and
+  // owes no phone (no request id, nothing to wait for).
+  if (!confirmed.success || !confirmed.extracted_data) return confirmed;
+  if (!personId) return { ...confirmed, provider_request_id: undefined };
+
+  const withPhone = await matchApolloPerson({ ...input, lead: { ...input.lead, id: personId, sourceProviderId: personId } },
+    apiKey, config);
+  const answered = firstText(withPhone.extracted_data?.source_provider_id, withPhone.extracted_data?.apollo_id);
+  if (!withPhone.success || !withPhone.extracted_data) return { ...confirmed, provider_request_id: undefined };
+  if (answered && answered !== personId) {
+    console.warn('[apollo] person identity mismatch: phone lookup answered another id');
+    throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', 'phone_person_differs');
+  }
+  const credits = [confirmed.credits_consumed, withPhone.credits_consumed].filter((value): value is number => typeof value === 'number');
+  return {
+    ...withPhone,
+    credits_consumed: credits.length ? credits.reduce((sum, value) => sum + value, 0) : undefined,
+    extracted_data: {
+      ...withPhone.extracted_data,
+      email: withPhone.extracted_data.email || confirmed.extracted_data.email,
+      email_status: withPhone.extracted_data.email ? withPhone.extracted_data.email_status : confirmed.extracted_data.email_status,
+    },
+  };
+}
+
+async function matchApolloPerson(input: EnrichmentInput, apiKey: string, config: GatewayConfig) {
   const query = new URLSearchParams();
   const personId = input.lead.sourceProviderId || input.lead.id;
   if (personId) query.set('id', personId);
@@ -675,21 +709,25 @@ export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: st
   // on a stale record, so a name-disjoint personal slug also refuses the match.
   if (input.lead.linkedinUrl) {
     const requested = normalizeLinkedinProfileUrl(input.lead.linkedinUrl);
+    // Apollo's own certainty (high, medium, low), kept with the refusal so a too-strict check can be told from a real one.
+    const confidence = firstText(asRecord(payload.person)?.match_confidence)?.toLowerCase().replace(/[^a-z]/g, '').slice(0, 12);
+    const refused = (reason: string) => new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH',
+      confidence ? `${reason}:${confidence}` : reason);
     // Same slug ignoring case and accents; without a returned address, only a personal slug fully contained in the
     // returned name vouches for the person.
     const sameProfile = lead.linkedin_url
       ? linkedinProfilesMatch(requested, lead.linkedin_url)
       : linkedinSlugMatchesName(requested, lead.name);
     if (!requested || !sameProfile) {
-      console.warn('[apollo] person identity mismatch: url', { requested: requested || null });
-      throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
+      console.warn('[apollo] person identity mismatch: url', { requested: requested || null, confidence: confidence || null });
+      throw refused(!requested ? 'url_unreadable' : lead.linkedin_url ? 'url_differs' : 'url_missing');
     }
     if (linkedinSlugConflictsWithName(input.lead.linkedinUrl, lead.name)) {
       console.warn('[apollo] person identity mismatch: slug-name', {
         slug: input.lead.linkedinUrl,
         returnedName: lead.name || null,
       });
-      throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
+      throw refused('slug_name_conflict');
     }
   }
   const pendingPhone = input.revealPhone && phoneNumbers.length === 0 && !lead.primary_phone && Boolean(providerRequestId);
