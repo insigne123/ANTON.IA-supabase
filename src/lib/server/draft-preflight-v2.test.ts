@@ -866,3 +866,26 @@ test('an email the person edited may be longer or shorter than the AI writes: a 
   const tooLong = validateDraftPreflightV2(context, withBody(420), { editedByPerson: true }).issues.find((issue) => issue.code === 'body_length');
   assert.match(String(tooLong?.message), /para enviarlo, debe tener entre 10 y 400/);
 });
+
+test('an email the person rewrote in their own words closes and opens as they decide: notices, not errors (23 Oct 2026)', () => {
+  const context = draftContextFixture();
+  // Their own presentation: no approved CTA, none of what the research found, a farewell instead of a question.
+  const own = { ...validOutput(), subject: 'Presentación de nuestros servicios', body: `Estimada Ada, buenos días
+
+Junto con saludar, le presento a Northstar y nuestro interés en ser considerados en sus próximos requerimientos de operaciones.
+
+Contamos con experiencia en equipos de alta exigencia, con supervisión en terreno, gestión de personas y control de calidad adaptados a cada cliente.
+
+Agradeceré nos pueda orientar sobre el registro de proveedores y los canales para participar en futuras solicitudes de propuesta.
+
+Saludos cordiales,` };
+  const codes = (options: Parameters<typeof validateDraftPreflightV2>[2]) => validateDraftPreflightV2(context, own, options).issues.map((issue) => issue.code);
+  assert.deepEqual((['cta_count', 'personalization_invalid'] as const).filter((code) => codes({}).includes(code)), ['cta_count', 'personalization_invalid'], 'what the AI writes keeps both rules');
+  const edited = validateDraftPreflightV2(context, own, { editedByPerson: true });
+  assert.deepEqual(edited.issues, [], 'the person may send it');
+  assert.ok(edited.preflight.warnings.some((warning) => /no cierra como propone tu estilo/.test(warning)));
+  assert.ok(edited.preflight.warnings.some((warning) => /ya no usa lo que encontró la investigación/.test(warning)));
+  // What protects the recipient still stops it.
+  const placeholder = validateDraftPreflightV2(context, { ...own, body: own.body.replace('Estimada Ada', 'Estimada {{nombre}}') }, { editedByPerson: true });
+  assert.ok(placeholder.issues.some((issue) => issue.code === 'unresolved_placeholder'));
+});
