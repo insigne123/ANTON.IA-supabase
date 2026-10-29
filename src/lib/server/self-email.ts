@@ -4,6 +4,7 @@ import { encodeHeaderRFC2047 } from '@/lib/email-header-utils';
 import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { tokenService } from '@/lib/services/token-service';
+import { signalProviderOutage } from '@/lib/server/provider-outage';
 
 /**
  * The app's own emails to a person: the Monday «Informe semanal», the morning «Avisos» and «Contacto del día». With
@@ -108,7 +109,11 @@ async function sendWithResend(input: SelfEmail, resend: Resend, request: Fetch, 
         method: 'POST', headers: { Authorization: `Bearer ${resend.apiKey}`, 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(30_000),
       });
       if (response.ok) return { ok: true as const };
-      if (response.status !== 429 || attempt >= 2) return { ok: false as const, error: `Resend no aceptó el correo (${response.status}).` };
+      if (response.status === 401 || response.status === 403) signalProviderOutage('resend', 'refused', `HTTP ${response.status}`);
+      // Its daily or monthly quota (daily_quota_exceeded, monthly_quota_exceeded) does not clear in a second, unlike two per second.
+      const quota = response.status === 429 && /quota/i.test(JSON.stringify(await response.json().catch(() => null)));
+      if (quota) signalProviderOutage('resend', 'empty', 'cupo de envíos del plan');
+      if (response.status !== 429 || quota || attempt >= 2) return { ok: false as const, error: `Resend no aceptó el correo (${response.status}).` };
     } catch {
       return { ok: false as const, error: 'No pudimos conectar con Resend.' };
     }

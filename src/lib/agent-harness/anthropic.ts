@@ -5,6 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { providerError } from '@/ai/anthropic-json';
 import { blockedModelMessage, isBlockedModel } from '@/ai/blocked-models';
+import { signalProviderOutage } from '@/lib/server/provider-outage';
 import type { ContentBlock, Effort, Message, ModelClient, ModelRequest, ModelResponse, ServerBlock, StopReason, ToolResultBlock, Usage } from './types';
 
 /** Thinking spends output tokens before the answer: each effort gets room for it on top of the answer's own limit. */
@@ -186,6 +187,7 @@ export function anthropicModel(options: AnthropicModelOptions): ModelClient {
         } catch (error) {
           request.signal?.throwIfAborted();
           const failure = providerError(error);
+          if (/credit_balance_exhausted/.test(failure.message)) signalProviderOutage('anthropic', 'empty', 'credit balance is too low');
           if (attempt >= retries || !retryable(error, failure)) throw failure;
           await sleep((options.backoffMs ?? 800) * 2 ** attempt, request.signal);
         }

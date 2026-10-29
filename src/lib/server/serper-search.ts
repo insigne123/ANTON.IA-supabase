@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { signalProviderOutage } from '@/lib/server/provider-outage';
 
 const SERPER_BASE_URL = 'https://google.serper.dev';
 const DEFAULT_LANGUAGE = 'es';
@@ -345,6 +346,12 @@ export async function searchSerper(
       if (retryable && attempt < maxRetries) {
         await sleep(retryDelayFor(response, retryDelayMs));
         continue;
+      }
+      if ([400, 401, 402, 403].includes(response.status)) {
+        // A refused key, or an account without credits («Not enough credits»), stops every search until someone acts.
+        const message = String(((await response.json().catch(() => null)) as { message?: unknown } | null)?.message ?? '').slice(0, 120);
+        if (response.status === 401 || response.status === 403) signalProviderOutage('serper', 'refused', message || `HTTP ${response.status}`);
+        else if (response.status === 402 || /credit|balance|quota/i.test(message)) signalProviderOutage('serper', 'empty', message || `HTTP ${response.status}`);
       }
       throw new SerperSearchError(`SERPER_HTTP_${response.status}`, retryable);
     }

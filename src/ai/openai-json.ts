@@ -3,6 +3,7 @@ import { z } from 'genkit';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { generateClaudeStructured, isClaudeModel, type ClaudeAttachment, type StructuredEffort } from '@/ai/anthropic-json';
 import { blockedModelMessage, isBlockedModel } from '@/ai/blocked-models';
+import { signalProviderOutage } from '@/lib/server/provider-outage';
 
 type StructuredOptions<T extends z.ZodTypeAny> = {
   prompt: string;
@@ -423,7 +424,11 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
       return await withRetries(() => tryChatCompletions({ ...opts, openAiModel: model }, config), opts.signal, attempts);
     } catch (error) {
       opts.signal?.throwIfAborted();
-      if (isCancellationError(error) || isProviderQuotaExhausted(error)) throw error;
+      if (isProviderQuotaExhausted(error)) {
+        signalProviderOutage(isClaudeModel(model) ? 'anthropic' : 'openai', 'empty', isClaudeModel(model) ? 'credit balance is too low' : 'insufficient_quota');
+        throw error;
+      }
+      if (isCancellationError(error)) throw error;
       lastError = error;
       console.warn(`[${isClaudeModel(model) ? 'Claude' : config.displayName}] Structured generation failed with ${model}:`, error);
     }
