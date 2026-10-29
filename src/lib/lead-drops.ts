@@ -47,7 +47,28 @@ export type DropItem = {
   draft: { subject: string; body: string } | null;
   /** The contact in «Por escribir» once saved. */
   savedLeadId?: string | null;
+  // Since 29 Oct 2026 (idea del dueño: «agrégale más info para que el usuario sepa por qué es recomendado»); drops from before have none.
+  /** The level and the area of the person, in Spanish («Gerencia o jefatura», «Recursos humanos»). */
+  seniority?: string | null;
+  department?: string | null;
+  /** Region and country, next to `city`. */
+  state?: string | null;
+  country?: string | null;
+  /** The company's site and LinkedIn page: public, unlike the person's, which stays in the vault. */
+  website?: string | null;
+  companyLinkedin?: string | null;
+  /** What the company does, in one sentence (writeDrop). */
+  summary?: string | null;
+  /** How the contact fits each part of the customer (dropFit). */
+  fit?: DropFit[];
+  /** Why it is worth it for what the person sells, and how to open, by a model with the data given only (writeDrop). */
+  reasons?: string[];
+  approach?: string | null;
 };
+
+/** How a contact fits one part of the customer: what they have, what the customer asks for, and whether it matches. */
+export type DropFit = { criterion: 'Cargo' | 'Rubro' | 'Lugar' | 'Tamaño'; theirs: string; wanted: string; match: 'yes' | 'partial' | 'no' | 'unknown' };
+export const FIT_LABEL: Record<DropFit['match'], string> = { yes: 'Sí', partial: 'En parte', no: 'No', unknown: 'Sin dato' };
 
 const PROFILE_SIZES: Record<string, string> = {
   '1-10': '1,10', '11-50': '11,50', '51-200': '51,200', '201-500': '201,500', '501-1000': '501,1000', '1001-5000': '1001,5000', '5001+': '5001,1000000',
@@ -111,7 +132,7 @@ export function personDropCriteria(own: IcpDeclared | null | undefined, company:
 
 // What two customers are compared on: the words that say what the person does («personas», «facility»), without the level of
 // the title («Gerente», «Jefe») nor linking words, in singular. To compare, the names Chile gives the area of people («RR. HH.»,
-// «HR», «Personas», «Capital humano», «Talento humano») are all «recursos humanos».
+// «HR», «Personas», «Capital humano», «Talento humano», «People», «Talento») are all «recursos humanos».
 const LEVELS = new Set(['gerente', 'subgerente', 'jefe', 'jefa', 'director', 'directora', 'head', 'manager', 'encargado', 'encargada',
   'coordinador', 'coordinadora', 'supervisor', 'supervisora', 'lider', 'responsable', 'analista', 'ejecutivo', 'ejecutiva', 'especialista',
   'vicepresidente', 'chief', 'officer', 'senior', 'junior', 'asistente', 'general', 'regional', 'corporativo', 'corporativa', 'area']);
@@ -120,7 +141,7 @@ function wordsOf(values: string[], withoutLevels: boolean, synonyms = true) {
   const words = new Set<string>();
   for (const value of values) {
     const folded = fold(value);
-    const text = (synonyms ? folded.replace(/\brr\.?\s*hh\b\.?|\bhr\b|\bhuman resources\b|\bpersonas\b|\b(capital|talento) humano\b/g, ' recursos humanos ') : folded)
+    const text = (synonyms ? folded.replace(/\brr\.?\s*hh\b\.?|\bhr\b|\bhuman resources\b|\bpersonas\b|\b(capital|talento) humano\b|\bpeople\b|\btalento?\b/g, ' recursos humanos ') : folded)
       .replace(/[^a-z0-9 ]/g, ' ');
     for (const raw of text.split(' ')) {
       const word = singular(raw);
@@ -196,7 +217,8 @@ export function groupDropPeople(people: Array<{ id: string; criteria: DropCriter
 }
 
 /** A contact found, with what the server needs to choose (the email and LinkedIn only as keys to skip known people). */
-export type DropCandidate = Omit<DropItem, 'why' | 'research' | 'draft' | 'savedLeadId'> & { emailKey: string | null; linkedinKey: string | null; about: string | null };
+export type DropCandidate = Omit<DropItem, 'why' | 'research' | 'draft' | 'savedLeadId' | 'summary' | 'fit' | 'reasons' | 'approach'>
+  & { emailKey: string | null; linkedinKey: string | null; about: string | null };
 export type KnownPeople = { emails: Set<string>; linkedins: Set<string>; leadIds: Set<string> };
 
 // The country domains of the places a team may search in (and of its neighbours): the search filters by where the PERSON is,
@@ -304,6 +326,83 @@ export function researchFacts(item: Pick<DropCandidate, 'company' | 'industry' |
   return facts.slice(0, 3);
 }
 
+// ─── Who the person is and how they fit, for the report ──────────────────────────────────────────────────────────────
+
+// Leads Finder's levels (actor-enums.ts) and areas («functional_level»), as the report says them.
+const SENIORITIES: Record<string, string> = {
+  founder: 'Fundador o fundadora', owner: 'Dueño o dueña', c_suite: 'Alta dirección', partner: 'Socio o socia', vp: 'Vicepresidencia',
+  director: 'Dirección', head: 'Jefatura de área', manager: 'Gerencia o jefatura', senior: 'Profesional senior', entry: 'Profesional', trainee: 'En práctica',
+};
+const DEPARTMENTS: Record<string, string> = {
+  human_resources: 'Recursos humanos', sales: 'Ventas', operations: 'Operaciones', finance: 'Finanzas', accounting: 'Contabilidad', marketing: 'Marketing',
+  engineering: 'Ingeniería', information_technology: 'Tecnología', legal: 'Legal', administrative: 'Administración', c_suite: 'Alta dirección',
+  product_management: 'Producto', consulting: 'Consultoría', education: 'Educación', medical_health: 'Salud', support: 'Soporte',
+  customer_service: 'Atención al cliente', purchasing: 'Compras', procurement: 'Compras', logistics: 'Logística', supply_chain: 'Logística',
+  design: 'Diseño', data_science: 'Datos', business_development: 'Desarrollo de negocios', security: 'Seguridad',
+};
+const humanize = (value: string) => { const words = value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim(); return words ? words.charAt(0).toLocaleUpperCase('es-CL') + words.slice(1) : null; };
+export const seniorityLabel = (value: string | null | undefined) => value ? SENIORITIES[fold(value)] ?? humanize(value) : null;
+export const departmentLabel = (value: string | null | undefined) => value ? DEPARTMENTS[fold(value)] ?? humanize(value) : null;
+
+/** «Santiago, Región Metropolitana, Chile»: the region in Spanish (Leads Finder says «Santiago Metropolitan Region»), nothing twice. */
+export function placeLabel(item: Pick<DropItem, 'city' | 'state' | 'country'>) {
+  const state = String(item.state || '').trim().replace(/^santiago metropolitan region$/i, 'Región Metropolitana').replace(/^(.+) region$/i, 'Región de $1');
+  const parts = [item.city, state, item.country].map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return parts.filter((part, index) => parts.findIndex(other => fold(other) === fold(part)) === index).join(', ') || null;
+}
+
+const wantedOf = (values: string[]) => values.length > 3 ? `${values.slice(0, 3).join(', ')} y ${values.length - 3} más` : values.join(', ');
+/** «51 a 200 personas», for a size as «Perfil» keeps it (PROFILE_SIZES). */
+function sizeRangeLabel(range: string) {
+  const [min, max] = range.split(',').map(Number);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  return max >= 1_000_000 ? `Más de ${(min - 1).toLocaleString('es-CL')} personas` : `${min.toLocaleString('es-CL')} a ${max.toLocaleString('es-CL')} personas`;
+}
+/** Of the words a wanted value says, the share the contact's value has too; a title of levels only («Gerente General») is compared with its levels. */
+function closest(wanted: string[], theirs: string, withoutLevels: boolean) {
+  return Math.max(0, ...wanted.map(value => {
+    const words = wordsOf([value], withoutLevels);
+    return words.size ? covered(words, wordsOf([theirs], withoutLevels)) : covered(wordsOf([value], false), wordsOf([theirs], false));
+  }));
+}
+const matchOf = (share: number): DropFit['match'] => share >= 1 ? 'yes' : share > 0 ? 'partial' : 'no';
+
+/**
+ * How the contact fits the customer it was chosen for, criterion by criterion: the title and the industry by their words (an
+ * industry also when the search names it the same, `sameIndustry`), the place by name or by country, and the size by range.
+ * A criterion the customer leaves open is left out; one the search brought no data for says so.
+ */
+export function dropFit(item: Pick<DropItem, 'title' | 'industry' | 'size' | 'city' | 'state' | 'country'>, criteria: DropCriteria,
+  sameIndustry?: (wanted: string) => boolean): DropFit[] {
+  const fit: DropFit[] = [];
+  const unknown = (criterion: DropFit['criterion'], wanted: string): DropFit => ({ criterion, theirs: 'Sin dato', wanted, match: 'unknown' });
+  if (criteria.titles.length) {
+    const wanted = wantedOf(criteria.titles);
+    fit.push(item.title ? { criterion: 'Cargo', theirs: item.title, wanted, match: matchOf(closest(criteria.titles, item.title, true)) } : unknown('Cargo', wanted));
+  }
+  if (criteria.industries.length) {
+    const wanted = wantedOf(criteria.industries);
+    fit.push(item.industry ? { criterion: 'Rubro', theirs: item.industry, wanted,
+      match: criteria.industries.some(value => sameIndustry?.(value)) ? 'yes' : matchOf(closest(criteria.industries, item.industry, false)) } : unknown('Rubro', wanted));
+  }
+  if (criteria.locations.length) {
+    const wanted = wantedOf(criteria.locations);
+    const place = placeLabel(item);
+    const asked = COUNTRIES.filter(country => criteria.locations.some(value => country.names.some(name => ` ${fold(value)} `.includes(` ${name} `))));
+    const theirs = COUNTRIES.find(country => country.names.includes(fold(item.country || '')));
+    const named = place && criteria.locations.some(value => ` ${fold(place).replace(/,/g, ' ')} `.includes(` ${fold(value)} `));
+    // The search keeps to those places: a contact that names none of them is in a part of them («Las Condes» for «Santiago»).
+    fit.push(!place ? unknown('Lugar', wanted) : { criterion: 'Lugar', theirs: place, wanted,
+      match: named || (theirs && asked.includes(theirs)) ? 'yes' : theirs && asked.length ? 'no' : 'partial' });
+  }
+  if (criteria.sizes.length) {
+    const wanted = criteria.sizes.map(sizeRangeLabel).filter(Boolean).join(' o ');
+    const within = (size: number) => criteria.sizes.some(range => { const [min, max] = range.split(',').map(Number); return size >= min && size <= max; });
+    fit.push(item.size ? { criterion: 'Tamaño', theirs: `${item.size.toLocaleString('es-CL')} personas`, wanted, match: within(item.size) ? 'yes' : 'no' } : unknown('Tamaño', wanted));
+  }
+  return fit;
+}
+
 // ─── In the morning alert: a table, the link and the PDF ────────────────────────────────────────────────────────────
 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
@@ -319,17 +418,20 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
   const one = items.length === 1;
   const heading = options.heading !== false;
   const lead = one ? 'Tu contacto de hoy, con su correo listo' : `${items.length} contactos nuevos para ti, con su correo listo`;
-  const research = one ? 'En el PDF adjunto va una breve investigación y un primer correo sugerido.' : 'En el PDF adjunto va una breve investigación de cada uno y un primer correo sugerido.';
+  const research = one ? 'En el PDF adjunto va por qué te lo recomendamos, quién es, su empresa y un primer correo sugerido.'
+    : 'En el PDF adjunto va por qué te recomendamos a cada uno, quiénes son, sus empresas y un primer correo sugerido.';
   const text = [
     ...(heading ? [`${lead}:`] : []),
-    ...items.map(item => `- ${item.name}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${item.why}`),
+    ...items.map(item => `- ${item.name}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${[item.why, item.reasons?.[0]].filter(Boolean).join(' ')}`),
     `${one ? 'Míralo y guárdalo' : 'Míralos y guárdalos'} sin costo: ${link}`,
     research,
   ].join('\n');
   const block = (item: DropItem, index: number) => `<div style="padding:12px 0;${index ? 'border-top:1px solid #e5e7eb;' : ''}">`
     + `<p style="margin:0;font-size:17px;line-height:24px;font-weight:600;color:#111827">${escape(item.name)}</p>`
     + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</p>`
-    + `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:#6b7280">${escape(item.why)}</p></div>`;
+    + `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:#6b7280">${escape(item.why)}</p>`
+    // The first reason it is worth it for what the person sells (writeDrop): the rest, with the fit criterion by criterion, in the PDF.
+    + (item.reasons?.[0] ? `<p style="margin:4px 0 0;font-size:14px;line-height:20px;color:#374151">${escape(item.reasons[0])}</p>` : '') + '</div>';
   const html = (heading ? `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
       + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
     + `<div style="margin:0 0 16px;padding:4px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb">${items.map(block).join('')}</div>`

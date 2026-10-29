@@ -3,12 +3,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { industryLabel } from '@/lib/companies/coverage';
+import type { CoworkUserContext } from '@/lib/cowork/decision-context';
 import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/lib/cowork/writer';
 import { renderPdf } from '@/lib/documents/render-pdf';
-import type { DocBlock, DocumentSpec } from '@/lib/documents/spec';
+import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
-  DROP_SIZE, assignDrops, companyDropCriteria, dropDay, groupDropPeople, nextDropDay, personDropCriteria, researchFacts, tidyCompany, tidyTitle, whyText,
-  type DropCandidate, type DropCriteria, type DropItem, type IcpDeclared, type KnownPeople,
+  DROP_SIZE, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropDay, dropFit, groupDropPeople, nextDropDay, personDropCriteria, placeLabel,
+  researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropItem, type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { readCompanyFields } from '@/lib/server/company-profile';
@@ -81,18 +82,35 @@ async function knownPeople(client: Client, organizationId: string, now: Date): P
   };
 }
 
+/** An http(s) address as the report links it, or nothing: a bare domain («ripley.cl») gets its https. */
+function webUrl(value: unknown) {
+  const raw = text(value, 500);
+  if (!raw) return null;
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`);
+    return ['http:', 'https:'].includes(url.protocol) && url.hostname.includes('.') ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A Leads Finder result as a candidate: what the screen may show, and the email and LinkedIn only as keys to skip known
  * people. The title with its linking words in lower case, the company with its legal form («S.A.») and the industry in
- * Spanish («logistics & supply chain» → «Logística»), as the screen, the email and the PDF say them.
+ * Spanish («logistics & supply chain» → «Logística»), as the screen, the email and the PDF say them; the level and the
+ * area in Spanish too. The company's site and LinkedIn page are public; the person's LinkedIn is not shown before saving.
  */
 function candidateOf(entry: VaultEntry): DropCandidate {
   const { lead, contact } = entry;
+  const domain = text(lead.organization_domain, 253) || null;
   return {
     leadId: lead.id, name: text(contact.fullName, 200) || text(lead.name, 200), title: tidyTitle(text(lead.title, 160)),
-    company: tidyCompany(text(lead.organization_name, 200)), domain: text(lead.organization_domain, 253) || null,
+    company: tidyCompany(text(lead.organization_name, 200)), domain,
     industry: industryLabel(text(lead.organization_industry, 160)), size: typeof lead.organization_size === 'number' ? lead.organization_size : null,
-    city: text(lead.city, 160) || null, hasEmail: Boolean(contact.email), hasPhone: Boolean(contact.mobileNumber),
+    city: text(lead.city, 160) || null, state: text(lead.state, 160) || null, country: text(lead.country, 160) || null,
+    seniority: seniorityLabel(text(lead.seniority, 60)), department: departmentLabel(text(Array.isArray(lead.departments) ? lead.departments[0] : '', 60)),
+    website: webUrl(lead.organization?.website_url) || webUrl(domain), companyLinkedin: webUrl(lead.organization?.linkedin_url),
+    hasEmail: Boolean(contact.email), hasPhone: Boolean(contact.mobileNumber),
     emailKey: contact.email ? contact.email.toLowerCase() : null, linkedinKey: contact.linkedinUrl ? contact.linkedinUrl.toLowerCase().replace(/\/$/, '') : null,
     about: text(lead.organization?.short_description, 600) || null,
   };
@@ -205,11 +223,13 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria: mine }); continue; }
       for (const pick of picks) { known.leadIds.add(pick.leadId); if (pick.emailKey) known.emails.add(pick.emailKey); }
       await storeInVault(client, { organizationId, userId, entries: picks.map(pick => entries.get(pick.leadId)!).filter(Boolean), now: deps.now.getTime() });
-      results.push({ userId, status: 'pending', cost: share, criteria: mine, items: picks.map(pick => ({
-        leadId: pick.leadId, name: pick.name, title: pick.title, company: pick.company, domain: pick.domain, industry: pick.industry, size: pick.size,
-        city: pick.city, hasEmail: pick.hasEmail, hasPhone: pick.hasPhone, why: whyText(pick, mine), research: researchFacts({ ...pick, about: null }), draft: null,
-        description: pick.about,
-      })) });
+      results.push({ userId, status: 'pending', cost: share, criteria: mine, items: picks.map(pick => {
+        // The industry as the actor names it: «servicios transitorios» searched as «staffing & recruiting» fits «Reclutamiento y personal».
+        const actorIndustry = text(entries.get(pick.leadId)?.lead.organization_industry, 160).toLowerCase();
+        const { emailKey: _email, linkedinKey: _linkedin, about, ...shown } = pick;
+        return { ...shown, why: whyText(pick, mine), research: researchFacts({ ...pick, about: null }), draft: null,
+          fit: dropFit(pick, mine, wanted => Boolean(actorIndustry) && leadsFinderIndustry(wanted) === actorIndustry), description: about };
+      }) });
     }
   }
   for (const result of results) {
@@ -243,6 +263,48 @@ async function summarizeCompanies(items: PendingItem[], generate: Generate) {
   return new Map<string, string>(((answer?.companies || []) as Array<{ leadId: string; about: string | null }>).filter(item => item.about).map(item => [item.leadId, text(item.about, 220)]));
 }
 
+// Loose limits: one long reason must not lose the rest (the request from «Hoy» has one attempt); a long one is left out after.
+const adviceSchema = z.object({ contacts: z.array(z.object({
+  leadId: z.string(), reasons: z.array(z.string().max(1000)).max(5), approach: z.string().max(1000).nullable(),
+}).strict()).max(10) }).strict();
+const ADVICE_PROMPT = 'Le explicas a un vendedor por qué le recomiendas cada contacto. Por cada uno: de 2 a 3 razones (reasons), una frase de hasta 200 caracteres cada una, '
+  + 'que conecten lo que vende (seller) con el cargo, el área y la empresa del contacto: qué problema de esa persona resuelve, por qué su empresa lo necesitaría y '
+  + 'por qué su cargo decide o influye en esa compra. Y una sugerencia breve de cómo abrir la conversación (approach), sin redactar el correo. Usa solo los datos dados: '
+  + 'no inventes cifras, clientes, noticias ni hechos de la empresa que su descripción no diga; lo que no se sabe se dice como lo que ese cargo suele resolver. '
+  + 'No repitas como razón que calza por cargo, rubro o lugar: eso ya se muestra. Español de Chile, de tú al vendedor, sin adjetivos de marketing. Responde JSON conforme al contrato.';
+
+/**
+ * Why each contact is worth it for what the person sells (two or three reasons) and how to open, by a small model with the
+ * person's offer and the contact's data only. A reason with a figure the data does not have is left out. Nothing without an
+ * offer to connect, or when the model fails: the report keeps the fit, criterion by criterion.
+ */
+async function adviseOn(items: PendingItem[], userContext: CoworkUserContext | null, generate: Generate) {
+  const none = new Map<string, { reasons: string[]; approach: string | null }>();
+  const seller = userContext && (userContext.offer || userContext.services?.length) ? {
+    company: userContext.companyName, offer: userContext.offer, services: userContext.services, results: userContext.proofPoints,
+    differentiators: userContext.differentiators, sector: userContext.sector,
+  } : null;
+  if (!seller || !items.length) return none;
+  const prompt = JSON.stringify({ seller, contacts: items.map(item => ({
+    leadId: item.leadId, firstName: item.name.split(' ')[0], title: item.title, level: item.seniority, area: item.department, company: item.company,
+    industry: item.industry, employees: item.size, place: placeLabel(item), description: item.description || null,
+    fit: (item.fit || []).map(entry => `${entry.criterion}: ${FIT_LABEL[entry.match]}`),
+  })) });
+  const answer = await generate({
+    schema: adviceSchema, maxOutputTokens: 1500, timeoutMs: 25_000, openAiModel: process.env.LEAD_DROPS_RESEARCH_MODEL || 'claude-haiku-5-5', reasoningEffort: 'low',
+    systemPrompt: ADVICE_PROMPT, prompt,
+  }).catch(() => null);
+  // «Reduce su rotación en un 30%»: a figure that is not in the data is the model's, not a fact.
+  const known = prompt.replace(/"leadId":"[^"]*"/g, '');
+  const grounded = (line: string) => (line.match(/\d+(?:[.,]\d+)*/g) || []).every(figure => known.includes(figure));
+  // Without the bullet the model may write; a line too long to read at a glance is left out rather than cut.
+  const clean = (line: unknown, max: number) => { const value = text(String(line || '').replace(/^[\s\-–•*·]+/, ''), max + 1); return value.length <= max && grounded(value) ? value : ''; };
+  return new Map(((answer?.contacts || []) as Array<{ leadId: string; reasons: string[]; approach: string | null }>).map(entry => [entry.leadId, {
+    reasons: (entry.reasons || []).map(line => clean(line, 280)).filter(Boolean).slice(0, 3),
+    approach: clean(entry.approach, 360) || null,
+  }]));
+}
+
 /** The first email for one contact, by Cowork's Writer with its checks and its Reviewer, as Cowork would write it. */
 async function draftFor(item: DropItem, userContext: Record<string, unknown> | null, generate: Generate, now: Date) {
   const brief: CoworkWriteBrief = {
@@ -267,7 +329,10 @@ async function draftFor(item: DropItem, userContext: Record<string, unknown> | n
   return block?.subject && block.body ? { subject: text(block.subject, 200), body: String(block.body).trim().slice(0, 4000) } : null;
 }
 
-/** Completes a pending drop: what each company does and a first email for each contact. A draft that fails leaves the contact without one. */
+/**
+ * Completes a pending drop: what each company does, why each contact is worth it for what the person sells (adviseOn) and a
+ * first email for each. A draft or advice that fails leaves the contact without it.
+ */
 export async function writeDrop(client: Client, drop: { id: string; organization_id: string; user_id: string; items: PendingItem[] }, deps: {
   generate: Generate; now: Date; parallel?: number;
 }) {
@@ -278,13 +343,19 @@ export async function writeDrop(client: Client, drop: { id: string; organization
   ]);
   // The description stays out of the saved drop: what reaches the person is its summary.
   const items: DropItem[] = drop.items.map(({ description: _description, ...item }) => ({
-    ...item, research: about.has(item.leadId) ? [about.get(item.leadId)!, ...item.research].slice(0, 3) : item.research,
+    ...item, summary: about.get(item.leadId) ?? null, research: about.has(item.leadId) ? [about.get(item.leadId)!, ...item.research].slice(0, 3) : item.research,
   }));
   const parallel = Math.max(1, deps.parallel ?? 3);
-  for (let start = 0; start < items.length; start += parallel) {
-    await Promise.all(items.slice(start, start + parallel).map(async item => {
-      item.draft = await draftFor(item, userContext as Record<string, unknown> | null, deps.generate, deps.now).catch(() => null);
-    }));
+  const [advice] = await Promise.all([adviseOn(drop.items, userContext, deps.generate), (async () => {
+    for (let start = 0; start < items.length; start += parallel) {
+      await Promise.all(items.slice(start, start + parallel).map(async item => {
+        item.draft = await draftFor(item, userContext as Record<string, unknown> | null, deps.generate, deps.now).catch(() => null);
+      }));
+    }
+  })()]);
+  for (const item of items) {
+    const found = advice.get(item.leadId);
+    if (found) Object.assign(item, found);
   }
   const saved = await client.from('lead_drops').update({ status: 'ready', items, updated_at: new Date().toISOString() }).eq('id', drop.id).eq('status', 'pending');
   if (saved.error) throw new LeadDropsError('No pudimos guardar tu contacto del día.', 503);
@@ -444,7 +515,8 @@ export async function saveDropLeads(client: Client, scope: DropScope, dropId: st
     const existing: any = email ? await client.from('enriched_leads').select('id').eq('organization_id', scope.organizationId).eq('user_id', scope.userId).eq('email', email).limit(1).maybeSingle() : { data: null };
     if (existing.data?.id) { saved.push({ leadId: item.leadId, savedLeadId: String(existing.data.id) }); continue; }
     const row = enrichedLeadRow(entry, { id: randomUUID(), userId: scope.userId, organizationId: scope.organizationId, revealEmail: true, revealPhone: true, now });
-    const inserted: any = await client.from('enriched_leads').insert({ ...row, data: { ...row.data, leadDrop: { dropId, why: item.why, research: item.research, draft: item.draft } } })
+    const leadDrop = { dropId, why: item.why, research: item.research, draft: item.draft, ...(item.reasons?.length ? { reasons: item.reasons, approach: item.approach ?? null } : {}) };
+    const inserted: any = await client.from('enriched_leads').insert({ ...row, data: { ...row.data, leadDrop } })
       .select('id').maybeSingle();
     if (inserted.error || !inserted.data) continue;
     saved.push({ leadId: item.leadId, savedLeadId: String(inserted.data.id) });
@@ -462,9 +534,68 @@ export function dropDateLabel(day: string) {
   return Number.isNaN(date.getTime()) ? day : date.toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
+/** «Ripley S.A.» without its legal form, as a heading says it. */
+const shortCompany = (name: string) => name.replace(/,?\s+(S\.A\.|SpA|Ltda\.|EIRL)$/, '');
+const labelled = (label: string, value: Run[] | string | null | undefined) =>
+  value && (typeof value === 'string' ? value.trim() : value.length) ? { runs: [{ text: `${label}: `, bold: true }, ...(typeof value === 'string' ? [{ text: value }] : value)] } : null;
+const present = <T,>(values: Array<T | null>) => values.filter((value): value is T => value !== null);
+const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } };
+
 /**
- * «Contacto del día» as a document (src/lib/documents): each contact with who they are, why they fit, what we know of the
- * company and the first email in its own box, and the way to save them as a button-like link instead of a bare address.
+ * One contact in the document: why we recommend them (what matched, and why it is worth it for what the person sells), how
+ * they fit the customer criterion by criterion, who they are, their company, how to open, and the first email in its own
+ * box. A drop from before 29 Oct 2026, without those parts, shows what it has: the why, the research and the email.
+ */
+function dropItemBlocks(item: DropItem): DocBlock[] {
+  const blocks: DocBlock[] = [];
+  const reasons = item.reasons?.length ? `\n\n${item.reasons.map(reason => `- ${reason}`).join('\n')}` : '';
+  blocks.push({ type: 'callout', tone: 'info', title: 'Por qué te lo recomendamos', runs: [{ text: item.why, bold: Boolean(reasons) }, ...(reasons ? [{ text: reasons }] : [])] });
+  if (item.fit?.length) {
+    blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Cómo calza con tu cliente ideal' }] });
+    blocks.push({ type: 'table', columns: [{ header: [{ text: 'Criterio' }] }, { header: [{ text: 'Este contacto' }] }, { header: [{ text: 'Lo que buscas' }] }, { header: [{ text: '¿Calza?' }] }],
+      rows: item.fit.map(entry => [[{ text: entry.criterion, bold: true }], [{ text: entry.theirs }], [{ text: entry.wanted }], [{ text: FIT_LABEL[entry.match], bold: entry.match === 'yes' }]]) });
+  }
+  if (item.fit) {
+    // What the table and the title do not say already: the role is under the name, the place and the industry in the table.
+    const shown = new Set(item.fit.map(entry => entry.criterion));
+    const person = present([
+      labelled('Nivel', item.seniority), labelled('Área', item.department), shown.has('Lugar') ? null : labelled('Ubicación', placeLabel(item)),
+      labelled('Datos de contacto', `${item.hasPhone ? 'correo verificado y teléfono móvil' : 'correo verificado'}, que ves al guardarlo`),
+    ]);
+    blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Sobre la persona' }] });
+    blocks.push({ type: 'list', ordered: false, items: person });
+    // «Construcción · 70 personas · topwood.cl · LinkedIn de la empresa», in one line under what the company does.
+    const facts: Run[][] = [shown.has('Rubro') ? null : item.industry, shown.has('Tamaño') || !item.size ? null : `${item.size.toLocaleString('es-CL')} personas`]
+      .filter((value): value is string => Boolean(value)).map(value => [{ text: value }]);
+    if (item.website) facts.push([{ text: hostOf(item.website), href: item.website }]);
+    if (item.companyLinkedin) facts.push([{ text: 'LinkedIn de la empresa', href: item.companyLinkedin }]);
+    if (item.summary || facts.length) {
+      blocks.push({ type: 'heading', level: 2, runs: [{ text: item.company ? `Sobre ${shortCompany(item.company)}` : 'Sobre la empresa' }] });
+      if (item.summary) blocks.push({ type: 'paragraph', runs: [{ text: item.summary }] });
+      if (facts.length) blocks.push({ type: 'paragraph', runs: facts.flatMap((runs, index) => index ? [{ text: '  ·  ' }, ...runs] : runs) });
+    }
+  } else if (item.research.length) {
+    blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Lo que sabemos de la empresa' }] });
+    blocks.push({ type: 'list', ordered: false, items: item.research.map(fact => ({ runs: [{ text: fact }] })) });
+  }
+  if (item.approach) {
+    blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Cómo abordarlo' }] });
+    blocks.push({ type: 'paragraph', runs: [{ text: item.approach }] });
+  }
+  if (item.draft) {
+    blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Primer correo sugerido' }] });
+    // The subject as its first line, in its own case (a callout title would be in capitals), and the body with its own line breaks.
+    blocks.push({ type: 'callout', tone: 'neutral', runs: [
+      { text: 'Asunto: ', bold: true }, { text: item.draft.subject, bold: true },
+      { text: `\n\n${item.draft.body.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()}` },
+    ] });
+  }
+  return blocks;
+}
+
+/**
+ * «Contacto del día» as a document (src/lib/documents): each contact with why we recommend them, how they fit, who they are,
+ * their company, how to open and the first email, and the way to save them as a button-like link instead of a bare address.
  */
 export function dropDocument(items: DropItem[], meta: { name: string; date: string; link: string }): DocumentSpec {
   const one = items.length === 1;
@@ -479,19 +610,7 @@ export function dropDocument(items: DropItem[], meta: { name: string; date: stri
       blocks.push({ type: 'heading', level: 1, runs: [{ text: item.name }] });
       if (role(item)) blocks.push({ type: 'paragraph', runs: [{ text: role(item) }] });
     }
-    blocks.push({ type: 'callout', tone: 'info', title: 'Por qué te lo recomiendo', runs: [{ text: item.why }] });
-    if (item.research.length) {
-      blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Lo que sabemos de la empresa' }] });
-      blocks.push({ type: 'list', ordered: false, items: item.research.map(fact => ({ runs: [{ text: fact }] })) });
-    }
-    if (item.draft) {
-      blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Primer correo sugerido' }] });
-      // The subject as its first line, in its own case (a callout title would be in capitals), and the body with its own line breaks.
-      blocks.push({ type: 'callout', tone: 'neutral', runs: [
-        { text: 'Asunto: ', bold: true }, { text: item.draft.subject, bold: true },
-        { text: `\n\n${item.draft.body.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()}` },
-      ] });
-    }
+    blocks.push(...dropItemBlocks(item));
   });
   return {
     title: one ? items[0].name : `${items.length} contactos para hoy`,

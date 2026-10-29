@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assignDrops, companyDropCriteria, criteriaKey, dropDay, dropEmailSection, dropHref, dropSubject, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
+import { assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropDay, dropEmailSection, dropFit, dropHref, dropSubject, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -170,4 +170,32 @@ test('the email table escapes what came from outside and links to the drop', () 
   assert.equal(dropSubject([item]), 'Tu contacto de hoy: Gerente en R&R');
   assert.equal(dropSubject([{ title: null, company: null }]), 'Tu contacto de hoy');
   assert.equal(dropSubject([item, item]), '2 contactos nuevos para ti');
+  // The first reason it is worth it for what the person sells goes under the why; the rest are in the PDF.
+  const advised = dropEmailSection([{ ...item, reasons: ['Revisa a cada persona que entra.', 'Otra.'] }], 'drop-1', 'https://app.antonia.ai/');
+  assert.match(advised.html, /Calza\.<\/p><p[^>]*>Revisa a cada persona que entra\.<\/p><\/div>/);
+  assert.doesNotMatch(advised.html, /Otra\./);
+  assert.match(advised.text, /Calza\. Revisa a cada persona que entra\./);
+});
+
+test('how a contact fits, criterion by criterion: by the words of the title and the industry, the place and the size', () => {
+  const ana = { title: 'Head of People', industry: 'Retail', size: 300, city: 'Las Condes', state: 'Santiago Metropolitan Region', country: 'Chile' };
+  const wanted: DropCriteria = { titles: ['Gerente de Personas', 'Jefe de RR. HH.'], industries: ['retail', 'minería'], locations: ['Santiago'], sizes: ['51,200', '201,500'], source: 'perfil' };
+  assert.deepEqual(dropFit(ana, wanted), [
+    { criterion: 'Cargo', theirs: 'Head of People', wanted: 'Gerente de Personas, Jefe de RR. HH.', match: 'yes' },
+    { criterion: 'Rubro', theirs: 'Retail', wanted: 'retail, minería', match: 'yes' },
+    { criterion: 'Lugar', theirs: 'Las Condes, Región Metropolitana, Chile', wanted: 'Santiago', match: 'partial' },
+    { criterion: 'Tamaño', theirs: '300 personas', wanted: '51 a 200 personas o 201 a 500 personas', match: 'yes' },
+  ], '«People» is «Personas»; Las Condes is a part of Santiago the search kept to');
+  const other = dropFit({ title: 'Gerente de Ventas', industry: 'Reclutamiento y personal', size: null, city: 'Lima', state: null, country: 'Peru' },
+    { titles: ['Gerente General', 'Jefe de Operaciones Comerciales'], industries: ['servicios transitorios'], locations: ['Chile'], sizes: ['5001,1000000'], source: 'empresa' },
+    value => value === 'servicios transitorios');
+  assert.deepEqual(other.map(entry => [entry.criterion, entry.match]), [['Cargo', 'partial'], ['Rubro', 'yes'], ['Lugar', 'no'], ['Tamaño', 'unknown']],
+    '«Gerente General» is compared with its level; the industry as the search names it; Perú is not Chile; no size, no guess');
+  assert.equal(other[3].wanted, 'Más de 5.000 personas');
+  assert.deepEqual(dropFit({ title: null, industry: null, size: 10, city: null, state: null, country: null }, criteria).map(entry => [entry.criterion, entry.theirs, entry.match]),
+    [['Cargo', 'Sin dato', 'unknown'], ['Rubro', 'Sin dato', 'unknown'], ['Lugar', 'Sin dato', 'unknown']], 'no size asked, no size row');
+  assert.equal(placeLabel({ city: 'Santiago', state: 'Santiago', country: 'Chile' }), 'Santiago, Chile');
+  assert.equal(placeLabel({ city: null, state: 'Valparaíso Region', country: null }), 'Región de Valparaíso');
+  assert.deepEqual([seniorityLabel('manager'), seniorityLabel('c_suite'), departmentLabel('human_resources'), departmentLabel('field_sales'), seniorityLabel(null)],
+    ['Gerencia o jefatura', 'Alta dirección', 'Recursos humanos', 'Field sales', null]);
 });

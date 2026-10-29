@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Check, ChevronDown, Copy, Download, Loader2, MailCheck, Phone, RefreshCw, Search } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, Copy, Download, ExternalLink, Loader2, MailCheck, Phone, RefreshCw, Search } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
-import { dropHref, type DropCriteria, type DropItem } from '@/lib/lead-drops';
+import { dropHref, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
 
 type Drop = { id: string; date: string; criteria: DropCriteria; items: DropItem[] };
@@ -32,6 +32,12 @@ const brief = (criteria: DropCriteria) => [criteria.titles, criteria.industries,
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 const SOURCE: Record<DropCriteria['source'], string> = { perfil: 'Tu cliente ideal, de «Perfil»', equipo: 'El cliente ideal de tu equipo',
   empresa: 'El cliente ideal de tu empresa, de su ficha', contactos: 'Parecidos a los contactos que guarda tu equipo' };
+
+/** How a criterion fits, said beside it (the PDF says it in its own column). */
+const FIT: Record<DropFit['match'], string> = { yes: 'Calza', partial: 'Calza en parte', no: 'No calza', unknown: 'Sin dato' };
+/** «Gerencia o jefatura · Recursos humanos · Santiago, Chile»: who the person is, under their role. */
+const personLine = (item: DropItem) => [item.seniority, item.department, placeLabel(item)].filter(Boolean).join(' · ');
+const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } };
 
 function Filter({ label, values }: { label: string; values: string[] }) {
   if (!values.length) return null;
@@ -58,7 +64,8 @@ function Steps({ step }: { step: number }) {
 /**
  * «Contacto del día» in «Buscar prospectos» (src/lib/lead-drops.ts), opened from the morning email or from «Hoy»: the
  * search that found it, played back in a moment (or at once with reduced motion, or with «Ver ahora»), then the contact
- * with why it fits, a brief research and a first email. Saving it puts it in «Por escribir» with its email, without
+ * with why we recommend it (what matched and, since 29 Oct 2026, why it is worth it for what the person sells), how it fits
+ * criterion by criterion, its company, how to open and a first email. Saving it puts it in «Por escribir» with its email, without
  * credits; then «Investigar y escribirle» starts its full research there, the way to an email that is reviewed and sent
  * from ANTON.IA (the suggested one stays here, with «Copiar»). With `nuevo` (from «Hoy», for whoever gets no email) today's
  * drop is made first, for real. A drop with more than one contact (DROP_SIZE) shows them as a list.
@@ -176,10 +183,39 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     {item.hasPhone ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Phone className="h-3 w-3" aria-hidden="true" />Teléfono</span> : null}
     {item.savedLeadId ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
   </div>;
-  // The brief research and the first email, with «Copiar».
+  // Why we recommend them: what matched and why it is worth it for what the person sells (writeDrop), then the fit criterion by criterion.
+  const why = (item: DropItem) => <div className="space-y-2">
+    <p className="text-sm">{item.why}</p>
+    {item.reasons?.length ? <ul className="list-disc space-y-1 pl-5 text-sm">{item.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul> : null}
+  </div>;
+  const fit = (item: DropItem) => item.fit?.length ? <div>
+    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Cómo calza con tu cliente ideal</p>
+    <dl className="mt-2 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+      {item.fit.map(entry => <div key={entry.criterion} className="min-w-0">
+        <dt className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">{entry.criterion}
+          <span className={cn('rounded-full px-1.5 py-px', entry.match === 'yes' ? 'bg-primary/10 text-primary' : 'bg-muted')}>{FIT[entry.match]}</span></dt>
+        <dd className="mt-0.5 text-sm">{entry.theirs}<span className="block text-xs text-muted-foreground">Buscas: {entry.wanted}</span></dd>
+      </div>)}
+    </dl>
+  </div> : null;
+  // What we know of the company, how to open, and the first email, with «Copiar». A drop from before 29 Oct 2026 has its research only.
+  const companyFacts = (item: DropItem) => [item.industry, item.size ? `${item.size.toLocaleString('es-CL')} personas` : null].filter(Boolean).join(' · ');
+  const hasDetails = (item: DropItem) => Boolean(item.research.length || item.summary || item.approach || item.draft);
   const details = (item: DropItem, panel?: string) => <div id={panel} className="space-y-4 rounded-xl bg-muted/40 p-4">
-    {item.research.length ? <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Breve investigación</p>
+    {item.fit ? <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{item.company ? `Sobre ${item.company}` : 'Sobre la empresa'}</p>
+      {item.summary ? <p className="mt-1.5 text-sm">{item.summary}</p> : null}
+      {companyFacts(item) ? <p className="mt-1 text-sm text-muted-foreground">{companyFacts(item)}</p> : null}
+      {item.website || item.companyLinkedin ? <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {item.website ? <a href={item.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
+          {hostOf(item.website)}<ExternalLink className="h-3 w-3" aria-hidden="true" /><span className="sr-only"> (se abre en otra pestaña)</span></a> : null}
+        {item.companyLinkedin ? <a href={item.companyLinkedin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
+          LinkedIn de la empresa<ExternalLink className="h-3 w-3" aria-hidden="true" /><span className="sr-only"> (se abre en otra pestaña)</span></a> : null}
+      </p> : null}
+    </div> : item.research.length ? <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Breve investigación</p>
       <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm">{item.research.map(fact => <li key={fact}>{fact}</li>)}</ul></div> : null}
+    {item.approach ? <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Cómo abordarlo</p>
+      <p className="mt-1.5 text-sm">{item.approach}</p></div> : null}
     {item.draft ? <div>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Primer correo sugerido</p>
@@ -267,16 +303,21 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           <div className="min-w-0 space-y-1">
             <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{one.name}</h2>
             <p className="text-sm text-muted-foreground">{[one.title, one.company].filter(Boolean).join(' · ')}</p>
+            {personLine(one) ? <p className="text-xs text-muted-foreground">{personLine(one)}</p> : null}
           </div>
           {one.savedLeadId ? <Button asChild size="lg"><Link href={writeHref(one)}>Investigar y escribirle<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
             : <Button size="lg" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}
         </div>
         {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
-        <div className="space-y-3 rounded-2xl border p-4 sm:p-5">
-          <p className="text-sm">{one.why}</p>
-          {badges(one)}
-          {one.research.length || one.draft ? details(one) : null}
+        <div className="space-y-4 rounded-2xl border p-4 sm:p-5">
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Por qué te lo recomendamos</p>
+            {why(one)}
+            {badges(one)}
+          </div>
+          {fit(one)}
+          {hasDetails(one) ? details(one) : null}
         </div>
         {howSection}
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
@@ -289,7 +330,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{`${drop.items.length} contactos nuevos`}</h2>
-            <p className="text-sm text-muted-foreground">{left.length ? 'Cada uno trae por qué te sirve, una breve investigación y un primer correo.' : 'Ya están todos en «Por escribir».'}</p>
+            <p className="text-sm text-muted-foreground">{left.length ? 'Cada uno trae por qué te lo recomendamos, cómo calza, su empresa y un primer correo.' : 'Ya están todos en «Por escribir».'}</p>
           </div>
           {left.length ? <Button size="lg" disabled={saving} onClick={() => void save()}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
@@ -307,7 +348,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
                 <div className="min-w-0 space-y-1">
                   <p className="font-medium">{item.name}</p>
                   <p className="text-sm text-muted-foreground">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
-                  <p className="text-sm">{item.why}</p>
+                  {personLine(item) ? <p className="text-xs text-muted-foreground">{personLine(item)}</p> : null}
+                  {why(item)}
                   {badges(item)}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
@@ -315,11 +357,11 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
                     : <Button size="sm" variant="outline" disabled={saving} onClick={() => void save([item.leadId])}>Guardar</Button>}
                 </div>
               </div>
-              {item.research.length || item.draft ? <Button variant="ghost" size="sm" className="-ml-2 mt-2 text-muted-foreground" aria-expanded={expanded} aria-controls={panel}
+              {hasDetails(item) || item.fit?.length ? <Button variant="ghost" size="sm" className="-ml-2 mt-2 text-muted-foreground" aria-expanded={expanded} aria-controls={panel}
                 onClick={() => setOpen(expanded ? null : item.leadId)}>
                 <ChevronDown className={cn('mr-1 h-4 w-4 transition-transform motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden="true" />
-                Investigación y primer correo</Button> : null}
-              {expanded ? <div className="mt-2">{details(item, panel)}</div> : null}
+                {item.fit ? 'Cómo calza, su empresa y primer correo' : 'Investigación y primer correo'}</Button> : null}
+              {expanded ? <div id={panel} className="mt-2 space-y-4">{fit(item)}{details(item)}</div> : null}
             </li>;
           })}
         </ul>
