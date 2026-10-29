@@ -1150,10 +1150,10 @@ export async function POST(request: NextRequest) {
           255,
         );
         if (target.sourceProviderId && resultPersonId && target.sourceProviderId !== resultPersonId) {
-          throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false);
+          throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false, 'person_id_differs');
         }
         if (target.boundPersonId && resultPersonId && target.boundPersonId !== resultPersonId) {
-          throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false);
+          throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false, 'bound_person_differs');
         }
 
         if (callback && result.providerRequestId) {
@@ -1302,7 +1302,10 @@ export async function POST(request: NextRequest) {
           await settleApolloEnrichmentCallback({
             callbackId: callback.callbackId,
             terminalState: 'failed',
-            errorCode: error instanceof ApolloEnrichmentError ? error.code : 'apollo_enrichment_failed',
+            // The refusal's reason rides on the stored code (APOLLO_PERSON_IDENTITY_MISMATCH:url_differs:low).
+            errorCode: error instanceof ApolloEnrichmentError
+              ? (error.reason ? `${error.code}:${error.reason}` : error.code)
+              : 'apollo_enrichment_failed',
           }).catch(() => undefined);
         } else {
           await markTargetsFailed({ targets: [target], tableName, userId, organizationId }).catch(() => undefined);
