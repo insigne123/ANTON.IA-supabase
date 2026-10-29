@@ -78,7 +78,7 @@ export type ValidateDraftPreflightV2Options = {
   // usuario: el llamador los activa junto a checkGeneratedCopy.
   checkHumanTone?: boolean;
   // The version is the person's own edit (generation_method 'human'): its length is a notice inside
-  // EDITED_EMAIL_BODY_WORDS, not an error (src/lib/drafts/email-length.ts).
+  // EDITED_EMAIL_BODY_WORDS, not an error (src/lib/drafts/email-length.ts), and so are its closing and its use of the research (PERSON_DECIDES).
   editedByPerson?: boolean;
 };
 
@@ -606,6 +606,14 @@ export function createFailedDraftPreflightV2(
   });
 }
 
+// What the person decides in an email they wrote or edited themselves (generation_method 'human'), said as a notice: how it closes (the
+// approved CTA, the one question of a follow-up) and whether it keeps what the research found. On 23 Oct 2026 a person rewrote their first
+// email in their own words and approval refused it for both, every time they tried. For what the model writes they stay errors.
+const PERSON_DECIDES: Partial<Record<DraftPreflightIssueV2['code'], string>> = {
+  cta_count: 'Tu correo no cierra como propone tu estilo (una sola pregunta clara o el CTA aprobado): un cierre así suele responderse más.',
+  personalization_invalid: 'Tu correo ya no usa lo que encontró la investigación sobre este contacto: un dato concreto suyo suele responderse más.',
+};
+
 export function validateDraftPreflightV2(
   context: DraftContextV2,
   outputInput: GeneratedOutreachV2,
@@ -618,6 +626,11 @@ export function validateDraftPreflightV2(
   const issues: DraftPreflightIssueV2[] = [];
   const warnings = context.warnings.slice(0, 100);
   const add = (code: DraftPreflightIssueV2['code'], message: string, location: DraftPreflightIssueV2['location']) => {
+    const notice = options.editedByPerson ? PERSON_DECIDES[code] : undefined;
+    if (notice) {
+      if (!warnings.includes(notice)) warnings.push(notice);
+      return;
+    }
     issues.push({ code, message, location });
   };
   const contentFingerprint = draftContentFingerprintV2(subject, body);
