@@ -1,6 +1,12 @@
 -- Finding the email ourselves when Apollo identifies a person but has none (src/lib/server/email-finder). One row per
 -- lead: whether it is waiting, what was found and how many Reoon checks it cost. No addresses are kept here: a found
 -- address is written on the lead itself, which the privacy flows already cover.
+
+-- The name split that the finder reads. Production already has both columns (text, read from its schema on 29 Oct 2026)
+-- but no migration created them, so a database built from the repository lacked them. A no-op in production.
+alter table public.enriched_leads add column if not exists first_name text;
+alter table public.enriched_leads add column if not exists last_name text;
+
 create table if not exists public.email_finder_attempts (
   id uuid primary key default gen_random_uuid(),
   target_table text not null check (target_table in ('enriched_leads', 'people_search_leads')),
