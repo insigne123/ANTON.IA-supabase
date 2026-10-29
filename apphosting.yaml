@@ -401,6 +401,16 @@ env:
   - variable: ENRICHMENT_PROVIDER_DEFAULT
     value: apollo
     availability: [RUNTIME]
+  # Cuando Apollo identifica a la persona pero no tiene su correo, el tick de reconciliación de Apollo arma los correos
+  # probables y los verifica con Reoon (src/lib/server/email-finder). No corre sin REOON_API_KEY. La clave es un secreto:
+  # crearlo antes de agregar aquí
+  #   - variable: REOON_API_KEY
+  #     secret: REOON_API_KEY
+  #     availability: [RUNTIME]
+  # porque un secreto que no existe hace fallar el despliegue. Los leads de los últimos 60 días entran a la cola.
+  - variable: EMAIL_FINDER_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Leads Finder como alternativa de prueba, solo la cuenta del dueño.
   # Bóveda de contactos y secretos server-only verificados; tope monetario por corrida.
   - variable: LEADS_FINDER_ENABLED
