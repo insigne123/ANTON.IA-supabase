@@ -21,20 +21,24 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 
 1. **Preparación** (`leadDropsTick`, martes, miércoles y viernes de 06:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`):
    - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos y una dirección que no es de prueba, y a quien le llega el correo: con Resend, a todos; sin Resend, a quien tiene su Gmail u Outlook conectado (o con el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
-   - **A quién buscar: un cliente ideal por empresa** (`companyDropCriteria`, desde el 26 de octubre):
-     - el de la «Ficha de la empresa», si la tiene;
-     - si no, el que más se repite en los «Perfil» del equipo (si empatan, el de un administrador);
-     - si nadie lo tiene, los cargos y rubros que más se repiten entre los contactos que guardó el equipo.
+   - **A quién buscar: el cliente ideal de cada persona** (desde el 29 de octubre):
+     - el de su «Perfil», si lo declaró;
+     - si no, el de la empresa (`companyDropCriteria`): el de la «Ficha de la empresa»; si no hay, el que más se repite en los «Perfil» del equipo (si empatan, el de un administrador); si nadie lo tiene, los cargos y rubros que más se repiten entre los contactos que guardó el equipo.
 
      Sin nada de eso no hay contacto, y queda dicho por qué (`status = empty`).
-   - **Por qué uno por empresa:** antes cada persona usaba su propio cliente ideal. El 21 de octubre, 35 personas de dos empresas hicieron 11 búsquedas, y cada búsqueda paga el mínimo de Apify aunque traiga pocos contactos. Cuatro personas con un cliente ideal propio costaron US$0,70 de los US$0,99 del día; las 21 que compartían uno, US$0,20 entre todas.
+   - **Grupos para ahorrar Apify** (`groupDropPeople`): cada búsqueda paga el mínimo de Apify aunque traiga pocos contactos, así que quienes buscan algo parecido comparten una.
+     - Alguien entra a un grupo si la mitad o más de las palabras de sus cargos y de sus rubros ya están en el grupo, y busca en un país que el grupo busca. Se comparan sin el nivel del cargo («Gerente», «Jefe») y en singular; «RR. HH.», «HR», «Personas», «Capital humano» y «Talento humano» cuentan como lo mismo.
+     - La búsqueda del grupo suma los cargos y rubros de quien entra, hasta 6 de cada uno, y busca en el país de quien lo abrió.
+     - Quien no se parece a ningún grupo tiene su propia búsqueda. El cliente ideal más repetido abre el primer grupo.
+     - **Tope:** `LEAD_DROPS_MAX_GROUPS` búsquedas por empresa al día (5 por defecto). Pasado el tope, cada grupo chico se suma al más parecido.
+     - **Historia:** hasta el 26 de octubre cada persona tenía su búsqueda (el 21, 35 personas de dos empresas hicieron 11 búsquedas, US$0,99). Del 27 al 29, una por empresa, y quien vendía otra cosa recibía contactos que no eran de su área (Facility recibía Recursos Humanos). Con los perfiles de GrupoExpro del 29 de octubre salen 4 búsquedas: Recursos Humanos (unas 25 personas), Recursos Humanos en servicios y logística (2), Perú (1) y Facility (1).
    - **Cliente ideal completado por ANTON.IA:** el 20 de octubre se completó el de las 31 personas de clientes que no lo tenían. A quien guardó 5 contactos o más, con los cargos y rubros de esos contactos; al resto, con uno por empresa (GrupoExpro: personal externo y RR. HH.; PSOL: selección). Queda marcado (`profile_extended.icpSource = 'anton'`) y «Perfil» lo avisa hasta que la persona lo guarda: si está de acuerdo, «Confirmar» lo deja como suyo sin editar nada.
-   - **Una búsqueda por empresa:** Leads Finder (Apify, `code_crafter/leads-finder`) busca solo correos validados. Trae el doble de lo que el grupo necesita más cinco, con un mínimo de diez.
+   - **Una búsqueda por grupo:** Leads Finder (Apify, `code_crafter/leads-finder`) busca solo correos validados. Trae el doble de lo que el grupo necesita más cinco, con un mínimo de diez.
      - El tope de cada corrida nunca baja del de una búsqueda normal (`LEADS_FINDER_MAX_RUN_USD`, US$0,50). Apify rechaza topes bajo su mínimo (`max-total-charge-usd-below-minimum`), y uno de US$0,03 hizo fallar la primera prueba real (20 oct). Es solo el límite: el costo sale de los resultados que trae.
      - **Rubros:** van con el nombre que usa el actor (`leadsFinderIndustry`: «Seguridad privada» → *security & investigations*, «Logística» → *logistics & supply chain*). Un rubro que no reconoce se omite. En la búsqueda normal pasaría como palabra clave de la empresa, y junto a otro rubro casi nadie calza: así salió vacía la segunda prueba real.
      - **Sin nadie con esos rubros o tamaños,** se busca una vez más solo con cargos y lugares. Si tampoco hay nadie, la pantalla lo dice así («Esta vez no encontramos a nadie») y no como si el equipo ya los tuviera.
    - **Reparto:** un contacto por persona (`DROP_SIZE`), distinto entre compañeros y, mientras alcancen, de una empresa que nadie más del equipo recibió.
-     - Primero quienes tienen teléfono y un cargo más cercano.
+     - Primero quienes tienen teléfono y un cargo más cercano al cliente ideal de *esa* persona, aunque la búsqueda sea del grupo. Lo que se guarda y se muestra («Por qué calza») es su propio cliente ideal.
      - Nunca alguien que el equipo ya tiene en «Por escribir» o «Conversaciones», ni quien llegó otro día de los últimos 180.
      - **Nunca una empresa de otro país que el buscado** (`foreignDomain`). La búsqueda filtra por dónde está la *persona*, no la empresa: el 21 de octubre llegó un contacto «en Santiago» de Gou, una empresa de mudanzas de México (`gou.mx`), y quien lo recibió preguntó por qué era mexicano. Si el dominio es de un país (`.mx`, `.com.ar`) y los lugares del cliente ideal nombran otro («Chile»), se deja fuera aunque tenga teléfono. Un `.com`, un `.co` suelto o lugares sin país («Santiago») no dicen nada, y ahí no se descarta a nadie.
    - **Dónde queda:**
@@ -48,8 +52,13 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 3. **Envío:** el aviso de la mañana (`dailyAlertsTick`, 08:00) lo lleva, así que nunca hay dos correos el mismo día.
    - **Asunto:** «Tu contacto de hoy: Gerente de Personas en Ripley», salvo que haya algo más urgente, como una respuesta o un compromiso.
    - **Cuerpo:** un bloque por contacto (nombre, cargo · empresa, por qué calza), no una tabla: una tabla de tres columnas se rompe en un teléfono. Con el contacto va su botón «Ver y guardar», el único botón principal del correo: «Abrir ANTON.IA» pasa a ser un enlace. Si hay otras cosas en el aviso (una respuesta, un compromiso), van en la lista y el contacto no se repite como una línea más; si el contacto es lo único, el saludo lo dice («Tu contacto del día ya está listo») y no hay lista ni título.
-   - **Por qué calza:** lo que coincidió, sin repetir el cargo que se ve al lado: «Calza con el cliente ideal de tu equipo por su cargo y su rubro (logística), en Santiago.» (o «de tu empresa», si viene de su ficha) (`whyText`).
-   - **Adjunto:** `contacto-del-dia-AAAA-MM-DD.pdf`, con la investigación y el primer correo.
+   - **Por qué calza:** lo que coincidió, sin repetir el cargo que se ve al lado: «Calza con tu cliente ideal por su cargo y su rubro (logística), en Santiago.» («de tu equipo» o «de tu empresa» para quien no declaró uno) (`whyText`).
+   - **Adjunto:** `contacto-del-dia-AAAA-MM-DD.pdf`, armado con el motor de documentos de la app (`dropDocument`, `src/lib/documents`), con el mismo diseño de los demás documentos:
+     - el nombre como título, cargo y empresa debajo, y «Para» y la fecha en español («28 de octubre de 2026»);
+     - «Ver y guardar en ANTON.IA» como enlace, no la dirección completa;
+     - «Por qué te lo recomiendo» en un recuadro, «Lo que sabemos de la empresa» en viñetas y el primer correo en su propio recuadro, con el asunto en su primera línea y la firma junta;
+     - si hay varios contactos, uno por página.
+     Hasta el 29 de octubre se dibujaba a mano con jsPDF: la dirección larga a la vista, la fecha «2026-10-28» y todo con el mismo peso.
    - Una vez enviado, pasa a `sent`.
 4. **En la app** (`/search/contactos/<id>`, dentro de «Buscar prospectos»):
    - **Título:** «Tu contacto del día» («Tus contactos del día» si son varios), no «Buscar prospectos».

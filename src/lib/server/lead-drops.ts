@@ -4,8 +4,10 @@ import { z } from 'zod';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { industryLabel } from '@/lib/companies/coverage';
 import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/lib/cowork/writer';
+import { renderPdf } from '@/lib/documents/render-pdf';
+import type { DocBlock, DocumentSpec } from '@/lib/documents/spec';
 import {
-  DROP_SIZE, assignDrops, companyDropCriteria, dropDay, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText,
+  DROP_SIZE, assignDrops, companyDropCriteria, dropDay, groupDropPeople, nextDropDay, personDropCriteria, researchFacts, tidyCompany, tidyTitle, whyText,
   type DropCandidate, type DropCriteria, type DropItem, type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
@@ -37,6 +39,11 @@ export const dropsMonthlyUsd = (env: Record<string, string | undefined> = proces
   return Number.isFinite(value) && value >= 0 ? value : 3;
 };
 export const dropsEnabled = (env: Record<string, string | undefined> = process.env) => env.LEAD_DROPS_ENABLED !== 'off';
+/** LEAD_DROPS_MAX_GROUPS: how many searches one organization's drops may take a day (5 by default, 1 to 20); past that, groups join. */
+export const dropsMaxGroups = (env: Record<string, string | undefined> = process.env) => {
+  const value = Number(env.LEAD_DROPS_MAX_GROUPS);
+  return Number.isInteger(value) && value >= 1 && value <= 20 ? value : 5;
+};
 
 /** «Tu cliente ideal» as «Perfil» keeps it. */
 function declaredOf(profile: Record<string, unknown> | null | undefined): IcpDeclared {
@@ -122,10 +129,12 @@ async function teamOf(client: Client, organizationId: string) {
   return { byId, team, savedRows, company };
 }
 type Team = Awaited<ReturnType<typeof teamOf>>;
-/** One customer per company (companyDropCriteria): every person of the team gets a contact from the same search. */
+/** The company's customer (companyDropCriteria): for whoever did not declare one of their own. */
 const customerOf = ({ byId, team, savedRows, company }: Team) => companyDropCriteria(
   company ? { roles: company.targetRoles, industries: company.targetIndustries, locations: company.targetLocations, size: company.targetCompanySize } : null,
   team.map(id => declaredOf(byId.get(id))), savedRows);
+/** A person's customer: their «Perfil»'s, else the company's. */
+const customerFor = (team: Team, userId: string, company: DropCriteria | null = customerOf(team)) => personDropCriteria(declaredOf(team.byId.get(userId)), company);
 /** How many a search asks for: twice what the group needs and some more (some are known already, some have no email), ten at least. */
 const searchCount = (people: number) => Math.max(10, Math.min(100, people * DROP_SIZE * 2 + 5));
 
@@ -138,10 +147,11 @@ const NOBODY = 'La búsqueda no encontró personas con correo verificado para es
 const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.status === 'empty' && !Array.isArray((drop.criteria as DropCriteria | null)?.titles);
 
 /**
- * Plans today's drops of an organization for the people given: the company's customer (its ficha's, the one most of the team
- * declared or what the team saved), one Leads Finder search for all of them, a different contact for each person (DROP_SIZE),
- * kept in the vault and in a «pending» drop that `writeDrop` completes. Without a customer to go by, or when the month's
- * budget ran out, each gets an «empty» drop with the reason, so later runs do not try again.
+ * Plans today's drops of an organization for the people given: each person's customer (their «Perfil»'s, else the company's),
+ * one Leads Finder search per group of people with similar customers (groupDropPeople, at most dropsMaxGroups), a different
+ * contact for each person (DROP_SIZE) chosen by their own customer, kept in the vault and in a «pending» drop that `writeDrop`
+ * completes. Without a customer to go by, or when the month's budget ran out, each gets an «empty» drop with the reason, so
+ * later runs do not try again.
  */
 export async function planOrganizationDrops(client: Client, organizationId: string, people: string[], deps: {
   now: Date; search?: Search; budgetUsd: number; spentUsd: number; usdPerLead?: number;
@@ -153,18 +163,19 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const usdPerLead = deps.usdPerLead ?? leadsFinderUsdPerLead();
   const team = await teamOf(client, organizationId);
 
-  // One search for the whole team, with the company's customer.
+  // One search per group of people with similar customers.
   const results: Array<{ userId: string; status: 'pending' | 'empty'; error?: string; items?: PendingItem[]; cost?: number; criteria?: DropCriteria }> = [];
-  const customer = people.length ? customerOf(team) : null;
-  if (!customer) for (const userId of people) results.push({ userId, status: 'empty', error: NO_CUSTOMER });
-  const groups = customer ? [{ criteria: customer, people }] : [];
+  const company = people.length ? customerOf(team) : null;
+  const own = new Map(people.map(userId => [userId, customerFor(team, userId, company)]));
+  for (const userId of people) if (!own.get(userId)) results.push({ userId, status: 'empty', error: NO_CUSTOMER });
+  const groups = groupDropPeople(people.filter(userId => own.get(userId)).map(userId => ({ id: userId, criteria: own.get(userId)! })), dropsMaxGroups());
 
   const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
   let spent = deps.spentUsd;
   for (const { criteria, people: members } of groups) {
     const count = searchCount(members.length);
     if (spent + count * usdPerLead > deps.budgetUsd) {
-      for (const userId of members) results.push({ userId, status: 'empty', error: NO_BUDGET, criteria });
+      for (const userId of members) results.push({ userId, status: 'empty', error: NO_BUDGET, criteria: own.get(userId)! });
       continue;
     }
     let found: Awaited<ReturnType<Search>>;
@@ -180,21 +191,23 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         found = { ...broad, costUsd: found.costUsd + broad.costUsd };
       }
     } catch (error) {
-      for (const userId of members) results.push({ userId, status: 'empty', error: `La búsqueda falló: ${text((error as Error)?.message, 200)}`, criteria });
+      for (const userId of members) results.push({ userId, status: 'empty', error: `La búsqueda falló: ${text((error as Error)?.message, 200)}`, criteria: own.get(userId)! });
       continue;
     }
     spent += found.costUsd;
     const entries = new Map<string, VaultEntry>(found.results.map(entry => [entry.lead.id, entry]));
-    const assigned = assignDrops(found.results.map(candidateOf), members, known, criteria);
+    const assigned = assignDrops(found.results.map(candidateOf), members, known, criteria, DROP_SIZE, userId => own.get(userId)!);
     const share = members.length ? Math.round((found.costUsd / members.length) * 10_000) / 10_000 : 0;
     for (const userId of members) {
+      // What the person sees and keeps is their own customer, not the group's search.
+      const mine = own.get(userId)!;
       const picks = assigned.get(userId) || [];
-      if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria }); continue; }
+      if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria: mine }); continue; }
       for (const pick of picks) { known.leadIds.add(pick.leadId); if (pick.emailKey) known.emails.add(pick.emailKey); }
       await storeInVault(client, { organizationId, userId, entries: picks.map(pick => entries.get(pick.leadId)!).filter(Boolean), now: deps.now.getTime() });
-      results.push({ userId, status: 'pending', cost: share, criteria, items: picks.map(pick => ({
+      results.push({ userId, status: 'pending', cost: share, criteria: mine, items: picks.map(pick => ({
         leadId: pick.leadId, name: pick.name, title: pick.title, company: pick.company, domain: pick.domain, industry: pick.industry, size: pick.size,
-        city: pick.city, hasEmail: pick.hasEmail, hasPhone: pick.hasPhone, why: whyText(pick, criteria), research: researchFacts({ ...pick, about: null }), draft: null,
+        city: pick.city, hasEmail: pick.hasEmail, hasPhone: pick.hasPhone, why: whyText(pick, mine), research: researchFacts({ ...pick, about: null }), draft: null,
         description: pick.about,
       })) });
     }
@@ -319,7 +332,7 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
   if (today && last!.status === 'pending') return 'preparing';
   const fresh = !last || withoutCustomer(last);
   if (!fresh && (today || !dropDay(now))) return null;
-  if (!customerOf(await teamOf(client, scope.organizationId))) return 'profile';
+  if (!customerFor(await teamOf(client, scope.organizationId), scope.userId)) return 'profile';
   if ((await monthSpend(client, now)) + searchCount(1) * leadsFinderUsdPerLead() > dropsMonthlyUsd()) return null;
   return fresh ? 'first' : 'today';
 }
@@ -443,41 +456,55 @@ export async function saveDropLeads(client: Client, scope: DropScope, dropId: st
   return { saved, expired, items };
 }
 
-/** Text the PDF's standard fonts can draw: typographic quotes and dashes become plain ones, anything else is dropped. */
-export function pdfSafe(value: string) {
-  return value.normalize('NFC').replace(/[‘’′]/g, "'").replace(/[“”″«»]/g, '"').replace(/[–—−‑]/g, '-').replace(/…/g, '...').replace(/•/g, '-')
-    .replace(/[^\x20-\x7e\xa0-\xff\n]/g, '');
+/** «28 de octubre de 2026»: the drop's day as the PDF says it. */
+export function dropDateLabel(day: string) {
+  const date = new Date(`${day}T12:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? day : date.toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
-/** «Contacto del día» as a PDF: for each contact, why it fits, the brief research and the first email. */
-export async function dropPdf(items: DropItem[], meta: { name: string; date: string; link: string }) {
-  const { jsPDF } = await import('jspdf');
-  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
-  let y = 22;
-  const space = (height: number) => { if (y + height > 278) { pdf.addPage(); y = 22; } };
-  const write = (value: string, size = 10, color: [number, number, number] = [30, 41, 59], bold = false) => {
-    pdf.setFont('helvetica', bold ? 'bold' : 'normal'); pdf.setFontSize(size); pdf.setTextColor(...color);
-    for (const line of pdf.splitTextToSize(pdfSafe(value), 176) as string[]) { space(6); pdf.text(line, 17, y); y += size >= 14 ? 7 : 5; }
-  };
-  write('Contacto del día', 18, [17, 24, 39], true); y += 1;
-  write(`${meta.name ? `Para ${meta.name} · ` : ''}${meta.date}`, 10, [100, 116, 139]); y += 3;
-  write(items.length === 1 ? 'Tiene su correo listo en ANTON.IA. Guardarlo no gasta créditos.' : 'Cada contacto tiene su correo listo en ANTON.IA. Guardarlos no gasta créditos.', 10, [71, 85, 105]);
-  write(meta.link, 9, [37, 99, 235]); y += 4;
+/**
+ * «Contacto del día» as a document (src/lib/documents): each contact with who they are, why they fit, what we know of the
+ * company and the first email in its own box, and the way to save them as a button-like link instead of a bare address.
+ */
+export function dropDocument(items: DropItem[], meta: { name: string; date: string; link: string }): DocumentSpec {
+  const one = items.length === 1;
+  const role = (item: DropItem) => [item.title, item.company].filter(Boolean).join(' · ');
+  const blocks: DocBlock[] = [{ type: 'paragraph', runs: [
+    { text: one ? 'Ver y guardar en ANTON.IA' : `Ver y guardar los ${items.length} en ANTON.IA`, href: meta.link, bold: true },
+    { text: one ? '   Su correo ya está listo. Guardarlo no gasta créditos.' : '   Sus correos ya están listos. Guardarlos no gasta créditos.' },
+  ] }];
   items.forEach((item, index) => {
-    space(40);
-    pdf.setDrawColor(226, 232, 240); pdf.line(17, y, 193, y); y += 7;
-    write(items.length === 1 ? item.name : `${index + 1}. ${item.name}`, 13, [17, 24, 39], true);
-    write([item.title, item.company].filter(Boolean).join(' · '), 10, [71, 85, 105]); y += 2;
-    write('Por qué te lo recomiendo', 9, [100, 116, 139], true); write(item.why); y += 1;
-    if (item.research.length) { write('Breve investigación', 9, [100, 116, 139], true); item.research.forEach(fact => write(`- ${fact}`)); y += 1; }
-    if (item.draft) {
-      write('Primer correo sugerido', 9, [100, 116, 139], true);
-      write(`Asunto: ${item.draft.subject}`, 10, [17, 24, 39], true);
-      item.draft.body.split(/\n+/).forEach(paragraph => { write(paragraph); y += 1; });
+    if (!one) {
+      if (index) blocks.push({ type: 'pageBreak' });
+      blocks.push({ type: 'heading', level: 1, runs: [{ text: item.name }] });
+      if (role(item)) blocks.push({ type: 'paragraph', runs: [{ text: role(item) }] });
     }
-    y += 3;
+    blocks.push({ type: 'callout', tone: 'info', title: 'Por qué te lo recomiendo', runs: [{ text: item.why }] });
+    if (item.research.length) {
+      blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Lo que sabemos de la empresa' }] });
+      blocks.push({ type: 'list', ordered: false, items: item.research.map(fact => ({ runs: [{ text: fact }] })) });
+    }
+    if (item.draft) {
+      blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Primer correo sugerido' }] });
+      // The subject as its first line, in its own case (a callout title would be in capitals), and the body with its own line breaks.
+      blocks.push({ type: 'callout', tone: 'neutral', runs: [
+        { text: 'Asunto: ', bold: true }, { text: item.draft.subject, bold: true },
+        { text: `\n\n${item.draft.body.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()}` },
+      ] });
+    }
   });
-  const pages = pdf.getNumberOfPages();
-  for (let page = 1; page <= pages; page++) { pdf.setPage(page); pdf.setFontSize(8); pdf.setTextColor(148, 163, 184); pdf.text(`ANTON.IA · Página ${page} de ${pages}`, 17, 289); }
-  return Buffer.from(pdf.output('arraybuffer'));
+  return {
+    title: one ? items[0].name : `${items.length} contactos para hoy`,
+    subtitle: one ? role(items[0]) || undefined : undefined,
+    meta: [...(meta.name ? [{ label: 'Para', value: meta.name }] : []), { label: 'Fecha', value: dropDateLabel(meta.date) }],
+    runningTitle: `Contacto del día · ${dropDateLabel(meta.date)}`,
+    theme: 'antonia',
+    blocks,
+  };
+}
+
+/** «Contacto del día» as a PDF, laid out by the document engine every ANTON.IA document uses. */
+export async function dropPdf(items: DropItem[], meta: { name: string; date: string; link: string }) {
+  const { bytes } = await renderPdf(dropDocument(items, meta));
+  return Buffer.from(bytes);
 }
