@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assignDrops, companyDropCriteria, criteriaKey, dropDay, dropEmailSection, dropHref, dropSubject, foreignDomain, inferCriteria, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
+import { assignDrops, companyDropCriteria, criteriaKey, dropDay, dropEmailSection, dropHref, dropSubject, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -37,6 +37,38 @@ test('people with the same customer share one search', () => {
   const b = companyDropCriteria({ roles: 'jefe de rr. hh., gerente de personas', industries: 'retail' }, [], [])!;
   assert.equal(criteriaKey(a), criteriaKey(b));
   assert.notEqual(criteriaKey(a), criteriaKey({ ...a, locations: ['Perú'] }));
+});
+
+test('similar customers share a search; a different area or country gets its own (29 oct)', () => {
+  const company = companyDropCriteria({ roles: 'Gerente de Personas, Jefe de Reclutamiento y Selección', industries: 'Retail, Minería', locations: 'Chile' }, [], [])!;
+  const of = (own: Record<string, string> | null) => personDropCriteria(own, company)!;
+  const groups = groupDropPeople([
+    { id: 'ana', criteria: of(null) },
+    { id: 'leo', criteria: of({ roles: 'Gerentes de RRHH, Gerente de Personas', industries: 'retail, minería, construcción', locations: 'Chile, Perú' }) },
+    { id: 'mau', criteria: of({ roles: 'Gerente de Facility, Gerente de Infraestructura', industries: 'Retail', locations: 'Chile' }) },
+    { id: 'kri', criteria: of({ roles: 'Jefe de Reclutamiento y Selección', industries: 'Retail', locations: 'Perú' }) },
+    { id: 'sin', criteria: of(null) },
+  ], 5);
+  assert.deepEqual(groups.map(group => group.people), [['ana', 'sin', 'leo'], ['mau'], ['kri']], 'Facility is not people; Perú alone is another country');
+  assert.deepEqual(groups[0].criteria.titles, ['Gerente de Personas', 'Jefe de Reclutamiento y Selección', 'Gerentes de RRHH'], 'the search takes what Leo adds');
+  assert.deepEqual(groups[0].criteria.industries, ['Retail', 'Minería', 'construcción']);
+  assert.deepEqual(groups[0].criteria.locations, ['Chile'], 'the group searches where it started');
+  assert.equal(of({ roles: 'Gerente de Facility', industries: '' }).source, 'perfil');
+  assert.equal(of({ roles: '', industries: '' }).source, 'empresa');
+
+  const capped = groupDropPeople([
+    { id: 'ana', criteria: of(null) }, { id: 'mau', criteria: of({ roles: 'Gerente de Facility', industries: 'Retail' }) },
+    { id: 'kri', criteria: of({ roles: 'Jefe de Selección', industries: 'Retail', locations: 'Perú' }) },
+  ], 1);
+  assert.deepEqual(capped.map(group => group.people), [['ana', 'mau', 'kri']], 'past the limit everyone shares the largest search');
+});
+
+test('in a shared search, each person gets the contacts closest to their own customer', () => {
+  const ops: DropCriteria = { ...criteria, titles: ['Jefe de Operaciones'] };
+  const pool = [candidate('1', 'A', { title: 'Gerente de Personas' }), candidate('2', 'B', { title: 'Jefe de Operaciones' })];
+  const out = assignDrops(pool, ['ana', 'leo'], none(), { ...criteria, titles: ['Gerente de Personas', 'Jefe de Operaciones'] }, 1,
+    person => (person === 'leo' ? ops : criteria));
+  assert.deepEqual([out.get('ana')![0].company, out.get('leo')![0].company], ['A', 'B']);
 });
 
 test('each person gets different contacts, one per company, never someone the team has', () => {

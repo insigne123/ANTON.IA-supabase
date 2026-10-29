@@ -23,7 +23,8 @@ export function nextDropDay(now: Date) {
 }
 
 /** Who the contacts are for: from the person's «Perfil», a teammate's, or the contacts the team already saved. */
-/** `perfil`: a person's own customer, as drops were made until 26 Oct 2026; since then one per company (companyDropCriteria). */
+/** `perfil`: a person's own customer. From 27 to 29 Oct 2026 everyone got the company's; since then each person's own when they declared one,
+ * and the company's otherwise, sharing a search with whoever has a similar one (groupDropPeople). */
 export type DropCriteria = { titles: string[]; industries: string[]; locations: string[]; sizes: string[]; source: 'perfil' | 'equipo' | 'empresa' | 'contactos' };
 export type IcpDeclared = { roles?: string | null; industries?: string | null; locations?: string | null; size?: string | null };
 
@@ -80,10 +81,10 @@ export function inferCriteria(saved: Array<{ title?: string | null; industry?: s
 }
 
 /**
- * The customer of a whole organization, so one search serves its team: the «Ficha de la empresa»'s; without one, the one most
+ * The customer of a whole organization, for whoever did not declare one: the «Ficha de la empresa»'s; without one, the one most
  * of the team declared (the first in `team`, admins first, on a tie); else what the team saved. Null with nothing to go by.
- * One per company, not one per person: on 21 Oct 2026 35 people of two companies took 11 searches, and each search has
- * Apify's minimum charge however few it brings.
+ * On 21 Oct 2026 one search per person took 11 searches for 35 people of two companies, each with Apify's minimum charge however
+ * few it brings: people with similar customers share one now (groupDropPeople).
  */
 export function companyDropCriteria(company: IcpDeclared | null, team: IcpDeclared[], saved: Array<{ title?: string | null; industry?: string | null }>) {
   const fromCompany = fromDeclared(company, 'empresa');
@@ -102,6 +103,97 @@ export function companyDropCriteria(company: IcpDeclared | null, team: IcpDeclar
 
 /** A key that groups people with the same customer, so one search serves all of them. */
 export const criteriaKey = (criteria: DropCriteria) => JSON.stringify([criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort()));
+
+/** A person's own customer: the one in their «Perfil» when they declared it, else the company's (companyDropCriteria). */
+export function personDropCriteria(own: IcpDeclared | null | undefined, company: DropCriteria | null): DropCriteria | null {
+  return fromDeclared(own, 'perfil') ?? company;
+}
+
+// What two customers are compared on: the words that say what the person does («personas», «facility»), without the level of
+// the title («Gerente», «Jefe») nor linking words, in singular. To compare, the names Chile gives the area of people («RR. HH.»,
+// «HR», «Personas», «Capital humano», «Talento humano») are all «recursos humanos».
+const LEVELS = new Set(['gerente', 'subgerente', 'jefe', 'jefa', 'director', 'directora', 'head', 'manager', 'encargado', 'encargada',
+  'coordinador', 'coordinadora', 'supervisor', 'supervisora', 'lider', 'responsable', 'analista', 'ejecutivo', 'ejecutiva', 'especialista',
+  'vicepresidente', 'chief', 'officer', 'senior', 'junior', 'asistente', 'general', 'regional', 'corporativo', 'corporativa', 'area']);
+const singular = (word: string) => word.length > 5 && word.endsWith('iones') ? word.slice(0, -2) : word.length > 4 && word.endsWith('s') ? word.slice(0, -1) : word;
+function wordsOf(values: string[], withoutLevels: boolean, synonyms = true) {
+  const words = new Set<string>();
+  for (const value of values) {
+    const folded = fold(value);
+    const text = (synonyms ? folded.replace(/\brr\.?\s*hh\b\.?|\bhr\b|\bhuman resources\b|\bpersonas\b|\b(capital|talento) humano\b/g, ' recursos humanos ') : folded)
+      .replace(/[^a-z0-9 ]/g, ' ');
+    for (const raw of text.split(' ')) {
+      const word = singular(raw);
+      if (word.length < 3 || LINKING.has(word) || (withoutLevels && LEVELS.has(word))) continue;
+      words.add(word);
+    }
+  }
+  return words;
+}
+/** The countries a customer looks in («Chile», «Perú»); the places as written when they name none we know. */
+function placesOf(locations: string[]) {
+  const countries = new Set(COUNTRIES.filter(country => locations.some(place => country.names.some(name => ` ${fold(place)} `.includes(` ${name} `)))).map(country => country.domain));
+  return countries.size ? countries : new Set(locations.map(fold));
+}
+/** How much of `mine` is already in `theirs`, from 0 to 1; a customer without words of that kind fits anywhere. */
+const covered = (mine: Set<string>, theirs: Set<string>) => mine.size ? [...mine].filter(word => theirs.has(word)).length / mine.size : 1;
+
+export type DropGroup = { criteria: DropCriteria; people: string[] };
+const GROUP_TITLES = 6;
+const GROUP_INDUSTRIES = 6;
+
+/**
+ * Who shares a search (idea del dueño, 29 oct 2026: each Apify search costs, however few it brings). Someone whose customer is
+ * like a group's (half or more of the words of their titles and of their industries are the group's already, in a country it
+ * searches) joins it, and the group's search takes their titles and industries too, up to 6 of each; the rest get a search of
+ * their own. The most common customer opens the first group. At most `maxGroups` searches: past that, each smaller group joins
+ * the one most like it, keeping that search. The largest groups come first, so a tight budget pays for them.
+ */
+export function groupDropPeople(people: Array<{ id: string; criteria: DropCriteria }>, maxGroups: number): DropGroup[] {
+  type Group = DropGroup & { titles: Set<string>; industries: Set<string>; places: Set<string>; first: number };
+  const counts = new Map<string, number>();
+  for (const person of people) counts.set(criteriaKey(person.criteria), (counts.get(criteriaKey(person.criteria)) || 0) + 1);
+  const ordered = people.map((person, index) => ({ ...person, index }))
+    .sort((a, b) => counts.get(criteriaKey(b.criteria))! - counts.get(criteriaKey(a.criteria))! || a.index - b.index);
+  const groups: Group[] = [];
+  const likeness = (titles: Set<string>, industries: Set<string>, places: Set<string>, group: Group) =>
+    [...places].some(place => group.places.has(place)) ? { titles: covered(titles, group.titles), industries: covered(industries, group.industries) } : null;
+  for (const person of ordered) {
+    const { titles, industries, locations } = person.criteria;
+    const words = { titles: wordsOf(titles, true), industries: wordsOf(industries, false), places: placesOf(locations) };
+    let best: Group | null = null, bestScore = -1;
+    for (const group of groups) {
+      const like = likeness(words.titles, words.industries, words.places, group);
+      if (!like || like.titles < 0.5 || like.industries < 0.5 || like.titles + like.industries <= bestScore) continue;
+      best = group; bestScore = like.titles + like.industries;
+    }
+    if (!best) {
+      groups.push({ criteria: { ...person.criteria, titles: titles.slice(0, GROUP_TITLES), industries: industries.slice(0, GROUP_INDUSTRIES) },
+        people: [person.id], ...words, first: person.index });
+      continue;
+    }
+    best.people.push(person.id);
+    // «Jefes de operaciones» is «Jefe de Operaciones» already: compared by their words, in singular.
+    const same = (value: string) => [...wordsOf([value], false, false)].sort().join(' ');
+    const add = (current: string[], more: string[], max: number) => {
+      const seen = new Set(current.map(same));
+      return [...current, ...more.filter(value => !seen.has(same(value)) && seen.add(same(value)))].slice(0, max);
+    };
+    best.criteria = { ...best.criteria, titles: add(best.criteria.titles, titles, GROUP_TITLES), industries: add(best.criteria.industries, industries, GROUP_INDUSTRIES) };
+    best.titles = wordsOf(best.criteria.titles, true);
+    best.industries = wordsOf(best.criteria.industries, false);
+  }
+  const bySize = (a: Group, b: Group) => b.people.length - a.people.length || a.first - b.first;
+  const kept = groups.slice().sort(bySize).slice(0, Math.max(1, maxGroups));
+  for (const extra of groups.filter(group => !kept.includes(group))) {
+    const target = kept.map(group => {
+      const like = likeness(extra.titles, extra.industries, extra.places, group);
+      return { group, score: like ? like.titles + like.industries + 1 : 0 };
+    }).sort((a, b) => b.score - a.score || bySize(a.group, b.group))[0].group;
+    target.people.push(...extra.people);
+  }
+  return kept.sort(bySize).map(({ criteria, people: members }) => ({ criteria, people: members }));
+}
 
 /** A contact found, with what the server needs to choose (the email and LinkedIn only as keys to skip known people). */
 export type DropCandidate = Omit<DropItem, 'why' | 'research' | 'draft' | 'savedLeadId'> & { emailKey: string | null; linkedinKey: string | null; about: string | null };
@@ -139,20 +231,27 @@ export function foreignDomain(domain: string | null | undefined, locations: stri
  * `size` contacts (DROP_SIZE) for each person of a group, different for each: only people with an email, none the team
  * already has or got in an earlier drop, no company from another country than the one asked, one per company for each person
  * and, while there are enough, a company nobody else in the group got. People with a phone and with a title closer to the
- * criteria go first.
+ * criteria go first: to each person's own (`criteriaOf`) when a group shares a search.
  */
-export function assignDrops(candidates: DropCandidate[], people: string[], known: KnownPeople, criteria: DropCriteria, size = DROP_SIZE) {
-  const titleWords = criteria.titles.map(title => new Set(fold(title).split(' ').filter(word => word.length > 2)));
-  const closeness = (title: string | null) => {
-    const words = new Set(fold(title || '').split(' '));
-    return Math.max(0, ...titleWords.map(set => [...set].filter(word => words.has(word)).length / Math.max(1, set.size)));
+export function assignDrops(candidates: DropCandidate[], people: string[], known: KnownPeople, criteria: DropCriteria, size = DROP_SIZE,
+  criteriaOf?: (person: string) => DropCriteria) {
+  const closenessTo = (target: DropCriteria) => {
+    const titleWords = target.titles.map(title => new Set(fold(title).split(' ').filter(word => word.length > 2)));
+    return (title: string | null) => {
+      const words = new Set(fold(title || '').split(' '));
+      return Math.max(0, ...titleWords.map(set => [...set].filter(word => words.has(word)).length / Math.max(1, set.size)));
+    };
   };
   const usable = candidates.filter(item => item.hasEmail
-    && !foreignDomain(item.domain, criteria.locations)
     && !known.leadIds.has(item.leadId)
     && !(item.emailKey && known.emails.has(item.emailKey))
-    && !(item.linkedinKey && known.linkedins.has(item.linkedinKey)))
-    .sort((a, b) => Number(b.hasPhone) - Number(a.hasPhone) || closeness(b.title) - closeness(a.title) || a.leadId.localeCompare(b.leadId));
+    && !(item.linkedinKey && known.linkedins.has(item.linkedinKey)));
+  const ranked = new Map(people.map(person => {
+    const own = criteriaOf?.(person) ?? criteria;
+    const closeness = closenessTo(own);
+    return [person, usable.filter(item => !foreignDomain(item.domain, own.locations))
+      .sort((a, b) => Number(b.hasPhone) - Number(a.hasPhone) || closeness(b.title) - closeness(a.title) || a.leadId.localeCompare(b.leadId))];
+  }));
   const companyOf = (item: DropCandidate) => fold(item.domain || item.company || item.leadId);
   const taken = new Set<string>(), usedCompanies = new Set<string>();
   const out = new Map<string, DropCandidate[]>(people.map(person => [person, []]));
@@ -163,7 +262,7 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
         const mine = out.get(person)!;
         if (mine.length > round) continue;
         const companies = new Set(mine.map(companyOf));
-        const pick = usable.find(item => !taken.has(item.leadId) && !companies.has(companyOf(item)) && (!strict || !usedCompanies.has(companyOf(item))));
+        const pick = ranked.get(person)!.find(item => !taken.has(item.leadId) && !companies.has(companyOf(item)) && (!strict || !usedCompanies.has(companyOf(item))));
         if (!pick) continue;
         taken.add(pick.leadId); usedCompanies.add(companyOf(pick)); mine.push(pick);
       }
