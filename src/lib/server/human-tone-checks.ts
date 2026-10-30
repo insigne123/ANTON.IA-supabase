@@ -119,8 +119,9 @@ function stripCta(body: string, ctaExactText?: string) {
 
 function firstContentLine(body: string) {
   for (const line of String(body || '').split('\n')) {
-    const withoutGreeting = line.replace(/^(?:hola|estimad[oa]s?|buen[oa]s\s+(?:dias|tardes))(?:\s+\w+){0,3}\s*(?:,|:|$)\s*/i, '').trim();
-    if (/\w/.test(withoutGreeting)) return withoutGreeting;
+    // \p{L}, not \w: «Hola María,» or «Hola Andrés,» was read as the opening and the opening was never checked.
+    const withoutGreeting = line.replace(/^(?:hola|estimad[oa]s?|buen[oa]s\s+(?:d[ií]as|tardes))(?:\s+[\p{L}'-]+){0,3}\s*(?:,|:|$)\s*/iu, '').trim();
+    if (/[\p{L}\p{N}]/u.test(withoutGreeting)) return withoutGreeting;
   }
   return '';
 }
@@ -204,7 +205,10 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
     const firstToken = company.split(' ')[0];
     const copula = firstToken && FICHA_COPULAS.find((phrase) => opening.includes(phrase) && opening.includes(firstToken));
     const conNumero = firstToken && new RegExp(`\\bcon (?:mas de |\\d+|${NUMERO_PALABRAS.join('|')})\\b`).test(opening) && opening.includes(firstToken);
-    if (copula || conNumero) {
+    // «En una cadena de retail como Acme, con 40 tiendas, …» names the company in passing, as the prompt asks when there is no signal.
+    // Only as the frame of an observation of the trade («En una … como Acme, …»), not ahead of a pitch («Para una … como Acme, sumar personal…»).
+    const inPassing = new RegExp(`^en (?:una|un|empresas|companias) [^,]{0,80}\\bcomo (?:la |el |los |las )?${firstToken}\\b`).test(opening);
+    if ((copula || conNumero) && !inPassing) {
       // Con señal disponible se bloquea: el modelo tiene material para
       // corregirlo en el reintento. Sin señal no hay con qué cumplirlo, así
       // que se avisa y decide el humano (que revisa el 100% al inicio).
@@ -212,7 +216,7 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
       const finding = {
         code: 'tone_ficha',
         message: input.hasSignal
-          ? 'La apertura le describe su propia empresa en vez de darle un motivo. Usa el dato fechado o la pregunta, no su ficha.'
+          ? 'La apertura le describe su propia empresa en vez de darle un motivo. Usa el dato fechado, o abre con lo que se complica en su rubro y nombra a la empresa de pasada («En una empresa como …, …»), no su ficha.'
           : 'La apertura le describe su propia empresa en vez de darle un motivo. Como no hay una señal concreta, abre con una observación honesta de su industria y deja el dato de la empresa para el resto del correo.',
         blocking,
       } as const;

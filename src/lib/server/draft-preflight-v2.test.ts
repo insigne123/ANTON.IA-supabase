@@ -10,6 +10,7 @@ import {
   stripUnapprovedDraftCtasV2,
   validateDraftPreflightV2,
   type GeneratedOutreachV2,
+  anchoredOnDatedEvent,
 } from './draft-preflight-v2';
 import { draftContextFixture } from './draft-v2-test-fixtures';
 import { DRAFT_BLOCKED_SAFETY_PHRASES } from './draft-context-v2';
@@ -902,4 +903,15 @@ Saludos cordiales,` };
   // What protects the recipient still stops it.
   const placeholder = validateDraftPreflightV2(context, { ...own, body: own.body.replace('Estimada Ada', 'Estimada {{nombre}}') }, { editedByPerson: true });
   assert.ok(placeholder.issues.some((issue) => issue.code === 'unresolved_placeholder'));
+});
+
+test('the email counts as resting on a signal only when the fact it is anchored on is a dated event', () => {
+  // Production, 30 Oct 2026: a signal elsewhere in the evidence («… firmaron convenio con la UCN») made the check ask for a dated
+  // opening while the email rested on «Cuenta con 5 líneas de negocio», and the draft was turned back twice.
+  const context = draftContextFixture();
+  assert.equal(anchoredOnDatedEvent(context), false);
+  const elsewhere = { ...context, evidence: [...context.evidence, { ...context.evidence[0], evidenceId: 'evidence-elsewhere', statement: 'Acme firmó un convenio con la universidad este mes.' }] };
+  assert.equal(anchoredOnDatedEvent(elsewhere), false);
+  const anchored = { ...context, evidence: context.evidence.map((item, index) => index === 0 ? { ...item, statement: 'Acme firmó un convenio con la universidad este mes.' } : item) };
+  assert.equal(anchoredOnDatedEvent(anchored), true);
 });

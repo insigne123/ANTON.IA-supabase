@@ -4,7 +4,7 @@ import test from 'node:test';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import type { ReportV2 } from '@/lib/report-v2-contracts';
 import {
-  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftFlagsForUser, draftHookFilterEnabled, draftSignalEvidenceEnabled, draftSignalMaxAgeDays, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
+  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftFlagsForUser, draftHookFilterEnabled, draftSignalEvidenceEnabled, draftSignalMaxAgeDays, isDatedEventEvidence, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
 } from './draft-context-v2';
 import { DRAFT_FIXTURE_NOW, draftReportV2Fixture, draftSnapshotFixture } from './draft-v2-test-fixtures';
 
@@ -214,4 +214,13 @@ test('with the hook filter a gloss is not offered either, and the plain facts of
   const filtered = statements(build(report, true, true));
   assert.ok(!filtered.some((statement) => /Who is who/.test(statement)), filtered.join(' | '));
   assert.ok(filtered.includes('Acme ayuda a equipos de operaciones a reducir trabajo manual.'), 'the plain description of the company stays');
+});
+
+test('a dated event is something that happened or will happen, not a year in the company\'s description', () => {
+  for (const statement of ['Codelco y Anglo American firmaron el acuerdo definitivo para el Plan Minero Conjunto.', 'Acme abrirá dos tiendas nuevas en la zona sur antes de diciembre.',
+    'Acme publicó 12 ofertas de operarios de bodega.', 'En noviembre parten una obra de 18 meses en Quilicura.', 'La Dirección del Trabajo anunció fiscalización de contratistas.'])
+    assert.equal(isDatedEventEvidence(statement, new Date('2026-10-30T12:00:00Z')), true, statement);
+  // Production, 30 Oct 2026: these counted as signals because of the year or the month in them.
+  for (const statement of ['Acme cuenta con 5 líneas de negocio y opera desde 1980.', 'Somos la principal compañía de transporte privado de personas.', 'Nuestra meta al 2030 es ser carbono neutral.', 'Presidenta del Directorio desde mayo de 2024.', 'VIDEOS | 4 julio, 2024 Operativo de limpieza de playa; la ceremonia se inicia en Antofagasta.'])
+    assert.equal(isDatedEventEvidence(statement, new Date('2026-10-30T12:00:00Z')), false, statement);
 });

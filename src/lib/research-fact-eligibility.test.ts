@@ -115,6 +115,7 @@ test('what a company says of itself and the chrome of a document are no reason t
     'Ana Pérez - División Norte: ... ACME – Corporación de Chile · Educación: Universidad ... Ana Pérez en LinkedIn',
     'Juan Soto: Experiencia: Constructora Acme · Educación: Universidad Andrés Bello · Ubicación: Área metropolitana de Rancagua',
     '4 perfiles de «Luis Rojas»: ... Luis Rojas que usan LinkedIn para ... Gerente de Recursos Humanos en Acme',
+    'Sigue leyendo → VIDEOS | 4 julio, 2024 Operativo de limpieza de playa junto a Acme Sigue leyendo → VIDEOS | 2 abril, 2024',
   ]) assert.equal(isUnsuitableHookText(text), true, text);
   for (const text of [
     'Abrirán dos tiendas nuevas en la zona sur antes de diciembre (nota de prensa, 2026-09-10).',
