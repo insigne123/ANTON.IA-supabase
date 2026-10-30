@@ -358,6 +358,15 @@ export function isEnglishStatement(value: unknown) {
   return english >= 3 && english > (normalized.match(SPANISH_WORDS) || []).length;
 }
 
+// English plurals lose only their «s»: the Spanish stemmer turned «Lines» into «lin» and dropped it, and a follow-up that said
+// «la construcción de las nuevas líneas» was turned back for lack of a second term (real research, 30 Oct 2026).
+const ENGLISH_FUNCTION_WORDS = new Set(['that', 'this', 'which', 'will', 'with', 'from', 'their', 'have', 'been', 'into', 'well', 'also', 'such', 'other']);
+function englishMaterialTerms(value: string) {
+  return normalizeForMatch(value).split(' ')
+    .map((word) => word.replace(/s$/u, ''))
+    .filter((term) => term.length >= 4 && !ENGLISH_FUNCTION_WORDS.has(term) && !personalizationStopWords.has(term));
+}
+
 function termInWords(term: string, words: string[], translated: boolean) {
   return translated ? words.some((word) => word.length >= 4 && word.slice(0, 4) === term.slice(0, 4)) : words.some((word) => word.startsWith(term));
 }
@@ -444,10 +453,10 @@ function hasGroundedPersonalization(
       evidenceById.get(item.evidenceId)?.statement || '',
       { keepSpecifics: Boolean(context.writing?.anchorSpecifics) },
     );
-    const materialTerms = [...new Set(materialPersonalizationTerms(statement))];
     // A faithful paraphrase often changes verbs and nouns. Two material terms
     // still bind the copy to the selected evidence without requiring verbatim text.
     const translated = isEnglishStatement(statement);
+    const materialTerms = [...new Set(translated ? englishMaterialTerms(statement) : materialPersonalizationTerms(statement))];
     // A translation keeps the figures as they are («Lines 8 and 9», «Líneas 8 y 9»): for English evidence they count as terms too.
     const figures = translated ? [...new Set(normalizeForMatch(statement).split(' ').filter((word) => /^\d+$/.test(word)))] : [];
     const minimumMatches = Math.min(2, materialTerms.length + figures.length);
@@ -794,13 +803,21 @@ export function validateDraftPreflightV2(
       && (/\b\p{L}{3,}(?:amos|emos)\b/u.test(normalized) || sellerNames.some((name) => new RegExp(`(?:^| )${name}(?: |$)`).test(normalized)));
     const evidenceStatements = citedEvidence.map((evidence) => evidence.statement);
     const sources = sellerScoped ? sellerStatements : speaksAsSeller ? [...evidenceStatements, ...sellerStatements] : evidenceStatements;
+    // «Para apoyar la construcción de las Líneas 8 y 9, en GrupoExpro hacemos cursos…» (a follow-up, real research of 30 Oct 2026): the
+    // figure comes before the seller is named, in a clause about the recipient, so it rests on the evidence; one after it is the seller's.
+    const sellerNameAt = normalizeForMatch(context.seller.companyName)
+      ? sentence.toLocaleLowerCase('es').indexOf(text(context.seller.companyName).toLocaleLowerCase('es'))
+      : -1;
+    const recipientClause = (index: number) => sellerScoped && !introduced && sellerNameAt > 0 && index < sellerNameAt
+      && !/\b(?:nosotros|nuestro|nuestra|tenemos|contamos|operamos|cubrimos|llevamos)\b/.test(normalizeForMatch(sentence.slice(0, sellerNameAt)));
     const quantities = materialQuantities(sentence);
     for (const quantity of quantities) {
-      const supported = sources.some((source) => {
+      const quantitySources = recipientClause(quantity.index) ? evidenceStatements : sources;
+      const supported = quantitySources.some((source) => {
         const translated = isEnglishStatement(source);
         const figure = (key: string) => key.split(' ')[0];
         if (!materialQuantities(source).some((item) => translated ? figure(item.key) === figure(quantity.key) : item.key === quantity.key)) return false;
-        const terms = materialPersonalizationTerms(source);
+        const terms = translated ? englishMaterialTerms(source) : materialPersonalizationTerms(source);
         if (translated) {
           // The figures a translation keeps («Lines 8 and 9», «Líneas 8 y 9») bind it to the subject too.
           const sourceFigures = new Set(normalizeForMatch(source).split(' ').filter((word) => /^\d+$/.test(word)));
