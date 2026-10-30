@@ -205,6 +205,41 @@ La causa común: se consideraba que había «señal» si cualquier frase de la e
 - **Banco:** 24 de 24 válidos (22 al primer intento), sin relleno ni eslogan. `Evalia`: 8 de 8.
 - **Lo que todavía pide retoque en los reales:** aperturas largas cuando el hecho trae muchas cifras (Codelco), y una oración que repite la autodescripción en el párrafo de la oferta (Hualpén). En esos casos, la investigación solo trae lo que la empresa dice de sí misma.
 
+### Octava vuelta: `native-draft/v31`, con 17 investigaciones reales
+
+Después de desplegar `v30` (`38ae43e5`, 30 de octubre a las 16:05 UTC), el redactor corrió en local sobre 17 investigaciones reales de tres organizaciones, leídas solo en lectura y con las banderas de producción. 12 tenían evidencia para un borrador; las otras 5 se bloquearon como corresponde (sin evidencia, sin correo del destinatario o sin perfil del vendedor). Los nombres de las empresas no van en este documento.
+
+**Qué se vio con `v30`:**
+
+- **Copiaba la web de la empresa en 6 de 12.** Sus eslóganes en primera persona («Contribuimos con las organizaciones…», «Brindamos servicios integrales para…»), su publicidad («la principal compañía de…») y, una vez, su frase entre comillas.
+- **La causa: el ancla.** En 7 de 8 empresas, el hecho que el correo debía usar (`REQUIRED_FACTUAL_PERSONALIZATION`) era ese eslogan, y el control de anclaje exigía dos de sus palabras. Para un eslogan, eso incluía el verbo en primera persona («Contribuimos»): ningún correo natural lo cumple, y el borrador no se creaba. La misma investigación tenía hechos mejores («un contrato con la minera hasta 2029», «un equipo de más de 350 personas»).
+- **Producción (`v23`, últimas dos semanas):** de 8 borradores rechazados por el anclaje, 7 se rechazaron otra vez en el reintento, porque el mensaje no decía qué palabras faltaban.
+- **El chequeo de tú/usted bloqueaba correos correctos.** «Acme abrirá sus tiendas… si te sirve» o «a los cajeros les toca doblar turno… si lo necesitas» contaban como usted.
+- **Otras fallas:** el párrafo de la oferta repetía el dolor con las mismas palabras («corregir tests a mano» en los dos), y el dolor no coincidía con el servicio (un turno sin conductor, y luego asesoría legal).
+
+**Qué cambió:**
+
+- **Publicidad y comillas:** se bloquea su publicidad dicha de vuelta («la principal compañía», «posición de liderazgo mundial», «la flota más grande»), sus palabras entre comillas y «servicios integrales» o «soluciones de negocio». Sobre 510 correos anteriores no hay falsos positivos.
+- **El ancla:** se mantiene la que elige el informe. Entre dos anclas del informe, va primero el hecho que el eslogan, y la basura de la página (formularios, teléfonos, «cotiza») nunca es ancla (`draftEvidenceSalesTone`).
+- **Los términos de anclaje:** el prompt los nombra con los sustantivos primero, sin el verbo de la empresa en primera persona ni sus palabras de venta. Si el anclaje falla, el reintento dice qué términos usar.
+- **La ficha sin señal** («Acme cuenta con cinco líneas de negocio.») pide un reintento que nombre a la empresa de pasada. En el reintento solo avisa (`retryAttempt`), para que el borrador se cree igual. «En los proyectos de …» y «como los de …» cuentan como de pasada.
+- **Tú/usted:** solo marcas inequívocas de usted («usted», «le escribo», «le parece»), las mismas que usa el CTA.
+- **Edición:** el párrafo de la oferta no repite el dolor con las mismas palabras, el dolor y el servicio son el mismo problema, y no dice «según su reporte interno».
+
+**Resultado:**
+
+| | Antes | `v31` |
+| --- | --- | --- |
+| 12 investigaciones reales con evidencia: válidos (antes, sin los cambios del ancla) | 10, 10 al primer intento | 12, 10 al primer intento |
+| Banco, 24 correos (antes, `v30`) | 24, 22 al primer intento | 24, 23 al primer intento |
+| `Evalia`, 8 correos (antes, `v30`) | 8, 7 al primer intento | 8, 8 al primer intento |
+
+- **Lo que mejoró en los reales:**
+  - La empresa de transporte de personal ya no abre con «la principal compañía». Ahora habla de consultas laborales sobre cambios de turno, lo mismo que ofrece la asesoría legal.
+  - La constructora abre con su trabajo concreto (mantenimiento vial en faenas) y no con «servicios integrales».
+  - La consultora de RR.HH. ya no cita su eslogan entre comillas.
+- **Lo que todavía no está bien:** cuando la investigación solo trae la autodescripción o la biografía de los fundadores, el correo es correcto pero plano («En 2012, … cofundaron …»). Eso se arregla en la investigación, no en la redacción.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

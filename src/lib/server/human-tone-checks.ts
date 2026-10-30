@@ -70,6 +70,8 @@ const MULETILLAS = [
   'puede implicar', 'asi el equipo', 'asi su equipo', 'asi el apoyo',
   // Lectura del banco del 30 de octubre de 2026 (v24): seguían pasando.
   'asi puede', 'asi pueden', 'asi podra', 'asi podran', 'puede acompanar', 'como parte de la gestion',
+  // Su web dicha de vuelta en las investigaciones reales del 30 de octubre de 2026 (DFV, ManpowerGroup).
+  'servicios integrales', 'soluciones de negocio',
 ];
 
 // La misma frase con palabras en medio: «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak».
