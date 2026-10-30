@@ -129,6 +129,26 @@ Lo que mejoró se ve en la segunda oración: «se resienten la atención en sala
 
 **Una corrida intermedia enseñó algo:** quitar del prompt los ejemplos negativos («el costo acompaña el peak») para no «sembrar» la frase no la redujo. El modelo la escribe porque parafrasea la propuesta de valor del vendedor («el costo se va con el peak»). Lo que funcionó fue darle una manera concreta de decir esa idea.
 
+### Tercera vuelta: `native-draft/v26`
+
+- **Editor final (3d).** La segunda oración de la apertura no repite la primera ni es la propuesta de valor dicha al revés («mantener personal después del peak deja un costo»). Dice lo que pasa en la operación cuando ese momento sale mal, sin «el equipo absorbe la carga». Una primera versión que pedía «quién se sobrecarga» subió esa fórmula de 1 a 5 de 18; se sacó.
+- **Un hecho de otro mes.** La regla de decirlo con su mes y en pasado se agregaba siempre, y el banco, cuyas señales son de septiembre, empezó a abrir con «En septiembre anunciaron que…». Ahora solo se agrega cuando una señal de más de 30 días llegó de verdad a la evidencia (`writing.olderSignal`, que solo puede pasar con `DRAFT_SIGNAL_MAX_AGE_DAYS` sobre 30).
+
+| Banco de 20 casos | `v25` | `v26` |
+| --- | --- | --- |
+| Iniciales con frases que no dicen nada (de 18) | 0 | 0 |
+| Iniciales con «la carga recae en el equipo» (de 18) | 1 | 2 |
+| Iniciales con cinco palabras seguidas de la propuesta (de 18) | 2 | 1 |
+| Seguimientos con frases que no dicen nada (de 6) | 1 | 0 |
+| Válidos al final | 24 de 24 | 24 de 24 |
+| Válidos al primer intento (de 24) | 23 | 22 |
+| De los 13 en frío, los enviaría tal cual | 9 | 10 |
+
+- **Lo que más mejoró son las aperturas sin señal**, que en producción son la mayoría: «En retail, un turno descubierto se nota rápido, incluso en una cadena como Tiendas Ejemplo, con 40 tiendas en la zona sur.» y «…los relevos requieren cuadrar bien los turnos. Cuando uno queda sin cubrir, el equipo entrante extiende su jornada y el cambio se atrasa.»
+- **Lo que todavía pide retoque:** el puente entre una fiscalización y un turno por cubrir (minería), un «eso permite» en conserjería y la startup, cuyo caso no calza con dotación temporal.
+- **Con hechos de mayo, julio y agosto marcados como antiguos:** 3 de 3 válidos al primer intento, ahora sin el año («En mayo, … finalizó la revisión técnica…»).
+- **Las diferencias entre `v25` y `v26` en el banco están dentro del ruido de una corrida.**
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

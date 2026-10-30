@@ -115,6 +115,10 @@ test('DRAFT_SIGNAL_MAX_AGE_DAYS lets an older dated signal reach the email, neve
   assert.equal(reaches(), false);
   assert.equal(reaches(60), false);
   assert.equal(reaches(90), true);
+  // The writer is told only when an older signal is in: a context without one is exactly what it was.
+  assert.deepEqual(build(reportWithSignal({ observedAt: '2026-06-01T12:00:00.000Z' }), true, undefined, undefined, 90).writing, { olderSignal: true });
+  assert.deepEqual(build(reportWithSignal({ observedAt: '2026-06-01T12:00:00.000Z' }), true, undefined, true, 90).writing, { anchorSpecifics: true, olderSignal: true });
+  assert.equal('writing' in build(reportWithSignal(), true, undefined, undefined, 90), false, 'a signal of this month changes nothing');
   // The page itself must still have been read within 30 days, whatever the window.
   const stalePage = reportWithSignal({ observedAt: '2026-06-01T12:00:00.000Z' });
   stalePage.evidenceGraph.sources.find((source) => source.id === 'src_cccccccccc')!.retrievedAt = '2026-07-01T12:00:00.000Z';

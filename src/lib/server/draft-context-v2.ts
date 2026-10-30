@@ -271,9 +271,10 @@ export const DraftContextV2Schema = z.object({
   /**
    * How the writer is asked to rest the email on its evidence, present only when this draft was built with DRAFT_ANCHOR_SPECIFICS_ENABLED
    * (for this person: see draftFlagsForUser). The writer's prompt and the preflight read it here, so both look for the same terms and a
-   * context built without the flag is exactly what it was.
+   * context built without the flag is exactly what it was. `olderSignal`: a signal older than 30 days reached the evidence (only with
+   * DRAFT_SIGNAL_MAX_AGE_DAYS above 30), so the writer is asked to say it with its month and never as news.
    */
-  writing: z.object({ anchorSpecifics: z.literal(true) }).strict().optional(),
+  writing: z.object({ anchorSpecifics: z.literal(true).optional(), olderSignal: z.literal(true).optional() }).strict().optional(),
   warnings: z.array(z.string().trim().min(1).max(2_000)).max(20),
 }).strict();
 export type DraftContextV2 = z.infer<typeof DraftContextV2Schema>;
@@ -654,6 +655,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
   }
   const eligibleFactClaimIds = new Set(evidence.flatMap((item) => item.supportedFactClaimIds));
   const eligibleHypothesisIds = new Set(hypotheses.map((item) => item.claimId));
+  let olderSignal = false;
   const report = reportDocument ? (() => {
     const computedMetadata: DraftReportDocumentMetadataV2 = {
       id: reportDocument.id,
@@ -804,6 +806,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         ? [DraftEvidenceV2Schema.parse({ ...supported[0], evidenceId: `${prefix}:evidence:${claim.id}:0`, statement: claim.statement })]
         : [];
       reportEvidence.push(...statementEvidence, ...supported);
+      if (supported.length && claim.dimension === 'signal' && claim.observedAt !== null && !isFreshDate(claim.observedAt, nowMs)) olderSignal = true;
       return supported.length ? [{ claim, internalId: draftClaimId }] : [];
     });
     if (reportEvidence.length) {
@@ -891,7 +894,9 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       prohibitedPhrases: [...DRAFT_PROHIBITED_PHRASES],
       minimumEvidenceProvenance: 1,
     },
-    ...(anchorSpecifics ? { writing: { anchorSpecifics: true } } : {}),
+    ...(anchorSpecifics || olderSignal ? {
+      writing: { ...(anchorSpecifics ? { anchorSpecifics: true as const } : {}), ...(olderSignal ? { olderSignal: true as const } : {}) },
+    } : {}),
     warnings,
   });
 
