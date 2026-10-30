@@ -28,8 +28,8 @@ test('no model that production names is one the app refuses to call', () => {
 });
 
 test('what production says: the draft improvements, the signal harvest, the Cowork harness on Haiku, its web and Investigadoras and the scheduled tasks are on for every account', () => {
-  // Signals of the report keep the 30-day window until the owner decides otherwise (DRAFT_SIGNAL_MAX_AGE_DAYS, docs/borradores-naturales-2026-10-30.md).
-  const everyone = { signalEvidence: true, hookFilter: true, anchorSpecifics: true, signalMaxAgeDays: 30 };
+  // Dated signals of the report reach the email up to 90 days old, by the owner's decision of 30 Oct 2026 (docs/borradores-naturales-2026-10-30.md).
+  const everyone = { signalEvidence: true, hookFilter: true, anchorSpecifics: true, signalMaxAgeDays: 90 };
   for (const id of [SOMEONE, SOMEONE_ELSE, null]) assert.deepEqual(draftFlagsForUser(id, plain), everyone, String(id));
   for (const id of [SOMEONE, SOMEONE_ELSE]) {
     assert.equal(coworkHarnessEnabled(plain, id), true, id);
@@ -44,6 +44,7 @@ test('what production says: the draft improvements, the signal harvest, the Cowo
   }
   // The harvest is a Claude too (Haiku unless a variable says otherwise) and needs the key the runtime already has.
   assert.equal(signalHarvestSettings({ ...plain, ANTHROPIC_API_KEY: 'a-key' })?.model, 'claude-haiku-5-5');
+  assert.equal(signalHarvestSettings({ ...plain, ANTHROPIC_API_KEY: 'a-key' })?.recencyDays, 90, 'the harvest looks in the window the draft takes');
   assert.equal(signalHarvestSettings({ ...plain }), null, 'without the key it stays out of the way');
   assert.equal(coworkSchedulesEnabled(plain), true);
 });
