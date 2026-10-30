@@ -10,7 +10,8 @@ export type HumanToneCode =
   | 'tone_asunto'
   | 'tone_tratamiento'
   | 'tone_pregunta'
-  | 'tone_ficha';
+  | 'tone_ficha'
+  | 'tone_fragmento';
 
 export type HumanToneFinding = {
   code: HumanToneCode;
@@ -55,6 +56,10 @@ const MULETILLAS = [
   'me encantaria tener la oportunidad',
   'no dudes en', 'no dude en', 'entera disposicion', 'sera un placer',
   'agradeciendo de antemano', 'favorable acogida',
+  // Frases que no dicen nada: aparecían en la mitad de los borradores del banco del 30 de octubre de 2026.
+  'es una alternativa', 'puede ser una alternativa', 'es una opcion', 'puede ser una opcion',
+  'pone sobre la mesa', 'forma parte del trabajo', 'es parte del trabajo', 'el costo acompana',
+  'segun su reporte', 'en la conversacion salio',
 ];
 
 // Solo advierten: a veces son válidas con un dato concreto.
@@ -94,6 +99,26 @@ function stripCta(body: string, ctaExactText?: string) {
   if (!cta) return body;
   const index = body.lastIndexOf(cta);
   return index === -1 ? body : `${body.slice(0, index)} ${body.slice(index + cta.length)}`;
+}
+
+// A verb, or what looks like one: a common short form or a conjugated ending. Nouns with those endings («volumen», «mercado»)
+// only make a fragment pass unseen; the check is for the sentence with none at all.
+const VERB_HINT = /(?<![\p{L}])(?:es|son|era|fue|fueron|está|están|estaba|hay|había|habrá|tiene|tienen|tenemos|tengo|hace|hacen|hacemos|hago|puede|pueden|podemos|puedo|vi|veo|vimos|sé|sabe|creo|cree|ayuda|ayudan|ayudamos|permite|permiten|ofrece|ofrecen|ofrecemos|trabajo|trabajan|trabajamos|cubre|cubren|cubrimos|pone|ponen|ponemos|va|van|vamos|voy|viene|vienen|queda|quedan|sirve|sirven|parece|acomoda|necesita|necesitan|llega|llegan|abre|abren|busca|buscan|cuesta|toma|toman|deja|dejan|da|dan|damos|doy|sale|salen|entra|entran|soy|estoy|escribo|cuento|comento|comparto|propongo|ofrezco|pregunto|llamo)(?![\p{L}])|\p{L}{2,}(?:amos|emos|imos|aron|ieron|aba|aban|ía|ían|ará|erá|irá|arán|erán|irán|ando|iendo|ado|ados|ada|adas|ido|idos|ida|idas|ar|er|ir)(?![\p{L}])/iu;
+// A clause that opens like the first half of a sentence: «Para selección…», «Con la temporada…», «Cuando entran…».
+const DEPENDENT_START = /^[¿¡]?(?:para|en|con|por|sobre|desde|hacia|y|pero|que|como|cuando|si|aunque|mientras)(?![\p{L}])/iu;
+
+/** A sentence that opens like the first half of one and has no verb («Para selección en servicios transitorios.»): the
+ * writer dropped what it meant to say. A short sentence without a verb of another kind («Un solo proveedor para todo.») is style. */
+export function sentenceFragments(body: string) {
+  const lines = String(body || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const content = lines.length > 1 && /^(?:hola|estimad[oa]s?|buen[oa]s)\b/i.test(lines[0]) ? lines.slice(1) : lines;
+  return content.join(' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => {
+      const words = sentence.match(/[\p{L}\p{N}]+/gu) || [];
+      return words.length >= 2 && words.length <= 10 && DEPENDENT_START.test(sentence) && !VERB_HINT.test(sentence);
+    });
 }
 
 function firstContentLine(body: string) {
@@ -200,6 +225,10 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
   const lowModel = modelBody.toLocaleLowerCase('es');
   if (/\bno (?:es|son|era|se trata de)\b[^.?!\n]{1,60}?,\s*(?:es|son|sino)\b/.test(lowModel) || /\bno solo\b[^.?!\n]{1,80}?\bsino\b/.test(normModel)) {
     warnings.push({ code: 'tone_muletilla', message: 'Posible contraste del tipo «no es X, es Y». Revisa si hace falta.', blocking: false });
+  }
+  const fragments = sentenceFragments(modelBody);
+  if (fragments.length > 0) {
+    errors.push({ code: 'tone_fragmento', message: `Oración incompleta, sin verbo: ${fragments.slice(0, 2).map((f) => `«${f}»`).join(', ')}. Escríbela completa o júntala con la siguiente.`, blocking: true });
   }
   const paragraphs = modelBody.split(/\n\s*\n/).map((p) => p.split(/\s+/).filter(Boolean).length);
   if (paragraphs.some((count) => count > 55)) {

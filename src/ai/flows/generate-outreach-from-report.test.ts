@@ -546,7 +546,7 @@ test('the first follow-up asks how they do it today instead of a second meeting'
   }
 });
 
-test('the prompt asks for the service in present tense and the benefit in the seller words', async () => {
+test('the prompt asks for the service in present tense and the benefit in the writer words, never the slogan', async () => {
   const previousKey = process.env.OPENAI_API_KEY;
   const previousFetch = globalThis.fetch;
   const prompts: string[] = [];
@@ -559,8 +559,14 @@ test('the prompt asks for the service in present tense and the benefit in the se
     await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
     assert.match(prompts[0], /Lo que hace el vendedor va en presente y con sujeto/);
     assert.match(prompts[0], /"hay un dato concreto"/);
-    assert.match(prompts[0], /El beneficio se dice con las palabras de valueProposition/);
+    // Copied word for word, the value proposition made every email of the 30 Oct 2026 bank end in the same slogan.
+    assert.match(prompts[0], /El beneficio sale de valueProposition o de un servicio declarado, dicho con tus palabras/);
+    assert.match(prompts[0], /No repitas la propuesta de valor literal/);
+    assert.match(prompts[0], /qué se complica en concreto en ese momento para alguien de su rubro/);
+    assert.match(prompts[0], /Soy <nombre de pila>, de <tu empresa>/);
+    assert.doesNotMatch(prompts[0], /ServiPro|Carla/, 'no seller of the eval bank leaks into the prompt of another seller');
     assert.match(prompts[1], /Quita los anuncios y rodeos/);
+    assert.match(prompts[1], /incompleta, sin verbo/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
@@ -677,5 +683,28 @@ test('priority-A drafts think at medium effort, overridable; rewrites and other 
   } finally {
     if (previous.write === undefined) delete process.env.OPENAI_DRAFT_PRIORITY_EFFORT; else process.env.OPENAI_DRAFT_PRIORITY_EFFORT = previous.write;
     if (previous.edit === undefined) delete process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT; else process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT = previous.edit;
+  }
+});
+
+test('the subject reads as a sentence: its first letter in capital, the rest as the model wrote it', async () => {
+  const { sentenceCaseSubject } = await import('./generate-outreach-from-report');
+  assert.equal(sentenceCaseSubject('identidad en evaluaciones'), 'Identidad en evaluaciones');
+  assert.equal(sentenceCaseSubject('¿turnos en Pudahuel?'), '¿Turnos en Pudahuel?');
+  assert.equal(sentenceCaseSubject('Re: dotación para diciembre'), 'Re: dotación para diciembre');
+  assert.equal(sentenceCaseSubject('PSOL para MVS Group'), 'PSOL para MVS Group');
+
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async () => Response.json({ choices: [{ message: { content: JSON.stringify({
+      subject: 'tests por cargo', opening: 'Vi que Acme abrió una sede nueva.', value: 'Northstar automatiza tareas repetitivas para reducir trabajo manual.',
+    }) } }], usage: {} });
+    const result = await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
+    assert.equal(result.subject, 'Tests por cargo');
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
   }
 });

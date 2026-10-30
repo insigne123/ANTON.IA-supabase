@@ -90,12 +90,51 @@ export function isSensitiveEventText(value: unknown) {
 export function isUnsuitableHookText(value: unknown) {
   const normalized = researchTextKey(value);
   if (!normalized) return false;
-  return [
+  return isDocumentChromeText(value) || [
     /\bwho is who\b/,
     /\b(?:glosario|se define como|conocid[oa]s? en el mercado como|se conoce en el mercado como|known in the market as)\b/,
     /\b(?:are|son) (?:the |las |los )?(?:communes|comunas|districts|municipalities)\b/,
     /\b(?:fne|fiscalia nacional economica|tribunal de defensa de la libre competencia|tdlc|libre competencia|colusion)\b/,
+    ...SELF_DESCRIPTION_HOOKS,
   ].some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * What a company says of itself to anyone, which an email cannot open with («Vi que su misión es maximizar el valor…»): its mission,
+ * its culture, its policies and the law it works under. In the research of 29 Oct 2026 for two customers, the writer opened with «el
+ * período de cobertura está vinculado a la naturaleza de la causal» (a definition of the law, copied from the company's site), and the
+ * other facts on offer were a policy of information security and a mission statement.
+ */
+const SELF_DESCRIPTION_HOOKS = [
+  /\b(?:nuestra mision|nuestra vision|nuestros valores|our mission|our vision|our values)\b/,
+  /\b(?:nos moviliza|parte de nuestra cultura|uno de los activos mas valiosos|compromiso con la proteccion de)\b/,
+  // The call to action of a web page: «Conoce cómo gestionamos este compromiso…».
+  /^(?:conoce|descubre|revisa) (?:como|nuestr[oa]s?|mas)\b/,
+  /\b(?:politica (?:general )?(?:del sistema de gestion )?de seguridad de la informacion|sistema de gestion de seguridad de la informacion)\b/,
+  /\b(?:politica de privacidad|proteccion de datos personales|terminos y condiciones|privacy policy|terms and conditions)\b/,
+  /\bregulad[oa]s? por la ley\b|\bnaturaleza de la causal\b/,
+  // A content-marketing title: «La importancia de los descriptores de cargo para el éxito organizacional».
+  /^(?:la importancia de|(?:\d+ )?(?:claves|tips|consejos|pasos) para|guia (?:para|de)|what is|que es (?:un|una|el|la))\b/,
+];
+
+/**
+ * The chrome of a document or a listing, not a fact: a page header («Página 1 de 66»), the title of a manual or of the terms of a
+ * tender («MANUAL CORPORATIVO - Código de Ética», «TÉRMINOS DE REFERENCIA»), a jobs aggregator («11472+ otras ocupaciones… jobs
+ * in Chile… Apply with free AI resume review»), a figure that lost its first digits («000 metros sobre el nivel del mar», PR 508) and
+ * text in sustained capitals.
+ */
+function isDocumentChromeText(value: unknown) {
+  const raw = text(value);
+  const normalized = researchTextKey(value);
+  const letters = raw.match(/\p{L}/gu) || [];
+  const capitals = raw.match(/\p{Lu}/gu) || [];
+  return /^0{3}\b/.test(normalized)
+    || (letters.length >= 25 && capitals.length / letters.length >= 0.6)
+    || [
+      /\bpagina \d+ de \d+\b|\bpage \d+ of \d+\b/,
+      /\b(?:manual corporativo|codigo de etica|terminos de referencia|oferta tecnica|bases (?:administrativas|tecnicas)|reglamento interno|memoria anual)\b/,
+      /\b\d+ otras ocupaciones\b|\bjobs in (?:chile|santiago|peru|colombia)\b|\bopenings at top companies\b|\bapply with free\b/,
+    ].some((pattern) => pattern.test(normalized));
 }
 
 /**

@@ -117,3 +117,15 @@ test('preflight warns when the approved CTA mixes tratamiento with an usted body
   const result = validateDraftPreflightV2(context, output, { checkGeneratedCopy: true, checkHumanTone: true });
   assert.ok(result.preflight.warnings.some((w) => /otro tratamiento/.test(w)));
 });
+
+test('human tone blocks a sentence left without its verb, not a short sentence by style', async () => {
+  const { sentenceFragments } = await import('./human-tone-checks');
+  // A draft of 29 Oct 2026 opened like this, and the person had to rewrite it.
+  const broken = checkHumanTone({ subject: 'Tests para servicios transitorios', body: 'Hola Cristian,\n\nPara selección en servicios transitorios.\n\nOfrecemos más de 45 tests para evaluar postulantes online.' });
+  assert.ok(broken.errors.some((finding) => finding.code === 'tone_fragmento' && finding.blocking && /Para selección en servicios transitorios/.test(finding.message)));
+
+  assert.deepEqual(sentenceFragments(GOOD.body), []);
+  assert.deepEqual(sentenceFragments('Hola Ana,\n\nUn solo proveedor para personal, aseo y seguridad. ¿Cuántos turnos cubren al mes?'), [], 'a short sentence of another kind is style');
+  assert.deepEqual(sentenceFragments('Hola Paula,\n\nLe escribo por la dotación temporal en faena. Con la temporada encima, cubrimos turnos el mismo día.'), []);
+  assert.deepEqual(sentenceFragments('Hola,\n\nPara el cierre de año. Cuando entran muchos guardias a la vez, cubrimos el turno.'), ['Para el cierre de año.']);
+});
