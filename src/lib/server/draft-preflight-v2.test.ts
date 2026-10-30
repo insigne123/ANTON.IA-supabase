@@ -776,6 +776,20 @@ test('list markers and FCL/LCL labels are not quantities but their numeric conte
   assert.ok(!supported.issues.some((issue) => issue.code === 'unsupported_material_claim'));
 });
 
+test('after the writer introduces itself, a figure of the recipient rests on the evidence and one of the seller still on the profile', () => {
+  // A bank draft of 30 Oct 2026 (v26) was turned back twice: «Soy Carla, de ServiPro; la faena … tiene más de 2.000 trabajadores…».
+  const context = draftContextFixture();
+  context.evidence[0].statement = 'Acme opera 16 sedes regionales.';
+  context.seller.proofPoints.push('Northstar atiende 300 empresas.');
+  const output = validOutput();
+  const check = (sentence: string) => validateDraftPreflightV2(context, { ...output, body: `${output.body}\n\n${sentence}` })
+    .issues.some((issue) => issue.code === 'unsupported_material_claim');
+  assert.equal(check('Soy Grace, de Northstar; Acme opera 16 sedes regionales y ordenamos sus tareas.'), false, 'the recipient figure, from the evidence');
+  assert.equal(check('Soy Grace, de Northstar; atendemos 300 empresas.'), false, 'the seller figure, from the profile');
+  assert.equal(check('Soy Grace, de Northstar; Acme atiende 300 empresas.'), true, 'a seller figure put on the recipient');
+  assert.equal(check('Soy Grace, de Northstar; Acme opera 40 sedes regionales.'), true, 'a figure in neither');
+});
+
 test('a figure of the seller profile passes when the sentence speaks as the seller, in any natural way, and never when it lands on the recipient', () => {
   const context = draftContextFixture();
   context.seller.companyName = 'Northstar SpA';
