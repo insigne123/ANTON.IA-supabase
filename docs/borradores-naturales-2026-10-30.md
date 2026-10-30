@@ -132,5 +132,22 @@ Lo que mejoró se ve en la segunda oración: «se resienten la atención en sala
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
+
+  **Cuánto pesa, en producción** (292 informes de los últimos 30 días, lectura de solo lectura):
+
+  | Señal con fecha más reciente del informe | Informes |
+  | --- | --- |
+  | De 30 días o menos (la única que el borrador usa) | 25 (9 %) |
+  | De 31 a 90 días | 39 (13 %) |
+  | De 91 a 180 días | 10 (3 %) |
+  | Más antigua | 27 (9 %) |
+  | Ninguna | 191 (65 %) |
+
+  - **Lo que falta en la mayoría de los informes:** dos de cada tres correos se escriben sin ninguna señal. Por eso la apertura sin señal de `v25` es la que más se usa.
+  - **Un caso de la última semana:** el informe traía cuatro proyectos terminados con mes y año («En mayo de 2026, … finalizó la revisión técnica … para BHP»). La regla de 30 días los dejó fuera, y el correo abrió con «más de cinco décadas en proyectos».
+  - **La decisión que se había tomado:** mantener los 30 días («un hecho de hace tres meses no es "vi que"»). Se tomó con 8 empresas, donde alargar la ventana no sumaba ninguna.
+  - **Lo que muestra producción:** con 90 días, los informes con un hecho con fecha pasarían de 9 % a 22 %. El correo lo diría con su mes («En agosto terminaron …»), nunca como «vi que».
+  - **Pendiente:** es una decisión de quien administra.
+- **Las «señales» de la búsqueda no siempre lo son.** Lo que la búsqueda de empleos o noticias devuelve queda como `hiring_signal` o `news_signal` (`native-research.ts`), aunque sea un post del blog de la empresa («El papel estratégico del Employer Branding…»), el título de una sección del sitio o una certificación. Cuando la página no tiene fecha, se le pone la de captura, y el indicador de calidad cuenta «señales recientes» que no existen. El borrador ya no las toma como gancho: la búsqueda no entra como evidencia y el filtro saca los títulos. Pero el indicador engaña a quien lee el informe.
 - **Las objeciones.** El correo ya reconoce lo que dijo la persona, pero el servidor le agrega el CTA de reunión del estilo; a quien dijo «no hay presupuesto» le sobra.
 - **La Redactora de Cowork** (Contacto del día, Cowork) escribe mejor que la vía de borradores, pero todos sus primeros correos siguen la misma forma («En [rubro], cuando…» y el eslogan de la oferta).
