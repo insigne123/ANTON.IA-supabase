@@ -133,20 +133,20 @@ Lo que mejoró se ve en la segunda oración: «se resienten la atención en sala
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
 
-  **Cuánto pesa, en producción** (292 informes de los últimos 30 días, lectura de solo lectura):
+  **Cuánto pesa, en producción** (los 168 informes con el esquema actual, `research-report-document/v2`, de los últimos 30 días; lectura de solo lectura. Los 124 con el esquema anterior, el último del 27 de octubre, no guardan las señales donde se pueden contar y quedan fuera):
 
   | Señal con fecha más reciente del informe | Informes |
   | --- | --- |
-  | De 30 días o menos (la única que el borrador usa) | 25 (9 %) |
-  | De 31 a 90 días | 39 (13 %) |
-  | De 91 a 180 días | 10 (3 %) |
-  | Más antigua | 27 (9 %) |
-  | Ninguna | 191 (65 %) |
+  | De 30 días o menos (la única que el borrador usa) | 25 (15 %) |
+  | De 31 a 90 días | 39 (23 %) |
+  | De 91 a 180 días | 10 (6 %) |
+  | Más antigua | 27 (16 %) |
+  | Ninguna | 67 (40 %) |
 
-  - **Lo que falta en la mayoría de los informes:** dos de cada tres correos se escriben sin ninguna señal. Por eso la apertura sin señal de `v25` es la que más se usa.
+  - **Lo que falta en la mayoría de los informes:** cuatro de cada diez informes no traen ninguna señal, y otros cuatro solo traen señales de más de 30 días, que el borrador no usa. En total, el 85 % de los informes llega al borrador sin una señal que pueda usar, y ahí escribe la apertura sin señal de `v25`.
   - **Un caso de la última semana:** el informe traía cuatro proyectos terminados con mes y año («En mayo de 2026, … finalizó la revisión técnica … para BHP»). La regla de 30 días los dejó fuera, y el correo abrió con «más de cinco décadas en proyectos».
   - **La decisión que se había tomado:** mantener los 30 días («un hecho de hace tres meses no es "vi que"»). Se tomó con 8 empresas, donde alargar la ventana no sumaba ninguna.
-  - **Lo que muestra producción:** con 90 días, los informes con un hecho con fecha pasarían de 9 % a 22 %. El correo lo diría con su mes («En agosto terminaron …»), nunca como «vi que».
+  - **Lo que muestra producción:** con 90 días, los informes con un hecho con fecha pasarían de 15 % a 38 %. El correo lo diría con su mes («En agosto terminaron …»), nunca como «vi que».
   - **Pendiente:** es una decisión de quien administra.
   - **Lo que ya está listo:** `DRAFT_SIGNAL_MAX_AGE_DAYS`, de 30 a 180 días; si falta o está fuera de rango, queda en 30, como hoy. Alarga la ventana solo para las señales del informe (`dimension: signal`). La página tiene que haberse leído en los últimos 30 días, y el resto de los hechos sigue con 30. Respeta `DRAFT_PILOT_USER_IDS`. El prompt ya pide decir un hecho de otro mes en pasado y con su mes, nunca como algo de ahora.
   - **Prueba con 3 casos con hechos de mayo, julio y agosto:** los 3 válidos al primer intento, en pasado y sin «vi que» («En julio de 2026, … abrió tres tiendas en Temuco y Puerto Montt. … Si usted aún está ajustando turnos para esas tiendas, …»). Todavía copia la frase de la fuente con el año.

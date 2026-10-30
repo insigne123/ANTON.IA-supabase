@@ -344,7 +344,7 @@ export function draftAnchorSpecificsEnabled(env: Record<string, string | undefin
 
 /**
  * DRAFT_SIGNAL_MAX_AGE_DAYS (30 to 180, 30 when absent or out of range): how old a dated signal of the report can be to reach the email. The page
- * must still have been read within 30 days; only the event it tells can be older. Of 292 reports of October 2026, 25 had a signal of 30 days or
+ * must still have been read within 30 days; only the event it tells can be older. Of 168 reports of October 2026, 25 had a signal of 30 days or
  * less and 39 more one of 31 to 90 (docs/borradores-naturales-2026-10-30.md). The writer says an older one with its month, never as news.
  */
 export function draftSignalMaxAgeDays(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
