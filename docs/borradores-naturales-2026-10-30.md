@@ -25,7 +25,7 @@ El dueño pidió un sistema de correos «perfecto»: que se vean naturales, huma
 | **Asunto como oración**: mayúscula inicial, el resto como lo escribió el modelo. | `sentenceCaseSubject` en el mismo archivo |
 | **Oraciones sin verbo**: una oración que empieza como la primera mitad de otra («Para…», «Con…», «Cuando…») y no tiene verbo bloquea el borrador y pide reescribirla (`tone_fragmento`). Una oración corta de otro tipo («Un solo proveedor para todo.») es estilo y pasa. | `src/lib/server/human-tone-checks.ts` |
 | **Frases vacías bloqueadas**: «es una alternativa», «es una opción», «pone sobre la mesa», «forma parte del trabajo», «el costo acompaña», «según su reporte», «en la conversación salió». | `MULETILLAS`, mismo archivo |
-| **Ganchos que no son hechos** (con `DRAFT_HOOK_FILTER_ENABLED`, encendida en producción): encabezados y títulos de documentos, agregadores de empleo, cifras que perdieron sus primeros dígitos, texto en mayúsculas sostenidas, misión, visión, cultura, políticas de privacidad o de seguridad de la información, definiciones de la ley y títulos de artículos («La importancia de…»). En las investigaciones de las últimas tres semanas saca de 0 a 3 evidencias por investigación y siempre quedan 6 o más de la empresa: no deja a nadie sin borrador. | `isUnsuitableHookText` en `src/lib/research-fact-eligibility.ts` |
+| **Ganchos que no son hechos** (con `DRAFT_HOOK_FILTER_ENABLED`, encendida en producción): encabezados y títulos de documentos, agregadores de empleo, cifras que perdieron sus primeros dígitos, texto en mayúsculas sostenidas, misión, visión, cultura, políticas de privacidad o de seguridad de la información, definiciones de la ley, títulos de artículos («La importancia de…»), textos que son una pregunta (títulos de blog, preguntas frecuentes, «¿Tienes dudas?») y perfiles de LinkedIn de otras personas («… · Educación: …», «4 perfiles de…»). Los fragmentos de buscador («título …: fragmento») no se sacan: algunos traen la señal («Estaremos presentes en feria laboral de Antofagasta…»). En 190 investigaciones de las últimas tres semanas saca el 5 % de la evidencia y la que menos conserva tiene 6 de la empresa: no deja a nadie sin borrador. | `isUnsuitableHookText` en `src/lib/research-fact-eligibility.ts` |
 | **Sin dos preguntas en el inicial**: cuando el CTA aprobado es una pregunta, la apertura asignada «pregunta» pasa a «observación». Antes uno de cada tres correos iniciales nacía con dos preguntas y dependía del reintento. | `draftContextPrompt`, mismo archivo del prompt |
 | **La Redactora de Cowork** (Contacto del día y Cowork) revisa lo mismo: una oración sin verbo y las frases vacías («pone sobre la mesa», «pensé que podría», «me gustaría», «la idea es»…) vuelven como corrección a la Redactora. El detector de oraciones sin verbo vive en un solo lugar para las dos vías. | `src/lib/sentence-fragments.ts`, `coworkDraftIssues` en `src/lib/cowork/writer.ts` |
 | **Tono de los flujos auxiliares** (respuestas, reconexión, campañas): presente y concreto, sin eslogan, sin «pensé que podría», «me gustaría», «la idea es»; asunto con mayúscula inicial. | `src/lib/outreach-tone.ts` (`outreach-tone/v2`) |
@@ -53,6 +53,20 @@ El dueño pidió un sistema de correos «perfecto»: que se vean naturales, huma
 - **Secuencias** (2 de 4 pasos): 8 de 8 válidos, con seguimientos de una o dos oraciones más la pregunta, sin la oración que repetía la anterior.
 - **Cómo suena**, en un caso del banco (ficticio). Antes: «Vi que abren cinco sucursales nuevas en regiones durante el primer semestre. / En ServiPro ponemos dotación temporal por el tiempo que usted la necesita, y el costo se va con el peak.» Ahora: «Vi que en Banco Regional abren cinco sucursales nuevas en regiones durante el primer semestre. En las aperturas bancarias, si falta personal, la carga de atención termina recayendo en los equipos de las sucursales que ya operan. / Soy Carla, de ServiPro; ponemos personal temporal en las sucursales nuevas por el período que requiera cada apertura.»
 - **El costo sube un 20 %** (correos algo más largos: 70 palabras contra 55, dentro del tope de 110).
+
+### Leídos uno por uno
+
+Además del conteo, leí los 13 correos en frío del banco de cada versión y puse nota de 1 a 5 a «suena a persona» y «da una razón interesante», y si lo enviaría tal cual, con un retoque o no. Es una sola lectura y no a ciegas (la presentación «Soy Carla, de ServiPro» delata la versión), así que vale como orientación, no como prueba.
+
+| 13 correos en frío | `v23` | `v24` |
+| --- | --- | --- |
+| Suena a persona (promedio) | 2,4 | 3,8 |
+| Da una razón interesante (promedio) | 1,9 | 3,2 |
+| Lo enviaría tal cual | 0 | 8 |
+| Con un retoque | 5 | 5 |
+| No lo enviaría | 8 | 0 |
+
+Lo que todavía pide retoque en `v24`: una frase de relleno que se cuela («puede implicar sumar personal», «Así, el equipo puede…») y, en dos correos, una consecuencia que repite la anterior con otras palabras. Ningún correo de `v24` afirmó algo de la empresa que no estuviera en los hechos del caso.
 
 ### Qué enseñó cada ronda
 

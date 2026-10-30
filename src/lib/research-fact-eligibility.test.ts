@@ -110,6 +110,11 @@ test('what a company says of itself and the chrome of a document are no reason t
     'La importancia de los Descriptores de Cargo para el éxito organizacional',
     'En Chile, los Servicios Transitorios están regulados por la Ley N° 20.123 sobre Contrato de Trabajo de Personal Transitorio.',
     'El período de cobertura está vinculado a la naturaleza de la causal que justifica el servicio transitorio.',
+    '¿Por qué trabajar en minería? Estos son los 5 atributos ...: Minería consolida su atractivo laboral en Chile.',
+    '¿Tienes dudas? ¿Quieres saber más de Acme? Contáctate con nosotros.',
+    'Ana Pérez - División Norte: ... ACME – Corporación de Chile · Educación: Universidad ... Ana Pérez en LinkedIn',
+    'Juan Soto: Experiencia: Constructora Acme · Educación: Universidad Andrés Bello · Ubicación: Área metropolitana de Rancagua',
+    '4 perfiles de «Luis Rojas»: ... Luis Rojas que usan LinkedIn para ... Gerente de Recursos Humanos en Acme',
   ]) assert.equal(isUnsuitableHookText(text), true, text);
   for (const text of [
     'Abrirán dos tiendas nuevas en la zona sur antes de diciembre (nota de prensa, 2026-09-10).',
@@ -117,6 +122,9 @@ test('what a company says of itself and the chrome of a document are no reason t
     'Publicaron 12 empleos de operarios de bodega en las últimas tres semanas.',
     'ACME y ENAP firmaron un acuerdo de suministro por 5 años.',
     'Acme cuenta con un equipo de consultores con experiencia en selección de personal para puestos ejecutivos.',
+    // The recipient's own profile and a snippet with a real signal stay.
+    'Eric Rojas - Jefe de Adquisiciones Proyectos en Acme ...: Jefe de Adquisiciones Proyectos en Acme · Ingeniero Civil Industrial',
+    'Estaremos presentes en feria laboral de Antofagasta para ...: Estaremos presentes en feria laboral de Antofagasta para acercar nuevas oportunidades de empleo.',
   ]) assert.equal(isUnsuitableHookText(text), false, text);
 });
 

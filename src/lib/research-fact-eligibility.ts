@@ -121,7 +121,7 @@ const SELF_DESCRIPTION_HOOKS = [
  * The chrome of a document or a listing, not a fact: a page header («Página 1 de 66»), the title of a manual or of the terms of a
  * tender («MANUAL CORPORATIVO - Código de Ética», «TÉRMINOS DE REFERENCIA»), a jobs aggregator («11472+ otras ocupaciones… jobs
  * in Chile… Apply with free AI resume review»), a figure that lost its first digits («000 metros sobre el nivel del mar», PR 508) and
- * text in sustained capitals.
+ * text in sustained capitals, a question (a blog title or a FAQ) and someone else's LinkedIn profile as a search shows it.
  */
 function isDocumentChromeText(value: unknown) {
   const raw = text(value);
@@ -130,10 +130,15 @@ function isDocumentChromeText(value: unknown) {
   const capitals = raw.match(/\p{Lu}/gu) || [];
   return /^0{3}\b/.test(normalized)
     || (letters.length >= 25 && capitals.length / letters.length >= 0.6)
+    // A question is a blog title, a FAQ or a call to action («¿Por qué trabajar en minería?», «¿Cómo postular?»), never a fact.
+    || /^[«"'“\s]*¿/.test(raw)
+    // Someone else's LinkedIn profile, as a search shows it: «… · Educación: Universidad…», «Experiencia: …», «4 perfiles de…».
+    || /(?:^|[\s·:])(?:Educación|Experiencia|Ubicación)\s*[:·]/u.test(raw)
     || [
       /\bpagina \d+ de \d+\b|\bpage \d+ of \d+\b/,
       /\b(?:manual corporativo|codigo de etica|terminos de referencia|oferta tecnica|bases (?:administrativas|tecnicas)|reglamento interno|memoria anual)\b/,
       /\b\d+ otras ocupaciones\b|\bjobs in (?:chile|santiago|peru|colombia)\b|\bopenings at top companies\b|\bapply with free\b/,
+      /\b\d+ perfiles de\b/,
     ].some((pattern) => pattern.test(normalized));
 }
 
