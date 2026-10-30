@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   draftEvidencePersonalizationStatementV2,
   draftContentFingerprintV2,
+  isEnglishStatement,
   personalizationAnchorTerms,
   requiredDraftPersonalizationV2,
   specificAnchorTerms,
@@ -932,4 +933,35 @@ test('the anchor terms of a slogan name its nouns first, and a draft that misses
   const issue = result.issues.find((item) => item.code === 'personalization_invalid' && /conceptos materiales/.test(item.message));
   assert.ok(issue, 'the grounding issue is raised');
   assert.match(issue!.message, /dos de estos términos: \S+, \S+/);
+});
+
+test('English evidence is told by its translation: the anchor and the figures accept «Líneas 8 y 9» for «Lines 8 and 9»', () => {
+  // Production research of 23 Oct 2026: the evidence was a lender's page in English and the draft was turned back on every attempt.
+  assert.equal(isEnglishStatement('The proposed early disclosure covers an application for guarantees to support the construction of Lines 8 and 9.'), true);
+  assert.equal(isEnglishStatement('Acme abrirá dos tiendas nuevas en la zona sur antes de diciembre.'), false);
+  const base = draftContextFixture();
+  const evidence = { ...base.evidence[0]!, statement: 'The proposed early disclosure covers an application for guarantees to Acme, to support the construction of Lines 8 and 9 and the modernization of the existing network.' };
+  const context = { ...base, evidence: [evidence, ...base.evidence.slice(1)] };
+  const result = validateDraftPreflightV2(context, {
+    subject: 'Obras de las líneas nuevas',
+    body: 'Hola Paula,\n\nAcme prepara la construcción de las Líneas 8 y 9 y la modernización de su red. En obras así, un turno sin cubrir atrasa el avance.\n\nSoy Ana, de ServiPro; ponemos personal el mismo día.\n\n¿Te parece si lo conversamos 15 minutos esta semana?',
+    personalization: [{ evidenceId: evidence.evidenceId, claimId: evidence.supportedFactClaimIds[0]!, sourceUrl: evidence.source.url }],
+    hypothesisIds: [],
+  }, { checkGeneratedCopy: true });
+  assert.deepEqual(result.issues.filter((issue) => ['personalization_invalid', 'unsupported_material_claim'].includes(issue.code)).map((issue) => issue.message), []);
+});
+
+test('for English evidence the figures a translation keeps count as anchor terms', () => {
+  // Production research of 23 Oct 2026: «to support the construction of Lines 8 and 9» left only «support» and «construction» as terms,
+  // and «apoyo» shares no letters with «support».
+  const base = draftContextFixture();
+  const evidence = { ...base.evidence[0]!, statement: 'The proposed disclosure covers guarantees for Acme to support the construction of Lines 8 and 9.' };
+  const context = { ...base, evidence: [evidence, ...base.evidence.slice(1)] };
+  const result = validateDraftPreflightV2(context, {
+    subject: 'Cursos para las Líneas 8 y 9',
+    body: 'Hola Paula,\n\nEn Acme, el apoyo a la construcción de las Líneas 8 y 9 pone a los equipos de terreno a prepararse. Si se posterga, la incorporación a faena se atrasa.\n\nSoy Ana, de ServiPro; hacemos capacitación para equipos.\n\n¿Te parece si lo conversamos 15 minutos esta semana?',
+    personalization: [{ evidenceId: evidence.evidenceId, claimId: evidence.supportedFactClaimIds[0]!, sourceUrl: evidence.source.url }],
+    hypothesisIds: [],
+  }, { checkGeneratedCopy: true });
+  assert.deepEqual(result.issues.filter((issue) => ['personalization_invalid', 'unsupported_material_claim'].includes(issue.code)).map((issue) => issue.message), []);
 });

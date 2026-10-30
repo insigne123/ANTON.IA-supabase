@@ -267,6 +267,12 @@ function bodyParagraphs(value: string) {
 const SELF_INTRODUCTION = /^\s*soy\s+[^,;.]{1,40},\s+de\s+[^,;.]{1,60}[;,]\s*/i;
 
 /** Whether the fact the writer must rest the email on (REQUIRED_FACTUAL_PERSONALIZATION) is a dated event of the company. */
+/** Words the evidence writes capitalised inside a sentence: names a subject may keep capitalised («Plan Minero Conjunto», «Temuco»). */
+function evidenceNames(context: DraftContextV2) {
+  return [...new Set(context.evidence.flatMap((evidence) => [...String(evidence.statement || '').matchAll(/(?<=[\p{L}\p{N},;:)] )\p{Lu}\p{L}{2,}/gu)]
+    .map((match) => match[0])))].slice(0, 300);
+}
+
 export function anchoredOnDatedEvent(context: DraftContextV2) {
   const required = new Set(requiredReportAwareDraftPersonalizationV2(context).map((item) => item.evidenceId));
   return context.evidence.some((item) => required.has(item.evidenceId) && isDatedEventEvidence(item.statement));
@@ -333,6 +339,22 @@ function materialPersonalizationTerms(value: string) {
     .filter((word) => !/^\p{L}{4,}(?:amos|emos|imos)$/u.test(word))
     .map((term) => term.replace(/(?:es|os|as|s)$/u, ''))
     .filter((term) => term.length >= 4 && !personalizationStopWords.has(term));
+}
+
+// English evidence for a Spanish email (a lender's page on «the construction of Lines 8 and 9»): the email translates it, so the checks
+// compare what a translation keeps, the first letters of a word («construction» and «construcción», «Lines» and «Líneas») and the figure
+// itself. Asked for the exact words, the writer wrote «apoyo (support) a la construcción (construction)» and the draft was still turned
+// back, in production, ten times for the same research (23 Oct 2026).
+const ENGLISH_WORDS = /\b(?:the|and|of|to|for|with|by|is|are|will|be|from|which|its|their|as|this|that)\b/g;
+const SPANISH_WORDS = /\b(?:de|la|el|los|las|en|y|para|con|por|del|que|se|su|sus|una|un)\b/g;
+export function isEnglishStatement(value: unknown) {
+  const normalized = normalizeForMatch(value);
+  const english = (normalized.match(ENGLISH_WORDS) || []).length;
+  return english >= 3 && english > (normalized.match(SPANISH_WORDS) || []).length;
+}
+
+function termInWords(term: string, words: string[], translated: boolean) {
+  return translated ? words.some((word) => word.length >= 4 && word.slice(0, 4) === term.slice(0, 4)) : words.some((word) => word.startsWith(term));
 }
 
 // Anchor terms for the writing prompt: the readable original words behind the
@@ -420,10 +442,14 @@ function hasGroundedPersonalization(
     const materialTerms = [...new Set(materialPersonalizationTerms(statement))];
     // A faithful paraphrase often changes verbs and nouns. Two material terms
     // still bind the copy to the selected evidence without requiring verbatim text.
-    const minimumMatches = Math.min(2, materialTerms.length);
-    return Boolean(statement && minimumMatches > 0 && sentences.some((sentence) => (
-      materialTerms.filter((term) => sentence.split(' ').some((word) => word.startsWith(term))).length >= minimumMatches
-    )));
+    const translated = isEnglishStatement(statement);
+    // A translation keeps the figures as they are («Lines 8 and 9», «Líneas 8 y 9»): for English evidence they count as terms too.
+    const figures = translated ? [...new Set(normalizeForMatch(statement).split(' ').filter((word) => /^\d+$/.test(word)))] : [];
+    const minimumMatches = Math.min(2, materialTerms.length + figures.length);
+    return Boolean(statement && minimumMatches > 0 && sentences.some((sentence) => {
+      const words = sentence.split(' ');
+      return materialTerms.filter((term) => termInWords(term, words, translated)).length + figures.filter((figure) => words.includes(figure)).length >= minimumMatches;
+    }));
   });
 }
 
@@ -597,7 +623,7 @@ function materialQuantities(sentence: string) {
     const percent = /%|por[ \t]+ciento/i.test(match[0]);
     // Bind to a single metric, never arbitrary trailing prose or the next line.
     const following = after.match(percent ? /^[ \t]+(?:de[l]?[ \t]+)?([\p{L}]+)/u : /^[ \t]+([\p{L}]+)/u)?.[1] || '';
-    const connector = /^(?:a|al|con|de|del|el|en|es|la|las|los|para|por|que|y|o|e|sin|sobre)$/i;
+    const connector = /^(?:a|al|con|de|del|el|en|es|la|las|los|para|por|que|y|o|e|sin|sobre|and|or|of|the|to|in|for|with|by|from)$/i;
     const preceding = sentence.slice(0, match.index).replace(/(?:\s+(?:en|un|el|de|del))+[ \t]*$/i, '').trim().match(/([\p{L}]+)$/u)?.[1] || '';
     const metric = following && !connector.test(following) ? following : percent ? preceding : '';
     return {
@@ -766,9 +792,18 @@ export function validateDraftPreflightV2(
     const quantities = materialQuantities(sentence);
     for (const quantity of quantities) {
       const supported = sources.some((source) => {
-        if (!materialQuantities(source).some((item) => item.key === quantity.key)) return false;
-        const terms = new Set(materialPersonalizationTerms(source));
-        return materialPersonalizationTerms(sentence).filter((term) => terms.has(term)).length >= 2;
+        const translated = isEnglishStatement(source);
+        const figure = (key: string) => key.split(' ')[0];
+        if (!materialQuantities(source).some((item) => translated ? figure(item.key) === figure(quantity.key) : item.key === quantity.key)) return false;
+        const terms = materialPersonalizationTerms(source);
+        if (translated) {
+          // The figures a translation keeps («Lines 8 and 9», «Líneas 8 y 9») bind it to the subject too.
+          const sourceFigures = new Set(normalizeForMatch(source).split(' ').filter((word) => /^\d+$/.test(word)));
+          const sharedFigures = new Set(normalizeForMatch(sentence).split(' ').filter((word) => sourceFigures.has(word))).size;
+          return materialPersonalizationTerms(sentence).filter((term) => termInWords(term, terms, true)).length + sharedFigures >= 2;
+        }
+        const termSet = new Set(terms);
+        return materialPersonalizationTerms(sentence).filter((term) => termSet.has(term)).length >= 2;
       });
       if (!supported) {
         const start = Math.max(0, quantity.index - 100);
@@ -870,7 +905,8 @@ export function validateDraftPreflightV2(
     const terms = output.personalization.flatMap((item) => personalizationAnchorTerms(draftEvidencePersonalizationStatementV2(
       evidenceById.get(item.evidenceId)?.statement || '', { keepSpecifics: Boolean(context.writing?.anchorSpecifics) },
     ))).slice(0, 5);
-    add('personalization_invalid', `La personalización debe conservar los conceptos materiales de la evidencia seleccionada${terms.length >= 2 ? `: usa en una misma oración, con tus palabras, dos de estos términos: ${terms.join(', ')}` : ''}.`, 'body');
+    const englishSource = output.personalization.some((item) => isEnglishStatement(evidenceById.get(item.evidenceId)?.statement || ''));
+    add('personalization_invalid', `La personalización debe conservar los conceptos materiales de la evidencia seleccionada${terms.length >= 2 ? `: usa en una misma oración, con tus palabras, dos de estos términos${englishSource ? ', traducidos al español' : ''}: ${terms.join(', ')}` : ''}.`, 'body');
   }
   if (output.personalization.length > 0 && hasCataloguedPersonalization(context, output.personalization, body)) {
     warnings.push('La personalización enumera la fuente como una ficha; usa solo uno o dos detalles en lenguaje natural.');
@@ -895,6 +931,7 @@ export function validateDraftPreflightV2(
       // The fact the email rests on, not any line of the evidence: asked to open with a dated fact it is not anchored on, the writer could not.
       hasSignal: anchoredOnDatedEvent(context),
       finalAttempt: Boolean(options.retryAttempt),
+      knownNames: [context.seller.companyName, ...evidenceNames(context)],
     });
     for (const finding of tone.errors) {
       add(finding.code, finding.message, finding.code === 'tone_asunto' ? 'subject' : 'body');

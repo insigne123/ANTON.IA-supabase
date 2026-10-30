@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { checkHumanTone, feedbackForToneRetry } from './human-tone-checks';
+import { blockedPhrasesIn, checkHumanTone, feedbackForToneRetry } from './human-tone-checks';
 import { draftContextFixture } from './draft-v2-test-fixtures';
 import { validateDraftPreflightV2 } from './draft-preflight-v2';
 
@@ -227,4 +227,47 @@ test('«como los de …» or «de …» names the company in passing; «Así pue
   assert.ok(!passing.errors.some((finding) => finding.code === 'tone_ficha'));
   const hollow = checkHumanTone({ subject: 'Evaluaciones por cargo', body: 'Hola María,\n\nEntregamos informes interpretados. Así puedes comparar postulantes.\n\n¿Conversamos?' });
   assert.ok(hollow.errors.some((finding) => finding.code === 'tone_muletilla'));
+});
+
+test('English copied from the source is blocked; names and the English said here are not', () => {
+  // Production research of 23 Oct 2026, retried ten times: «El Project incluye…», «apoyo (support) a la construcción (construction)».
+  const english = (body: string, companyName = 'Acme') => checkHumanTone({ subject: 'Obras de las nuevas líneas', body, companyName })
+    .errors.filter((finding) => /inglés/.test(finding.message));
+  assert.equal(english('Hola Ana,\n\nEl Project incluye la construcción de dos nuevas líneas de metro.\n\n¿Conversamos?').length, 1);
+  assert.equal(english('Hola Ana,\n\nEl proyecto contempla apoyo (support) a la construcción (construction) de dos líneas.\n\n¿Conversamos?').length, 1);
+  assert.deepEqual(english('Hola Ana,\n\nEn obras, el peak de diciembre pesa. Soy Michel, de GrupoExpro; hacemos staffing TI y call center para Acme Solutions.\n\n¿Conversamos?', 'Acme Solutions'), []);
+});
+
+test('after «Soy …, de …;» comes what the seller does, not what the recipient does', () => {
+  // Real research of 23 Oct 2026: «Soy Carolina, de PSOL; Tawa Chile encuentra y selecciona talento…».
+  const after = (body: string) => checkHumanTone({ subject: 'Evaluaciones para selección', body, companyName: 'Acme Chile' })
+    .errors.filter((finding) => /Después de «Soy/.test(finding.message));
+  assert.equal(after('Hola Ana,\n\nEn selección, comparar postulantes se demora.\n\nSoy Carolina, de PSOL; Acme Chile encuentra talento para sus clientes.\n\n¿Conversamos?').length, 1);
+  assert.equal(after('Hola Ana,\n\nEn selección, comparar postulantes se demora.\n\nSoy Carolina, de PSOL. Acme Chile trabaja con organizaciones. Hacemos evaluaciones online.\n\n¿Conversamos?').length, 1);
+  assert.deepEqual(after('Hola Ana,\n\nEn selección, comparar postulantes se demora.\n\nSoy Carolina, de PSOL; hacemos evaluaciones para equipos como el de Acme Chile.\n\n¿Conversamos?'), []);
+  assert.deepEqual(after('Hola Ana,\n\nEn selección, comparar postulantes se demora.\n\nSoy Carolina, de PSOL. Hacemos evaluaciones para equipos como el de Acme Chile.\n\n¿Conversamos?'), []);
+});
+
+test('a subject may capitalise a name the evidence capitalises', () => {
+  // Production, 23 Oct 2026: a subject with «Plan Minero Conjunto» was turned back as Title Case eight times.
+  const titled = (knownNames?: string[]) => checkHumanTone({ subject: 'Selección y Plan Minero Conjunto', body: 'Hola Ana,\n\nEl plan abre procesos.\n\n¿Conversamos?', companyName: 'Acme', knownNames })
+    .errors.filter((finding) => /parece título/.test(finding.message));
+  assert.equal(titled().length, 1);
+  assert.deepEqual(titled(['Plan', 'Minero', 'Conjunto']), []);
+});
+
+test('a company whose name is a common word is named only with its capital', () => {
+  // Bank of 30 Oct 2026: «En una cadena de retail con 40 tiendas en la zona sur, …» was read as describing «Tiendas Ejemplo».
+  const ficha = (body: string) => checkHumanTone({ subject: 'Turnos en tiendas', body, companyName: 'Tiendas Ejemplo', hasSignal: false })
+    .errors.filter((finding) => finding.code === 'tone_ficha');
+  assert.deepEqual(ficha('Hola Rodrigo,\n\nEn una cadena de retail con 40 tiendas en la zona sur, los peaks aprietan la cobertura de caja.\n\n¿Conversamos?'), []);
+  assert.equal(ficha('Hola Rodrigo,\n\nTiendas Ejemplo cuenta con 40 tiendas en la zona sur.\n\n¿Conversamos?').length, 1);
+});
+
+test('the blocked phrases a source carries are found, so the writer can be told', () => {
+  assert.deepEqual(blockedPhrasesIn('Contribuimos con las organizaciones, potenciando sus aptitudes. Ofrecemos servicios integrales.').sort(), ['potenciando', 'servicios integrales']);
+  assert.deepEqual(blockedPhrasesIn('Acme abrirá dos tiendas en la zona sur.'), []);
+  // The evidence's names excuse a capital in the subject but still count as words.
+  assert.deepEqual(checkHumanTone({ subject: 'Evaluaciones para Nuevo Nivel Mina', body: 'Hola Ana,\n\nEl proyecto abre procesos.\n\n¿Conversamos?', companyName: 'Acme', knownNames: ['Nuevo', 'Nivel', 'Mina'] })
+    .errors.filter((finding) => finding.code === 'tone_asunto'), []);
 });

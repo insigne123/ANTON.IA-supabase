@@ -6,6 +6,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
+import { blockedPhrasesIn } from '@/lib/server/human-tone-checks';
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { firstNameOf } from '@/lib/lead-name';
@@ -23,6 +24,7 @@ import {
   draftCtaMinutes,
   draftEvidencePersonalizationStatementV2,
   draftSellerStatementsV2,
+  isEnglishStatement,
   personalizationAnchorTerms,
   specificAnchorTerms,
   GeneratedOutreachV2Schema,
@@ -393,10 +395,17 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
     .map((item) => specifics
       ? specificAnchorTerms(item.statement, { companyName: input.context.company.name || '' })
       : personalizationAnchorTerms(item.statement))
-    .filter((terms) => terms.length > 0)
-    .map((terms) => (terms.length === 1
-      ? `conserva este término: ${terms[0]}`
-      : `conserva al menos dos de estos términos: ${terms.join(', ')}`));
+    .map((terms, index) => ({ terms, english: isEnglishStatement(requiredEvidence[index]?.statement) }))
+    .filter(({ terms }) => terms.length > 0)
+    // English evidence: the check accepts the translation, so asking for the words made the writer leave them in English («El Project…»).
+    .map(({ terms, english }) => (english
+      ? `la fuente está en inglés: di en español, nunca en inglés, al menos dos de estos conceptos traducidos (${terms.join(', ')}), con sus nombres propios y cifras como están`
+      : terms.length === 1
+        ? `conserva este término: ${terms[0]}`
+        : `conserva al menos dos de estos términos: ${terms.join(', ')}`));
+  // Real research of 30 Oct 2026: five of six retries were the writer copying a phrase of the company's site the tone check turns back
+  // («potenciando», «servicios integrales», «soluciones de negocio»). Naming them up front saves the retry.
+  const sourceBlockedPhrases = blockedPhrasesIn(input.context.evidence.map((item) => item.statement).join('\n')).slice(0, 6);
   // A later email already had the fact in the initial one: two of its terms in a short reference pass the same check
   // («para la faena minera»), so asking for the whole fact again only made every follow-up open by repeating it (Plan 16).
   const anchorPrompt = anchorLines.length > 0
@@ -623,7 +632,7 @@ ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
 Usa exclusivamente WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION y los campos eligibleFacts y seller de DRAFT_MESSAGE_BRIEF como hechos y capacidades autorizados. REQUIRED_COMMERCIAL_ANGLE solo orienta relevancia, nunca prueba hechos. El historial y el cargo del brief no autorizan afirmaciones nuevas. No inventes datos, métricas, clientes, necesidades ni fuentes. Tampoco límites ni garantías del servicio que el vendedor no declara: qué no hace, qué no reemplaza, quién decide o en qué etapa se usa. No muestres URLs, IDs ni el proceso de investigación dentro del correo. Solo nombra herramientas si son capacidades declaradas por el vendedor.
 
 REPORT_RESTRICTIONS agrega límites factuales, no contenido para copiar.
-
+${sourceBlockedPhrases.length > 0 ? `La fuente usa frases que el control automático rechaza (${sourceBlockedPhrases.map((phrase) => `«${phrase}»`).join(', ')}): no las repitas en el asunto ni en el correo; di el hecho con palabras simples.\n` : ''}
 Reglas no negociables:
 - Si algo choca, manda en este orden: veracidad, instrucción de campaña, estilo, largo.
 - Asunto entre ${input.context.constraints.subject.minCharacters} y ${input.context.constraints.subject.maxCharacters} caracteres. Dos a seis palabras sin contar nombres propios, escrito como oración (mayúscula inicial y el resto en minúscula, salvo nombres propios), específico para este destinatario, tono de colega, sin exclamaciones ni emojis. Nunca uses como asunto: Seguimiento, Recordatorio, ¿Recibiste mi correo?, Presentación de servicios ni promesas de ahorro que el correo no demuestra.
