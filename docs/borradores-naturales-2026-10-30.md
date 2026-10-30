@@ -174,6 +174,12 @@ Los dos que todavía piden retoque son los de minería sin señal, que vuelve al
 - **Validez:** 24 de 24 válidos (23 al primer intento) y `Evalia` 8 de 8.
 - **Lo que queda:** cuando el dato de la empresa no entra en la apertura, a veces queda como oración suelta en el párrafo de la oferta.
 
+### Sexta vuelta: `native-draft/v29`
+
+- **El dato de la empresa va en la apertura sin señal.** En `v28` quedaba a veces como oración suelta en el párrafo de la oferta («La faena minera de … reúne más de 2.000 trabajadores.»). Ahora la apertura sin señal lo lleva en su primera oración, y el editor lo mueve ahí si quedó suelto. Así queda: «En una faena minera como Minera Cascada, con más de 2.000 trabajadores entre propios y contratistas, un relevo que no llega a tiempo puede atrasar el cambio de guardia».
+- **Banco:** 24 de 24 válidos, 23 al primer intento. `Evalia`: 8 de 8 al primer intento. De los 13 en frío, 11 tal cual.
+- **Lo que no se estabiliza.** La elección de servicio para la startup cambia de una corrida a otra: en `v28`, administrar contratos; en `v29`, personal temporal, esta vez con un argumento defendible («contratar fijo para cada alza puede dejar costos cuando baja la carga»). Desde `v26`, la lectura se mueve entre 10 y 11 de 13. Lo que falta medir son los borradores reales.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
