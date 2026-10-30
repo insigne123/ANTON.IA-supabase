@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { blockedPhrasesIn, checkHumanTone, feedbackForToneRetry } from './human-tone-checks';
+import { blockedPhrasesIn, checkHumanTone, feedbackForToneRetry, sentenceFragments } from './human-tone-checks';
 import { draftContextFixture } from './draft-v2-test-fixtures';
 import { validateDraftPreflightV2 } from './draft-preflight-v2';
 
@@ -285,4 +285,11 @@ test('figures in a subject are not words', () => {
   // Real research of 30 Oct 2026: «Capacitación para las Líneas 8 y 9» was turned back twice as seven useful words.
   assert.deepEqual(checkHumanTone({ subject: 'Capacitación para las Líneas 8 y 9', body: 'Hola Ana,\n\nLas obras avanzan.\n\n¿Conversamos?', companyName: 'Acme' })
     .errors.filter((finding) => finding.code === 'tone_asunto'), []);
+});
+
+test('a plural verb is a verb: «En Hualpén cuentan con un programa.» is a sentence', () => {
+  // Real research of 30 Oct 2026: the sentence was turned back as having no verb.
+  assert.deepEqual(sentenceFragments('Hola,\n\nEn Acme cuentan con un Programa de Inclusión Laboral. Cuando operan de noche, venden menos.'), []);
+  // Nouns in -men and -gen are still not verbs.
+  assert.deepEqual(sentenceFragments('Hola,\n\nPara el volumen de diciembre. Cuando falta alguien, cubrimos el turno.'), ['Para el volumen de diciembre.']);
 });

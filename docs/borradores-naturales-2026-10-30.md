@@ -295,6 +295,38 @@ En `v32`, el banco no tiene relleno ni carga genérica en los correos iniciales.
   - La consultora de RR.HH. recibe uno sobre su vacante de ejecutivo de venta técnica y la evaluación por cargo.
   - La exportadora de alimentos, uno sobre sus filiales en el Reino Unido.
 
+### Undécima vuelta: `native-draft/v34`, los seguimientos con investigaciones reales
+
+Hasta `v33` solo se habían probado correos iniciales con investigaciones reales. En producción también fallaban seguimientos y cierres de campaña: un cierre se rechazó 4 veces por el anclaje y dos seguimientos se rechazaron en el reintento. `v34` corre secuencias completas (inicial y 3 pasos) sobre 8 investigaciones reales, entre ellas las que fallaron en producción.
+
+**Qué se vio con `v33`:** de 32 correos, 28 válidos y 23 al primer intento.
+
+- **Frase sin verbo falsa:** «En Acme cuentan con un Programa de Inclusión Laboral.» se marcaba como incompleta, porque el detector no reconocía la tercera persona del plural («cuentan», «operan»).
+- **El hecho de ellos como propio:** en el reintento, el modelo escribió «Soy …, de …; contamos con un Programa de Inclusión Laboral». Copió la primera persona de la web de la empresa.
+- **Cifras de un seguimiento:** «Para apoyar la construcción de las Líneas 8 y 9, en <vendedor> hacemos cursos…» se rechazaba. Al nombrar al vendedor, toda la oración contaba como suya, cifras incluidas.
+- **«Lines» quedaba como «lin»:** el recorte de plurales en español lo eliminaba. Un seguimiento que decía «las nuevas líneas» se quedaba sin su segundo término de anclaje.
+- **Reintento por cifras:** volvía con «Así, el equipo puede…», porque ese reintento no tenía el recordatorio de frases vetadas.
+
+**Qué cambió:**
+
+- **Detector de frases sin verbo:** reconoce la tercera persona del plural («cuentan», «venden»), pero no los sustantivos en -men y -gen («volumen», «imagen»).
+- **Hecho en primera persona:** si la evidencia está en primera persona, el prompt pide contarla en tercera («Acme tiene un programa…»), nunca como propia.
+- **Cifras por cláusula:** una cifra que va antes del nombre del vendedor, en la parte que habla del destinatario, se compara con la evidencia. Una que va después sigue siendo del vendedor.
+- **Términos en inglés:** solo pierden la «s» del plural («lines» queda como «line», no como «lin»).
+- **Seguimientos con fuente en inglés:** nombran el hecho en pocas palabras y sin cifras («las nuevas líneas del metro»).
+- **Reintento por cifras:** también recuerda las frases vetadas.
+
+**Resultado:**
+
+| | `v33` | `v34` |
+| --- | --- | --- |
+| Secuencias reales, 32 correos: válidos | 28 | 32 |
+| … al primer intento | 23 | 27 |
+| Correos iniciales reales (16 con evidencia) | 16 | 16, 15 al primer intento |
+| Banco, 24 correos | 24, 24 al primer intento | 24, 23 al primer intento |
+
+**Lo que todavía se lee raro:** cuando el hecho ancla es la historia de la empresa, cada seguimiento la vuelve a nombrar («con Perú y Chile en su historia»). Los seguimientos están obligados a nombrar el ancla. Con un ancla débil, la referencia sobra.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

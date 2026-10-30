@@ -972,3 +972,18 @@ test('narrowing a statement skips the clause that only introduces the fact', () 
   assert.equal(draftEvidencePersonalizationStatementV2(statement), 'contamos con un Programa de Inclusión Laboral');
   assert.deepEqual(personalizationAnchorTerms(draftEvidencePersonalizationStatementV2(statement)), ['Programa', 'Inclusión', 'Laboral']);
 });
+
+test('a figure before the seller is named, in a clause about the recipient, rests on the evidence; one after it is the seller\'s', () => {
+  // A follow-up on real research of 30 Oct 2026: «Para apoyar la construcción de las Líneas 8 y 9, en GrupoExpro hacemos cursos…».
+  const base = draftContextFixture();
+  const evidence = { ...base.evidence[0]!, statement: 'Acme prepara la construcción de las Líneas 8 y 9 del metro.' };
+  const context = { ...base, evidence: [evidence, ...base.evidence.slice(1)] };
+  const figures = (sentence: string) => validateDraftPreflightV2(context, {
+    subject: 'Cursos para las obras',
+    body: `Hola Paula,\n\n${sentence} Así los equipos llegan preparados a terreno.\n\n¿Te parece si lo conversamos 15 minutos esta semana?`,
+    personalization: [{ evidenceId: evidence.evidenceId, claimId: evidence.supportedFactClaimIds[0]!, sourceUrl: evidence.source.url }],
+    hypothesisIds: [],
+  }, { checkGeneratedCopy: true }).issues.filter((issue) => issue.code === 'unsupported_material_claim');
+  assert.deepEqual(figures(`Para la construcción de las Líneas 8 y 9 de Acme, en ${base.seller.companyName} hacemos cursos para equipos.`), []);
+  assert.ok(figures(`En ${base.seller.companyName} hacemos cursos para las 9 líneas de Acme.`).length > 0);
+});
