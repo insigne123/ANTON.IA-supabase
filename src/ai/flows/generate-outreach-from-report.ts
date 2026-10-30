@@ -9,6 +9,7 @@ import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { firstNameOf } from '@/lib/lead-name';
+import { sentenceCaseSubject } from '@/lib/subject-case';
 import { buildDraftMessageBrief, draftMessageBriefForModel, draftPriorMessageReference } from '@/lib/draft-message-brief';
 import { selectOutreachExamples, selectOpeningScaffold, type OutreachOpeningKind } from '@/lib/outreach-example-library';
 import { SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
@@ -196,11 +197,6 @@ function modelForDraftRequest(input: GenerateOutreachFromDraftContextV2Input) {
     return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-6-luna').trim();
   }
   return modelForDraftPriority(input.context.quality.priority);
-}
-
-/** A subject written as a sentence: its first letter in capital («Dotación para diciembre»), as people fix it by hand. */
-export function sentenceCaseSubject(subject: string) {
-  return subject.replace(/^([^\p{L}]*)(\p{Ll})/u, (_, lead: string, letter: string) => `${lead}${letter.toLocaleUpperCase('es')}`);
 }
 
 function draftWordCount(value: string) {

@@ -687,7 +687,7 @@ test('priority-A drafts think at medium effort, overridable; rewrites and other 
 });
 
 test('the subject reads as a sentence: its first letter in capital, the rest as the model wrote it', async () => {
-  const { sentenceCaseSubject } = await import('./generate-outreach-from-report');
+  const { sentenceCaseSubject } = await import('@/lib/subject-case');
   assert.equal(sentenceCaseSubject('identidad en evaluaciones'), 'Identidad en evaluaciones');
   assert.equal(sentenceCaseSubject('¿turnos en Pudahuel?'), '¿Turnos en Pudahuel?');
   assert.equal(sentenceCaseSubject('Re: dotación para diciembre'), 'Re: dotación para diciembre');
