@@ -16,6 +16,9 @@ test('the checks catch what the text alone shows, once per kind and place', () =
   assert.deepEqual(shorts([signed.replace('en minutos', 'barato y gratis'), signed, signed]),
     ['«Secuencia AXIS», correo 1 · sin «barato»', '«Secuencia AXIS», correo 1 · sin «gratis»']);
   assert.deepEqual(shorts([signed, `${signed}\nGarantizamos resultados.`, signed]), ['«Secuencia AXIS», correo 2 · sin promesas']);
+  // What says nothing and a sentence left without its verb, the same the research path's drafts are checked for.
+  assert.deepEqual(shorts([signed.replace('para {{empresa}}.', 'para {{empresa}}. Eso pone sobre la mesa los ingresos de diciembre.'), signed, signed]), ['«Secuencia AXIS», correo 1 · sin frases vacías']);
+  assert.deepEqual(shorts([signed.replace('para {{empresa}}.', 'para {{empresa}}. Para selección en servicios transitorios.'), signed, signed]), ['«Secuencia AXIS», correo 1 · oraciones completas']);
   const last = signed.replace('¿Te sirve', 'Este es mi último mensaje. ¿Te sirve');
   assert.deepEqual(shorts([last, signed, last]), ['«Secuencia AXIS», correo 1 · cierre solo al final']);
   // A text for several people greets with {{nombre}}: never a fixed name, never «Hola,» alone.

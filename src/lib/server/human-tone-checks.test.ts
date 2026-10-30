@@ -127,5 +127,6 @@ test('human tone blocks a sentence left without its verb, not a short sentence b
   assert.deepEqual(sentenceFragments(GOOD.body), []);
   assert.deepEqual(sentenceFragments('Hola Ana,\n\nUn solo proveedor para personal, aseo y seguridad. ¿Cuántos turnos cubren al mes?'), [], 'a short sentence of another kind is style');
   assert.deepEqual(sentenceFragments('Hola Paula,\n\nLe escribo por la dotación temporal en faena. Con la temporada encima, cubrimos turnos el mismo día.'), []);
-  assert.deepEqual(sentenceFragments('Hola,\n\nPara el cierre de año. Cuando entran muchos guardias a la vez, cubrimos el turno.'), ['Para el cierre de año.']);
+  assert.deepEqual(sentenceFragments('Hola,\n\nPara selección en servicios transitorios. Cuando entran muchos guardias a la vez, cubrimos el turno.'), ['Para selección en servicios transitorios.']);
+  assert.deepEqual(sentenceFragments('Hola,\n\nCon este correo cierro el tema. Con AXIS, cargas la lista de postulantes.'), [], 'the first and second person are verbs');
 });
