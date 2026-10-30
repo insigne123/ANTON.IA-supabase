@@ -596,7 +596,8 @@ test('close step caps model words and forbids re-pitching in the final message',
     assert.ok(bounds);
     assert.ok(Number(bounds[2]) <= 50, `close model cap must stay brief, got ${bounds[2]}`);
     assert.match(prompt, /breakup directo y breve/);
-    assert.match(prompt, /Retoma el BENEFICIO/);
+    assert.match(prompt, /Retoma en una frase lo que harías por esa persona/);
+    assert.doesNotMatch(prompt, /BENEFICIO/);
     assert.match(prompt, /sin aclaraciones innecesarias/);
     assert.match(prompt, /última vez que escribes sobre esto/);
     assert.match(prompt, /UNA sola pregunta directa de sí o no/);
@@ -727,6 +728,30 @@ test('an initial email whose approved CTA is a question does not open with anoth
     const telling = { ...context, constraints: { ...context.constraints, cta: { ...context.constraints.cta, exactText: 'Te dejo mi agenda para esta semana.' } } };
     await generateOutreachFromDraftContextV2({ context: telling, openingKind: 'pregunta' });
     assert.match(prompts[0], /APERTURA ASIGNADA \(pregunta\)/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('without a dated signal the initial email opens with the trade, not with what the company says about itself', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const prompts: string[] = [];
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompts.push(JSON.parse(String(init?.body)).messages[1].content);
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Selección en Acme', opening: 'En una consultora como Acme, la terna se presenta contra el reloj.', value: 'Northstar automatiza tareas repetitivas.' }) } }], usage: {} });
+    };
+    const context = draftContextFixture();
+    const withStatement = (statement: string) => ({ ...context, evidence: context.evidence.map((item) => ({ ...item, statement })) });
+    await generateOutreachFromDraftContextV2({ context: withStatement('Acme recluta y selecciona el mejor talento disponible para sus clientes.') });
+    assert.match(prompts[0], /no hay una señal con fecha o evento/);
+    prompts.length = 0;
+    await generateOutreachFromDraftContextV2({ context: withStatement('Acme publicó 12 vacantes de operario de bodega en octubre.') });
+    assert.doesNotMatch(prompts[0], /no hay una señal con fecha o evento/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;

@@ -75,8 +75,79 @@ Lo que todavía pide retoque en `v24`: una frase de relleno que se cuela («pued
 3. **Prohibir «puede»** quitó la fórmula, pero devolvió obviedades («el equipo tiene que estar listo para atender desde el primer día»).
 4. **Pedir el costo de que salga mal** (qué se pierde, quién se sobrecarga, qué se atrasa) dio consecuencias concretas del rubro. Es la que quedó.
 
+## Segunda vuelta: `native-draft/v25`
+
+`v24` quedó en `main` con el PR 594. La lectura de su última corrida y de los borradores reales de producción mostró lo que faltaba.
+
+**Lo que se encontró:**
+
+- **En producción**, cuando la investigación no trae ninguna señal con fecha, el correo abre repitiendo lo que la empresa dice de sí misma en su sitio («Vi que en … reclutan y seleccionan el mejor talento disponible», «suma más de cinco décadas en proyectos relevantes»), o empieza por lo que vende quien escribe. El prompt se contradecía: pedía abrir con una observación del rubro y, más abajo, «empieza por la propuesta aplicada a esa actividad».
+- **La consecuencia era siempre la misma.** En 8 de 18 correos iniciales, el costo del momento era «la carga recae en el equipo que ya está», que vale para cualquier rubro.
+- **Los seguimientos eran lo más flojo.** Tenían frases vacías en 3 de 6 pasos: «un reemplazo el mismo día permite resolver ese turno operativo», «administrar contratos también puede acompañar la incorporación». También se filtraban palabras de las instrucciones al correo («¿Te parece conversar sobre esta aplicación?»), y el cierre volvía al eslogan («el costo acompaña el peak»).
+- **El control de tono no veía las variantes.** Pasaban «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak» y «Así puede sumar personal…».
+- **La reconexión rellenaba** («esto permite contar con apoyo… El foco es coordinar…») y, con el largo más corto, en una corrida firmó el correo, cuando la firma la agrega el envío.
+
+**Qué cambió:**
+
+| Qué | Dónde |
+| --- | --- |
+| **Apertura sin señal**: sin un hecho con fecha o evento en la evidencia, el inicial no repite la autodescripción de la empresa ni empieza por lo que se vende; abre con lo que se complica en su rubro, con la empresa nombrada de pasada («En una consultora de selección como …, …»). Se quitó la regla que decía lo contrario. | `noSignalOpening` en `src/ai/flows/generate-outreach-from-report.ts` |
+| **Dónde se nota**: «la carga recae en el equipo que ya está» se nombra como obviedad; se pide dónde se nota (la fila en caja, el despacho que sale tarde, el guardia que dobla turno). | mismo archivo |
+| **El costo dicho con lo que pasa**: si la propuesta de valor habla de cuánto dura el costo, se dice con un hecho («cuando termina la temporada, se termina el contrato y deja de pagarse»), no con «el costo acompaña el peak». Solo prohibirlo no bastó: el modelo lo volvía a escribir y el reintento lo arreglaba (6 de 9 primeros intentos rechazados en una corrida). | mismo archivo |
+| **Seguimientos**: lo nuevo va como una escena del trabajo de la persona y lo que hace quien escribe, con ejemplos de otros rubros («Si una grúa queda detenida un viernes, el técnico llega antes del turno del lunes.»); nunca palabras de las instrucciones («esta aplicación», «este enfoque»); el cierre retoma lo que harías, no el eslogan. | mismo archivo y `RESEARCH_SEQUENCE_STEPS` en `src/lib/outreach-sequence-brief.ts` |
+| **Más frases vacías bloqueadas**: «costo/gasto … acompaña» con palabras en medio, «Así puede…», «Así, ese turno puede…» (no «así que»), «puede acompañar», «como parte de la gestión» y, por vigilancia, «reporte interno». La Redactora de Cowork marca las mismas. | `HOLLOW_PATTERNS` y `MULETILLAS` en `src/lib/server/human-tone-checks.ts`; `HOLLOW` en `src/lib/cowork/writer.ts` |
+| **Reconexión**: 70 a 130 palabras, sin firma; el bloque de tono pide decir lo que harías, no lo que la oferta «permite» (`outreach-tone/v3`). | `src/ai/flows/generate-reconnection-message.ts`, `src/lib/outreach-tone.ts` |
+| **El banco guarda por qué se rechazó el primer intento** (`firstIssues` en `results.json`), para ver cuánto reintento cuesta cada regla. | `scripts/evaluate-outreach-set.ts` |
+
+**Resultado** (mismo banco, Luna; el contador de relleno ahora también cuenta las variantes de arriba, así que `v24` se volvió a contar con él):
+
+| Banco de 20 casos | `v24` (en `main`) | `v25` |
+| --- | --- | --- |
+| Iniciales con frases que no dicen nada (de 18) | 3 | 0 |
+| Iniciales con «la carga recae en el equipo» (de 18) | 8 | 1 |
+| Iniciales con cinco palabras seguidas de la propuesta de valor (de 18) | 1 | 2 |
+| Seguimientos con frases que no dicen nada (de 6) | 3 | 1 |
+| Válidos al final | 16 de 16 iniciales, 8 de 8 pasos | 16 de 16, 8 de 8 |
+| Válidos al primer intento (de 24 generaciones) | 22 | 23 |
+| Costo de la corrida | US$0,088 | US$0,084 |
+
+- **Con el segundo vendedor** (`Evalia`, 8 casos): 8 de 8 válidos, sin relleno ni «la carga recae en el equipo», y ninguno copia el ejemplo del costo, que no es de su oferta. El único reintento fue un falso positivo del detector de oraciones sin verbo («Si se alarga, se posterga la decisión de contratación.»): ahora un pronombre delante de una palabra («se alarga») cuenta como verbo. Aquí las «cinco palabras seguidas de la propuesta» (6 de 8) no son eslogan. Su propuesta es un mecanismo («los postulantes rinden los tests desde cualquier dispositivo…») y el correo lo cuenta tal cual.
+- **Secuencias** (2 de 4 pasos): 8 de 8 válidos al primer intento y ningún seguimiento con relleno. Los seguimientos ahora dicen una sola cosa concreta («si alguien falta durante una jornada, en ServiPro reemplazamos ese turno el mismo día») y no retoman el eslogan en el cierre.
+- **Gasto de esta vuelta:** nueve corridas, US$0,53.
+
+**Leídos uno por uno** (los mismos 13 correos en frío, con el mismo criterio y la misma advertencia: una sola lectura, no a ciegas):
+
+| 13 correos en frío | `v23` | `v24` | `v25` |
+| --- | --- | --- | --- |
+| Suena a persona (promedio) | 2,4 | 3,8 | 4,0 |
+| Da una razón interesante (promedio) | 1,9 | 3,2 | 3,5 |
+| Lo enviaría tal cual | 0 | 8 | 9 |
+| Con un retoque | 5 | 5 | 4 |
+| No lo enviaría | 8 | 0 | 0 |
+
+Lo que mejoró se ve en la segunda oración: «se resienten la atención en sala y la reposición», «se acumula fruta por procesar», «aprieta los descansos de quienes toman los turnos», «se sigue pagando personal para una etapa que ya pasó». Lo que todavía pide retoque: dos aperturas sin señal que siguen apoyándose en el tamaño de la empresa sin decir nada más («ajustar la duración de la dotación importa»), una oración enredada en minería y una respuesta a «no hay presupuesto» que en esa corrida no lo reconoció (en las otras tres corridas sí).
+
+**Una corrida intermedia enseñó algo:** quitar del prompt los ejemplos negativos («el costo acompaña el peak») para no «sembrar» la frase no la redujo. El modelo la escribe porque parafrasea la propuesta de valor del vendedor («el costo se va con el peak»). Lo que funcionó fue darle una manera concreta de decir esa idea.
+
 ## Lo que falta
 
-- **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. Es lo que más mueve la calidad (`docs/senales-de-la-investigacion-al-correo.md`).
+- **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
+
+  **Cuánto pesa, en producción** (292 informes de los últimos 30 días, lectura de solo lectura):
+
+  | Señal con fecha más reciente del informe | Informes |
+  | --- | --- |
+  | De 30 días o menos (la única que el borrador usa) | 25 (9 %) |
+  | De 31 a 90 días | 39 (13 %) |
+  | De 91 a 180 días | 10 (3 %) |
+  | Más antigua | 27 (9 %) |
+  | Ninguna | 191 (65 %) |
+
+  - **Lo que falta en la mayoría de los informes:** dos de cada tres correos se escriben sin ninguna señal. Por eso la apertura sin señal de `v25` es la que más se usa.
+  - **Un caso de la última semana:** el informe traía cuatro proyectos terminados con mes y año («En mayo de 2026, … finalizó la revisión técnica … para BHP»). La regla de 30 días los dejó fuera, y el correo abrió con «más de cinco décadas en proyectos».
+  - **La decisión que se había tomado:** mantener los 30 días («un hecho de hace tres meses no es "vi que"»). Se tomó con 8 empresas, donde alargar la ventana no sumaba ninguna.
+  - **Lo que muestra producción:** con 90 días, los informes con un hecho con fecha pasarían de 9 % a 22 %. El correo lo diría con su mes («En agosto terminaron …»), nunca como «vi que».
+  - **Pendiente:** es una decisión de quien administra.
+- **Las «señales» de la búsqueda no siempre lo son.** Lo que la búsqueda de empleos o noticias devuelve queda como `hiring_signal` o `news_signal` (`native-research.ts`), aunque sea un post del blog de la empresa («El papel estratégico del Employer Branding…»), el título de una sección del sitio o una certificación. Cuando la página no tiene fecha, se le pone la de captura, y el indicador de calidad cuenta «señales recientes» que no existen. El borrador ya no las toma como gancho: la búsqueda no entra como evidencia y el filtro saca los títulos. Pero el indicador engaña a quien lee el informe.
 - **Las objeciones.** El correo ya reconoce lo que dijo la persona, pero el servidor le agrega el CTA de reunión del estilo; a quien dijo «no hay presupuesto» le sobra.
 - **La Redactora de Cowork** (Contacto del día, Cowork) escribe mejor que la vía de borradores, pero todos sus primeros correos siguen la misma forma («En [rubro], cuando…» y el eslogan de la oferta).

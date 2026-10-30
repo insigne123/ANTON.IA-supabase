@@ -181,7 +181,9 @@ async function generateWithRetry(
   let output = await generateOutreachFromDraftContextV2(baseArgs as never);
   onUsage(output.usage, output.model);
   let checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds });
-  if (checked.validation.valid) return { output, validation: checked.validation, body: checked.body, attempts: 1, recovered: false };
+  if (checked.validation.valid) return { output, validation: checked.validation, body: checked.body, attempts: 1, recovered: false, firstIssues: [] as string[] };
+  // What turned the first attempt back: the retry rate is a cost and, when the retry fails too, a draft that is not created.
+  const firstIssues = checked.validation.issues.map((issue) => issue.message);
   const retry = await generateOutreachFromDraftContextV2({
     ...baseArgs,
     rewrite: {
@@ -191,7 +193,7 @@ async function generateWithRetry(
   } as never);
   onUsage(retry.usage, retry.model);
   checked = validate({ subject: retry.subject, body: retry.body, personalization: retry.personalization, hypothesisIds: retry.hypothesisIds });
-  return { output: retry, validation: checked.validation, body: checked.body, attempts: 2, recovered: checked.validation.valid };
+  return { output: retry, validation: checked.validation, body: checked.body, attempts: 2, recovered: checked.validation.valid, firstIssues };
 }
 
 const results: any[] = [];
@@ -283,11 +285,11 @@ for (const evalCase of evalSet.cases) {
           },
           addUsage,
         );
-        const { output, validation, body, attempts, recovered } = tried;
+        const { output, validation, body, attempts, recovered, firstIssues } = tried;
         steps.push({
           step: index, subject: output.subject, body, model: output.model,
           words: wordCount(body), subjectWords: wordCount(output.subject),
-          valid: validation.valid, attempts, recovered,
+          valid: validation.valid, attempts, recovered, firstIssues,
           issues: validation.issues.map((issue: any) => issue.message),
           warnings: validation.preflight.warnings,
         });
@@ -311,12 +313,12 @@ for (const evalCase of evalSet.cases) {
       },
       addUsage,
     );
-    const { output, validation, body, attempts, recovered } = tried;
+    const { output, validation, body, attempts, recovered, firstIssues } = tried;
     results.push({
       id: evalCase.id, type: evalCase.type, openingKind, cta: resolveEffectiveCta(context, body, (requestExtras as { userInstruction?: string }).userInstruction),
       subject: output.subject, body, model: output.model,
       words: wordCount(body), subjectWords: wordCount(output.subject),
-      valid: validation.valid, attempts, recovered,
+      valid: validation.valid, attempts, recovered, firstIssues,
       issues: validation.issues.map((issue: any) => issue.message),
       warnings: validation.preflight.warnings,
     });

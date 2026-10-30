@@ -85,12 +85,13 @@ Instrucciones:
 - Máximo 4 párrafos cortos con aire entre ellos; nunca un bloque único de texto.
 - El asunto debe tener maximo 8 palabras y no usar mayusculas exageradas.
 - El cuerpo debe ser HTML simple usando solo <p>, <br>, <strong> y <ul><li> si realmente ayuda.
-- 90 a 170 palabras.
+- 70 a 130 palabras: lo justo para el recuerdo, la novedad y el pedido, sin relleno.
 - Debe conectar la nueva oferta con al menos un dolor, prioridad o contexto del lead/empresa si existe evidencia.
 - Debe incluir un CTA claro y simple.
 - Si hay una guia previa de asunto o cuerpo, usala como direccion, no como copia literal.
 - Evita sonar como spam, newsletter o mensaje masivo.
 - No uses placeholders en la salida final.
+- No incluyas firma ni despedida («Saludos», tu nombre, tu cargo): la firma la agrega el envío.
 - ${OUTREACH_TONE_BLOCK}
 
 Devuelve solo JSON valido con esta forma exacta:
