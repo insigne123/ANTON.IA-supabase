@@ -381,7 +381,7 @@ const FREE = /\b(gratis|gratuit[oa]s?|sin costo|prueba gratuita)\b/;
 const PROMISE = /\b(garantiza(?:mos|do|da)?|100\s?%|el mejor|la mejor|numero uno|lider del mercado|revolucionari[oa])\b/;
 // Sentences that say nothing (the research path's draft check blocks the same ones: human-tone-checks.ts).
 // «es una alternativa» has its own check below, with the abstract benefits.
-const HOLLOW = /\b(es una opcion|pone sobre la mesa|forma parte del trabajo|es parte del trabajo|el costo acompana|pense que podria|me gustaria|la idea es)\b/;
+const HOLLOW = /\b(es una opcion|pone sobre la mesa|forma parte del trabajo|es parte del trabajo|el costo acompana|pense que podria|me gustaria|la idea es|puede implicar|asi,? (?:el|su) equipo)\b/;
 const CLOSING = /\b(ultimo (?:mensaje|correo)|ultima vez|cierro (?:el|este) (?:hilo|tema)|no (?:te )?(?:vuelvo|volvere) a escribir)\b/;
 // A greeting followed by a capitalized name («Hola Felipe,»); «Hola equipo,» is not a name.
 const GREETING_NAME = /^\s*(?:[Hh]ola|[Ee]stimad[oa]|[Bb]uen(?:os|as) (?:d[ií]as|tardes))\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)/;

@@ -64,6 +64,8 @@ const MULETILLAS = [
   'es una alternativa', 'puede ser una alternativa', 'es una opcion', 'puede ser una opcion',
   'pone sobre la mesa', 'forma parte del trabajo', 'es parte del trabajo', 'el costo acompana',
   'segun su reporte', 'en la conversacion salio',
+  // «Así, el equipo puede…»: 36 de las 120 frases más artificiales que marcó el juez el 23 de octubre (borradores-ganchos-y-reglas.md).
+  'puede implicar', 'asi el equipo', 'asi su equipo', 'asi el apoyo',
 ];
 
 // Solo advierten: a veces son válidas con un dato concreto.

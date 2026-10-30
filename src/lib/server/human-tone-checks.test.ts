@@ -118,6 +118,11 @@ test('preflight warns when the approved CTA mixes tratamiento with an usted body
   assert.ok(result.preflight.warnings.some((w) => /otro tratamiento/.test(w)));
 });
 
+test('human tone blocks the bridges that say nothing', () => {
+  for (const sentence of ['La puesta en marcha puede implicar sumar personal.', 'Así, el equipo puede revisar opciones con más agilidad.', 'Es una alternativa para cubrir la conserjería.'])
+    assert.ok(checkHumanTone({ subject: 'Dotación para diciembre', body: `Hola Rodrigo,\n\n${sentence}\n\n¿Conversamos?` }).errors.some((finding) => finding.code === 'tone_muletilla'), sentence);
+});
+
 test('human tone blocks a sentence left without its verb, not a short sentence by style', async () => {
   const { sentenceFragments } = await import('./human-tone-checks');
   // A draft of 29 Oct 2026 opened like this, and the person had to rewrite it.
