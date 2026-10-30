@@ -4,7 +4,7 @@ import test from 'node:test';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import type { ReportV2 } from '@/lib/report-v2-contracts';
 import {
-  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftFlagsForUser, draftHookFilterEnabled, draftSignalEvidenceEnabled, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
+  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftFlagsForUser, draftHookFilterEnabled, draftSignalEvidenceEnabled, draftSignalMaxAgeDays, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
 } from './draft-context-v2';
 import { DRAFT_FIXTURE_NOW, draftReportV2Fixture, draftSnapshotFixture } from './draft-v2-test-fixtures';
 
@@ -44,12 +44,13 @@ function reportWithSignal(overrides: { statement?: string; observedAt?: string; 
   return report;
 }
 
-function build(reportDocument: ReportV2, signalEvidence?: boolean, hookFilter?: boolean, anchorSpecifics?: boolean) {
+function build(reportDocument: ReportV2, signalEvidence?: boolean, hookFilter?: boolean, anchorSpecifics?: boolean, signalMaxAgeDays?: number) {
   const snapshot = draftSnapshotFixture();
   const result = buildDraftContextV2({
     snapshot, artifact: { contentHash: canonicalSha256(snapshot), capturedAt: '2026-08-20T12:00:00.000Z' },
     seller: normalizeDraftSellerProfileV2({ name: 'Grace Hopper', companyName: 'Northstar', services: ['Automatización de operaciones'] }),
     style: createDefaultDraftWritingStyleV2(), reportDocument, now: DRAFT_FIXTURE_NOW, ...(signalEvidence === undefined ? {} : { signalEvidence }), ...(hookFilter === undefined ? {} : { hookFilter }), ...(anchorSpecifics === undefined ? {} : { anchorSpecifics }),
+    ...(signalMaxAgeDays === undefined ? {} : { signalMaxAgeDays }),
   });
   assert.equal(result.status, 'ready');
   if (result.status !== 'ready') throw new Error('not ready');
@@ -104,6 +105,22 @@ test('a signal older than the draft accepts is not added, with or without the fl
   assert.ok(!context.evidence.some((item) => item.provenance?.kind === 'report_v2' && item.provenance.claimId === 'c02'));
 });
 
+test('DRAFT_SIGNAL_MAX_AGE_DAYS lets an older dated signal reach the email, never past what it says, and only a signal', () => {
+  assert.equal(draftSignalMaxAgeDays({}), 30);
+  assert.equal(draftSignalMaxAgeDays({ DRAFT_SIGNAL_MAX_AGE_DAYS: ' 90 ' }), 90);
+  for (const value of ['7', '365', 'noventa', '45.5']) assert.equal(draftSignalMaxAgeDays({ DRAFT_SIGNAL_MAX_AGE_DAYS: value }), 30, value);
+  // 82 days before the fixture's today: out with 30 or 60 days, in with 90.
+  const reaches = (days?: number) => build(reportWithSignal({ observedAt: '2026-06-01T12:00:00.000Z' }), true, undefined, undefined, days)
+    .evidence.some((item) => item.provenance?.kind === 'report_v2' && item.provenance.claimId === 'c02');
+  assert.equal(reaches(), false);
+  assert.equal(reaches(60), false);
+  assert.equal(reaches(90), true);
+  // The page itself must still have been read within 30 days, whatever the window.
+  const stalePage = reportWithSignal({ observedAt: '2026-06-01T12:00:00.000Z' });
+  stalePage.evidenceGraph.sources.find((source) => source.id === 'src_cccccccccc')!.retrievedAt = '2026-07-01T12:00:00.000Z';
+  assert.ok(!build(stalePage, true, undefined, undefined, 90).evidence.some((item) => item.provenance?.kind === 'report_v2' && item.provenance.claimId === 'c02'));
+});
+
 test('an invalid citation in a section the draft does not read does not discard the report, one in the angle still does', () => {
   const company = { section: 'company' as const, paragraphIndex: 1, type: 'invalid_citation' as const, fragment: 'el perfil corporativo importado indica operación en Perú', severity: 'warn' as const };
   const angle = { ...company, section: 'angle' as const };
@@ -134,11 +151,11 @@ test('the specific anchor terms are off unless DRAFT_ANCHOR_SPECIFICS_ENABLED is
 
 const PILOT_PERSON = '5B1F0F5E-1C2D-4E3F-8A4B-0000000000AA';
 const OTHER_PERSON = '00000000-0000-4000-8000-000000000001';
-const ALL_ON = { DRAFT_SIGNAL_EVIDENCE_ENABLED: 'true', DRAFT_HOOK_FILTER_ENABLED: 'true', DRAFT_ANCHOR_SPECIFICS_ENABLED: 'true' };
+const ALL_ON = { DRAFT_SIGNAL_EVIDENCE_ENABLED: 'true', DRAFT_HOOK_FILTER_ENABLED: 'true', DRAFT_ANCHOR_SPECIFICS_ENABLED: 'true', DRAFT_SIGNAL_MAX_AGE_DAYS: '90' };
 
-test('DRAFT_PILOT_USER_IDS limits the three flags to the people of the pilot, and never turns one on by itself', () => {
-  const everyone = { signalEvidence: true, hookFilter: true, anchorSpecifics: true };
-  const nobody = { signalEvidence: false, hookFilter: false, anchorSpecifics: false };
+test('DRAFT_PILOT_USER_IDS limits the draft flags to the people of the pilot, and never turns one on by itself', () => {
+  const everyone = { signalEvidence: true, hookFilter: true, anchorSpecifics: true, signalMaxAgeDays: 90 };
+  const nobody = { signalEvidence: false, hookFilter: false, anchorSpecifics: false, signalMaxAgeDays: 30 };
   // Without a list each flag is what it says, for everyone: also for a draft with no known person.
   for (const person of [PILOT_PERSON, OTHER_PERSON, null, undefined]) assert.deepEqual(draftFlagsForUser(person, ALL_ON), everyone);
   assert.deepEqual(draftFlagsForUser(OTHER_PERSON, { ...ALL_ON, DRAFT_PILOT_USER_IDS: '  ,  ' }), everyone, 'an empty list is no list');
@@ -150,7 +167,7 @@ test('DRAFT_PILOT_USER_IDS limits the three flags to the people of the pilot, an
   assert.deepEqual(draftFlagsForUser('', pilot), nobody);
   // The list turns nothing on: each flag still decides by itself.
   assert.deepEqual(draftFlagsForUser(PILOT_PERSON, { DRAFT_PILOT_USER_IDS: PILOT_PERSON }), nobody);
-  assert.deepEqual(draftFlagsForUser(PILOT_PERSON, { DRAFT_PILOT_USER_IDS: PILOT_PERSON, DRAFT_HOOK_FILTER_ENABLED: 'true' }), { signalEvidence: false, hookFilter: true, anchorSpecifics: false });
+  assert.deepEqual(draftFlagsForUser(PILOT_PERSON, { DRAFT_PILOT_USER_IDS: PILOT_PERSON, DRAFT_HOOK_FILTER_ENABLED: 'true' }), { signalEvidence: false, hookFilter: true, anchorSpecifics: false, signalMaxAgeDays: 30 });
 });
 
 test('a context built with the specific anchors says so; one built without them is exactly what it was', () => {
