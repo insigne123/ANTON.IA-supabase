@@ -36,13 +36,16 @@ export type HumanToneCheckInput = {
   // Names the subject may capitalise besides the person and the company: the seller's, and those written capitalised in the evidence
   // («Plan Minero Conjunto», «Talleres Neptuno»). In production a subject with one of them was turned back as Title Case eight times.
   knownNames?: string[];
+  // The seller's company, whose name may carry an English word («Talent Solutions»).
+  sellerName?: string | null;
 };
 
 // Copied from an English source («El Project incluye…», «apoyo (support) a la construcción (construction)»): never Spanish, unlike
 // «staffing», «call center» or «peak», which are said here.
 const ENGLISH_ONLY = new Set(['the', 'and', 'of', 'with', 'for', 'from', 'after', 'project', 'support', 'construction', 'graduation',
   'leading', 'services', 'solutions', 'company', 'business', 'development', 'through', 'which', 'will', 'would', 'growth', 'includes',
-  'including', 'expected', 'stations', 'network', 'loans', 'financing', 'founder', 'founders']);
+  'including', 'expected', 'stations', 'network', 'loans', 'financing', 'founder', 'founders', 'commercial', 'subsidiaries',
+  'united', 'kingdom', 'netherlands', 'korea', 'lines']);
 
 // Bloquean. Se comparan sin tildes ni mayúsculas.
 const MULETILLAS = [
@@ -225,7 +228,8 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
     for (const token of normalize(name).split(' ').filter((token) => token.length >= 3)) capitalised.add(token);
   }
   if (subject) {
-    const useful = subject.split(/\s+/).filter((word) => /\w/.test(word) && !properNouns.has(normalize(word).replace(/^[¿?¡!"'([{]+|[.,;:!?)"'\]}]+$/g, '')));
+    // A figure is not a word: «Capacitación para las Líneas 8 y 9» has five, and was turned back twice as seven (real research, 30 Oct 2026).
+    const useful = subject.split(/\s+/).filter((word) => /\p{L}/u.test(word) && !properNouns.has(normalize(word).replace(/^[¿?¡!"'([{]+|[.,;:!?)"'\]}]+$/g, '')));
     if (useful.length < 2 || useful.length > 6) {
       errors.push({ code: 'tone_asunto', message: `El asunto tiene ${useful.length} palabras útiles (sin contar nombres propios); debe tener entre 2 y 6.`, blocking: true });
     }
@@ -286,11 +290,24 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
   }
 
   // A name of a company may carry one («White Lion Foods», «Talent Solutions»): those are left alone.
-  const ownNames = new Set([input.companyName, ...(input.knownNames || [])].flatMap((name) => normalize(name).split(' ')));
+  // Only the two companies' names: the evidence's capitals include «United Kingdom».
+  const ownNames = new Set([input.companyName, input.sellerName].flatMap((name) => normalize(name).split(' ')));
   const english = [...new Set(`${subject}\n${modelBody}`.split(/[^\p{L}]+/u)
     .filter((word) => ENGLISH_ONLY.has(word.toLowerCase()) && !ownNames.has(normalize(word))))];
+  // «filiales en el Reino Unido (United Kingdom)» (real research, 30 Oct 2026): the original in English as a gloss. Spanish in brackets
+  // («(Metro de Santiago)»), an acronym («(ITO)»), a figure («(Ley 21.015)») or one brand name («(ExproFacility)») are not glosses.
+  const SPANISH_LINK = /^(?:de|del|la|el|los|las|y|en|para|con|por)$/i;
+  for (const match of `${subject}\n${modelBody}`.matchAll(/\(([A-Za-z]+(?: [A-Za-z]+){0,3})\)/g)) {
+    const words = match[1].split(' ');
+    const gloss = !words.some((word) => SPANISH_LINK.test(word)) && words.some((word) => /[a-z]/.test(word))
+      && (words.length >= 2 || ENGLISH_ONLY.has(words[0].toLowerCase()) || /^[a-z]/.test(words[0]));
+    if (gloss && !english.includes(match[0])) english.push(match[0]);
+  }
   if (english.length > 0) {
-    errors.push({ code: 'tone_formato', message: `Hay palabras en inglés copiadas de la fuente (${english.slice(0, 4).map((word) => `«${word}»`).join(', ')}): escríbelas en español.`, blocking: true });
+    // On the corrective retry only a notice, like the ficha: the writer keeps «United Kingdom» as a name, and a draft not created is worse.
+    const finding = { code: 'tone_formato', message: `Hay palabras en inglés copiadas de la fuente (${english.slice(0, 4).map((word) => `«${word}»`).join(', ')}): escríbelas en español («Reino Unido», «proyecto»).`, blocking: !input.finalAttempt } as const;
+    if (finding.blocking) errors.push({ ...finding });
+    else warnings.push({ ...finding });
   }
 
   // «Soy Carolina, de PSOL; Tawa Chile encuentra y selecciona talento…» (real research, 30 Oct 2026): after the introduction comes what the

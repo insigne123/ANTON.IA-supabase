@@ -271,6 +271,30 @@ Después de desplegar `v30` (`38ae43e5`, 30 de octubre a las 16:05 UTC), el reda
 
 En `v32`, el banco no tiene relleno ni carga genérica en los correos iniciales.
 
+### Décima vuelta: `native-draft/v33`, el hecho antes que el eslogan
+
+`v32` quedó en producción (`ca85aec1`, 30 de octubre a las 19:33 UTC). En las mismas 21 investigaciones, el ancla del informe todavía era el eslogan cuando la investigación traía un hecho mejor sin anclar. Por ejemplo, el «Programa de Inclusión Laboral (Ley 21.015)» de una empresa de transporte, para un gerente de relaciones laborales, o una vacante publicada, para un jefe de reclutamiento.
+
+**Qué cambió:**
+
+- **Hecho antes que eslogan:** un hecho de la empresa va antes que su eslogan o su biografía, aunque el informe haya elegido el eslogan. Entre hechos, primero el que eligió el informe. La historia de los fundadores («In 2012, … co-founding …») cuenta como biografía.
+- **Frases que solo introducen el hecho:** al recortar la evidencia se saltan las que abren con «De acuerdo a los lineamientos de…» o «Según…». El ancla pide «Programa, Inclusión, Laboral», no «acuerdo, lineamientos».
+- **Evidencia en inglés:**
+  - El prompt ya no muestra los términos en inglés, porque el modelo los copiaba entre paréntesis («Reino Unido (United Kingdom)»). Ahora pide contar el hecho en español con el nombre y las cifras.
+  - El control marca el inglés y las glosas entre paréntesis. Solo exime los nombres de las dos empresas.
+  - En el reintento el inglés solo avisa: el modelo trata «United Kingdom» como nombre propio, y un borrador que no se crea es peor.
+- **Reintento solo por una frase** (vetada, inglés, comillas, publicidad): repara esa frase y deja el resto del correo. Antes reescribía todo desde cero y metía una frase vetada nueva («Así puedes…»). Cuando hay que empezar de cero, el prompt recuerda las frases vetadas.
+- **Asunto:** las cifras no cuentan como palabras. «Capacitación para las Líneas 8 y 9» se rechazaba por tener siete.
+
+**Resultado:**
+
+- **Banco:** 24 de 24 válidos al primer intento.
+- **Investigaciones reales:** 17 de 18 válidos en la corrida completa. El que faltaba (el asunto con cifras) sale al primer intento después del último cambio.
+- **Lo que se lee distinto:**
+  - La empresa de transporte recibe un correo sobre su programa de inclusión y la asesoría en inclusión.
+  - La consultora de RR.HH. recibe uno sobre su vacante de ejecutivo de venta técnica y la evaluación por cargo.
+  - La exportadora de alimentos, uno sobre sus filiales en el Reino Unido.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

@@ -239,7 +239,7 @@ test('a slogan or a biography is a sales line, page chrome is worse, and a fact 
     assert.equal(draftEvidenceSalesTone(statement), 0, statement);
 });
 
-test('the anchor the report chose stays, but between two of its anchors the fact goes before the slogan, and chrome never anchors', () => {
+test('a fact anchors before a slogan or a biography, the report\'s choice first among facts, and chrome never anchors', () => {
   const evidence = (id: string, statement: string, confidence = 0.8) => ({ evidenceId: id, statement, supportedFactClaimIds: [`claim-${id}`], source: { url: `https://acme.example/${id}` }, subjectScope: 'company', confidence });
   const chosen = (statements: string[], anchors: string[]) => requiredReportAwareDraftPersonalizationV2({
     evidence: statements.map((statement, index) => evidence(`e${index}`, statement, index === statements.length - 1 ? 0.9 : 0.8)),
@@ -248,7 +248,9 @@ test('the anchor the report chose stays, but between two of its anchors the fact
   } as never)[0]!.evidenceId;
   // Both chosen by the report: the fact, though the slogan comes first.
   assert.equal(chosen(['Brindamos servicios integrales para la gran minería.', 'Mantenimiento vial y obras civiles para la industria minera'], ['claim-e0', 'claim-e1']), 'e1');
-  // A fact the report did not choose does not jump over its anchor, slogan or not; chrome never anchors.
-  assert.equal(chosen(['Brindamos servicios integrales para la gran minería.', 'Hace 15 años iniciamos operaciones en Perú.'], ['claim-e0']), 'e0');
+  // A fact the report did not choose goes before its slogan, but not before its fact; chrome never anchors.
+  assert.equal(chosen(['Brindamos servicios integrales para la gran minería.', 'Hace 15 años iniciamos operaciones en Perú.'], ['claim-e0']), 'e1');
+  assert.equal(chosen(['Mantenimiento vial y obras civiles para la industria minera', 'Hace 15 años iniciamos operaciones en Perú.'], ['claim-e0']), 'e0');
+  assert.equal(chosen(['In 2012, Gareth and Greg embarked on a venture by co-founding Acme.', 'Acme has commercial subsidiaries in five countries.'], ['claim-e0']), 'e1');
   assert.equal(chosen(['Envíenos un mensaje completando el siguiente formulario.', 'Brindamos servicios integrales para la gran minería.'], ['claim-e0']), 'e1');
 });

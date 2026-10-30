@@ -235,6 +235,15 @@ test('English copied from the source is blocked; names and the English said here
     .errors.filter((finding) => /inglés/.test(finding.message));
   assert.equal(english('Hola Ana,\n\nEl Project incluye la construcción de dos nuevas líneas de metro.\n\n¿Conversamos?').length, 1);
   assert.equal(english('Hola Ana,\n\nEl proyecto contempla apoyo (support) a la construcción (construction) de dos líneas.\n\n¿Conversamos?').length, 1);
+  assert.equal(english('Hola Ana,\n\nAcme tiene filiales comerciales en el Reino Unido (United Kingdom).\n\n¿Conversamos?').length, 1);
+  assert.equal(english('Hola Ana,\n\nCon filiales de Acme en el United Kingdom, una búsqueda cruza mercados.\n\n¿Conversamos?').length, 1);
+  // On the corrective retry it is a notice, so the draft is still created.
+  const retried = checkHumanTone({ subject: 'Selección comercial', body: 'Hola Ana,\n\nCon filiales de Acme en el United Kingdom, una búsqueda cruza mercados.\n\n¿Conversamos?', companyName: 'Acme', finalAttempt: true });
+  assert.ok(!retried.errors.some((finding) => /inglés/.test(finding.message)) && retried.warnings.some((finding) => /inglés/.test(finding.message)));
+  // The evidence writes «United Kingdom» capitalised: that excuses a capital in the subject, not English in the email.
+  assert.equal(checkHumanTone({ subject: 'Selección comercial', body: 'Hola Ana,\n\nCon filiales de Acme en el United Kingdom, una búsqueda cruza mercados.\n\n¿Conversamos?', companyName: 'Acme', knownNames: ['United', 'Kingdom'], sellerName: 'Talent Solutions' })
+    .errors.filter((finding) => /inglés/.test(finding.message)).length, 1);
+  assert.deepEqual(english('Hola Ana,\n\nEl proyecto (Metro de Santiago) usa ITO (ITO) y la Ley 21.015 (Ley 21.015). Con ExproFacility (ExproFacility) cubrimos aseo.\n\n¿Conversamos?'), []);
   assert.deepEqual(english('Hola Ana,\n\nEn obras, el peak de diciembre pesa. Soy Michel, de GrupoExpro; hacemos staffing TI y call center para Acme Solutions.\n\n¿Conversamos?', 'Acme Solutions'), []);
 });
 
@@ -269,5 +278,11 @@ test('the blocked phrases a source carries are found, so the writer can be told'
   assert.deepEqual(blockedPhrasesIn('Acme abrirá dos tiendas en la zona sur.'), []);
   // The evidence's names excuse a capital in the subject but still count as words.
   assert.deepEqual(checkHumanTone({ subject: 'Evaluaciones para Nuevo Nivel Mina', body: 'Hola Ana,\n\nEl proyecto abre procesos.\n\n¿Conversamos?', companyName: 'Acme', knownNames: ['Nuevo', 'Nivel', 'Mina'] })
+    .errors.filter((finding) => finding.code === 'tone_asunto'), []);
+});
+
+test('figures in a subject are not words', () => {
+  // Real research of 30 Oct 2026: «Capacitación para las Líneas 8 y 9» was turned back twice as seven useful words.
+  assert.deepEqual(checkHumanTone({ subject: 'Capacitación para las Líneas 8 y 9', body: 'Hola Ana,\n\nLas obras avanzan.\n\n¿Conversamos?', companyName: 'Acme' })
     .errors.filter((finding) => finding.code === 'tone_asunto'), []);
 });
