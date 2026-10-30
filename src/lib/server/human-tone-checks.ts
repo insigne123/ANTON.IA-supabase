@@ -74,7 +74,8 @@ const MULETILLAS = [
 const HOLLOW_PATTERNS: Array<[RegExp, string]> = [
   [/(?<!\w)(?:costo|gasto)(?: \w+){0,4} acompan(?:a|e|an|en)(?!\w)/, 'el costo acompaña'],
   // «Así, ese turno puede volver a tener cobertura»: repite lo anterior como consecuencia. «Así que» es otra cosa.
-  [/(?<!\w)asi(?! que)(?: \w+){1,2} (?:puede|pueden|podra|podran)(?!\w)/, 'así … puede'],
+  [/(?<!\w)asi(?! que)(?: \w+){1,3} (?:puede|pueden|podra|podran)(?!\w)/, 'así … puede'],
+  [/(?<!\w)asi (?:usted|ustedes|tu|el equipo|su equipo) (?:cuenta|cuentan|tiene|tienen|queda|quedan)(?!\w)/, 'así, usted cuenta…'],
 ];
 
 // Solo advierten: a veces son válidas con un dato concreto.

@@ -261,6 +261,9 @@ function bodyParagraphs(value: string) {
     .filter(Boolean);
 }
 
+// «Soy <nombre>, de <empresa>;» or «.»: how the writer introduces itself since native-draft/v24.
+const SELF_INTRODUCTION = /^\s*soy\s+[^,;.]{1,40},\s+de\s+[^,;.]{1,60}[;,]\s*/i;
+
 function sentenceParts(value: string) {
   return value
     .split(/(?<=[.!?])\s+|\n{2,}/)
@@ -727,12 +730,17 @@ export function validateDraftPreflightV2(
   // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.
   const materialSentences = claimCheckContent.replace(/^[ \t]*\d+[.)][ \t]+(?=\S)/gm, '').split(/\r?\n/).flatMap(sentenceParts);
   for (const sentence of materialSentences) {
-    const normalized = normalizeForMatch(sentence);
+    // The writer introduces itself («Soy Carla, de ServiPro; …»): the clause after the introduction says whose figure it is. Speaking of the
+    // recipient («…; la faena de Acme tiene más de 2.000 trabajadores») it rests on the evidence; otherwise it is the seller speaking, as before.
+    const afterIntroduction = sentence.replace(SELF_INTRODUCTION, '');
+    const introduced = afterIntroduction !== sentence;
+    const normalized = normalizeForMatch(afterIntroduction);
+    const namesRecipient = Boolean(recipientName) && normalized.includes(recipientName);
     const sellerScoped = normalized.includes(normalizeForMatch(context.seller.companyName))
-      || /\b(?:nosotros|nuestro|nuestra|tenemos|contamos|operamos|cubrimos|llevamos)\b/.test(normalized);
+      || /\b(?:nosotros|nuestro|nuestra|tenemos|contamos|operamos|cubrimos|llevamos)\b/.test(normalized)
+      || (introduced && !namesRecipient);
     // A sentence that speaks as the seller without its legal name (the first person of the team, «Procesamos…», or the name it goes by, «AXIS procesa…»)
     // may rest on the seller's own lines as well as on the evidence. Never one that names the recipient: that is where a figure of the seller lands on them.
-    const namesRecipient = Boolean(recipientName) && normalized.includes(recipientName);
     const speaksAsSeller = !sellerScoped && !namesRecipient
       && (/\b\p{L}{3,}(?:amos|emos)\b/u.test(normalized) || sellerNames.some((name) => new RegExp(`(?:^| )${name}(?: |$)`).test(normalized)));
     const evidenceStatements = citedEvidence.map((evidence) => evidence.statement);

@@ -149,6 +149,23 @@ Lo que mejoró se ve en la segunda oración: «se resienten la atención en sala
 - **Con hechos de mayo, julio y agosto marcados como antiguos:** 3 de 3 válidos al primer intento, ahora sin el año («En mayo, … finalizó la revisión técnica…»).
 - **Las diferencias entre `v25` y `v26` en el banco están dentro del ruido de una corrida.**
 
+### Cuarta vuelta: `native-draft/v27`
+
+- **El servicio que calza, también sin señal.** Sin una señal, el redactor ofrecía siempre el servicio de la propuesta de valor, aunque no calzara (personal temporal a una startup que crece contratando). Ahora elige entre los servicios del perfil el que responde a lo que hace la empresa y al cargo de quien lee. En una corrida, la startup recibió «cada contratación suma gestión de contratos… el equipo de Personas termina persiguiendo documentos» con la oferta de administrar contratos, y la fiscalización minera recibió la administración de contratos en vez de personal para un turno. En otra corrida, la startup volvió a recibir personal temporal: la regla ayuda, pero no lo garantiza.
+- **La cifra después de presentarse.** «Soy Carla, de ServiPro; la faena minera de … tiene más de 2.000 trabajadores…» se rechazaba dos veces y el correo no se creaba. Como la oración nombra al vendedor, la cifra del destinatario se buscaba en el perfil del vendedor. Ahora la parte que sigue a la presentación («Soy …, de …;») se revisa por sí sola. Si habla del destinatario, se apoya en la evidencia; si no, sigue siendo la voz del vendedor. Una cifra del vendedor puesta en el destinatario se sigue rechazando (`draft-preflight-v2.ts`).
+- **Más frases puente:** «Así, la dotación también puede…» (hasta tres palabras en medio) y «así, usted cuenta con…». Sobre las corridas anteriores, el patrón ampliado solo toca esas dos frases.
+
+| Banco de 20 casos | `v26` | `v27` |
+| --- | --- | --- |
+| Válidos al primer intento (de 24) | 22 | 24 |
+| Válidos al final | 24 de 24 | 24 de 24 |
+| Iniciales con frases que no dicen nada (de 18) | 0 | 0 |
+| Iniciales con «la carga recae en el equipo» (de 18) | 2 | 1 |
+| De los 13 en frío, los enviaría tal cual | 10 | 11 |
+| Segundo vendedor (`Evalia`): válidos al primer intento | 8 de 8 | 8 de 8 |
+
+Los dos que todavía piden retoque son los de minería sin señal, que vuelve al eslogan («el costo se va cuando baja el peak»), y el de la startup, que en esa corrida no eligió el servicio que calza.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
