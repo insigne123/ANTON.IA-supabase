@@ -965,3 +965,10 @@ test('for English evidence the figures a translation keeps count as anchor terms
   }, { checkGeneratedCopy: true });
   assert.deepEqual(result.issues.filter((issue) => ['personalization_invalid', 'unsupported_material_claim'].includes(issue.code)).map((issue) => issue.message), []);
 });
+
+test('narrowing a statement skips the clause that only introduces the fact', () => {
+  // Real research of 30 Oct 2026: narrowed to «De acuerdo a los lineamientos de la Ley 21.015», the anchor asked for «acuerdo» and «lineamientos».
+  const statement = 'De acuerdo a los lineamientos de la Ley 21.015, contamos con un Programa de Inclusión Laboral, cuyos objetivos son reforzar la diversidad, promover espacios inclusivos y crear redes.';
+  assert.equal(draftEvidencePersonalizationStatementV2(statement), 'contamos con un Programa de Inclusión Laboral');
+  assert.deepEqual(personalizationAnchorTerms(draftEvidencePersonalizationStatementV2(statement)), ['Programa', 'Inclusión', 'Laboral']);
+});

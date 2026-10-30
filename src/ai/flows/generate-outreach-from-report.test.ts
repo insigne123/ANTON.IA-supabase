@@ -813,3 +813,31 @@ test('without a bridge to the offer the capability reaches the writer as a sugge
     else process.env.OPENAI_API_KEY = previousKey;
   }
 });
+
+test('a rejection only for a phrase repairs that phrase and keeps the rest; any other starts over, reminded of the blocked phrases', async () => {
+  // Real research of 30 Oct 2026: rewritten from scratch to remove «(United Kingdom)», the email came back with «Así puedes…» and was not created.
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const prompts: string[] = [];
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompts.push(JSON.parse(String(init?.body)).messages[1].content);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar automatiza operaciones.' }) } }], usage: {} }), { status: 200 });
+    };
+    const previous = { subject: 'Selección en Acme', body: 'Acme tiene filiales en el Reino Unido (United Kingdom). Una búsqueda larga demora la incorporación.', personalization: [], hypothesisIds: [] };
+    await generateOutreachFromDraftContextV2({ context: draftContextFixture(), rewrite: { previous, errors: ['Hay palabras en inglés copiadas de la fuente («(United Kingdom)»): escríbelas en español.'] } });
+    assert.match(prompts[0]!, /INTENTO RECHAZADO SOLO POR FRASES/);
+    assert.match(prompts[0]!, /deja igual el resto del correo/);
+    assert.match(prompts[0]!, /Así puedes/);
+    assert.doesNotMatch(prompts[0]!, /escribe un correo nuevo desde cero/);
+    prompts.length = 0;
+    await generateOutreachFromDraftContextV2({ context: draftContextFixture(), rewrite: { previous, errors: ['Hay palabras en inglés copiadas de la fuente («Project»): escríbelas en español.', 'La apertura le describe su propia empresa en vez de darle un motivo.'] } });
+    assert.match(prompts[0]!, /escribe un correo nuevo desde cero/);
+    assert.match(prompts[0]!, /No escribas frases que el control rechaza/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});

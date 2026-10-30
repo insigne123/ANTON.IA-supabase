@@ -157,6 +157,10 @@ const personalizationBoilerplate = /\b(?:ir al contenido|profile picture|email &
  * names its datum after a comma keeps everything up to it (see statementThroughFirstDatum). It never reads the environment: the prompt and the
  * preflight pass the same option, taken from the context.
  */
+// A clause that only introduces the fact («De acuerdo a los lineamientos de la Ley 21.015, contamos con un Programa de Inclusión Laboral…»):
+// narrowed to it, the anchor asked for «acuerdo» and «lineamientos» and the draft about the programme was turned back (real research, 30 Oct 2026).
+const INTRODUCTORY_CLAUSE = /^(?:de acuerdo (?:a|con)|seg[uú]n|conforme a|en el marco de|con el (?:fin|objetivo|prop[oó]sito) de|a trav[eé]s de|adem[aá]s|asimismo|por (?:eso|ello|lo tanto))\b/i;
+
 export function draftEvidencePersonalizationStatementV2(value: unknown, options: { keepSpecifics?: boolean } = {}) {
   const statement = text(value);
   const conditionalClause = /,\s*(?:si\b|siempre que\b|aunque\b|cuando\b|porque\b|mientras\b|salvo\b|excepto\b|a menos que\b)/i.test(statement);
@@ -173,7 +177,8 @@ export function draftEvidencePersonalizationStatementV2(value: unknown, options:
           && candidate.length <= 120
           && words >= 4
           && words <= 16
-          && !personalizationBoilerplate.test(candidate);
+          && !personalizationBoilerplate.test(candidate)
+          && !INTRODUCTORY_CLAUSE.test(candidate);
       })
     : undefined;
   if (focusedListItem) return focusedListItem;
@@ -932,6 +937,7 @@ export function validateDraftPreflightV2(
       hasSignal: anchoredOnDatedEvent(context),
       finalAttempt: Boolean(options.retryAttempt),
       knownNames: [context.seller.companyName, ...evidenceNames(context)],
+      sellerName: context.seller.companyName,
     });
     for (const finding of tone.errors) {
       add(finding.code, finding.message, finding.code === 'tone_asunto' ? 'subject' : 'body');
