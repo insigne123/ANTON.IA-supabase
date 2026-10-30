@@ -33,7 +33,16 @@ export type HumanToneCheckInput = {
   hasSignal?: boolean;
   // The corrective retry: a ficha without a dated fact is then a notice, not a draft that is never created.
   finalAttempt?: boolean;
+  // Names the subject may capitalise besides the person and the company: the seller's, and those written capitalised in the evidence
+  // («Plan Minero Conjunto», «Talleres Neptuno»). In production a subject with one of them was turned back as Title Case eight times.
+  knownNames?: string[];
 };
+
+// Copied from an English source («El Project incluye…», «apoyo (support) a la construcción (construction)»): never Spanish, unlike
+// «staffing», «call center» or «peak», which are said here.
+const ENGLISH_ONLY = new Set(['the', 'and', 'of', 'with', 'for', 'from', 'after', 'project', 'support', 'construction', 'graduation',
+  'leading', 'services', 'solutions', 'company', 'business', 'development', 'through', 'which', 'will', 'would', 'growth', 'includes',
+  'including', 'expected', 'stations', 'network', 'loans', 'financing', 'founder', 'founders']);
 
 // Bloquean. Se comparan sin tildes ni mayúsculas.
 const MULETILLAS = [
@@ -150,6 +159,15 @@ function firstContentLine(body: string) {
   return '';
 }
 
+/** The blocked phrases a text already carries: the writer is told the source uses them, so it does not copy them and pay for a retry. */
+export function blockedPhrasesIn(value: unknown) {
+  const normalized = normalize(value);
+  return [...new Set([
+    ...MULETILLAS.filter((phrase) => containsWord(normalized, phrase)),
+    ...PUFFERY_PATTERNS.map((pattern) => normalized.match(pattern)?.[0]).filter((match): match is string => Boolean(match)),
+  ])];
+}
+
 export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneFinding[]; warnings: HumanToneFinding[] } {
   const errors: HumanToneFinding[] = [];
   const warnings: HumanToneFinding[] = [];
@@ -201,12 +219,17 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
   for (const name of [input.recipientFirstName, input.companyName]) {
     for (const token of normalize(name).split(' ').filter((token) => token.length >= 3)) properNouns.add(token);
   }
+  // The evidence's names only excuse a capital, never count as no word: «Evaluaciones para Nuevo Nivel Mina» has three useful words.
+  const capitalised = new Set(properNouns);
+  for (const name of input.knownNames || []) {
+    for (const token of normalize(name).split(' ').filter((token) => token.length >= 3)) capitalised.add(token);
+  }
   if (subject) {
     const useful = subject.split(/\s+/).filter((word) => /\w/.test(word) && !properNouns.has(normalize(word).replace(/^[¿?¡!"'([{]+|[.,;:!?)"'\]}]+$/g, '')));
     if (useful.length < 2 || useful.length > 6) {
       errors.push({ code: 'tone_asunto', message: `El asunto tiene ${useful.length} palabras útiles (sin contar nombres propios); debe tener entre 2 y 6.`, blocking: true });
     }
-    const rest = subject.split(/\s+/).slice(1).filter((word) => /^[A-Za-zÁÉÍÓÚÜÑ]/.test(word) && !properNouns.has(normalize(word)));
+    const rest = subject.split(/\s+/).slice(1).filter((word) => /^[A-Za-zÁÉÍÓÚÜÑ]/.test(word) && !capitalised.has(normalize(word)));
     const upper = rest.filter((word) => /^[A-ZÁÉÍÓÚÜÑ]/.test(word));
     if (rest.length > 0 && upper.length >= 3 && upper.length / rest.length >= 0.5) {
       errors.push({ code: 'tone_asunto', message: 'El asunto parece título (Mayúscula En Cada Palabra). Escríbelo como oración, en minúscula.', blocking: true });
@@ -227,8 +250,11 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
   const company = normalize(input.companyName);
   if (opening && company) {
     const firstToken = company.split(' ')[0];
-    const copula = firstToken && FICHA_COPULAS.find((phrase) => opening.includes(phrase) && opening.includes(firstToken));
-    const conNumero = firstToken && new RegExp(`\\bcon (?:mas de |\\d+|${NUMERO_PALABRAS.join('|')})\\b`).test(opening) && opening.includes(firstToken);
+    // The company written as a name, with its capital: «una cadena de retail con 40 tiendas» does not name «Tiendas Ejemplo» (bank, 30 Oct 2026).
+    const namesCompany = Boolean(firstToken) && [...firstContentLine(modelBody).matchAll(/[\p{L}\p{N}]+/gu)]
+      .some((match) => normalize(match[0]) === firstToken && /^[\p{Lu}\p{N}]/u.test(match[0]));
+    const copula = namesCompany && FICHA_COPULAS.find((phrase) => opening.includes(phrase));
+    const conNumero = namesCompany && new RegExp(`\\bcon (?:mas de |\\d+|${NUMERO_PALABRAS.join('|')})\\b`).test(opening);
     // «En una cadena de retail como Acme, con 40 tiendas, …» names the company in passing, as the prompt asks when there is no signal.
     // Only as the frame of an observation of the trade («En una … como Acme, …»), not ahead of a pitch («Para una … como Acme, sumar personal…»).
     // «En una faena como la de Minera Cascada, con más de 2.000 trabajadores, la dotación temporal puede servir» frames a pitch, not the trade.
@@ -257,6 +283,22 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
     .find((text) => text.trim().split(/\s+/).length >= 6 || /\p{L}{3,}(?:amos|emos|imos)\b|\bnuestr[oa]s?\b/iu.test(text));
   if (quoted) {
     errors.push({ code: 'tone_ficha', message: `No cites a la empresa entre comillas («${quoted.slice(0, 60)}»): di con tus palabras lo que hace en concreto.`, blocking: true });
+  }
+
+  // A name of a company may carry one («White Lion Foods», «Talent Solutions»): those are left alone.
+  const ownNames = new Set([input.companyName, ...(input.knownNames || [])].flatMap((name) => normalize(name).split(' ')));
+  const english = [...new Set(`${subject}\n${modelBody}`.split(/[^\p{L}]+/u)
+    .filter((word) => ENGLISH_ONLY.has(word.toLowerCase()) && !ownNames.has(normalize(word))))];
+  if (english.length > 0) {
+    errors.push({ code: 'tone_formato', message: `Hay palabras en inglés copiadas de la fuente (${english.slice(0, 4).map((word) => `«${word}»`).join(', ')}): escríbelas en español.`, blocking: true });
+  }
+
+  // «Soy Carolina, de PSOL; Tawa Chile encuentra y selecciona talento…» (real research, 30 Oct 2026): after the introduction comes what the
+  // seller does; what the recipient's company does goes in the opening.
+  const recipientToken = normalize(input.companyName).split(' ')[0];
+  const afterIntroduction = modelBody.match(/(?:^|\n|[.!?]\s+)soy\s+[^,;.\n]{1,40},\s+de\s+[^,;.\n]{1,60}[;,.]\s*([^.\n]{0,120})/iu)?.[1];
+  if (afterIntroduction && recipientToken && new RegExp(`^(?:en |la |el |los |las )?${recipientToken}\\b`).test(normalize(afterIntroduction))) {
+    errors.push({ code: 'tone_ficha', message: 'Después de «Soy …, de …;» di qué hace tu empresa, no lo que hace la de ellos: eso va en la apertura.', blocking: true });
   }
 
   const puffery = PUFFERY_PATTERNS.map((pattern) => normModel.match(pattern)?.[0]).find(Boolean);

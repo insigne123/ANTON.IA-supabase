@@ -240,6 +240,37 @@ Después de desplegar `v30` (`38ae43e5`, 30 de octubre a las 16:05 UTC), el reda
   - La consultora de RR.HH. ya no cita su eslogan entre comillas.
 - **Lo que todavía no está bien:** cuando la investigación solo trae la autodescripción o la biografía de los fundadores, el correo es correcto pero plano («En 2012, … cofundaron …»). Eso se arregla en la investigación, no en la redacción.
 
+### Novena vuelta: `native-draft/v32`, con los borradores que no se crearon en producción
+
+`v31` quedó en `main` (PR 602). Después se leyeron, solo en lectura, las investigaciones cuyos borradores se rechazaron también en el reintento en producción en las últimas dos semanas. Son 4 investigaciones; una se intentó 8 veces el 23 de octubre y nunca se creó. Las 4 se sumaron al set real, que quedó en 21 investigaciones (16 con evidencia).
+
+**Qué se vio con `v31`:**
+
+- **La evidencia en inglés:** la página de un banco sobre «the construction of Lines 8 and 9». El control de anclaje comparaba palabras exactas y el prompt pedía «conserva estos términos: support, construction». El modelo escribía «apoyo (support) a la construcción (construction)» o «El Project incluye…», y el control de cifras no reconocía «Líneas 8 y 9» como la frase de la fuente. El borrador no se creaba.
+- **El asunto con un nombre propio de la evidencia** («Plan Minero Conjunto», «Nuevo Nivel Mina») se rechazaba por parecer título.
+- **«Soy Carolina, de PSOL; <la otra empresa> encuentra y selecciona talento…»:** después de presentarse, el correo contaba lo que hace la otra empresa.
+- **5 de 6 reintentos** eran el redactor copiando una frase de la web que el control rechaza («potenciando», «servicios integrales», «soluciones de negocio»).
+
+**Qué cambió:**
+
+- **Evidencia en inglés** (`isEnglishStatement`): el anclaje y las cifras se comparan por lo que conserva una traducción, las primeras letras («construction», «construcción») y las cifras («8», «9»). El prompt pide decirlo en español, y el control bloquea palabras en inglés copiadas («Project», «support»), salvo en los nombres de las empresas. Sobre 576 correos anteriores, el control de inglés marca uno solo, y con razón («tras graduation»).
+- **Asunto:** los nombres escritos con mayúscula en la evidencia pueden ir con mayúscula, pero siguen contando como palabras.
+- **Presentación:** después de «Soy …, de …» va lo que hace la empresa de quien escribe.
+- **Frases vetadas:** el prompt dice qué frases rechazadas trae la fuente, para no copiarlas.
+- **Empresas con nombre común:** el control de ficha exige el nombre con mayúscula. «Una cadena de retail con 40 tiendas» ya no se lee como «Tiendas Ejemplo».
+
+**Resultado:**
+
+| | `v31` | `v32` |
+| --- | --- | --- |
+| 4 investigaciones cuyos borradores no se crearon en producción | 3 de 4 | 4 de 4 |
+| 16 investigaciones reales con evidencia: válidos | 15 | 16 |
+| … al primer intento | 10 | 15 |
+| Banco, 24 correos | 24, 22 a 24 al primer intento | 24, 23 al primer intento |
+| `Evalia`, 8 correos | 8, 7 a 8 al primer intento | 8, 8 al primer intento |
+
+En `v32`, el banco no tiene relleno ni carga genérica en los correos iniciales.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
