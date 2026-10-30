@@ -175,15 +175,16 @@ function trigrams(text: string) {
 // correctivo Luna con los errores del preflight. Devuelve el resultado final.
 async function generateWithRetry(
   baseArgs: Record<string, unknown>,
-  validate: (candidate: { subject: string; body: string; personalization: unknown; hypothesisIds: unknown }) => { validation: { valid: boolean; issues: Array<{ message: string }>; preflight: { warnings: string[] } }; body: string },
+  validate: (candidate: { subject: string; body: string; personalization: unknown; hypothesisIds: unknown }, retryAttempt: boolean) => { validation: { valid: boolean; issues: Array<{ message: string }>; preflight: { warnings: string[] } }; body: string },
   onUsage: (usage: { inputTokens: number; outputTokens: number }, model: string) => void,
 ) {
   let output = await generateOutreachFromDraftContextV2(baseArgs as never);
   onUsage(output.usage, output.model);
-  let checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds });
-  if (checked.validation.valid) return { output, validation: checked.validation, body: checked.body, attempts: 1, recovered: false, firstIssues: [] as string[] };
+  let checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds }, false);
+  if (checked.validation.valid) return { output, validation: checked.validation, body: checked.body, attempts: 1, recovered: false, firstIssues: [] as string[], firstBody: '' };
   // What turned the first attempt back: the retry rate is a cost and, when the retry fails too, a draft that is not created.
   const firstIssues = checked.validation.issues.map((issue) => issue.message);
+  const firstBody = checked.body;
   const retry = await generateOutreachFromDraftContextV2({
     ...baseArgs,
     rewrite: {
@@ -192,8 +193,8 @@ async function generateWithRetry(
     },
   } as never);
   onUsage(retry.usage, retry.model);
-  checked = validate({ subject: retry.subject, body: retry.body, personalization: retry.personalization, hypothesisIds: retry.hypothesisIds });
-  return { output: retry, validation: checked.validation, body: checked.body, attempts: 2, recovered: checked.validation.valid, firstIssues };
+  checked = validate({ subject: retry.subject, body: retry.body, personalization: retry.personalization, hypothesisIds: retry.hypothesisIds }, true);
+  return { output: retry, validation: checked.validation, body: checked.body, attempts: 2, recovered: checked.validation.valid, firstIssues, firstBody };
 }
 
 const results: any[] = [];
@@ -274,24 +275,24 @@ for (const evalCase of evalSet.cases) {
         const policy = index === 0 ? {} : index === 3 ? { expectedCtaCount: 0 as const } : { expectedCtaCount: 'model' as const };
         const tried = await generateWithRetry(
           baseArgs,
-          (candidate) => {
+          (candidate, retryAttempt) => {
             // Como la app: un correo de usted lleva el CTA de usted (resolveEffectiveCta) y se valida con ese CTA.
             const effective = withCta(context, resolveEffectiveCta(context, candidate.body, (requestExtras as { userInstruction?: string }).userInstruction));
             const candidateBody = index === 0 ? `${candidate.body}\n\n${effective.constraints.cta.exactText}` : candidate.body;
             const validation = validateDraftPreflightV2(
               effective,
               { subject: candidate.subject, body: candidateBody, personalization: candidate.personalization as never, hypothesisIds: candidate.hypothesisIds as never },
-              { checkGeneratedCopy: true, checkHumanTone: true, ...policy },
+              { checkGeneratedCopy: true, checkHumanTone: true, retryAttempt, ...policy },
             );
             return { validation, body: candidateBody };
           },
           addUsage,
         );
-        const { output, validation, body, attempts, recovered, firstIssues } = tried;
+        const { output, validation, body, attempts, recovered, firstIssues, firstBody } = tried;
         steps.push({
           step: index, subject: output.subject, body, model: output.model,
           words: wordCount(body), subjectWords: wordCount(output.subject),
-          valid: validation.valid, attempts, recovered, firstIssues,
+          valid: validation.valid, attempts, recovered, firstIssues, ...(firstBody ? { firstBody } : {}),
           issues: validation.issues.map((issue: any) => issue.message),
           warnings: validation.preflight.warnings,
         });
@@ -303,24 +304,24 @@ for (const evalCase of evalSet.cases) {
 
     const tried = await generateWithRetry(
       { context, ...requestExtras, ...(openingKind ? { openingKind } : {}) },
-      (candidate) => {
+      (candidate, retryAttempt) => {
         const effective = withCta(context, resolveEffectiveCta(context, candidate.body, (requestExtras as { userInstruction?: string }).userInstruction));
         const candidateBody = `${candidate.body}\n\n${effective.constraints.cta.exactText}`;
         const validation = validateDraftPreflightV2(
           effective,
           { subject: candidate.subject, body: candidateBody, personalization: candidate.personalization as never, hypothesisIds: candidate.hypothesisIds as never },
-          { checkGeneratedCopy: true, checkHumanTone: true },
+          { checkGeneratedCopy: true, checkHumanTone: true, retryAttempt },
         );
         return { validation, body: candidateBody };
       },
       addUsage,
     );
-    const { output, validation, body, attempts, recovered, firstIssues } = tried;
+    const { output, validation, body, attempts, recovered, firstIssues, firstBody } = tried;
     results.push({
       id: evalCase.id, type: evalCase.type, openingKind, cta: resolveEffectiveCta(context, body, (requestExtras as { userInstruction?: string }).userInstruction),
       subject: output.subject, body, model: output.model,
       words: wordCount(body), subjectWords: wordCount(output.subject),
-      valid: validation.valid, attempts, recovered, firstIssues,
+      valid: validation.valid, attempts, recovered, firstIssues, ...(firstBody ? { firstBody } : {}),
       issues: validation.issues.map((issue: any) => issue.message),
       warnings: validation.preflight.warnings,
     });

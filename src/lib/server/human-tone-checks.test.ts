@@ -59,6 +59,13 @@ test('human tone blocks tuteo/usted mixing but accepts consistent usted', () => 
 
   const usted = checkHumanTone({ subject: 'dotación en faena', body: 'Hola Paula,\n\nLe escribo por la dotación temporal en faena. Su equipo podría sumar personal por un período acotado.\n\n¿Le parece si lo conversamos?' });
   assert.deepEqual(usted.errors, []);
+  // Bank of 30 Oct 2026: «sus tiendas» of the company or «les toca» to the cashiers turned correct tú emails back.
+  for (const body of [
+    'Hola Ana,\n\nVi que Acme abrirá sus tiendas en el sur. Si te sirve, ponemos personal para la apertura.',
+    'Hola Ana,\n\nA los cajeros les toca doblar turno cuando falta alguien. Ponemos personal el mismo día si lo necesitas.',
+    'Hola Ana,\n\nSi ustedes abren en marzo, te ayudamos con la dotación.',
+  ]) assert.ok(!checkHumanTone({ subject: 'dotación en tiendas', body }).errors.some((finding) => finding.code === 'tone_tratamiento'), body);
+  assert.ok(checkHumanTone({ subject: 'dotación en tiendas', body: 'Hola Ana,\n\nUsted verá que tu equipo llega justo.' }).errors.some((finding) => finding.code === 'tone_tratamiento'));
 });
 
 test('human tone blocks company-definition openings', () => {
@@ -76,23 +83,47 @@ test('human tone blocks company-definition openings', () => {
   assert.deepEqual(signal.errors, []);
 });
 
-test('human tone warns instead of blocking ficha when no signal exists', () => {
+test('a ficha opening blocks without a signal too: naming the company in passing is always possible', () => {
+  // Real research of 30 Oct 2026: two of three openings without a dated fact were «SQM cuenta con cinco líneas de negocio.».
   const ficha = checkHumanTone({
     subject: 'dotación temporal en tiendas',
     body: 'Hola Rodrigo,\n\nPara una cadena de retail con 40 tiendas en la zona sur como Tiendas Ejemplo, sumar personal puede servir.\n\n¿Conversamos?',
     companyName: 'Tiendas Ejemplo',
     hasSignal: false,
   });
-  assert.deepEqual(ficha.errors, []);
-  assert.ok(ficha.warnings.some((finding) => finding.code === 'tone_ficha'));
+  assert.ok(ficha.errors.some((finding) => finding.code === 'tone_ficha' && finding.blocking && /de pasada/.test(finding.message)));
+  // On the corrective retry it is a notice: a draft not created because of how it opens is worse than one the person reviews.
+  const retried = checkHumanTone({
+    subject: 'dotación temporal en tiendas',
+    body: 'Hola Rodrigo,\n\nPara una cadena de retail con 40 tiendas en la zona sur como Tiendas Ejemplo, sumar personal puede servir.\n\n¿Conversamos?',
+    companyName: 'Tiendas Ejemplo',
+    hasSignal: false,
+    finalAttempt: true,
+  });
+  assert.ok(!retried.errors.some((finding) => finding.code === 'tone_ficha'));
+  assert.ok(retried.warnings.some((finding) => finding.code === 'tone_ficha'));
+  const described = checkHumanTone({
+    subject: 'asuntos laborales en transporte',
+    body: 'Hola Waldo,\n\nHualpén se describe como una compañía de transporte privado de personas. Un asunto laboral que se entrampa atrasa recorridos.\n\n¿Conversamos?',
+    companyName: 'Hualpén',
+    hasSignal: false,
+  });
+  assert.ok(described.errors.some((finding) => finding.code === 'tone_ficha'));
+  const passing = checkHumanTone({
+    subject: 'evaluaciones por cargo',
+    body: 'Hola María,\n\nEn operaciones industriales como SQM, que cuenta con cinco líneas de negocio, cada cargo pide su propia batería de tests.\n\n¿Conversamos?',
+    companyName: 'SQM',
+    hasSignal: false,
+  });
+  assert.ok(!passing.errors.some((finding) => finding.code === 'tone_ficha'));
 });
 
-test('ficha feedback points to industry observation when no signal exists', () => {
+test('ficha feedback points to the trade, with the company in passing, when no signal exists', () => {
   const without = checkHumanTone({
     subject: 'dotación en faena', body: 'Hola Paula,\n\nEn una faena como la de Minera Cascada, con más de 2.000 trabajadores, la dotación temporal puede servir.\n\n¿Conversamos?',
     companyName: 'Minera Cascada',
   });
-  assert.ok(without.errors.some((finding) => finding.code === 'tone_ficha' && /observación honesta/.test(finding.message)));
+  assert.ok(without.errors.some((finding) => finding.code === 'tone_ficha' && /se complica en su rubro/.test(finding.message)));
   const withSignal = checkHumanTone({
     subject: 'dotación en faena', body: 'Hola Paula,\n\nEn una faena como la de Minera Cascada, con más de 2.000 trabajadores, la dotación temporal puede servir.\n\n¿Conversamos?',
     companyName: 'Minera Cascada', hasSignal: true,
@@ -158,4 +189,42 @@ test('a company named in passing is not a ficha; one described as the subject st
     companyName: 'Acme', hasSignal: true,
   });
   assert.ok(described.errors.some((finding) => finding.code === 'tone_ficha' && /de pasada/.test(finding.message)));
+});
+
+test('its own advertising said back is blocked, with or without a signal; the same words about the trade are not', () => {
+  // Real research of 30 Oct 2026: «Hualpén es la principal compañía de transporte privado de personas» opened the draft.
+  const said = (body: string, hasSignal: boolean) => checkHumanTone({ subject: 'Turnos de conductores', body, companyName: 'Acme', hasSignal })
+    .errors.filter((finding) => finding.code === 'tone_ficha' && finding.blocking && /publicidad/.test(finding.message));
+  assert.equal(said('Hola Waldo,\n\nEn transporte de personas, Acme es la principal compañía del rubro y opera turnos de noche.\n\n¿Conversamos?', false).length, 1);
+  assert.equal(said('Hola Ana,\n\nAcme ejerce una posición de liderazgo mundial en litio.\n\n¿Conversamos?', true).length, 1);
+  assert.equal(said('Hola Ana,\n\nCon la flota más grande del país, un conductor que falta deja un bus en patio.\n\n¿Conversamos?', false).length, 1);
+  for (const body of [
+    'Hola Ana,\n\nEn retail, la falta de cobertura es la principal causa de reclamos en caja.\n\n¿Conversamos?',
+    'Hola Ana,\n\nSi el que falta es el líder de turno, la cuadrilla se detiene.\n\n¿Conversamos?',
+    'Hola Ana,\n\nUno de los principales problemas en faena es el relevo de turno.\n\n¿Conversamos?',
+    'Hola Ana,\n\nEl primer grupo de contratados entra en marzo.\n\n¿Conversamos?',
+  ]) assert.deepEqual(said(body, true), [], body);
+});
+
+test('their own words in quotes are blocked; a short name in quotes is not', () => {
+  // Real research of 30 Oct 2026: «Tawa Chile resume su aporte como «Contribuimos con las organizaciones».».
+  const quotes = (body: string) => checkHumanTone({ subject: 'Tests en selección', body, companyName: 'Acme', hasSignal: false })
+    .errors.filter((finding) => /comillas/.test(finding.message));
+  assert.equal(quotes('Hola Rolando,\n\nEn selección, Acme resume su aporte como «Contribuimos con las organizaciones». Interpretar tests a mano toma horas.\n\n¿Conversamos?').length, 1);
+  assert.deepEqual(quotes('Hola Karlos,\n\nCon el contrato «Mantenimiento Vial y Control Carretera» hasta 2029, las cuadrillas trabajan en ruta.\n\n¿Conversamos?'), []);
+});
+
+test('«como los de …» or «de …» names the company in passing; «Así puedes…» says nothing', () => {
+  const ofIt = checkHumanTone({
+    subject: 'Perfiles TI para minería', body: 'Hola Julian,\n\nEn los proyectos mineros de LEN, con más de cinco décadas en obras, una búsqueda TI larga deja tareas pendientes.\n\n¿Conversamos?',
+    companyName: 'LEN INGENIERIA', hasSignal: false,
+  });
+  assert.ok(!ofIt.errors.some((finding) => finding.code === 'tone_ficha'));
+  const passing = checkHumanTone({
+    subject: 'Perfiles TI para minería', body: 'Hola Julian,\n\nEn proyectos mineros como los de LEN Ingeniería, con más de cinco décadas en obras, sumar especialistas TI compite con el avance del proyecto.\n\n¿Conversamos?',
+    companyName: 'LEN INGENIERIA', hasSignal: false,
+  });
+  assert.ok(!passing.errors.some((finding) => finding.code === 'tone_ficha'));
+  const hollow = checkHumanTone({ subject: 'Evaluaciones por cargo', body: 'Hola María,\n\nEntregamos informes interpretados. Así puedes comparar postulantes.\n\n¿Conversamos?' });
+  assert.ok(hollow.errors.some((finding) => finding.code === 'tone_muletilla'));
 });

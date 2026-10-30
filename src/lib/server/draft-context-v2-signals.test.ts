@@ -4,7 +4,7 @@ import test from 'node:test';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import type { ReportV2 } from '@/lib/report-v2-contracts';
 import {
-  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftFlagsForUser, draftHookFilterEnabled, draftSignalEvidenceEnabled, draftSignalMaxAgeDays, isDatedEventEvidence, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
+  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftEvidenceSalesTone, draftFlagsForUser, draftHookFilterEnabled, draftSignalEvidenceEnabled, draftSignalMaxAgeDays, isDatedEventEvidence, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
 } from './draft-context-v2';
 import { DRAFT_FIXTURE_NOW, draftReportV2Fixture, draftSnapshotFixture } from './draft-v2-test-fixtures';
 
@@ -223,4 +223,32 @@ test('a dated event is something that happened or will happen, not a year in the
   // Production, 30 Oct 2026: these counted as signals because of the year or the month in them.
   for (const statement of ['Acme cuenta con 5 líneas de negocio y opera desde 1980.', 'Somos la principal compañía de transporte privado de personas.', 'Nuestra meta al 2030 es ser carbono neutral.', 'Presidenta del Directorio desde mayo de 2024.', 'VIDEOS | 4 julio, 2024 Operativo de limpieza de playa; la ceremonia se inicia en Antofagasta.'])
     assert.equal(isDatedEventEvidence(statement, new Date('2026-10-30T12:00:00Z')), false, statement);
+});
+
+test('a slogan or a biography is a sales line, page chrome is worse, and a fact of the company is neither', () => {
+  // Real research of 30 Oct 2026: the report chose the first group as the anchor and the drafts copied it.
+  for (const statement of ['Somos la principal compañía de transporte privado de personas.', 'Contribuimos con las organizaciones, comprendiendo y potenciando las aptitudes de sus colaboradores.',
+    'Soluciones de negocio estratégicas e innovadoras para la gestión de capital humano en Chile', 'After graduation, he moved into recruitment, eventually starting a consulting and staffing business in 2006.',
+    'Brindamos servicios integrales para la gran minería, incluyendo mantenimiento vial.'])
+    assert.equal(draftEvidenceSalesTone(statement), 1, statement);
+  for (const statement of ['Envíenos un mensaje completando el siguiente formulario y nos pondremos en contacto con usted en breve.',
+    'Recuerda también que disponemos de nuestro Call Center 600 329 2017, donde puedes cotizar.', 'FREE MARKET REPORT: Let’s talk Brazil nuts!'])
+    assert.equal(draftEvidenceSalesTone(statement), 2, statement);
+  for (const statement of ['Mantenimiento vial y obras civiles para la industria minera', 'Contamos con un equipo de más de 350 personas, entre ingenieros y constructores.',
+    'Actualmente contamos con un contrato con Codelco hasta el año 2029, llamado “Mantenimiento Vial y Control Carretera”.', 'Acme abrirá dos tiendas nuevas en la zona sur antes de diciembre.'])
+    assert.equal(draftEvidenceSalesTone(statement), 0, statement);
+});
+
+test('the anchor the report chose stays, but between two of its anchors the fact goes before the slogan, and chrome never anchors', () => {
+  const evidence = (id: string, statement: string, confidence = 0.8) => ({ evidenceId: id, statement, supportedFactClaimIds: [`claim-${id}`], source: { url: `https://acme.example/${id}` }, subjectScope: 'company', confidence });
+  const chosen = (statements: string[], anchors: string[]) => requiredReportAwareDraftPersonalizationV2({
+    evidence: statements.map((statement, index) => evidence(`e${index}`, statement, index === statements.length - 1 ? 0.9 : 0.8)),
+    report: { outreachBrief: { selectedFactualAnchorClaimIds: anchors } },
+    constraints: { minimumEvidenceProvenance: 1 },
+  } as never)[0]!.evidenceId;
+  // Both chosen by the report: the fact, though the slogan comes first.
+  assert.equal(chosen(['Brindamos servicios integrales para la gran minería.', 'Mantenimiento vial y obras civiles para la industria minera'], ['claim-e0', 'claim-e1']), 'e1');
+  // A fact the report did not choose does not jump over its anchor, slogan or not; chrome never anchors.
+  assert.equal(chosen(['Brindamos servicios integrales para la gran minería.', 'Hace 15 años iniciamos operaciones en Perú.'], ['claim-e0']), 'e0');
+  assert.equal(chosen(['Envíenos un mensaje completando el siguiente formulario.', 'Brindamos servicios integrales para la gran minería.'], ['claim-e0']), 'e1');
 });

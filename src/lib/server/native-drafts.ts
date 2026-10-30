@@ -1257,7 +1257,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       }
       const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, [userInstruction, instruction].filter(Boolean).join(' ')) : context;
       generatedOutput = outputForPreflight(retryContext, generated, ctaPolicy);
-      validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, retryAttempt: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
       bufferedAttempts.push({
         generated,
         attemptNo: 2,
@@ -1603,7 +1603,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
       }
       const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, instruction) : context;
       generatedOutput = outputForPreflight(retryContext, generated, ctaPolicy);
-      validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, retryAttempt: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
       bufferedAttempts.push({
         generated,
         attemptNo: 2,
