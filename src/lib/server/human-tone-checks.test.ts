@@ -123,6 +123,14 @@ test('human tone blocks the bridges that say nothing', () => {
     assert.ok(checkHumanTone({ subject: 'Dotación para diciembre', body: `Hola Rodrigo,\n\n${sentence}\n\n¿Conversamos?` }).errors.some((finding) => finding.code === 'tone_muletilla'), sentence);
 });
 
+test('human tone blocks the same bridges with words in between, and leaves a real cost alone', () => {
+  // Bank drafts of 30 Oct 2026 (v24) that still passed.
+  for (const sentence of ['La dotación se ajusta y su costo acompaña la cosecha.', 'El costo de esa dotación acompaña el peak.', 'Así puede sumar personal durante esas aperturas.', 'Administrar contratos también puede acompañar la incorporación.', 'Así, ese turno puede volver a tener cobertura.'])
+    assert.ok(checkHumanTone({ subject: 'Dotación para diciembre', body: `Hola Rodrigo,\n\n${sentence}\n\n¿Conversamos?` }).errors.some((finding) => finding.code === 'tone_muletilla'), sentence);
+  for (const sentence of ['El costo termina cuando termina la cosecha.', 'Acompañamos la apertura con dos personas por tienda.', 'Así que el equipo puede revisarlo el lunes.'])
+    assert.ok(!checkHumanTone({ subject: 'Dotación para diciembre', body: `Hola Rodrigo,\n\n${sentence}\n\n¿Conversamos?` }).errors.some((finding) => finding.code === 'tone_muletilla'), sentence);
+});
+
 test('human tone blocks a sentence left without its verb, not a short sentence by style', async () => {
   const { sentenceFragments } = await import('./human-tone-checks');
   // A draft of 29 Oct 2026 opened like this, and the person had to rewrite it.
