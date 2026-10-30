@@ -5,6 +5,7 @@ import { coworkCompetencies } from './competencies';
 import { coworkEvidenceBundle } from './evidence';
 import { COWORK_JARGON } from './answer-quality';
 import { coworkReplyLanguage } from './decision-context';
+import { sentenceFragments } from '../sentence-fragments';
 
 /**
  * The Writer and the Reviewer (plan 2, G1). When a turn has to write emails,
@@ -378,6 +379,9 @@ const normalize = (text: string) => text.toLocaleLowerCase('es').normalize('NFD'
 const PLACEHOLDER = /\[[^\]\n]{2,}\]/;
 const FREE = /\b(gratis|gratuit[oa]s?|sin costo|prueba gratuita)\b/;
 const PROMISE = /\b(garantiza(?:mos|do|da)?|100\s?%|el mejor|la mejor|numero uno|lider del mercado|revolucionari[oa])\b/;
+// Sentences that say nothing (the research path's draft check blocks the same ones: human-tone-checks.ts).
+// «es una alternativa» has its own check below, with the abstract benefits.
+const HOLLOW = /\b(es una opcion|pone sobre la mesa|forma parte del trabajo|es parte del trabajo|el costo acompana|pense que podria|me gustaria|la idea es|puede implicar|asi,? (?:el|su) equipo)\b/;
 const CLOSING = /\b(ultimo (?:mensaje|correo)|ultima vez|cierro (?:el|este) (?:hilo|tema)|no (?:te )?(?:vuelvo|volvere) a escribir)\b/;
 // A greeting followed by a capitalized name («Hola Felipe,»); «Hola equipo,» is not a name.
 const GREETING_NAME = /^\s*(?:[Hh]ola|[Ee]stimad[oa]|[Bb]uen(?:os|as) (?:d[ií]as|tardes))\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)/;
@@ -824,6 +828,10 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     if (free && !context.trialOffer) issues.push({ where, problem: `Ofrece algo «${free[1]}» sin una oferta de prueba aprobada.`, fix: 'Quita la oferta gratuita o el descuento.', short: `sin «${free[1]}»` });
     const promise = PROMISE.exec(plain);
     if (promise) issues.push({ where, problem: `Promete «${promise[1]}» sin respaldo.`, fix: 'Cámbialo por un beneficio concreto y verificable.', short: 'sin promesas' });
+    const hollow = HOLLOW.exec(plain);
+    if (hollow) issues.push({ where, problem: `Usa «${hollow[1]}», que no le dice nada al destinatario.`, fix: 'Cámbialo por lo que pasa en concreto en su rubro o por lo que hace la oferta.', short: 'sin frases vacías' });
+    const fragment = sentenceFragments(email.body)[0];
+    if (fragment) issues.push({ where, problem: `Tiene una oración incompleta, sin verbo: «${fragment}».`, fix: 'Escríbela completa o júntala con la oración siguiente.', short: 'oraciones completas' });
     if (/\b(?:no es|no constituye|no representa|no implica) una garantia\b|\bno (?:es|son) (?:una )?verificacion externa\b/.test(plain)) {
       issues.push({ where, problem: 'Incluye una nota de evaluación dentro del correo para el destinatario.', fix: 'Conserva el hecho y las condiciones del piloto; quita la nota sobre garantías o verificación.', short: 'prueba sin nota interna' });
     }

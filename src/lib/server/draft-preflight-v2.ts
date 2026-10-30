@@ -50,7 +50,8 @@ export type DraftPreflightIssueV2 = {
     | 'tone_asunto'
     | 'tone_tratamiento'
     | 'tone_pregunta'
-    | 'tone_ficha';
+    | 'tone_ficha'
+    | 'tone_fragmento';
   message: string;
   location: 'subject' | 'body' | 'research';
 };

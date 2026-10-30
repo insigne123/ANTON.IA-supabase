@@ -26,7 +26,7 @@ const PLACEHOLDER = 'Quedó un campo sin completar.';
 const REASON_OF: Record<string, string> = {
   unsupported_material_claim: EVIDENCE, personalization_invalid: EVIDENCE, personalization_missing: EVIDENCE, hypothesis_invalid: EVIDENCE,
   hypothesis_unqualified: EVIDENCE, source_url_invalid: EVIDENCE,
-  tone_muletilla: TONE, tone_formato: TONE, tone_asunto: TONE, tone_tratamiento: TONE, tone_pregunta: TONE, tone_ficha: TONE,
+  tone_muletilla: TONE, tone_formato: TONE, tone_asunto: TONE, tone_tratamiento: TONE, tone_pregunta: TONE, tone_ficha: TONE, tone_fragmento: TONE,
   abstract_language: TONE, corporate_copy: TONE, prohibited_phrase: TONE, commercial_relevance: TONE,
   subject_length: FORMAT, body_length: FORMAT, body_structure: FORMAT, cta_count: FORMAT,
   duplicate_content: DUPLICATE, duplicate_sentence: DUPLICATE,

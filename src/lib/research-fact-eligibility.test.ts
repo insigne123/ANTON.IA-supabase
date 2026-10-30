@@ -93,6 +93,41 @@ test('a gloss and the debate on the competition of the market are no reason to w
   ]) assert.equal(isUnsuitableHookText(text), false, text);
 });
 
+test('what a company says of itself and the chrome of a document are no reason to write; a dated fact of its business stays', () => {
+  // The shapes of what the research of 29 Oct 2026 offered as facts, with another company's name.
+  for (const text of [
+    'MANUAL CORPORATIVO - Código de Ética: ACME. DE SANTIAGO. MANUAL CORPORATIVO. Código de Ética. ACME S.A.. Gerencia General.',
+    'TÉRMINOS DE REFERENCIA: EMPRESA DE TRANSPORTE. ACME S.A.. SUBGERENCIA DE PROYECTOS OPERACIONALES. CONSTRUCCIÓN DE SALAS ...',
+    'Página 1 de 66: asesoría para Acme S.A.: Póliza de Incendio de Edificios y Contenidos, con una vigencia de 12 meses ...',
+    '11472+ Otras Ocupaciones Concepcion Acme Ingenieria Jobs in ...: 11472+ otras ocupaciones jobs in Chile — October 2026 openings at top companies.',
+    'Nuestra misión es maximizar el valor económico, ambiental y social de Acme de manera sostenible.',
+    'En Acme nos moviliza la transparencia. Acá puedes acceder a nuestros resultados financieros.',
+    '000 metros sobre el nivel del mar. Es un yacimiento de explotación a rajo abierto.',
+    'En Acme Chile, la seguridad de la información es parte de nuestra cultura.',
+    'Política general del sistema de gestión de seguridad de la información',
+    'La información es uno de los activos más valiosos de cualquier organización, y en Acme lo sabemos bien.',
+    'Conoce cómo gestionamos este compromiso a través de una política clara.',
+    'La importancia de los Descriptores de Cargo para el éxito organizacional',
+    'En Chile, los Servicios Transitorios están regulados por la Ley N° 20.123 sobre Contrato de Trabajo de Personal Transitorio.',
+    'El período de cobertura está vinculado a la naturaleza de la causal que justifica el servicio transitorio.',
+    '¿Por qué trabajar en minería? Estos son los 5 atributos ...: Minería consolida su atractivo laboral en Chile.',
+    '¿Tienes dudas? ¿Quieres saber más de Acme? Contáctate con nosotros.',
+    'Ana Pérez - División Norte: ... ACME – Corporación de Chile · Educación: Universidad ... Ana Pérez en LinkedIn',
+    'Juan Soto: Experiencia: Constructora Acme · Educación: Universidad Andrés Bello · Ubicación: Área metropolitana de Rancagua',
+    '4 perfiles de «Luis Rojas»: ... Luis Rojas que usan LinkedIn para ... Gerente de Recursos Humanos en Acme',
+  ]) assert.equal(isUnsuitableHookText(text), true, text);
+  for (const text of [
+    'Abrirán dos tiendas nuevas en la zona sur antes de diciembre (nota de prensa, 2026-09-10).',
+    'Acme mantiene 10 vacantes abiertas para conductores en Antofagasta y Atacama.',
+    'Publicaron 12 empleos de operarios de bodega en las últimas tres semanas.',
+    'ACME y ENAP firmaron un acuerdo de suministro por 5 años.',
+    'Acme cuenta con un equipo de consultores con experiencia en selección de personal para puestos ejecutivos.',
+    // The recipient's own profile and a snippet with a real signal stay.
+    'Eric Rojas - Jefe de Adquisiciones Proyectos en Acme ...: Jefe de Adquisiciones Proyectos en Acme · Ingeniero Civil Industrial',
+    'Estaremos presentes en feria laboral de Antofagasta para ...: Estaremos presentes en feria laboral de Antofagasta para acercar nuevas oportunidades de empleo.',
+  ]) assert.equal(isUnsuitableHookText(text), false, text);
+});
+
 test('a fact loses its unsuitable sentences and keeps the rest, and is empty when nothing is left', () => {
   assert.equal(
     withoutUnsuitableSentences('Acme se adjudicó 16 contratos nuevos por UF 5,4 millones. El backlog, conocido en el mercado como cartera pendiente, mide lo que falta por ejecutar. Esto abre obras en Antofagasta.'),

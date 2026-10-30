@@ -1,3 +1,7 @@
+import { sentenceFragments } from '@/lib/sentence-fragments';
+
+export { sentenceFragments };
+
 // Chequeos deterministas de tono humano para borradores generados por el modelo.
 // Port de validador_correos.py (guía externa) más dos reglas propias que la
 // línea base demostró necesarias: mezcla de tratamiento y ficha corporativa.
@@ -10,7 +14,8 @@ export type HumanToneCode =
   | 'tone_asunto'
   | 'tone_tratamiento'
   | 'tone_pregunta'
-  | 'tone_ficha';
+  | 'tone_ficha'
+  | 'tone_fragmento';
 
 export type HumanToneFinding = {
   code: HumanToneCode;
@@ -55,6 +60,12 @@ const MULETILLAS = [
   'me encantaria tener la oportunidad',
   'no dudes en', 'no dude en', 'entera disposicion', 'sera un placer',
   'agradeciendo de antemano', 'favorable acogida',
+  // Frases que no dicen nada: aparecían en la mitad de los borradores del banco del 30 de octubre de 2026.
+  'es una alternativa', 'puede ser una alternativa', 'es una opcion', 'puede ser una opcion',
+  'pone sobre la mesa', 'forma parte del trabajo', 'es parte del trabajo', 'el costo acompana',
+  'segun su reporte', 'en la conversacion salio',
+  // «Así, el equipo puede…»: 36 de las 120 frases más artificiales que marcó el juez el 23 de octubre (borradores-ganchos-y-reglas.md).
+  'puede implicar', 'asi el equipo', 'asi su equipo', 'asi el apoyo',
 ];
 
 // Solo advierten: a veces son válidas con un dato concreto.
@@ -200,6 +211,10 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
   const lowModel = modelBody.toLocaleLowerCase('es');
   if (/\bno (?:es|son|era|se trata de)\b[^.?!\n]{1,60}?,\s*(?:es|son|sino)\b/.test(lowModel) || /\bno solo\b[^.?!\n]{1,80}?\bsino\b/.test(normModel)) {
     warnings.push({ code: 'tone_muletilla', message: 'Posible contraste del tipo «no es X, es Y». Revisa si hace falta.', blocking: false });
+  }
+  const fragments = sentenceFragments(modelBody);
+  if (fragments.length > 0) {
+    errors.push({ code: 'tone_fragmento', message: `Oración incompleta, sin verbo: ${fragments.slice(0, 2).map((f) => `«${f}»`).join(', ')}. Escríbela completa o júntala con la siguiente.`, blocking: true });
   }
   const paragraphs = modelBody.split(/\n\s*\n/).map((p) => p.split(/\s+/).filter(Boolean).length);
   if (paragraphs.some((count) => count > 55)) {
