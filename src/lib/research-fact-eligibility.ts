@@ -138,6 +138,8 @@ function isDocumentChromeText(value: unknown) {
       /\bpagina \d+ de \d+\b|\bpage \d+ of \d+\b/,
       /\b(?:manual corporativo|codigo de etica|terminos de referencia|oferta tecnica|bases (?:administrativas|tecnicas)|reglamento interno|memoria anual)\b/,
       /\b\d+ otras ocupaciones\b|\bjobs in (?:chile|santiago|peru|colombia)\b|\bopenings at top companies\b|\bapply with free\b/,
+      // A listing of the site's posts or videos («Sigue leyendo → VIDEOS | 4 julio, 2024 …»): its headlines, not a fact.
+      /\b(?:sigue leyendo|seguir leyendo|leer mas|read more)\b/,
       /\b\d+ perfiles de\b/,
     ].some((pattern) => pattern.test(normalized));
 }

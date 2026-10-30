@@ -180,6 +180,31 @@ Los dos que todavía piden retoque son los de minería sin señal, que vuelve al
 - **Banco:** 24 de 24 válidos, 23 al primer intento. `Evalia`: 8 de 8 al primer intento. De los 13 en frío, 11 tal cual.
 - **Lo que no se estabiliza.** La elección de servicio para la startup cambia de una corrida a otra: en `v28`, administrar contratos; en `v29`, personal temporal, esta vez con un argumento defendible («contratar fijo para cada alza puede dejar costos cuando baja la carga»). Desde `v26`, la lectura se mueve entre 10 y 11 de 13. Lo que falta medir son los borradores reales.
 
+### Séptima vuelta: `native-draft/v30`, con investigaciones reales
+
+Después de desplegar `v29` (`a7e3d5bb`, 30 de octubre a las 14:40 UTC), el redactor corrió en local sobre 6 investigaciones reales de producción, leídas solo en lectura y sin escribir nada en la base, con las banderas de producción.
+
+- **3 se bloquearon** con `evidence_insufficient`: sus investigaciones casi no tenían contenido. Es lo correcto.
+- **1 no se creó.** «SQM cuenta con cinco líneas de negocio…» se rechazó dos veces por ser ficha: el control pedía «usa el dato fechado», pero el correo se apoyaba en ese hecho y no en uno con fecha.
+- **1 abrió con la autodescripción de la empresa** («se presenta como la principal compañía…»).
+
+La causa común: se consideraba que había «señal» si cualquier frase de la evidencia traía un año, un mes o un verbo de evento. Eso incluía una lista de videos de 2024 del sitio («Sigue leyendo → VIDEOS | 4 julio, 2024…») y un convenio que no era el ancla del correo. Entonces no entraba la apertura sin señal, y la ficha se bloqueaba pidiendo un dato fechado que el redactor no podía usar.
+
+**Qué cambió:**
+
+- **Evento con fecha** (`isDatedEventEvidence`): ahora es algo que pasó o va a pasar («firmaron el acuerdo», «abrirán dos tiendas», «parten una obra»). Un año o un mes sueltos no cuentan, y tampoco un texto cuyas fechas son todas de años anteriores.
+- **El hecho del ancla** (`anchoredOnDatedEvent`): la decisión se toma sobre el hecho en que se apoya el correo (`REQUIRED_FACTUAL_PERSONALIZATION`), no sobre cualquier frase. Decide la apertura sin señal en el prompt y si la ficha se bloquea o solo avisa.
+- **«De pasada» no es ficha:** «En una cadena de retail como Acme, con 40 tiendas, …» ya no se marca. «Para una … como Acme, sumar personal…» sigue marcado, porque pone la descripción delante de la oferta.
+- **El mensaje de corrección de la ficha** explica cómo arreglarla: abrir con lo que se complica en su rubro y nombrar a la empresa de pasada.
+- **El filtro de ganchos** saca los listados de entradas del sitio («Sigue leyendo», «Leer más»).
+- **Nombres con tilde:** con «Hola María,» o «Hola Andrés,», el control leía el saludo como si fuera la apertura y no la revisaba.
+
+**Resultado:**
+
+- **Las 3 investigaciones reales con evidencia** quedan válidas al primer intento, SQM incluida: «En operaciones industriales como SQM, que cuenta con cinco líneas de negocio, evaluar perfiles para cargos distintos puede extender la selección…».
+- **Banco:** 24 de 24 válidos (22 al primer intento), sin relleno ni eslogan. `Evalia`: 8 de 8.
+- **Lo que todavía pide retoque en los reales:** aperturas largas cuando el hecho trae muchas cifras (Codelco), y una oración que repite la autodescripción en el párrafo de la oferta (Hualpén). En esos casos, la investigación solo trae lo que la empresa dice de sí misma.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

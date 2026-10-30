@@ -443,11 +443,8 @@ test('native drafting permits one corrective generation pass, then persists a tr
 test('generated company-definition opening triggers the bounded editorial rewrite before persistence', async () => {
   for (const repairSucceeds of [true, false]) {
     const snapshot = draftSnapshotFixture();
-    snapshot.evidence.push({
-      ...snapshot.evidence[0],
-      id: 'evidence-signal-test',
-      statement: 'Acme anunció que reducirá el trabajo manual en operaciones este trimestre según su reporte.',
-    });
+    // The fact the email rests on is a dated event: a company definition instead of it is turned back (anchoredOnDatedEvent).
+    snapshot.evidence[0] = { ...snapshot.evidence[0], statement: 'Acme anunció que ayuda a equipos de operaciones a reducir trabajo manual este trimestre.' };
     const fixture = dependencies(snapshot);
     let calls = 0;
     fixture.value.generate = async ({ context, rewrite }) => {

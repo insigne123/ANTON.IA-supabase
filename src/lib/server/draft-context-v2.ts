@@ -944,6 +944,20 @@ export function isSignalLikeEvidence(statement: unknown) {
   return SIGNAL_LIKE_HINT.test(String(statement || ''));
 }
 
+// Something that happened or will happen to the company, not only a year or a month in the text: «firmaron el acuerdo», «abrirán dos
+// tiendas», «publicaron 12 ofertas», «parten una obra». In production a year in a company's self-description («desde 1980», «Plan 2030»)
+// counted as a signal: the writer was told to open with a dated fact that did not exist and the check turned the email back twice.
+const DATED_EVENT_HINT = /\b(?:abr(?:e|en|ió|ieron|irá|irán)|inaugur\p{L}*|anunci(?:ó|aron|a|an|ará)|public(?:ó|aron|ará)|lanz(?:ó|aron|ará|arán)|firm(?:ó|aron|ará)|adjudic\p{L}*|licitaci[óo]n\p{L}*|contrat(?:ó|aron|ará|arán)|incorpor(?:ó|aron|ará|arán)|renunci(?:ó|aron)|part(?:e|en|irá|irán)\s+(?:una|un|la|el|en)|comienza|comenzará|inici(?:a|ó|ará)\s|fiscalizaci[óo]n|huelga|paralizaci[óo]n|multa|clausura|vacantes|ofertas\s+de|cosecha|temporada|finaliz(?:ó|aron)|termin(?:ó|aron)|adquiri(?:ó|eron)|fusion\p{L}*|nuev[oa]s?\s+(?:sucursal|tienda|planta|sede|obra|faena|proyecto|centro)\p{L}*)/iu;
+
+/** A dated event of the company, stricter than isSignalLikeEvidence: it decides whether the writer opens with the fact or with the trade. */
+export function isDatedEventEvidence(statement: unknown, now = new Date()) {
+  const value = String(statement || '');
+  // Every year it names is past: what it tells is not news («Operativo de limpieza … 4 julio, 2024»).
+  const years = (value.match(/\b20\d\d\b/g) || []).map(Number);
+  if (years.length && Math.max(...years) < now.getUTCFullYear()) return false;
+  return DATED_EVENT_HINT.test(value);
+}
+
 export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV2) {
   const reportAnchorOrder = new Map(
     (context.report?.outreachBrief.selectedFactualAnchorClaimIds || []).map((claimId, index) => [claimId, index]),

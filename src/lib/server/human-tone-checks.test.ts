@@ -145,3 +145,17 @@ test('human tone blocks a sentence left without its verb, not a short sentence b
   // Turned back a first attempt of the bank on 30 Oct 2026 (v25): a clitic before a word is a verb.
   assert.deepEqual(sentenceFragments('Hola,\n\nSi se alarga, se posterga la decisión de contratación. Para la selección de esta cosecha.'), ['Para la selección de esta cosecha.']);
 });
+
+test('a company named in passing is not a ficha; one described as the subject still is', () => {
+  // Production, 30 Oct 2026: the second form was turned back twice and the draft was not created. «María»: an accented name hid the opening from the check.
+  const passing = checkHumanTone({
+    subject: 'Turnos en tiendas', body: 'Hola Rodrigo,\n\nEn una cadena de retail como Tiendas Ejemplo, con 40 tiendas en la zona sur, un turno corto alarga la fila en caja.\n\n¿Conversamos?',
+    companyName: 'Tiendas Ejemplo', hasSignal: true,
+  });
+  assert.ok(!passing.errors.some((finding) => finding.code === 'tone_ficha'));
+  const described = checkHumanTone({
+    subject: 'Evaluaciones por cargo', body: 'Hola María,\n\nAcme cuenta con cinco líneas de negocio, desde litio hasta nutrición vegetal.\n\n¿Conversamos?',
+    companyName: 'Acme', hasSignal: true,
+  });
+  assert.ok(described.errors.some((finding) => finding.code === 'tone_ficha' && /de pasada/.test(finding.message)));
+});

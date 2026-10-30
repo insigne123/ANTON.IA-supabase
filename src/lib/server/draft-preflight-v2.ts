@@ -5,7 +5,7 @@ import {
   canonicalSha256,
   type MessagingPreflightV1,
 } from '@/lib/messaging-contracts';
-import { DRAFT_STYLE_ADVISORIES, isSignalLikeEvidence, type DraftContextV2 } from '@/lib/server/draft-context-v2';
+import { DRAFT_STYLE_ADVISORIES, isDatedEventEvidence, isSignalLikeEvidence, requiredReportAwareDraftPersonalizationV2, type DraftContextV2 } from '@/lib/server/draft-context-v2';
 import { checkHumanTone } from '@/lib/server/human-tone-checks';
 import { EDITED_EMAIL_BODY_WORDS } from '@/lib/drafts/email-length';
 
@@ -263,6 +263,12 @@ function bodyParagraphs(value: string) {
 
 // «Soy <nombre>, de <empresa>;» or «.»: how the writer introduces itself since native-draft/v24.
 const SELF_INTRODUCTION = /^\s*soy\s+[^,;.]{1,40},\s+de\s+[^,;.]{1,60}[;,]\s*/i;
+
+/** Whether the fact the writer must rest the email on (REQUIRED_FACTUAL_PERSONALIZATION) is a dated event of the company. */
+export function anchoredOnDatedEvent(context: DraftContextV2) {
+  const required = new Set(requiredReportAwareDraftPersonalizationV2(context).map((item) => item.evidenceId));
+  return context.evidence.some((item) => required.has(item.evidenceId) && isDatedEventEvidence(item.statement));
+}
 
 function sentenceParts(value: string) {
   return value
@@ -870,7 +876,8 @@ export function validateDraftPreflightV2(
       recipientFirstName: String(context.recipient.displayName || '').trim().split(/\s+/)[0] || null,
       companyName: context.company.name,
       maxModelQuestions: expectedCtaCount === 1 ? 0 : 1,
-      hasSignal: context.evidence.some((item) => isSignalLikeEvidence(item.statement)),
+      // The fact the email rests on, not any line of the evidence: asked to open with a dated fact it is not anchored on, the writer could not.
+      hasSignal: anchoredOnDatedEvent(context),
     });
     for (const finding of tone.errors) {
       add(finding.code, finding.message, finding.code === 'tone_asunto' ? 'subject' : 'body');

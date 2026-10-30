@@ -16,7 +16,6 @@ import { SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outre
 import { selectOutreachStrategy } from '@/lib/outreach-evidence-ranking';
 import {
   DraftContextV2Schema,
-  isSignalLikeEvidence,
   requiredReportAwareDraftPersonalizationV2,
   type DraftContextV2,
 } from '@/lib/server/draft-context-v2';
@@ -27,6 +26,7 @@ import {
   personalizationAnchorTerms,
   specificAnchorTerms,
   GeneratedOutreachV2Schema,
+  anchoredOnDatedEvent,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
 import {
@@ -590,7 +590,7 @@ ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
 `
     : '';
   // Production drafts of 28-29 Oct 2026 without a signal opened with what the company says about itself on its site.
-  const noSignalOpening = !input.sequenceContext && !input.context.evidence.some((item) => isSignalLikeEvidence(item.statement))
+  const noSignalOpening = !input.sequenceContext && !anchoredOnDatedEvent(input.context)
     ? `
   - Aquí no hay una señal con fecha o evento: lo que sabes es lo que la empresa dice de sí misma. La apertura no lo repite («Vi que reclutan y seleccionan el mejor talento», «suma más de cinco décadas en proyectos», «es una cadena con 40 tiendas») ni empieza por lo que vendes. Abre con lo que se complica en su rubro o en su cargo, con la empresa nombrada de pasada como ejemplo («En una consultora de selección como <empresa>, …», «Con tres plantas en regiones, …»), y sigue con la oración del costo. El dato de la empresa va en esa primera oración, no suelto más abajo en el párrafo de la oferta.`
     : '';
