@@ -758,3 +758,26 @@ test('without a dated signal the initial email opens with the trade, not with wh
     else process.env.OPENAI_API_KEY = previousKey;
   }
 });
+
+test('the writer is asked to say a fact with its month only when an older signal reached the evidence', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const prompts: string[] = [];
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompts.push(JSON.parse(String(init?.body)).messages[1].content);
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Avance en Acme', opening: 'En mayo Acme terminó una obra.', value: 'Northstar automatiza tareas repetitivas.' }) } }], usage: {} });
+    };
+    const context = draftContextFixture();
+    await generateOutreachFromDraftContextV2({ context });
+    assert.doesNotMatch(prompts[0], /de hace más de un mes/);
+    prompts.length = 0;
+    await generateOutreachFromDraftContextV2({ context: { ...context, writing: { olderSignal: true as const } } });
+    assert.match(prompts[0], /Un hecho de esta evidencia es de hace más de un mes: dilo en pasado, con su mes/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});

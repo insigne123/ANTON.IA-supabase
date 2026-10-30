@@ -271,9 +271,10 @@ export const DraftContextV2Schema = z.object({
   /**
    * How the writer is asked to rest the email on its evidence, present only when this draft was built with DRAFT_ANCHOR_SPECIFICS_ENABLED
    * (for this person: see draftFlagsForUser). The writer's prompt and the preflight read it here, so both look for the same terms and a
-   * context built without the flag is exactly what it was.
+   * context built without the flag is exactly what it was. `olderSignal`: a signal older than 30 days reached the evidence (only with
+   * DRAFT_SIGNAL_MAX_AGE_DAYS above 30), so the writer is asked to say it with its month and never as news.
    */
-  writing: z.object({ anchorSpecifics: z.literal(true) }).strict().optional(),
+  writing: z.object({ anchorSpecifics: z.literal(true).optional(), olderSignal: z.literal(true).optional() }).strict().optional(),
   warnings: z.array(z.string().trim().min(1).max(2_000)).max(20),
 }).strict();
 export type DraftContextV2 = z.infer<typeof DraftContextV2Schema>;
@@ -309,6 +310,8 @@ export type BuildDraftContextV2Input = {
   hookFilter?: boolean;
   /** Overrides DRAFT_ANCHOR_SPECIFICS_ENABLED (see draftAnchorSpecificsEnabled). */
   anchorSpecifics?: boolean;
+  /** Overrides DRAFT_SIGNAL_MAX_AGE_DAYS (see draftSignalMaxAgeDays). */
+  signalMaxAgeDays?: number;
 };
 
 /**
@@ -341,6 +344,16 @@ export function draftAnchorSpecificsEnabled(env: Record<string, string | undefin
 }
 
 /**
+ * DRAFT_SIGNAL_MAX_AGE_DAYS (30 to 180, 30 when absent or out of range): how old a dated signal of the report can be to reach the email. The page
+ * must still have been read within 30 days; only the event it tells can be older. Of 168 reports of October 2026, 25 had a signal of 30 days or
+ * less and 39 more one of 31 to 90 (docs/borradores-naturales-2026-10-30.md). The writer says an older one with its month, never as news.
+ */
+export function draftSignalMaxAgeDays(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
+  const days = Number(env.DRAFT_SIGNAL_MAX_AGE_DAYS?.trim());
+  return Number.isInteger(days) && days >= 30 && days <= 180 ? days : 30;
+}
+
+/**
  * The three draft flags as they apply to one person. DRAFT_PILOT_USER_IDS (user ids, comma separated) limits them to those people while they are
  * tried, as COWORK_HARNESS_USER_IDS does for the Cowork harness: whoever is not on the list writes exactly as before, whatever the flags say.
  * Empty or absent, each flag is what it says for everyone. The list never turns a flag on by itself.
@@ -355,6 +368,7 @@ export function draftFlagsForUser(
     signalEvidence: inPilot && draftSignalEvidenceEnabled(env),
     hookFilter: inPilot && draftHookFilterEnabled(env),
     anchorSpecifics: inPilot && draftAnchorSpecificsEnabled(env),
+    signalMaxAgeDays: inPilot ? draftSignalMaxAgeDays(env) : 30,
   };
 }
 
@@ -404,12 +418,12 @@ function validHttpUrl(value: unknown): string | null {
   }
 }
 
-function isFreshDate(value: string | null, nowMs: number) {
+function isFreshDate(value: string | null, nowMs: number, maxAgeMs = DRAFT_CONTEXT_MAX_AGE_MS) {
   if (!value) return false;
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp)
     && timestamp <= nowMs + 5 * 60 * 1000
-    && timestamp >= nowMs - DRAFT_CONTEXT_MAX_AGE_MS;
+    && timestamp >= nowMs - maxAgeMs;
 }
 
 function priorityForScore(score: number): 'A' | 'B' | 'C' {
@@ -641,6 +655,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
   }
   const eligibleFactClaimIds = new Set(evidence.flatMap((item) => item.supportedFactClaimIds));
   const eligibleHypothesisIds = new Set(hypotheses.map((item) => item.claimId));
+  let olderSignal = false;
   const report = reportDocument ? (() => {
     const computedMetadata: DraftReportDocumentMetadataV2 = {
       id: reportDocument.id,
@@ -679,6 +694,9 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       .filter((section) => ['company', 'verdict'].includes(section.key))
       .flatMap((section) => section.paragraphs.filter((paragraph) => paragraph.basis === 'source' && paragraph.context === 'target').flatMap((paragraph) => paragraph.claimIds)));
     const signalEvidence = input.signalEvidence ?? draftSignalEvidenceEnabled();
+    // Only the event a signal tells can be older than 30 days: the report, its sources and every other claim keep the window.
+    const signalMaxAgeMs = (input.signalMaxAgeDays ?? draftSignalMaxAgeDays()) * 24 * 60 * 60 * 1000;
+    const eventMaxAgeMs = (claim: { dimension: string }) => claim.dimension === 'signal' ? signalMaxAgeMs : DRAFT_CONTEXT_MAX_AGE_MS;
     // The signals the analysis chose as the reason to write come first, newest first, whether or not the angle cites them.
     const chosenSignalClaimIds = signalEvidence ? reportDocument.evidenceGraph.signals
       .filter((signal) => reportDocument.analysis.signalIds.includes(signal.id))
@@ -714,7 +732,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         || isGenericResearchText(claim.statement)
         || isSensitiveEventText(claim.statement)
         || (hookFilter && isUnsuitableHookText(claim.statement))
-        || (claim.observedAt !== null && !isFreshDate(claim.observedAt, nowMs))
+        || (claim.observedAt !== null && !isFreshDate(claim.observedAt, nowMs, eventMaxAgeMs(claim)))
         || (claim.dimension === 'signal' && !claim.observedAt)
         || (claim.jurisdiction && claim.jurisdiction !== 'GLOBAL' && claim.jurisdiction !== reportDocument.entity.contactCountry)
       ) return [];
@@ -744,7 +762,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
           || (hookFilter && !factText)
           || ['search', 'registry'].includes(source.sourceType)
           || !isFreshDate(source.retrievedAt, nowMs)
-          || (fact.observedAt !== null && !isFreshDate(fact.observedAt, nowMs))
+          || (fact.observedAt !== null && !isFreshDate(fact.observedAt, nowMs, eventMaxAgeMs(claim)))
           || [fact.jurisdiction, source.jurisdiction].some((jurisdiction) => jurisdiction && jurisdiction !== 'GLOBAL' && jurisdiction !== reportDocument.entity.contactCountry)
         ) return [];
         if (subjectScope === 'company') {
@@ -788,6 +806,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         ? [DraftEvidenceV2Schema.parse({ ...supported[0], evidenceId: `${prefix}:evidence:${claim.id}:0`, statement: claim.statement })]
         : [];
       reportEvidence.push(...statementEvidence, ...supported);
+      if (supported.length && claim.dimension === 'signal' && claim.observedAt !== null && !isFreshDate(claim.observedAt, nowMs)) olderSignal = true;
       return supported.length ? [{ claim, internalId: draftClaimId }] : [];
     });
     if (reportEvidence.length) {
@@ -875,7 +894,9 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       prohibitedPhrases: [...DRAFT_PROHIBITED_PHRASES],
       minimumEvidenceProvenance: 1,
     },
-    ...(anchorSpecifics ? { writing: { anchorSpecifics: true } } : {}),
+    ...(anchorSpecifics || olderSignal ? {
+      writing: { ...(anchorSpecifics ? { anchorSpecifics: true as const } : {}), ...(olderSignal ? { olderSignal: true as const } : {}) },
+    } : {}),
     warnings,
   });
 

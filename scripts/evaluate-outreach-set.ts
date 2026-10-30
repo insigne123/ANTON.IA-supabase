@@ -252,6 +252,8 @@ for (const evalCase of evalSet.cases) {
     }
     const context = built.context;
     if (!evalCase.destinatario.nombre) context.recipient.displayName = null;
+    // A case whose signal stands for one older than 30 days («senal.antigua») is written as production writes it with DRAFT_SIGNAL_MAX_AGE_DAYS above 30.
+    if (evalCase.senal?.antigua) context.writing = { ...context.writing, olderSignal: true };
 
     const objecionInstruction = evalCase.objecion
       ? `Esto es una RESPUESTA breve al mensaje del destinatario (no un correo frío): "${evalCase.objecion}". Responde en el mismo hilo con una sola idea y una sola pregunta fácil.`

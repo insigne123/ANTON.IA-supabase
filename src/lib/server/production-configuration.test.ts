@@ -28,7 +28,8 @@ test('no model that production names is one the app refuses to call', () => {
 });
 
 test('what production says: the draft improvements, the signal harvest, the Cowork harness on Haiku, its web and Investigadoras and the scheduled tasks are on for every account', () => {
-  const everyone = { signalEvidence: true, hookFilter: true, anchorSpecifics: true };
+  // Signals of the report keep the 30-day window until the owner decides otherwise (DRAFT_SIGNAL_MAX_AGE_DAYS, docs/borradores-naturales-2026-10-30.md).
+  const everyone = { signalEvidence: true, hookFilter: true, anchorSpecifics: true, signalMaxAgeDays: 30 };
   for (const id of [SOMEONE, SOMEONE_ELSE, null]) assert.deepEqual(draftFlagsForUser(id, plain), everyone, String(id));
   for (const id of [SOMEONE, SOMEONE_ELSE]) {
     assert.equal(coworkHarnessEnabled(plain, id), true, id);
