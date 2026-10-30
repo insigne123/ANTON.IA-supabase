@@ -708,3 +708,28 @@ test('the subject reads as a sentence: its first letter in capital, the rest as 
     else process.env.OPENAI_API_KEY = previousKey;
   }
 });
+
+test('an initial email whose approved CTA is a question does not open with another question', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const prompts: string[] = [];
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompts.push(JSON.parse(String(init?.body)).messages[1].content);
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Avance en Acme', opening: 'Vi que Acme abrió una sede nueva.', value: 'Northstar automatiza tareas repetitivas.' }) } }], usage: {} });
+    };
+    const context = draftContextFixture();
+    const asking = { ...context, constraints: { ...context.constraints, cta: { ...context.constraints.cta, exactText: '¿Te parece si lo conversamos 15 minutos esta semana?' } } };
+    await generateOutreachFromDraftContextV2({ context: asking, openingKind: 'pregunta' });
+    assert.match(prompts[0], /APERTURA ASIGNADA \(observacion\)/);
+    prompts.length = 0;
+    const telling = { ...context, constraints: { ...context.constraints, cta: { ...context.constraints.cta, exactText: 'Te dejo mi agenda para esta semana.' } } };
+    await generateOutreachFromDraftContextV2({ context: telling, openingKind: 'pregunta' });
+    assert.match(prompts[0], /APERTURA ASIGNADA \(pregunta\)/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});

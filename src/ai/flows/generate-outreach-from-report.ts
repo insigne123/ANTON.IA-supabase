@@ -507,7 +507,10 @@ ${examples.map((example) => JSON.stringify({ id: example.id, subject: example.su
  ${isCloseStep ? 'Este es el último correo: breakup directo y breve. Los borradores previos no demuestran envíos ni falta de respuesta: no afirmes que te ignoraron.' : isFollowUpStep ? 'Este correo NO es el cierre. Prueba solo el enfoque de esta etapa: un respaldo diferente o una aplicación distinta. Reserva cualquier frase de despedida, última vez o cierre del hilo para el último correo.' : 'Este es el contacto inicial: presenta una aplicación pertinente, sin lenguaje de seguimiento ni cierre.'}
 `
     : '';
-  const openingScaffold = selectOpeningScaffold(input.openingKind || 'dato');
+  // The initial email ends with the approved CTA: when it is a question, an opening question makes two and the check turns the
+  // email back (one of every three openings was a retry by design). That email opens with an observation instead.
+  const ctaAsks = /\?\s*$/.test(input.context.constraints.cta.exactText.trim());
+  const openingScaffold = selectOpeningScaffold(input.openingKind === 'pregunta' && ctaAsks && !input.sequenceContext ? 'observacion' : input.openingKind || 'dato');
   const openingPrompt = !input.sequenceContext
     ? `
 APERTURA ASIGNADA (${openingScaffold.kind}): ${openingScaffold.instruction}
