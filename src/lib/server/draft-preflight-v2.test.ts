@@ -915,3 +915,21 @@ test('the email counts as resting on a signal only when the fact it is anchored 
   const anchored = { ...context, evidence: context.evidence.map((item, index) => index === 0 ? { ...item, statement: 'Acme firmó un convenio con la universidad este mes.' } : item) };
   assert.equal(anchoredOnDatedEvent(anchored), true);
 });
+
+test('the anchor terms of a slogan name its nouns first, and a draft that misses them is told which', () => {
+  // Real research of 30 Oct 2026: asked for two of «Contribuimos, organizaciones, comprendiendo, potenciando, aptitudes», the writer wrote «potenciando».
+  assert.deepEqual(personalizationAnchorTerms('Contribuimos con las organizaciones, comprendiendo y potenciando las aptitudes, habilidades y conocimientos de sus colaboradores.'),
+    ['organizaciones', 'aptitudes', 'habilidades', 'conocimientos', 'colaboradores']);
+  // Their own first-person verb is never asked for: «Contribuimos con las organizaciones» needs only «organizaciones».
+  assert.deepEqual(personalizationAnchorTerms('Contribuimos con las organizaciones.'), ['organizaciones']);
+  const context = draftContextFixture();
+  const result = validateDraftPreflightV2(context, {
+    subject: 'Dotación en faena',
+    body: 'Hola Paula,\n\nCuando falta alguien en un turno, el resto del equipo lo cubre.\n\nSoy Ana, de ServiPro; ponemos personal el mismo día.\n\n¿Te parece si lo conversamos 15 minutos esta semana?',
+    personalization: [{ evidenceId: context.evidence[0]!.evidenceId, claimId: context.evidence[0]!.supportedFactClaimIds[0]!, sourceUrl: context.evidence[0]!.source.url }],
+    hypothesisIds: [],
+  });
+  const issue = result.issues.find((item) => item.code === 'personalization_invalid' && /conceptos materiales/.test(item.message));
+  assert.ok(issue, 'the grounding issue is raised');
+  assert.match(issue!.message, /dos de estos términos: \S+, \S+/);
+});

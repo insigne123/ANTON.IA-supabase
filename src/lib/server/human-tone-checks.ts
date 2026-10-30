@@ -31,6 +31,8 @@ export type HumanToneCheckInput = {
   companyName?: string | null;
   maxModelQuestions?: number;
   hasSignal?: boolean;
+  // The corrective retry: a ficha without a dated fact is then a notice, not a draft that is never created.
+  finalAttempt?: boolean;
 };
 
 // Bloquean. Se comparan sin tildes ni mayúsculas.
@@ -68,13 +70,15 @@ const MULETILLAS = [
   'puede implicar', 'asi el equipo', 'asi su equipo', 'asi el apoyo',
   // Lectura del banco del 30 de octubre de 2026 (v24): seguían pasando.
   'asi puede', 'asi pueden', 'asi podra', 'asi podran', 'puede acompanar', 'como parte de la gestion',
+  // Su web dicha de vuelta en las investigaciones reales del 30 de octubre de 2026 (DFV, ManpowerGroup).
+  'servicios integrales', 'soluciones de negocio',
 ];
 
 // La misma frase con palabras en medio: «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak».
 const HOLLOW_PATTERNS: Array<[RegExp, string]> = [
   [/(?<!\w)(?:costo|gasto)(?: \w+){0,4} acompan(?:a|e|an|en)(?!\w)/, 'el costo acompaña'],
   // «Así, ese turno puede volver a tener cobertura»: repite lo anterior como consecuencia. «Así que» es otra cosa.
-  [/(?<!\w)asi(?! que)(?: \w+){1,3} (?:puede|pueden|podra|podran)(?!\w)/, 'así … puede'],
+  [/(?<!\w)asi(?! que)(?: \w+){0,3} (?:puede|pueden|puedes|podra|podran|podras)(?!\w)/, 'así … puede'],
   [/(?<!\w)asi (?:usted|ustedes|tu|el equipo|su equipo) (?:cuenta|cuentan|tiene|tienen|queda|quedan)(?!\w)/, 'así, usted cuenta…'],
 ];
 
@@ -88,11 +92,31 @@ const ASUNTOS_GENERICOS = ['propuesta comercial', 'oportunidad de colaboracion',
 const FORMAS_TU = ['tu', 'te', 'ti', 'contigo', 'tienes', 'puedes', 'quieres', 'necesitas',
   'sabes', 'avisame', 'cuentame', 'dime', 'escribeme', 'mandame', 'parece que te', 'te parece'];
 
-const USTED_MARCAS = ['usted', 'le', 'les', 'su', 'sus', 'consigo', 'se lo', 'le escribo'];
+// Solo marcas que no se confunden con la tercera persona: «Acme abrirá sus tiendas» o «a los cajeros les toca doblar
+// turno» van bien en un correo de tú, y bloquearlas devolvía primeros intentos correctos (banco del 30 de octubre de 2026).
+// «ustedes» tampoco: es el plural de tú. Son las mismas que usa resolveEffectiveCta para elegir el CTA (Plan 15).
+const USTED_MARCAS = ['usted', 'consigo', 'le escribo', 'le escribi', 'le escribimos', 'le comparto', 'le cuento',
+  'le comento', 'le parece', 'le sirve', 'le serviria', 'le interesa', 'le interesaria', 'le propongo', 'le pregunto',
+  'le ofrezco', 'le acomoda', 'le consulto', 'le dejo', 'le envio', 'le mando', 'su agenda', 'su tiempo', 'su respuesta'];
 
 // Apertura que le describe su propia empresa en vez de darle un motivo.
 const FICHA_COPULAS = ['se dedica a', 'es una empresa', 'se hace cargo de', 'comunica que',
-  'publica que', 'lider en', 'cuenta con'];
+  'publica que', 'lider en', 'cuenta con', 'se describe como', 'se presenta como', 'se define como'];
+
+// Su publicidad dicha de vuelta: «Hualpén es la principal compañía de transporte privado» (investigación real del 30 de octubre de 2026).
+// Siempre se puede quitar el adjetivo y dejar el hecho, así que bloquea con o sin señal.
+const PUFFERY_NOUNS = 'compania|empresa|productor|productora|operador|operadora|cadena|proveedor|proveedora|grupo|red|flota|exportador|exportadora|fabricante|distribuidor|distribuidora|actor|referente|marca|minera|naviera|aerolinea|banco|clinica|universidad';
+const PUFFERY_PATTERNS = [
+  // Con el sustantivo detrás: «es la principal causa de rotación» o «el primer grupo de contratados» no son publicidad.
+  new RegExp(`(?<!\\w)(?:la|el|los|las) (?:principal|principales|mayor|mayores) (?:${PUFFERY_NOUNS})(?!\\w)`),
+  new RegExp(`(?<!\\w)(?:${PUFFERY_NOUNS}) (?:mas grande|mas grandes|lider|lideres|numero uno)(?!\\w)`),
+  /(?<!\w)(?:uno de los|una de las) (?:principales|mayores|mas grandes) (?:companias|empresas|productores|operadores|cadenas|proveedores|grupos|exportadores|fabricantes|distribuidores|actores|referentes|marcas|mineras|navieras|bancos|clinicas)(?!\w)/,
+  // «el que falta es el líder de turno» sí es del rubro.
+  /(?<!\w)(?:es|son|somos) (?:el |la |los |las )?lider(?:es)? (?:en|mundial|mundiales|nacional|regional|del mercado|de la industria|del rubro|del sector)(?!\w)/,
+  /(?<!\w)lider(?:es)? (?:mundial|mundiales|del mercado|de la industria|nacional|regional|del rubro|en su rubro)(?!\w)/,
+  /(?<!\w)(?:posicion de liderazgo|liderazgo mundial|liderazgo global|de primer nivel)(?!\w)/,
+  /(?<!\w)(?:la|el) (?:flota|red|planta|cartera|operacion) mas grande(?!\w)/,
+];
 
 const NUMERO_PALABRAS = ['dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'];
 
@@ -207,22 +231,37 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
     const conNumero = firstToken && new RegExp(`\\bcon (?:mas de |\\d+|${NUMERO_PALABRAS.join('|')})\\b`).test(opening) && opening.includes(firstToken);
     // «En una cadena de retail como Acme, con 40 tiendas, …» names the company in passing, as the prompt asks when there is no signal.
     // Only as the frame of an observation of the trade («En una … como Acme, …»), not ahead of a pitch («Para una … como Acme, sumar personal…»).
-    const inPassing = new RegExp(`^en (?:una|un|empresas|companias) [^,]{0,80}\\bcomo (?:la |el |los |las )?${firstToken}\\b`).test(opening);
+    // «En una faena como la de Minera Cascada, con más de 2.000 trabajadores, la dotación temporal puede servir» frames a pitch, not the trade.
+    const inPassing = new RegExp(`^en [^,]{0,80}\\b(?:como|de) (?:(?:la|el|los|las)(?: de)? )?${firstToken}\\b`).test(opening)
+      && !/\b(?:puede|pueden|podria|podrian) (?:servir|ayudar|ser util)\b/.test(opening);
     if ((copula || conNumero) && !inPassing) {
-      // Con señal disponible se bloquea: el modelo tiene material para
-      // corregirlo en el reintento. Sin señal no hay con qué cumplirlo, así
-      // que se avisa y decide el humano (que revisa el 100% al inicio).
-      const blocking = input.hasSignal !== false;
+      // Sin señal también pide el reintento: nombrar a la empresa de pasada siempre se puede, y en las investigaciones reales del
+      // 30 de octubre de 2026 dos de tres aperturas quedaron como «SQM cuenta con cinco líneas de negocio.». En el reintento solo
+      // avisa: un borrador que no se crea por cómo abre es peor que uno que abre con su ficha y revisa la persona.
+      const blocking = Boolean(input.hasSignal) || !input.finalAttempt;
       const finding = {
         code: 'tone_ficha',
         message: input.hasSignal
           ? 'La apertura le describe su propia empresa en vez de darle un motivo. Usa el dato fechado, o abre con lo que se complica en su rubro y nombra a la empresa de pasada («En una empresa como …, …»), no su ficha.'
-          : 'La apertura le describe su propia empresa en vez de darle un motivo. Como no hay una señal concreta, abre con una observación honesta de su industria y deja el dato de la empresa para el resto del correo.',
+          : 'La apertura le describe su propia empresa en vez de darle un motivo. Abre con lo que se complica en su rubro o en su cargo y nombra a la empresa de pasada, con su dato en esa misma oración («En una empresa con … como …, …»).',
         blocking,
       } as const;
       if (blocking) errors.push({ ...finding });
       else warnings.push({ ...finding });
     }
+  }
+
+  // «Tawa Chile resume su aporte como «Contribuimos con las organizaciones»» (real research, 30 Oct 2026): their site, quoted.
+  // A short name in quotes («Mantenimiento Vial y Control Carretera») is not a quote of their pitch.
+  const quoted = [...modelBody.matchAll(/[«"“]([^»"”]{3,160})[»"”]/g)].map((match) => match[1])
+    .find((text) => text.trim().split(/\s+/).length >= 6 || /\p{L}{3,}(?:amos|emos|imos)\b|\bnuestr[oa]s?\b/iu.test(text));
+  if (quoted) {
+    errors.push({ code: 'tone_ficha', message: `No cites a la empresa entre comillas («${quoted.slice(0, 60)}»): di con tus palabras lo que hace en concreto.`, blocking: true });
+  }
+
+  const puffery = PUFFERY_PATTERNS.map((pattern) => normModel.match(pattern)?.[0]).find(Boolean);
+  if (puffery) {
+    errors.push({ code: 'tone_ficha', message: `Quita la publicidad de la empresa («${puffery}»): decirle que es la principal o la más grande no le da un motivo para responder. Deja el hecho, sin el adjetivo.`, blocking: true });
   }
 
   const lowModel = modelBody.toLocaleLowerCase('es');

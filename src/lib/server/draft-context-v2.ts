@@ -958,6 +958,24 @@ export function isDatedEventEvidence(statement: unknown, now = new Date()) {
   return DATED_EVENT_HINT.test(value);
 }
 
+// What a company says of itself to sell, not a fact a person would mention: «Somos la principal compañía de transporte privado»,
+// «Contribuimos con las organizaciones…», «Soluciones de negocio estratégicas e innovadoras…», a founder's biography. In the real
+// research of 30 Oct 2026 the report chose these as the anchor in seven of eight companies, and the drafts copied them, sometimes in
+// quotes, while the same research had «un contrato con Codelco hasta el año 2029» or «un equipo de más de 350 personas».
+const SITE_CHROME = /!|\b(?:formulario|cont[áa]ctanos|canal de denuncias|ir al contenido|email & phone|phone number|linkedin-in|seguidores|followers|profiles of professionals|cotiza(?:r)?|call center|recuerda tambi[ée]n|suscr[ií]bete|descarga|free|newsletter)\b|\w\+\w+\+\w|\b\d{3}\s\d{3}\s\d{4}\b/iu;
+const PERSON_BIOGRAPHY = /\b(?:he|she|his|her)\b|[’']s (?:role|journey|expertise|career)\b/i;
+const FIRST_PERSON_PITCH = /^(?:en [^,]{1,40},\s*)?(?:nos\s+\p{L}+|\p{L}{3,}(?:amos|emos|imos))\b|\bnuestr[oa]s?\b/iu;
+const PROMOTIONAL_WORDS = /\b(?:principal(?:es)?\s+(?:compañ[ií]a|empresa|operador|red|proveedor)|l[ií]der(?:es)?|liderazgo|m[aá]s grande|clase mundial|primer nivel|innovador(?:a|as|es)?|estrat[ée]gic(?:a|as|o|os)|integral(?:es)?|excelencia|leading|leader|world-class|fastest-growing)\b/iu;
+
+/** 2 for page chrome, 1 for a slogan or a biography, 0 for a fact; a number keeps a first-person line a fact («Contamos con más de 350 personas»). */
+export function draftEvidenceSalesTone(statement: unknown) {
+  const value = String(statement || '').trim();
+  if (SITE_CHROME.test(value)) return 2;
+  if (PERSON_BIOGRAPHY.test(value)) return 1;
+  if (/\d/.test(value)) return 0;
+  return FIRST_PERSON_PITCH.test(value) || PROMOTIONAL_WORDS.test(value) ? 1 : 0;
+}
+
 export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV2) {
   const reportAnchorOrder = new Map(
     (context.report?.outreachBrief.selectedFactualAnchorClaimIds || []).map((claimId, index) => [claimId, index]),
@@ -971,13 +989,17 @@ export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV
       confidence: evidence.confidence,
       reportAnchorOrder: reportAnchorOrder.get(claimId),
       signalLike: isSignalLikeEvidence(evidence.statement),
+      salesTone: draftEvidenceSalesTone(evidence.statement),
     })),
   );
   candidates.sort((left, right) => {
     if (left.subjectScope !== right.subjectScope) return left.subjectScope === 'company' ? -1 : 1;
+    // Page chrome never anchors a draft; between a slogan and a fact of the same standing (both chosen by the report, or neither), the fact.
+    if ((left.salesTone === 2) !== (right.salesTone === 2)) return left.salesTone === 2 ? 1 : -1;
     const leftIsReportAnchor = left.reportAnchorOrder !== undefined;
     const rightIsReportAnchor = right.reportAnchorOrder !== undefined;
     if (leftIsReportAnchor !== rightIsReportAnchor) return leftIsReportAnchor ? -1 : 1;
+    if (left.salesTone !== right.salesTone) return left.salesTone - right.salesTone;
     if (left.reportAnchorOrder !== right.reportAnchorOrder) {
       return (left.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER) - (right.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER);
     }

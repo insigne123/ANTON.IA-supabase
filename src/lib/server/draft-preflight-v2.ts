@@ -78,6 +78,8 @@ export type ValidateDraftPreflightV2Options = {
   // ficha corporativa). Solo para texto del modelo, nunca ediciones del
   // usuario: el llamador los activa junto a checkGeneratedCopy.
   checkHumanTone?: boolean;
+  // The corrective retry: what only asks for a better opening (a ficha without a dated fact) is a notice there, so the draft is still created.
+  retryAttempt?: boolean;
   // The version is the person's own edit (generation_method 'human'): its length is a notice inside
   // EDITED_EMAIL_BODY_WORDS, not an error (src/lib/drafts/email-length.ts), and so are its closing and its use of the research (PERSON_DECIDES).
   editedByPerson?: boolean;
@@ -327,6 +329,8 @@ const personalizationStopWords = new Set([
 function materialPersonalizationTerms(value: string) {
   return normalizeForMatch(value)
     .split(' ')
+    // The company's own voice («Contribuimos con las organizaciones…»): no email says it, so the check never asks for it (real research, 30 Oct 2026).
+    .filter((word) => !/^\p{L}{4,}(?:amos|emos|imos)$/u.test(word))
     .map((term) => term.replace(/(?:es|os|as|s)$/u, ''))
     .filter((term) => term.length >= 4 && !personalizationStopWords.has(term));
 }
@@ -336,7 +340,15 @@ function materialPersonalizationTerms(value: string) {
 // the check on the first attempt instead of paraphrasing them away and paying
 // for a full corrective regeneration.
 export function personalizationAnchorTerms(statement: string, max = 5): string[] {
-  return anchorWords(statement).slice(0, max).map(({ word }) => word);
+  return plainWordsFirst(anchorWords(statement)).slice(0, max).map(({ word }) => word);
+}
+
+// The words a company sells itself with, and its verbs, go after its nouns: for «Contribuimos con las organizaciones, comprendiendo y
+// potenciando las aptitudes…» the writer was asked for two of «Contribuimos, organizaciones, comprendiendo, potenciando, aptitudes» and wrote
+// «potenciando», which the tone check turns back (real research, 30 Oct 2026). Any two material terms still pass the grounding check.
+const SALES_WORD = /^(?:\p{L}{3,}(?:amos|emos|imos|ando|iendo|yendo)|potenci\p{L}*|integral(?:es)?|innovador\p{L}*|estrat[ée]gic\p{L}*|l[ií]der\p{L}*|liderazgo|principal(?:es)?|excelencia|calidad|soluci[óo]n(?:es)?|compañ[ií]a|empresa)$/iu;
+function plainWordsFirst(words: AnchorWord[]) {
+  return [...words.filter((item) => !SALES_WORD.test(item.word)), ...words.filter((item) => SALES_WORD.test(item.word))];
 }
 
 type AnchorWord = { word: string; term: string; sentenceStart: boolean; neighbours: string[] };
@@ -377,7 +389,7 @@ export function specificAnchorTerms(statement: string, options: { companyName?: 
   const max = options.max ?? 5;
   const own = new Set(materialPersonalizationTerms(normalizeForMatch(options.companyName).replace(LEGAL_FORM, ' ')));
   const capitalised = (word: string) => /^\p{Lu}/u.test(word);
-  const words = anchorWords(statement);
+  const words = plainWordsFirst(anchorWords(statement));
   const isOwn = (item: AnchorWord) => own.has(item.term)
     || (capitalised(item.word) && item.neighbours.some((neighbour) => capitalised(neighbour) && own.has(pluralStem(neighbour))));
   const isConcrete = (item: AnchorWord) => !isOwn(item) && isConcreteWord(item.word, item.sentenceStart);
@@ -854,7 +866,11 @@ export function validateDraftPreflightV2(
     }
   }
   if (output.personalization.length > 0 && !hasGroundedPersonalization(context, output.personalization, rawBody)) {
-    add('personalization_invalid', 'La personalización debe conservar los conceptos materiales de la evidencia seleccionada.', 'body');
+    // Production v23, last two weeks: 7 of 8 drafts turned back for this were turned back again, because the retry did not know which words.
+    const terms = output.personalization.flatMap((item) => personalizationAnchorTerms(draftEvidencePersonalizationStatementV2(
+      evidenceById.get(item.evidenceId)?.statement || '', { keepSpecifics: Boolean(context.writing?.anchorSpecifics) },
+    ))).slice(0, 5);
+    add('personalization_invalid', `La personalización debe conservar los conceptos materiales de la evidencia seleccionada${terms.length >= 2 ? `: usa en una misma oración, con tus palabras, dos de estos términos: ${terms.join(', ')}` : ''}.`, 'body');
   }
   if (output.personalization.length > 0 && hasCataloguedPersonalization(context, output.personalization, body)) {
     warnings.push('La personalización enumera la fuente como una ficha; usa solo uno o dos detalles en lenguaje natural.');
@@ -878,6 +894,7 @@ export function validateDraftPreflightV2(
       maxModelQuestions: expectedCtaCount === 1 ? 0 : 1,
       // The fact the email rests on, not any line of the evidence: asked to open with a dated fact it is not anchored on, the writer could not.
       hasSignal: anchoredOnDatedEvent(context),
+      finalAttempt: Boolean(options.retryAttempt),
     });
     for (const finding of tone.errors) {
       add(finding.code, finding.message, finding.code === 'tone_asunto' ? 'subject' : 'body');
