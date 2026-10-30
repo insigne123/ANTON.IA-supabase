@@ -188,10 +188,19 @@ env:
   - variable: DRAFT_ANCHOR_SPECIFICS_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Señales con fecha de hasta 90 días llegan al correo (antes 30), por decisión del dueño del 30 oct 2026: con 30, el 15 % de los informes
+  # tenía una señal que el correo podía usar; con 90, el 38 %. La de más de 30 días se dice con su mes y en pasado, nunca como «vi que»
+  # (docs/borradores-naturales-2026-10-30.md). La cosecha de señales busca en la misma ventana.
+  - variable: DRAFT_SIGNAL_MAX_AGE_DAYS
+    value: "90"
+    availability: [RUNTIME]
   # Investigación: un Claude (Haiku) elige, entre los hechos que la investigación ya leyó, las señales recientes que sirven de motivo para escribir;
   # solo se aceptan las que están escritas en los hechos que citan. Cuesta del orden de US$0,001 por investigación y suma unos segundos.
   - variable: RESEARCH_SIGNAL_HARVEST_ENABLED
     value: "true"
+    availability: [RUNTIME]
+  - variable: RESEARCH_SIGNAL_HARVEST_DAYS
+    value: "90"
     availability: [RUNTIME]
   # Cowork: el harness (el coordinador es un Claude con herramientas) con Haiku 5.5, y las tareas programadas (cada persona decide si crea una; hasta 5 activas).
   - variable: COWORK_RUNTIME
