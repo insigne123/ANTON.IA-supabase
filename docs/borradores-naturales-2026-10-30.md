@@ -166,6 +166,14 @@ Lo que mejoró se ve en la segunda oración: «se resienten la atención en sala
 
 Los dos que todavía piden retoque son los de minería sin señal, que vuelve al eslogan («el costo se va cuando baja el peak»), y el de la startup, que en esa corrida no eligió el servicio que calza.
 
+### Quinta vuelta: `native-draft/v28`
+
+- **Por qué el servicio cambiaba de una corrida a otra.** Cuando ninguna palabra de la evidencia está en los servicios del perfil, la estrategia (`capabilityForFact`) le pasaba al redactor el primer servicio de la lista como «capacidad indicada», y el prompt pedía «conéctalo con la capacidad indicada». Eso contradecía la regla de `v27` de elegir el servicio que calza. A una startup que crece le llegaba «Dotación de personal temporal» porque «personas» no es «personal».
+- **Qué cambió:** cuando la estrategia no encuentra puente (`exploratory`), el servicio llega como sugerencia (`suggestedCapability`) y el redactor elige el que calza.
+- **Resultado:** la startup recibe «administramos contratos laborales de nuevas incorporaciones, para que el equipo de personas no tenga que tramitarlos», y minería sin señal, «reemplazamos turnos el mismo día», sin el eslogan.
+- **Validez:** 24 de 24 válidos (23 al primer intento) y `Evalia` 8 de 8.
+- **Lo que queda:** cuando el dato de la empresa no entra en la apertura, a veces queda como oración suelta en el párrafo de la oferta.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
