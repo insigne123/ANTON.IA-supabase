@@ -486,13 +486,14 @@ OUTREACH_STRATEGY (guía interna, no evidencia ni texto para copiar):
 ${JSON.stringify({
   primaryFact: strategy.primaryFact.statement,
   supportingFact: strategy.supportingFact?.statement || null,
-  capability: strategy.capability,
+  // Without a bridge in the evidence the capability is only the first service of the profile (capabilityForFact): a guess, not a choice.
+  ...(strategy.exploratory ? { suggestedCapability: strategy.capability } : { capability: strategy.capability }),
   proofPoint: strategy.proofPoint,
   angle: strategy.angle,
   exploratory: strategy.exploratory,
 })}
 
- Sigue esta estrategia: ${input.sequenceContext ? 'el hecho primario ya abrió el primer correo; aquí va solo como referencia breve y el motivo para escribir es el enfoque nuevo de este correo: la capacidad aplicada a un momento concreto del trabajo del destinatario (qué resuelve, para quién y cuándo), dicha como lo que haces, no como un problema que tiene' : 'integra el hecho primario en un motivo concreto para escribir, conéctalo con la capacidad indicada'} y usa el punto de respaldo solo si encaja sin forzar. Si exploratory es true, plantea una aplicación condicional, no un problema confirmado ni una pregunta adicional. ${isCloseStep ? 'En este cierre no pidas reunión: solo una pregunta directa de sí o no.' : asksHowToday ? 'El único pedido será tu pregunta sobre cómo lo resuelven hoy.' : isFollowUpStep ? 'El único pedido será tu pregunta de conversación breve.' : 'El único pedido será el CTA aprobado que agregará el servidor.'}
+ Sigue esta estrategia: ${input.sequenceContext ? 'el hecho primario ya abrió el primer correo; aquí va solo como referencia breve y el motivo para escribir es el enfoque nuevo de este correo: la capacidad aplicada a un momento concreto del trabajo del destinatario (qué resuelve, para quién y cuándo), dicha como lo que haces, no como un problema que tiene' : `integra el hecho primario en un motivo concreto para escribir, ${strategy.exploratory ? 'elige entre los servicios de seller el que calza con lo que hace la empresa y con el cargo de quien lee (suggestedCapability es solo el primero de la lista, no una elección), conéctalo con él' : 'conéctalo con la capacidad indicada'}`} y usa el punto de respaldo solo si encaja sin forzar. Si exploratory es true, plantea una aplicación condicional, no un problema confirmado ni una pregunta adicional. ${isCloseStep ? 'En este cierre no pidas reunión: solo una pregunta directa de sí o no.' : asksHowToday ? 'El único pedido será tu pregunta sobre cómo lo resuelven hoy.' : isFollowUpStep ? 'El único pedido será tu pregunta de conversación breve.' : 'El único pedido será el CTA aprobado que agregará el servidor.'}
 `
     : '';
   const examplesPrompt = examples.length > 0

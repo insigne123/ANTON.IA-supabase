@@ -781,3 +781,35 @@ test('the writer is asked to say a fact with its month only when an older signal
     else process.env.OPENAI_API_KEY = previousKey;
   }
 });
+
+test('without a bridge to the offer the capability reaches the writer as a suggestion, and it picks the service that fits', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const prompts: string[] = [];
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompts.push(JSON.parse(String(init?.body)).messages[1].content);
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Avance en Acme', opening: 'Vi que Acme crece.', value: 'Northstar automatiza tareas repetitivas.' }) } }], usage: {} });
+    };
+    const context = draftContextFixture();
+    await generateOutreachFromDraftContextV2({ context });
+    assert.match(prompts[0], /"capability":/);
+    assert.match(prompts[0], /conéctalo con la capacidad indicada/);
+    prompts.length = 0;
+    // A startup that grows: no word of it is in the services, so the strategy only has the first one of the list.
+    const unbridged = {
+      ...context,
+      person: { ...context.person, title: 'Head of People' },
+      evidence: context.evidence.map((item) => ({ ...item, statement: 'Acme es una startup de pagos que este año crece al doble.' })),
+    };
+    await generateOutreachFromDraftContextV2({ context: unbridged });
+    assert.match(prompts[0], /"suggestedCapability":/);
+    assert.doesNotMatch(prompts[0], /"capability":/);
+    assert.match(prompts[0], /elige entre los servicios de seller el que calza/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
