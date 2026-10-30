@@ -63,7 +63,7 @@ const MULETILLAS = [
   // Frases que no dicen nada: aparecían en la mitad de los borradores del banco del 30 de octubre de 2026.
   'es una alternativa', 'puede ser una alternativa', 'es una opcion', 'puede ser una opcion',
   'pone sobre la mesa', 'forma parte del trabajo', 'es parte del trabajo',
-  'segun su reporte', 'en la conversacion salio',
+  'segun su reporte', 'en la conversacion salio', 'reporte interno',
   // «Así, el equipo puede…»: 36 de las 120 frases más artificiales que marcó el juez el 23 de octubre (borradores-ganchos-y-reglas.md).
   'puede implicar', 'asi el equipo', 'asi su equipo', 'asi el apoyo',
   // Lectura del banco del 30 de octubre de 2026 (v24): seguían pasando.
@@ -72,7 +72,7 @@ const MULETILLAS = [
 
 // La misma frase con palabras en medio: «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak».
 const HOLLOW_PATTERNS: Array<[RegExp, string]> = [
-  [/(?<!\w)costo(?: \w+){0,4} acompana(?!\w)/, 'el costo acompaña'],
+  [/(?<!\w)(?:costo|gasto)(?: \w+){0,4} acompan(?:a|e|an|en)(?!\w)/, 'el costo acompaña'],
   // «Así, ese turno puede volver a tener cobertura»: repite lo anterior como consecuencia. «Así que» es otra cosa.
   [/(?<!\w)asi(?! que)(?: \w+){1,2} (?:puede|pueden|podra|podran)(?!\w)/, 'así … puede'],
 ];

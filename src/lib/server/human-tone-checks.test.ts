@@ -125,7 +125,7 @@ test('human tone blocks the bridges that say nothing', () => {
 
 test('human tone blocks the same bridges with words in between, and leaves a real cost alone', () => {
   // Bank drafts of 30 Oct 2026 (v24) that still passed.
-  for (const sentence of ['La dotación se ajusta y su costo acompaña la cosecha.', 'El costo de esa dotación acompaña el peak.', 'Así puede sumar personal durante esas aperturas.', 'Administrar contratos también puede acompañar la incorporación.', 'Así, ese turno puede volver a tener cobertura.'])
+  for (const sentence of ['La dotación se ajusta y su costo acompaña la cosecha.', 'El gasto de ese refuerzo acompaña el peak.', 'Ponemos personal, de modo que el costo acompañe ese peak.', 'El costo de esa dotación acompaña el peak.', 'Así puede sumar personal durante esas aperturas.', 'Administrar contratos también puede acompañar la incorporación.', 'Así, ese turno puede volver a tener cobertura.', 'El reporte interno indica que la rotación llegó al 18%.'])
     assert.ok(checkHumanTone({ subject: 'Dotación para diciembre', body: `Hola Rodrigo,\n\n${sentence}\n\n¿Conversamos?` }).errors.some((finding) => finding.code === 'tone_muletilla'), sentence);
   for (const sentence of ['El costo termina cuando termina la cosecha.', 'Acompañamos la apertura con dos personas por tienda.', 'Así que el equipo puede revisarlo el lunes.'])
     assert.ok(!checkHumanTone({ subject: 'Dotación para diciembre', body: `Hola Rodrigo,\n\n${sentence}\n\n¿Conversamos?` }).errors.some((finding) => finding.code === 'tone_muletilla'), sentence);
@@ -142,4 +142,6 @@ test('human tone blocks a sentence left without its verb, not a short sentence b
   assert.deepEqual(sentenceFragments('Hola Paula,\n\nLe escribo por la dotación temporal en faena. Con la temporada encima, cubrimos turnos el mismo día.'), []);
   assert.deepEqual(sentenceFragments('Hola,\n\nPara selección en servicios transitorios. Cuando entran muchos guardias a la vez, cubrimos el turno.'), ['Para selección en servicios transitorios.']);
   assert.deepEqual(sentenceFragments('Hola,\n\nCon este correo cierro el tema. Con AXIS, cargas la lista de postulantes.'), [], 'the first and second person are verbs');
+  // Turned back a first attempt of the bank on 30 Oct 2026 (v25): a clitic before a word is a verb.
+  assert.deepEqual(sentenceFragments('Hola,\n\nSi se alarga, se posterga la decisión de contratación. Para la selección de esta cosecha.'), ['Para la selección de esta cosecha.']);
 });
