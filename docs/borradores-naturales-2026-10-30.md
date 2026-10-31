@@ -327,6 +327,18 @@ Hasta `v33` solo se habían probado correos iniciales con investigaciones reales
 
 **Lo que todavía se lee raro:** cuando el hecho ancla es la historia de la empresa, cada seguimiento la vuelve a nombrar («con Perú y Chile en su historia»). Los seguimientos están obligados a nombrar el ancla. Con un ancla débil, la referencia sobra.
 
+### Duodécima vuelta: `native-draft/v35`, el ancla de los seguimientos
+
+`v34` quedó en producción (`a41cbe88`, 31 de octubre a las 00:56 UTC). En sus secuencias reales, cuando el hecho ancla era la historia de la empresa, cada seguimiento lo volvía a contar como dato suelto: «Para una búsqueda en Tawa, con Perú y Chile en su historia…».
+
+**Qué cambió:** la instrucción del ancla en los seguimientos pide usarla como el lugar o el momento de lo que harías («para sus búsquedas en Perú y Chile»), no como un dato suelto ni como su historia.
+
+**Resultado:**
+
+- **4 secuencias reales con anclas débiles:** 16 de 16 correos válidos, 12 al primer intento.
+- **Tawa:** ya escribe «Para sus búsquedas en Perú y Chile, PSOL verifica en tiempo real la identidad…».
+- **Lo que falta:** la de DFV, cuyo ancla es «Nuestros inicios datan del año 2010…», todavía arrastra «rubro ligado a sus inicios en 2010».
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
