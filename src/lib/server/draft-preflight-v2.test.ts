@@ -1008,6 +1008,28 @@ test('a certification is written as the profile writes it, year included', () =>
   assert.deepEqual(standards(`En ${context.seller.companyName} estamos certificados en ISO 27001.`), ['La norma ISO 27001 no figura en el perfil ni en la evidencia: quítala.']);
 });
 
+test('a later email may rest on the recipient\'s name when the anchor is not a dated event; the first email and a dated event still carry the fact', () => {
+  // Real research of 31 Oct 2026: told to carry «sus planes mensuales» into every follow-up, the writer wrote «Si una búsqueda se vincula con
+  // sus planes mensuales…».
+  const base = draftContextFixture();
+  const evidence = { ...base.evidence[0]!, statement: 'Acme ofrece planes mensuales que se pueden suscribir en línea.' };
+  const context = { ...base, evidence: [evidence, ...base.evidence.slice(1)] };
+  const output = (body: string) => ({
+    subject: 'Evaluaciones por cargo',
+    body,
+    personalization: [{ evidenceId: evidence.evidenceId, claimId: evidence.supportedFactClaimIds[0]!, sourceUrl: evidence.source.url }],
+    hypothesisIds: [],
+  });
+  const followUp = `Hola Ada,\n\nPara las búsquedas de Acme, en ${base.seller.companyName} configuramos una batería de tests para cada cargo.\n\nEl postulante la rinde desde su celular. ¿Cómo definen hoy qué pruebas aplicar?`;
+  const invalid = (body: string, expectedCtaCount: 0 | 1 | 'model', ctx = context) => validateDraftPreflightV2(ctx, output(body), { expectedCtaCount }).issues
+    .some((issue) => issue.code === 'personalization_invalid');
+  assert.equal(invalid(followUp, 'model'), false);
+  assert.equal(invalid(followUp.replace('Para las búsquedas de Acme, en', 'En'), 'model'), true);
+  // A dated event still goes into every email.
+  const dated = { ...evidence, statement: 'Acme abrirá dos tiendas nuevas en diciembre según nota de prensa del 2026-09-10.' };
+  assert.equal(invalid(followUp, 'model', { ...base, evidence: [dated, ...base.evidence.slice(1)] }), true);
+});
+
 test('narrowing a statement skips the clause that only introduces the fact', () => {
   // Real research of 30 Oct 2026: narrowed to «De acuerdo a los lineamientos de la Ley 21.015», the anchor asked for «acuerdo» and «lineamientos».
   const statement = 'De acuerdo a los lineamientos de la Ley 21.015, contamos con un Programa de Inclusión Laboral, cuyos objetivos son reforzar la diversidad, promover espacios inclusivos y crear redes.';

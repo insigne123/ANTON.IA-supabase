@@ -335,6 +335,8 @@ const personalizationStopWords = new Set([
   'actualidad', 'ademas', 'ayuda', 'ayudan', 'como', 'comunica', 'desde', 'donde', 'empresa',
   'equipos', 'esta', 'este', 'estos', 'figura', 'hacia', 'para', 'publica', 'sobre', 'tiene',
   'trabajo', 'una', 'unas', 'uno', 'unos',
+  // «Nosotros creamos software, pero no administramos comunidades» (real research, 31 Oct 2026): the writer was asked for «Nosotros» and «pero».
+  'nosotros', 'nosotras', 'pero', 'tambien', 'solo', 'cada', 'todo', 'toda', 'todos', 'todas',
 ]);
 
 function materialPersonalizationTerms(value: string) {
@@ -977,7 +979,14 @@ export function validateDraftPreflightV2(
       add('source_url_invalid', 'La URL de fuente no coincide con la evidencia declarada.', 'research');
     }
   }
-  if (output.personalization.length > 0 && !hasGroundedPersonalization(context, output.personalization, rawBody)) {
+  // A later email whose anchor is not a dated event may rest on the recipient's name: told to carry «sus planes mensuales» or «uno de los
+  // mayores portales de empleo» into every follow-up, the writer wrote «Si una búsqueda se vincula con sus planes mensuales…» (real research,
+  // 31 Oct 2026). The first email still carries the fact, and a dated event still goes into every email.
+  const laterStep = options.expectedCtaCount === 'model' || options.expectedCtaCount === 0;
+  const recipientToken = normalizeForMatch(context.company.name).replace(LEGAL_FORM, ' ').split(' ').find((token) => token.length >= 4) || '';
+  const namesRecipient = laterStep && Boolean(recipientToken) && !anchoredOnDatedEvent(context)
+    && normalizeForMatch(rawBody).split(' ').includes(recipientToken);
+  if (output.personalization.length > 0 && !namesRecipient && !hasGroundedPersonalization(context, output.personalization, rawBody)) {
     // Production v23, last two weeks: 7 of 8 drafts turned back for this were turned back again, because the retry did not know which words.
     const terms = output.personalization.flatMap((item) => personalizationAnchorTerms(draftEvidencePersonalizationStatementV2(
       evidenceById.get(item.evidenceId)?.statement || '', { keepSpecifics: Boolean(context.writing?.anchorSpecifics) },

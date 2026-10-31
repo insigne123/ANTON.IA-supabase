@@ -91,8 +91,8 @@ const MULETILLAS = [
 // sin otra prueba del servicio en el perfil, dice algo abstracto del tema: «La responsabilidad social corporativa es otra perspectiva para el
 // programa», «una mirada preventiva también considera la seguridad de las personas». Ninguna aparece en los 612 correos iniciales del corpus.
 // En el reintento solo avisan: un borrador que no se crea por una de ellas es peor que uno que la trae y revisa la persona.
-const RELACIONES_FORZADAS = ['tambien entra en', 'tambien entran en', 'tambien se juega en', 'suma una mirada', 'suma una instancia', 'desde ese cruce',
-  'otra perspectiva', 'una mirada preventiva', 'tambien se puede trabajar', 'es una forma concreta de', 'tambien considera'];
+const RELACIONES_FORZADAS = ['tambien entra en', 'tambien entran en', 'tambien se juega en', 'suma una mirada', 'suma una instancia',
+  'otra perspectiva', 'una mirada preventiva', 'tambien se puede trabajar', 'es una forma concreta de', 'tambien considera', 'ese cruce'];
 
 // La misma frase con palabras en medio: «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak».
 const HOLLOW_PATTERNS: Array<[RegExp, string]> = [
@@ -125,17 +125,19 @@ const FICHA_COPULAS = ['se dedica a', 'es una empresa', 'se hace cargo de', 'com
 
 // Su publicidad dicha de vuelta: «Hualpén es la principal compañía de transporte privado» (investigación real del 30 de octubre de 2026).
 // Siempre se puede quitar el adjetivo y dejar el hecho, así que bloquea con o sin señal.
-const PUFFERY_NOUNS = 'compania|empresa|productor|productora|operador|operadora|cadena|proveedor|proveedora|grupo|red|flota|exportador|exportadora|fabricante|distribuidor|distribuidora|actor|referente|marca|minera|naviera|aerolinea|banco|clinica|universidad';
+const PUFFERY_NOUNS = 'compania|empresa|productor|productora|operador|operadora|cadena|proveedor|proveedora|grupo|red|flota|exportador|exportadora|fabricante|distribuidor|distribuidora|actor|referente|marca|minera|naviera|aerolinea|banco|clinica|universidad|portal|plataforma|consultora|holding|constructora|aseguradora';
 const PUFFERY_PATTERNS = [
   // Con el sustantivo detrás: «es la principal causa de rotación» o «el primer grupo de contratados» no son publicidad.
   new RegExp(`(?<!\\w)(?:la|el|los|las) (?:principal|principales|mayor|mayores) (?:${PUFFERY_NOUNS})(?!\\w)`),
   new RegExp(`(?<!\\w)(?:${PUFFERY_NOUNS}) (?:mas grande|mas grandes|lider|lideres|numero uno)(?!\\w)`),
-  /(?<!\w)(?:uno de los|una de las) (?:principales|mayores|mas grandes) (?:companias|empresas|productores|operadores|cadenas|proveedores|grupos|exportadores|fabricantes|distribuidores|actores|referentes|marcas|mineras|navieras|bancos|clinicas)(?!\w)/,
+  /(?<!\w)(?:uno de los|una de las) (?:principales|mayores|mas grandes) (?:companias|empresas|productores|operadores|cadenas|proveedores|grupos|exportadores|fabricantes|distribuidores|actores|referentes|marcas|mineras|navieras|bancos|clinicas|portales|plataformas|consultoras|holdings|constructoras|aseguradoras|universidades)(?!\w)/,
   // «el que falta es el líder de turno» sí es del rubro.
   /(?<!\w)(?:es|son|somos) (?:el |la |los |las )?lider(?:es)? (?:en|mundial|mundiales|nacional|regional|del mercado|de la industria|del rubro|del sector)(?!\w)/,
   /(?<!\w)lider(?:es)? (?:mundial|mundiales|del mercado|de la industria|nacional|regional|del rubro|en su rubro)(?!\w)/,
   /(?<!\w)(?:posicion de liderazgo|liderazgo mundial|liderazgo global|de primer nivel)(?!\w)/,
   /(?<!\w)(?:la|el) (?:flota|red|planta|cartera|operacion) mas grande(?!\w)/,
+  // «Acme está entre los portales de empleo más grandes de Chile» (real research, 31 Oct 2026).
+  /(?<!\w)entre (?:los|las) (?:\w+ ){1,4}(?:mas grandes|mayores|principales|lideres)(?!\w)/,
 ];
 
 const NUMERO_PALABRAS = ['dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'];

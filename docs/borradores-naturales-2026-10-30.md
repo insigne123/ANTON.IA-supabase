@@ -427,6 +427,30 @@ Cuando el perfil del vendedor trae una sola línea del servicio (prevención de 
 | `v39`, 8 secuencias reales | 32 | 32 | 32 | 0 | 2 |
 | `v39` final, 2 repeticiones de los casos con perfil escaso | 16 | 16 | 15 | 0 | 0 |
 
+### Decimoséptima vuelta: `native-draft/v40`, empresas que no se habían probado
+
+Se tomaron, en solo lectura, 8 investigaciones reales de empresas que no estaban en ninguna muestra anterior (minería, portales de empleo, sector público, salud, consultoras de RR. HH.). Cuatro traen evidencia utilizable. Con `v39`, de 16 correos salieron 15 válidos, con tres defectos nuevos:
+
+- **El ancla era lo que la empresa dice que no es:** «Nosotros creamos software, pero no administramos comunidades». El control pedía «Nosotros» y «pero» como términos, un seguimiento no se creó y la apertura decía «crean software, pero no administran comunidades».
+- **Publicidad con otra forma:** «uno de los mayores portales de empleo», «está entre los portales de empleo más grandes de Chile».
+- **Seguimientos que forzaban un ancla sin relación con lo que se vende:** «Si una búsqueda se vincula con sus planes mensuales…», «Para búsquedas de empleo en Chile…».
+
+**Qué cambió:**
+
+- **La voz propia de la empresa y lo que dice no ser cuentan como frase de venta** («Nosotros…», «pero no…», «no somos…»), igual que el eslogan: un hecho se elige antes. «nosotros», «pero» y otras palabras de función ya no se piden como términos del ancla.
+- **Publicidad:** «uno de los mayores portales, plataformas o consultoras» y «entre los … más grandes» se bloquean en el correo y bajan la evidencia que los trae. «ese cruce» se suma a las relaciones forzadas.
+- **Un seguimiento cuyo ancla no es un hecho con fecha puede apoyarse en el nombre de la empresa:** el primer correo sigue llevando el hecho, y un hecho con fecha (un proyecto, una vacante, una apertura) sigue yendo en cada correo. El prompt lo dice: si el hecho no tiene relación con lo que se ofrece, basta con nombrar a la empresa.
+
+**Resultado:**
+
+| | Correos | Válidos | Al primer intento | Defectos medidos |
+| --- | --- | --- | --- | --- |
+| 4 empresas nuevas, `v39` | 16 | 15 | 13 | 2 |
+| 4 empresas nuevas, `v40` | 16 | 16 | 15 | 0 |
+| 8 secuencias anteriores, `v40` | 32 | 32 | 32 | 0 |
+
+**Lo que todavía se lee raro:** cuando el único hecho de la investigación no tiene relación con lo que se vende («se pueden suscribir planes mensuales»), el primer correo todavía lo nombra. El arreglo está en la investigación (traer un hecho con fecha), no en el correo.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

@@ -324,4 +324,8 @@ test('the closing line is a sentence of its own, and a forced link between servi
   // A follow-up with nothing new from the profile said something abstract about the topic (real research, 31 Oct 2026).
   assert.deepEqual(blockedPhrasesIn('La responsabilidad social corporativa es otra perspectiva para el Programa de Inclusión Laboral.'), ['otra perspectiva']);
   assert.deepEqual(blockedPhrasesIn('En una obra subterránea, una mirada preventiva también considera la seguridad de las personas.').sort(), ['tambien considera', 'una mirada preventiva']);
+  // Real research of 31 Oct 2026: «Acme, uno de los mayores portales de empleo en Chile, está en ese cruce entre búsqueda y evaluación».
+  assert.deepEqual(blockedPhrasesIn('Acme, uno de los mayores portales de empleo en Chile, está en ese cruce entre búsqueda y evaluación.').sort(), ['ese cruce', 'uno de los mayores portales']);
+  assert.deepEqual(blockedPhrasesIn('Acme está entre los portales de empleo más grandes de Chile.'), ['entre los portales de empleo mas grandes']);
+  assert.deepEqual(blockedPhrasesIn('Está entre las tareas que más tiempo toman.'), []);
 });
