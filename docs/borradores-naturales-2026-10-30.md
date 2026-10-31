@@ -397,6 +397,18 @@ En `v35`, una empresa cuyo ancla era «Nuestros inicios datan del año 2010, cua
 - **Seguimientos repetitivos cuando el perfil tiene poco del servicio:** con una sola línea de prevención de riesgos, los cuatro correos dicen casi lo mismo. El arreglo está en el perfil del vendedor (pruebas, casos, alcance por servicio), no en el prompt.
 - **Frases sueltas como «por eso te escribo desde ese cruce»:** aparecen de vez en cuando.
 
+### Decimoquinta vuelta: `native-draft/v38`, el inglés que quedaba en el reintento
+
+Con `v37`, los correos iniciales sobre las 21 investigaciones reales dieron 16 de 16 válidos, 14 al primer intento (con `v36`, 11). Al leerlos quedaba un defecto que llegaba al borrador: «son parte de su estructura commercial». En el reintento, el control de inglés solo avisa, para que el borrador se cree igual, y en una muestra anterior pasó lo mismo con «en United Kingdom».
+
+**Qué cambió:**
+
+- **Traducción determinista y acotada del texto final** (`src/lib/copied-english.ts`), como ya se hacía con la mayúscula del asunto:
+  - Solo nombres de países y palabras cuyo español no está en duda: «United Kingdom» → «Reino Unido», «commercial» → «comercial», «subsidiaries» → «filiales».
+  - Una palabra con mayúscula puede ser parte de un nombre («Commercial Bank») y no se toca, y tampoco los nombres de la empresa ni del vendedor.
+  - La glosa que queda repetida («Reino Unido (Reino Unido)») se borra.
+- **«desde ese cruce»** pasa a la lista de relaciones forzadas.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

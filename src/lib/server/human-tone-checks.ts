@@ -89,7 +89,7 @@ const MULETILLAS = [
 // Relaciones forzadas entre el servicio y el hecho: «Las áreas verdes también entran en la coordinación de las obras civiles mineras»,
 // «la diversidad e inclusión también se juega en el trabajo cotidiano» (secuencias reales del 31 de octubre de 2026). En el reintento solo
 // avisan: un borrador que no se crea por una de ellas es peor que uno que la trae y revisa la persona.
-const RELACIONES_FORZADAS = ['tambien entra en', 'tambien entran en', 'tambien se juega en', 'suma una mirada', 'suma una instancia'];
+const RELACIONES_FORZADAS = ['tambien entra en', 'tambien entran en', 'tambien se juega en', 'suma una mirada', 'suma una instancia', 'desde ese cruce'];
 
 // La misma frase con palabras en medio: «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak».
 const HOLLOW_PATTERNS: Array<[RegExp, string]> = [
