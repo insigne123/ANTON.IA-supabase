@@ -86,6 +86,11 @@ const MULETILLAS = [
   'servicios integrales', 'soluciones de negocio',
 ];
 
+// Relaciones forzadas entre el servicio y el hecho: «Las áreas verdes también entran en la coordinación de las obras civiles mineras»,
+// «la diversidad e inclusión también se juega en el trabajo cotidiano» (secuencias reales del 31 de octubre de 2026). En el reintento solo
+// avisan: un borrador que no se crea por una de ellas es peor que uno que la trae y revisa la persona.
+const RELACIONES_FORZADAS = ['tambien entra en', 'tambien entran en', 'tambien se juega en', 'suma una mirada', 'suma una instancia'];
+
 // La misma frase con palabras en medio: «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak».
 const HOLLOW_PATTERNS: Array<[RegExp, string]> = [
   [/(?<!\w)(?:costo|gasto)(?: \w+){0,4} acompan(?:a|e|an|en)(?!\w)/, 'el costo acompaña'],
@@ -167,6 +172,7 @@ export function blockedPhrasesIn(value: unknown) {
   const normalized = normalize(value);
   return [...new Set([
     ...MULETILLAS.filter((phrase) => containsWord(normalized, phrase)),
+    ...RELACIONES_FORZADAS.filter((phrase) => containsWord(normalized, phrase)),
     ...PUFFERY_PATTERNS.map((pattern) => normalized.match(pattern)?.[0]).filter((match): match is string => Boolean(match)),
   ])];
 }
@@ -190,6 +196,12 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
       message: `Frases de plantilla o de IA: ${found.slice(0, 4).map((f) => `«${f}»`).join(', ')}. Reescríbelas con palabras simples y concretas.`,
       blocking: true,
     });
+  }
+  const forced = RELACIONES_FORZADAS.filter((phrase) => containsWord(normText, phrase));
+  if (forced.length > 0) {
+    const finding = { code: 'tone_muletilla', message: `Frases de plantilla o de IA: ${forced.map((f) => `«${f}»`).join(', ')}. No inventes cómo funciona su operación: di qué harías en ese lugar o momento.`, blocking: !input.finalAttempt } as const;
+    if (finding.blocking) errors.push({ ...finding });
+    else warnings.push({ ...finding });
   }
   const review = PALABRAS_A_REVISAR.filter((word) => containsWord(normText, word));
   if (review.length > 0) {
@@ -316,6 +328,33 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
   const afterIntroduction = modelBody.match(/(?:^|\n|[.!?]\s+)soy\s+[^,;.\n]{1,40},\s+de\s+[^,;.\n]{1,60}[;,.]\s*([^.\n]{0,120})/iu)?.[1];
   if (afterIntroduction && recipientToken && new RegExp(`^(?:en |la |el |los |las )?${recipientToken}\\b`).test(normalize(afterIntroduction))) {
     errors.push({ code: 'tone_ficha', message: 'Después de «Soy …, de …;» di qué hace tu empresa, no lo que hace la de ellos: eso va en la apertura.', blocking: true });
+  }
+
+  // «Es una línea distinta de diversidad e inclusión», «La capacitación es distinta de nuestras asesorías» (follow-ups of real research,
+  // 31 Oct 2026): asked for a new angle, the writer said so instead of just taking it. «Cada faena es distinta a otra» is left alone.
+  if (/\b(?:es|son|suma|sumamos|aporta|ofrece) (?:\p{L}+ ){0,4}distint[ao]s? (?:de|a)\b(?! otr)/u.test(normModel)) {
+    errors.push({ code: 'tone_muletilla', message: 'No compares este servicio con lo que ya ofreciste («es una línea distinta de…»): di directamente qué harías por ellos.', blocking: true });
+  }
+
+  // «En ServiPro hacemos facility management… En ServiPro llevamos más de 28 años…» (follow-ups of real research, 31 Oct 2026). A
+  // signature («Ejecutiva comercial, ServiPro») is not the body.
+  const sellerToken = normalize(input.sellerName).replace(/\b(?:s ?p ?a|s ?a|ltda|limitada|inc|llc|spa)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  if (sellerToken.length >= 3) {
+    const prose = modelBody.replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ')
+      .split(/\n\s*(?:saludos|un saludo|atentamente|cordialmente|abrazo|gracias)\b/i)[0];
+    const mentions = ` ${normalize(prose)} `.split(` ${sellerToken} `).length - 1;
+    if (mentions >= 2) {
+      const finding = { code: 'tone_muletilla', message: `Nombras a ${String(input.sellerName).trim()} ${mentions} veces: déjalo una vez y en la otra oración habla en primera persona («hacemos…», «llevamos…»).`, blocking: !input.finalAttempt } as const;
+      if (finding.blocking) errors.push({ ...finding });
+      else warnings.push({ ...finding });
+    }
+  }
+
+  // «La plataforma captura imágenes durante el test; esta es la última vez que te escribo sobre esto» (real research, 31 Oct 2026).
+  if (/[;,]\s*esta es la [úu]ltima vez\b/i.test(modelBody)) {
+    const finding = { code: 'tone_formato', message: 'Escribe «Esta es la última vez…» como oración aparte, después de un punto, no pegada a otra idea con «;» o coma.', blocking: !input.finalAttempt } as const;
+    if (finding.blocking) errors.push({ ...finding });
+    else warnings.push({ ...finding });
   }
 
   const puffery = PUFFERY_PATTERNS.map((pattern) => normModel.match(pattern)?.[0]).find(Boolean);

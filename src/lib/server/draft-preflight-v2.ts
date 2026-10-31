@@ -367,8 +367,46 @@ function englishMaterialTerms(value: string) {
     .filter((term) => term.length >= 4 && !ENGLISH_FUNCTION_WORDS.has(term) && !personalizationStopWords.has(term));
 }
 
+// Words a translation changes past their first letters: «sus filiales del Reino Unido» kept none of «commercial subsidiaries in the United
+// Kingdom» by the four-letter rule, and a faithful follow-up was turned back (real research, 31 Oct 2026). English stems, without their
+// plural «s», to the beginnings of the Spanish words that translate them.
+const ENGLISH_TO_SPANISH: Array<[string, string[]]> = [
+  ['subsidiar', ['filial', 'subsidiari']], ['commerc', ['comerc']], ['kingdom', ['reino']], ['united', ['unid']],
+  ['netherland', ['holand', 'paises']], ['korea', ['corea']], ['turkey', ['turqu']], ['brazil', ['brasil']], ['japan', ['japon']],
+  ['germany', ['aleman']], ['spain', ['espan']], ['england', ['inglat']], ['british', ['britan']], ['world', ['mund']],
+  ['south', ['sur']], ['north', ['norte']], ['country', ['pais']], ['countrie', ['pais']], ['support', ['apoy', 'soport']],
+  ['project', ['proyect']], ['construct', ['constru', 'obra']], ['build', ['edific', 'constru']], ['line', ['line']],
+  ['station', ['estacion']], ['tunnel', ['tunel']], ['railway', ['ferrov', 'tren']], ['road', ['camin', 'carreter', 'vial']],
+  ['highway', ['autopist', 'carreter']], ['bridge', ['puente']], ['port', ['puert']], ['airport', ['aeropuert']],
+  ['compan', ['empres', 'compan']], ['branch', ['sucursal']], ['office', ['oficin']], ['headquarter', ['sede', 'casa']],
+  ['store', ['tienda', 'local']], ['warehouse', ['bodeg', 'almacen', 'centro']], ['fleet', ['flota']], ['truck', ['camion']],
+  ['employee', ['trabajador', 'colaborador', 'emplead']], ['worker', ['trabajador', 'operari']], ['people', ['person']],
+  ['staff', ['personal', 'dotacion']], ['team', ['equip']], ['hiring', ['contrat']], ['hire', ['contrat']], ['recruit', ['reclut']],
+  ['training', ['capacit', 'formac']], ['safety', ['segur']], ['health', ['salud']], ['mining', ['miner', 'mina']], ['mine', ['mina', 'miner']],
+  ['copper', ['cobre']], ['garlic', ['ajo']], ['fresh', ['fresc']], ['food', ['aliment']],
+  ['market', ['mercad']], ['customer', ['client']], ['sale', ['venta']], ['revenue', ['ingres', 'venta']], ['growth', ['crec']],
+  ['grow', ['crec']], ['increase', ['aument', 'crec']], ['loan', ['prestam', 'credit']], ['investment', ['invers']], ['invest', ['invers', 'invert']],
+  ['acquisition', ['adquisic', 'compra']], ['acquire', ['adquir', 'compr']], ['merger', ['fusion']], ['agreement', ['acuerd', 'conveni']],
+  ['partner', ['alianz', 'soci']], ['award', ['premi', 'adjudic']], ['tender', ['licitac']], ['launch', ['lanz']], ['open', ['abrio', 'abrir', 'abre', 'abier', 'apertur']],
+  ['develop', ['desarroll']], ['technology', ['tecnolog']], ['quality', ['calidad']], ['sustainab', ['sostenib', 'sustentab']],
+  ['environment', ['ambient', 'medioambient']], ['insurance', ['segur']], ['bank', ['banc']], ['billion', ['millon']],
+  ['year', ['ano']], ['month', ['mes']], ['government', ['gobiern']], ['approval', ['aprob']], ['water', ['agua']],
+  ['energy', ['energ']], ['wind', ['eolic']], ['school', ['coleg', 'escuel']], ['beverage', ['bebid']], ['retail', ['retail', 'comerci']],
+];
+
+/** Whether a Spanish word (or the stem of one) can translate an English material term. */
+function translates(english: string, spanish: string) {
+  if (english.length >= 4 && spanish.length >= 4 && english.slice(0, 4) === spanish.slice(0, 4)) return true;
+  // A short Spanish word («ajo», «sur») only as itself or its plural: «sur» must not answer for «surtido».
+  return ENGLISH_TO_SPANISH.some(([stem, beginnings]) => english.startsWith(stem) && beginnings.some((beginning) => (
+    beginning.length > 3
+      ? spanish.startsWith(beginning)
+      : spanish === beginning || spanish === `${beginning}s` || spanish === `${beginning}es`
+  )));
+}
+
 function termInWords(term: string, words: string[], translated: boolean) {
-  return translated ? words.some((word) => word.length >= 4 && word.slice(0, 4) === term.slice(0, 4)) : words.some((word) => word.startsWith(term));
+  return translated ? words.some((word) => translates(term, word)) : words.some((word) => word.startsWith(term));
 }
 
 // Anchor terms for the writing prompt: the readable original words behind the
@@ -449,13 +487,13 @@ function hasGroundedPersonalization(
   const evidenceById = new Map(context.evidence.map((evidence) => [evidence.evidenceId, evidence]));
   const sentences = sentenceParts(content).map(normalizeForMatch);
   return personalization.every((item) => {
-    const statement = draftEvidencePersonalizationStatementV2(
-      evidenceById.get(item.evidenceId)?.statement || '',
-      { keepSpecifics: Boolean(context.writing?.anchorSpecifics) },
-    );
+    const fullStatement = evidenceById.get(item.evidenceId)?.statement || '';
+    const statement = draftEvidencePersonalizationStatementV2(fullStatement, { keepSpecifics: Boolean(context.writing?.anchorSpecifics) });
     // A faithful paraphrase often changes verbs and nouns. Two material terms
     // still bind the copy to the selected evidence without requiring verbatim text.
-    const translated = isEnglishStatement(statement);
+    // The language is the evidence's, as the prompt reads it: narrowed to «Acme has commercial subsidiaries in the United Kingdom»
+    // the list kept one «the», the statement was read as Spanish, and «sus filiales comerciales del Reino Unido» was turned back (31 Oct 2026).
+    const translated = isEnglishStatement(fullStatement) || isEnglishStatement(statement);
     const materialTerms = [...new Set(translated ? englishMaterialTerms(statement) : materialPersonalizationTerms(statement))];
     // A translation keeps the figures as they are («Lines 8 and 9», «Líneas 8 y 9»): for English evidence they count as terms too.
     const figures = translated ? [...new Set(normalizeForMatch(statement).split(' ').filter((word) => /^\d+$/.test(word)))] : [];
@@ -790,6 +828,18 @@ export function validateDraftPreflightV2(
   const claimCheckContent = modelClosingQuestion ? materialContent.split(modelClosingQuestion).join(' ') : materialContent;
   // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.
   const materialSentences = claimCheckContent.replace(/^[ \t]*\d+[.)][ \t]+(?=\S)/gm, '').split(/\r?\n/).flatMap(sentenceParts);
+  // A standard is said as its source says it: «ISO 45001:2015» passed the figure check because «2015» belongs to «ISO 9001:2015» in the same
+  // profile, which certifies «ISO 45001:2018» (a follow-up of real research, 31 Oct 2026).
+  const standards = (value: string) => [...value.matchAll(/\bISO\s*(\d{3,5})(?:\s*[:-]\s*((?:19|20)\d\d))?/gi)].map((match) => ({ raw: match[0], number: match[1], year: match[2] || '' }));
+  const sourceStandards = standards([...sellerStatements, ...context.evidence.map((evidence) => evidence.statement)].join('\n'));
+  for (const standard of standards(claimCheckContent)) {
+    const known = sourceStandards.filter((item) => item.number === standard.number);
+    if (known.length > 0 && (!standard.year || known.some((item) => item.year === standard.year))) continue;
+    const asWritten = [...new Set(known.map((item) => item.raw.replace(/\s+/g, ' ')))];
+    add('unsupported_material_claim', asWritten.length > 0
+      ? `La norma ${standard.raw} no figura así en el perfil ni en la evidencia: escríbela como figura (${asWritten.join(', ')}).`
+      : `La norma ${standard.raw} no figura en el perfil ni en la evidencia: quítala.`, 'body');
+  }
   for (const sentence of materialSentences) {
     // The writer introduces itself («Soy Carla, de ServiPro; …»): the clause after the introduction says whose figure it is. Speaking of the
     // recipient («…; la faena de Acme tiene más de 2.000 trabajadores») it rests on the evidence; otherwise it is the seller speaking, as before.
@@ -800,10 +850,12 @@ export function validateDraftPreflightV2(
     const sellerScoped = normalized.includes(normalizeForMatch(context.seller.companyName))
       || /\b(?:nosotros|nuestro|nuestra|tenemos|contamos|operamos|cubrimos|llevamos)\b/.test(normalized)
       || (introduced && !namesRecipient);
-    // A sentence that speaks as the seller without its legal name (the first person of the team, «Procesamos…», or the name it goes by, «AXIS procesa…»)
-    // may rest on the seller's own lines as well as on the evidence. Never one that names the recipient: that is where a figure of the seller lands on them.
+    // A sentence that speaks as the seller without its legal name (the first person of the team, «Procesamos…», the name it goes by, «AXIS
+    // procesa…», or its product, «La plataforma reúne más de 30 tests…», turned back in a real follow-up of 31 Oct 2026) may rest on the
+    // seller's own lines as well as on the evidence. Never one that names the recipient: that is where a figure of the seller lands on them.
     const speaksAsSeller = !sellerScoped && !namesRecipient
-      && (/\b\p{L}{3,}(?:amos|emos)\b/u.test(normalized) || sellerNames.some((name) => new RegExp(`(?:^| )${name}(?: |$)`).test(normalized)));
+      && (/\b\p{L}{3,}(?:amos|emos)\b/u.test(normalized) || /\b(?:la|el) (?:plataforma|herramienta|software|aplicacion)\b/.test(normalized)
+        || sellerNames.some((name) => new RegExp(`(?:^| )${name}(?: |$)`).test(normalized)));
     const evidenceStatements = citedEvidence.map((evidence) => evidence.statement);
     const sources = sellerScoped ? sellerStatements : speaksAsSeller ? [...evidenceStatements, ...sellerStatements] : evidenceStatements;
     // «Para apoyar la construcción de las Líneas 8 y 9, en GrupoExpro hacemos cursos…» (a follow-up, real research of 30 Oct 2026): the
@@ -825,7 +877,7 @@ export function validateDraftPreflightV2(
           // The figures a translation keeps («Lines 8 and 9», «Líneas 8 y 9») bind it to the subject too.
           const sourceFigures = new Set(normalizeForMatch(source).split(' ').filter((word) => /^\d+$/.test(word)));
           const sharedFigures = new Set(normalizeForMatch(sentence).split(' ').filter((word) => sourceFigures.has(word))).size;
-          return materialPersonalizationTerms(sentence).filter((term) => termInWords(term, terms, true)).length + sharedFigures >= 2;
+          return materialPersonalizationTerms(sentence).filter((term) => terms.some((english) => translates(english, term))).length + sharedFigures >= 2;
         }
         const termSet = new Set(terms);
         return materialPersonalizationTerms(sentence).filter((term) => termSet.has(term)).length >= 2;
