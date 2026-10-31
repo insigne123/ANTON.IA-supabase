@@ -409,6 +409,24 @@ Con `v37`, los correos iniciales sobre las 21 investigaciones reales dieron 16 d
   - La glosa que queda repetida («Reino Unido (Reino Unido)») se borra.
 - **«desde ese cruce»** pasa a la lista de relaciones forzadas.
 
+### Decimosexta vuelta: `native-draft/v39`, seguimientos con poco perfil detrás
+
+Cuando el perfil del vendedor trae una sola línea del servicio (prevención de riesgos, asesoría en inclusión), los seguimientos de `v37` y `v38` rellenaban con frases abstractas sobre el tema: «La responsabilidad social corporativa es otra perspectiva para el programa», «una mirada preventiva también considera la seguridad de las personas». Además, en algunas corridas el cierre volvía a cambiar de servicio.
+
+**Qué cambió:**
+
+- **Sin otra prueba o aplicación del servicio en el perfil, el seguimiento pregunta en concreto u ofrece algo que el perfil permita:** por ejemplo, enviar el alcance por escrito. Ese ofrecimiento va una sola vez por secuencia: en la primera corrida aparecía en dos seguimientos de la misma secuencia.
+- **Cinco frases más en las relaciones forzadas:** «otra perspectiva», «una mirada preventiva», «también se puede trabajar», «es una forma concreta de», «también considera». Ninguna aparece en los 612 correos iniciales del corpus, y todas aparecían como relleno en seguimientos generados.
+- **El mismo servicio, también en la revisión editorial y en el cierre:** el paso 4 de la revisión editorial pregunta si el correo ofrece el mismo servicio que el primero, y el cierre retoma «el mismo servicio del primer correo».
+- **No hay control determinista para esto:** en un catálogo de un solo producto (tipos de test, informes), los ítems de una línea son variantes legítimas del mismo producto, y un control rechazaría seguimientos correctos.
+
+**Resultado:**
+
+| | Correos | Válidos | Al primer intento | Frases abstractas | Otro servicio |
+| --- | --- | --- | --- | --- | --- |
+| `v39`, 8 secuencias reales | 32 | 32 | 32 | 0 | 2 |
+| `v39` final, 2 repeticiones de los casos con perfil escaso | 16 | 16 | 15 | 0 | 0 |
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
