@@ -87,9 +87,12 @@ const MULETILLAS = [
 ];
 
 // Relaciones forzadas entre el servicio y el hecho: «Las áreas verdes también entran en la coordinación de las obras civiles mineras»,
-// «la diversidad e inclusión también se juega en el trabajo cotidiano» (secuencias reales del 31 de octubre de 2026). En el reintento solo
-// avisan: un borrador que no se crea por una de ellas es peor que uno que la trae y revisa la persona.
-const RELACIONES_FORZADAS = ['tambien entra en', 'tambien entran en', 'tambien se juega en', 'suma una mirada', 'suma una instancia', 'desde ese cruce'];
+// «la diversidad e inclusión también se juega en el trabajo cotidiano» (secuencias reales del 31 de octubre de 2026). Y el seguimiento que,
+// sin otra prueba del servicio en el perfil, dice algo abstracto del tema: «La responsabilidad social corporativa es otra perspectiva para el
+// programa», «una mirada preventiva también considera la seguridad de las personas». Ninguna aparece en los 612 correos iniciales del corpus.
+// En el reintento solo avisan: un borrador que no se crea por una de ellas es peor que uno que la trae y revisa la persona.
+const RELACIONES_FORZADAS = ['tambien entra en', 'tambien entran en', 'tambien se juega en', 'suma una mirada', 'suma una instancia', 'desde ese cruce',
+  'otra perspectiva', 'una mirada preventiva', 'tambien se puede trabajar', 'es una forma concreta de', 'tambien considera'];
 
 // La misma frase con palabras en medio: «su costo acompaña la cosecha», «el costo de esa dotación acompaña el peak».
 const HOLLOW_PATTERNS: Array<[RegExp, string]> = [

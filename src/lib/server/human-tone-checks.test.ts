@@ -321,4 +321,7 @@ test('the closing line is a sentence of its own, and a forced link between servi
   assert.equal(forced(false).errors.filter((finding) => /tambien se juega en/.test(finding.message)).length, 1);
   assert.deepEqual(forced(true).errors.filter((finding) => /tambien se juega en/.test(finding.message)), []);
   assert.equal(forced(true).warnings.filter((finding) => /tambien se juega en/.test(finding.message)).length, 1);
+  // A follow-up with nothing new from the profile said something abstract about the topic (real research, 31 Oct 2026).
+  assert.deepEqual(blockedPhrasesIn('La responsabilidad social corporativa es otra perspectiva para el Programa de Inclusión Laboral.'), ['otra perspectiva']);
+  assert.deepEqual(blockedPhrasesIn('En una obra subterránea, una mirada preventiva también considera la seguridad de las personas.').sort(), ['tambien considera', 'una mirada preventiva']);
 });
