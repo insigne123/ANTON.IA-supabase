@@ -966,8 +966,9 @@ const SITE_CHROME = /!|\b(?:formulario|cont[áa]ctanos|canal de denuncias|ir al 
 // The founders' story («In 2012, Gareth and Greg embarked on… co-founding…», «fue fundada por…») is a biography too: a draft that opened with it
 // said nothing a recruiter could answer (real research, 30 Oct 2026), while the same research had subsidiaries in five countries.
 const PERSON_BIOGRAPHY = /\b(?:he|she|his|her)\b|[’']s (?:role|journey|expertise|career)\b|\b(?:co-?found(?:ed|ing|er|ers)|founded by|cofund\p{L}*|fundad[oa] por|fund[óo]|fundador(?:es|a|as)?)\b/iu;
-const FIRST_PERSON_PITCH = /^(?:en [^,]{1,40},\s*)?(?:nos\s+\p{L}+|\p{L}{3,}(?:amos|emos|imos))\b|\bnuestr[oa]s?\b/iu;
-const PROMOTIONAL_WORDS = /\b(?:principal(?:es)?\s+(?:compañ[ií]a|empresa|operador|red|proveedor)|l[ií]der(?:es)?|liderazgo|m[aá]s grande|clase mundial|primer nivel|innovador(?:a|as|es)?|estrat[ée]gic(?:a|as|o|os)|integral(?:es)?|excelencia|leading|leader|world-class|fastest-growing)\b/iu;
+// «Nosotros creamos software, pero no administramos comunidades» (real research, 31 Oct 2026): the company's own voice, and what it is not.
+const FIRST_PERSON_PITCH = /^(?:en [^,]{1,40},\s*)?(?:nos\s+\p{L}+|nosotr[oa]s\b|\p{L}{3,}(?:amos|emos|imos))\b|\bnuestr[oa]s?\b|\bpero no\b|\bno somos\b/iu;
+const PROMOTIONAL_WORDS = /\b(?:(?:uno|una) de (?:los|las) (?:mayores|principales|m[aá]s grandes)|entre (?:los|las) (?:\p{L}+\s+){1,4}m[aá]s grandes|principal(?:es)?\s+(?:compañ[ií]a|empresa|operador|red|proveedor)|l[ií]der(?:es)?|liderazgo|m[aá]s grande|clase mundial|primer nivel|innovador(?:a|as|es)?|estrat[ée]gic(?:a|as|o|os)|integral(?:es)?|excelencia|leading|leader|world-class|fastest-growing)\b/iu;
 
 /** 2 for page chrome, 1 for a slogan or a biography, 0 for a fact; a number keeps a first-person line a fact («Contamos con más de 350 personas»). */
 export function draftEvidenceSalesTone(statement: unknown) {
