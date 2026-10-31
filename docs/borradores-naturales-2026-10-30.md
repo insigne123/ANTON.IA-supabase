@@ -354,6 +354,49 @@ En `v35`, una empresa cuyo ancla era «Nuestros inicios datan del año 2010, cua
 - **21 investigaciones reales, correo inicial:** 16 de 16 válidos.
 - **Banco:** 24 de 24 al primer intento.
 
+### Decimocuarta vuelta: `native-draft/v37`, los seguimientos se leen como de una persona
+
+`v36` quedó en producción (`428f9276`, 31 de octubre a las 05:56 UTC). Una muestra de 8 secuencias reales (32 correos) dio 31 válidos, pero al leerlos los seguimientos tenían defectos que ningún control veía:
+
+- **Frases que comparan con el correo anterior:** «Es una línea distinta de diversidad e inclusión…», «La capacitación es distinta de nuestras asesorías…».
+- **El vendedor nombrado dos veces seguidas:** «En ServiPro hacemos… En ServiPro llevamos…».
+- **El cierre pegado a otra idea:** «La plataforma captura imágenes durante el test; esta es la última vez que te escribo…».
+- **Relaciones inventadas entre el servicio y el hecho:** «Las áreas verdes también entran en la coordinación de las obras civiles mineras».
+- **Un servicio distinto en cada seguimiento:** de limpieza industrial a jardinería y facility management, porque el catálogo los agrupa en una sola línea.
+- **Una traducción fiel rechazada:** «sus filiales del Reino Unido» por «commercial subsidiaries in the United Kingdom».
+
+**Qué cambió:**
+
+- **Toda la secuencia ofrece el mismo servicio que el primer correo:** el paso «Segundo ángulo» ya pedía «otra aplicación del mismo servicio», pero el redactor no lo cumplía. Si una línea del catálogo agrupa varios servicios, se queda con el que ofreció el primer correo. Los seguimientos ahora traen una prueba del mismo servicio (certificaciones, años de experiencia) en vez de otro servicio forzado.
+- **Controles nuevos (`human-tone-checks.ts`):**
+  - Comparar el servicio con el anterior («es distinta de…»).
+  - El vendedor nombrado más de una vez (la firma no cuenta).
+  - «Esta es la última vez» pegada con «;» o coma.
+  - Las relaciones forzadas («también entra en», «también se juega en», «suma una mirada»).
+
+  Los cuatro piden el reintento que reescribe solo esa frase, y en el reintento solo avisan.
+- **Las normas se escriben como en la fuente:** «ISO 45001:2015» pasaba porque «2015» aparecía en «ISO 9001:2015», en un perfil que certifica «ISO 45001:2018». Ahora cada norma ISO del correo tiene que figurar igual, con su año, en el perfil o en la evidencia.
+- **Las traducciones:** un diccionario corto de palabras que una traducción cambia más allá de sus primeras letras (subsidiaries → filiales, Kingdom → Reino, commercial → comercial). Además, el idioma se decide con la evidencia completa, como en el prompt. Al acortar la lista de países a uno solo, la frase dejaba de leerse como inglés y se comparaba palabra por palabra.
+- **Las cifras de su producto:** una oración que no nombra al destinatario y habla de «la plataforma» o «la herramienta» puede usar las cifras del vendedor («La plataforma reúne más de 30 tests…»).
+
+**Resultado, en las mismas 8 secuencias reales (32 correos):**
+
+| | `v36` | `v37` |
+| --- | --- | --- |
+| Correos válidos | 31 | 32 |
+| Al primer intento | 25 | 29 |
+| Vendedor nombrado dos veces | 2 | 0 |
+| Cierre pegado con «;» | 4 | 0 |
+| Comparación con el correo anterior | 3 | 0 |
+| Relación forzada | 3 | 0 |
+
+- **Banco:** 24 de 24, 23 al primer intento. El reintento fue por el CTA, no por estos cambios.
+
+**Lo que todavía se lee raro:**
+
+- **Seguimientos repetitivos cuando el perfil tiene poco del servicio:** con una sola línea de prevención de riesgos, los cuatro correos dicen casi lo mismo. El arreglo está en el perfil del vendedor (pruebas, casos, alcance por servicio), no en el prompt.
+- **Frases sueltas como «por eso te escribo desde ese cruce»:** aparecen de vez en cuando.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).

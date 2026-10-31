@@ -805,6 +805,8 @@ test('a figure of the seller profile passes when the sentence speaks as the sell
     'Procesamos 1.000 postulantes en unos 30 minutos.',
     'Northstar procesa 1.000 postulantes en unos 30 minutos.',
     'ATLAS procesa 1.000 postulantes en unos 30 minutos.',
+    // Its product (a follow-up of real research, 31 Oct 2026: «La plataforma reúne más de 30 tests…»).
+    'La plataforma procesa 1.000 postulantes en unos 30 minutos.',
   ]) assert.equal(rejected(sentence), false, sentence);
   for (const sentence of [
     'Procesa 1.000 postulantes en unos 30 minutos.',
@@ -814,6 +816,7 @@ test('a figure of the seller profile passes when the sentence speaks as the sell
     'ATLAS ayuda a Acme, que procesa 1.000 postulantes en unos 30 minutos.',
     'Procesamos 400 postulantes en unos 30 minutos.',
     'ATLAS procesa 1.000 personas en unos 30 minutos.',
+    'La plataforma de Acme procesa 1.000 postulantes en unos 30 minutos.',
   ]) assert.equal(rejected(sentence), true, sentence);
   // A product label is a name, not a phrase: «Consultas judiciales: …» does not make every sentence with those words the seller's.
   context.seller.services = ['Consultas judiciales: revisión de antecedentes'];
@@ -964,6 +967,45 @@ test('for English evidence the figures a translation keeps count as anchor terms
     hypothesisIds: [],
   }, { checkGeneratedCopy: true });
   assert.deepEqual(result.issues.filter((issue) => ['personalization_invalid', 'unsupported_material_claim'].includes(issue.code)).map((issue) => issue.message), []);
+});
+
+test('English evidence is told by its translation even when the word changes: «filiales del Reino Unido» for «subsidiaries in the United Kingdom»', () => {
+  // A follow-up on real research of 31 Oct 2026 was turned back: «subsidiaries», «United» and «Kingdom» share no first letters with their Spanish.
+  const base = draftContextFixture();
+  const evidence = { ...base.evidence[0]!, statement: 'Acme has 5 commercial subsidiaries in the United Kingdom and the Netherlands, and the group exports to Asia.' };
+  const context = { ...base, evidence: [evidence, ...base.evidence.slice(1)] };
+  const issues = (opening: string) => validateDraftPreflightV2(context, {
+    subject: 'Selección en sus filiales',
+    body: `Hola Luis,\n\n${opening} En selección, una evaluación poco ajustada al cargo hace perder tiempo.\n\nSoy Ana, de ServiPro; hacemos evaluaciones psicolaborales online.\n\n¿Te parece si lo conversamos 15 minutos esta semana?`,
+    personalization: [{ evidenceId: evidence.evidenceId, claimId: evidence.supportedFactClaimIds[0]!, sourceUrl: evidence.source.url }],
+    hypothesisIds: [],
+  }, { checkGeneratedCopy: true }).issues.filter((issue) => ['personalization_invalid', 'unsupported_material_claim'].includes(issue.code)).map((issue) => issue.code);
+  assert.deepEqual(issues('Para las búsquedas de sus filiales del Reino Unido, el perfil comercial cambia.'), []);
+  assert.deepEqual(issues('Acme tiene 5 filiales comerciales en el Reino Unido y los Países Bajos.'), []);
+  assert.deepEqual(issues('Para sus búsquedas en Asia y Europa, el perfil cambia.'), ['personalization_invalid']);
+
+  // Narrowed to its first country, the list keeps one «the» and no longer reads as English: the language is the whole evidence's.
+  const listed = { ...evidence, statement: 'Acme has commercial subsidiaries in the United Kingdom, South Korea, UAE, Turkey, and the Netherlands.' };
+  const listedContext = { ...base, evidence: [listed, ...base.evidence.slice(1)] };
+  assert.deepEqual(validateDraftPreflightV2(listedContext, {
+    subject: 'Base para búsquedas comerciales',
+    body: 'Hola Luis,\n\nPara búsquedas comerciales vinculadas a sus filiales comerciales del Reino Unido, en ServiPro trabajamos con una base propia de postulantes.\n\nSoy Ana, de ServiPro; hacemos selección.\n\n¿Te parece si lo conversamos 15 minutos esta semana?',
+    personalization: [{ evidenceId: listed.evidenceId, claimId: listed.supportedFactClaimIds[0]!, sourceUrl: listed.source.url }],
+    hypothesisIds: [],
+  }, { checkGeneratedCopy: true }).issues.filter((issue) => issue.code === 'personalization_invalid'), []);
+});
+
+test('a certification is written as the profile writes it, year included', () => {
+  // A follow-up of real research, 31 Oct 2026: «ISO 45001:2015» passed because «2015» belongs to «ISO 9001:2015» in the same profile.
+  const context = draftContextFixture();
+  context.seller.proofPoints = ['Sistema de gestión integrado certificado en ISO 9001:2015, ISO 14001:2015 e ISO 45001:2018'];
+  const output = validOutput();
+  const standards = (sentence: string) => validateDraftPreflightV2(context, { ...output, body: `${output.body}\n\n${sentence}` }).issues
+    .filter((issue) => issue.code === 'unsupported_material_claim' && /norma/.test(issue.message)).map((issue) => issue.message);
+  assert.deepEqual(standards(`En ${context.seller.companyName} estamos certificados en ISO 45001:2018.`), []);
+  assert.deepEqual(standards(`En ${context.seller.companyName} estamos certificados en ISO 45001.`), []);
+  assert.deepEqual(standards(`En ${context.seller.companyName} estamos certificados en ISO 45001:2015.`), ['La norma ISO 45001:2015 no figura así en el perfil ni en la evidencia: escríbela como figura (ISO 45001:2018).']);
+  assert.deepEqual(standards(`En ${context.seller.companyName} estamos certificados en ISO 27001.`), ['La norma ISO 27001 no figura en el perfil ni en la evidencia: quítala.']);
 });
 
 test('narrowing a statement skips the clause that only introduces the fact', () => {

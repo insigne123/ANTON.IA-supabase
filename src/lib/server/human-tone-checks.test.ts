@@ -293,3 +293,32 @@ test('a plural verb is a verb: «En Hualpén cuentan con un programa.» is a sen
   // Nouns in -men and -gen are still not verbs.
   assert.deepEqual(sentenceFragments('Hola,\n\nPara el volumen de diciembre. Cuando falta alguien, cubrimos el turno.'), ['Para el volumen de diciembre.']);
 });
+
+test('a follow-up neither compares its service with the last one nor names the seller twice', () => {
+  // Follow-ups of real research, 31 Oct 2026.
+  const codes = (body: string, finalAttempt = false) => checkHumanTone({ subject: 'Capacitación para equipos', body, companyName: 'Acme', sellerName: 'ServiPro', finalAttempt });
+  const meta = (body: string) => codes(body).errors.filter((finding) => /No compares/.test(finding.message));
+  assert.equal(meta('Hola Ana,\n\nEs una línea distinta de diversidad e inclusión: aborda consultas legales.\n\n¿Conversamos?').length, 1);
+  assert.equal(meta('Hola Ana,\n\nLa capacitación es distinta de nuestras asesorías laborales.\n\n¿Conversamos?').length, 1);
+  assert.deepEqual(meta('Hola Ana,\n\nCada faena es distinta a otra, y el turno de noche también.\n\n¿Conversamos?'), []);
+
+  const twice = 'Hola Ana,\n\nEn ServiPro hacemos facility management para las obras. En ServiPro llevamos más de 28 años en esto.\n\n¿Conversamos?';
+  assert.equal(codes(twice).errors.filter((finding) => /Nombras a ServiPro 2 veces/.test(finding.message)).length, 1);
+  // On the corrective retry only a notice; a signature is not the body.
+  assert.deepEqual(codes(twice, true).errors.filter((finding) => /Nombras a/.test(finding.message)), []);
+  assert.deepEqual(codes('<p>Hola Ana,</p><p>En ServiPro armamos equipos para el peak.</p><p>Saludos,<br>Carla<br>Ejecutiva comercial, ServiPro</p>').errors
+    .filter((finding) => /Nombras a/.test(finding.message)), []);
+});
+
+test('the closing line is a sentence of its own, and a forced link between service and fact is a stock phrase', () => {
+  // Real research, 31 Oct 2026.
+  const close = (body: string) => checkHumanTone({ subject: 'Identidad en evaluaciones', body, companyName: 'Acme' }).errors.filter((finding) => /última vez/.test(finding.message));
+  assert.equal(close('Hola Ana,\n\nLa plataforma captura imágenes durante el test; esta es la última vez que te escribo sobre esto. ¿Lo dejamos hasta aquí?').length, 1);
+  assert.deepEqual(close('Hola Ana,\n\nLa plataforma captura imágenes durante el test. Esta es la última vez que te escribo sobre esto. ¿Lo dejamos hasta aquí?'), []);
+  assert.deepEqual(blockedPhrasesIn('Las áreas verdes también entran en la coordinación de las obras civiles mineras.'), ['tambien entran en']);
+  // Blocking on the first attempt, a notice on the corrective retry.
+  const forced = (finalAttempt: boolean) => checkHumanTone({ subject: 'Inclusión en relaciones laborales', body: 'Hola Ana,\n\nLa inclusión también se juega en el trabajo cotidiano.\n\n¿Conversamos?', companyName: 'Acme', finalAttempt });
+  assert.equal(forced(false).errors.filter((finding) => /tambien se juega en/.test(finding.message)).length, 1);
+  assert.deepEqual(forced(true).errors.filter((finding) => /tambien se juega en/.test(finding.message)), []);
+  assert.equal(forced(true).warnings.filter((finding) => /tambien se juega en/.test(finding.message)).length, 1);
+});
