@@ -987,3 +987,19 @@ test('a figure before the seller is named, in a clause about the recipient, rest
   assert.deepEqual(figures(`Para la construcción de las Líneas 8 y 9 de Acme, en ${base.seller.companyName} hacemos cursos para equipos.`), []);
   assert.ok(figures(`En ${base.seller.companyName} hacemos cursos para las 9 líneas de Acme.`).length > 0);
 });
+
+test('a year is the same year whatever word follows it', () => {
+  // Real research of 31 Oct 2026: «en el 2017 abrimos la oficina regional en Concepción» did not back «En 2017, Acme abrió…».
+  const base = draftContextFixture();
+  const evidence = { ...base.evidence[0]!, statement: 'Por ello, en el 2017 abrimos la oficina regional en Concepción para la zona sur.' };
+  const context = { ...base, evidence: [evidence, ...base.evidence.slice(1)] };
+  for (const sentence of ['En 2017, Acme abrió su oficina regional en Concepción para la zona sur.', 'Acme abrió en 2017 una oficina regional en Concepción.']) {
+    const issues = validateDraftPreflightV2(context, {
+      subject: 'Evaluaciones en la zona sur',
+      body: `Hola Paula,\n\n${sentence} Coordinar evaluaciones a distancia demora la selección.\n\nSoy Ana, de ServiPro; hacemos evaluaciones online.\n\n¿Te parece si lo conversamos 15 minutos esta semana?`,
+      personalization: [{ evidenceId: evidence.evidenceId, claimId: evidence.supportedFactClaimIds[0]!, sourceUrl: evidence.source.url }],
+      hypothesisIds: [],
+    }, { checkGeneratedCopy: true }).issues.filter((issue) => issue.code === 'unsupported_material_claim');
+    assert.deepEqual(issues.map((issue) => issue.message), [], sentence);
+  }
+});

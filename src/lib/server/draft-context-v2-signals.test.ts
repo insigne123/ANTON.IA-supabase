@@ -229,7 +229,9 @@ test('a slogan or a biography is a sales line, page chrome is worse, and a fact 
   // Real research of 30 Oct 2026: the report chose the first group as the anchor and the drafts copied it.
   for (const statement of ['Somos la principal compañía de transporte privado de personas.', 'Contribuimos con las organizaciones, comprendiendo y potenciando las aptitudes de sus colaboradores.',
     'Soluciones de negocio estratégicas e innovadoras para la gestión de capital humano en Chile', 'After graduation, he moved into recruitment, eventually starting a consulting and staffing business in 2006.',
-    'Brindamos servicios integrales para la gran minería, incluyendo mantenimiento vial.'])
+    'Brindamos servicios integrales para la gran minería, incluyendo mantenimiento vial.',
+    // A year alone does not make the company's own story a fact (real research, 31 Oct 2026).
+    'Nuestros inicios datan del año 2010, cuando surgimos como un actor importante dentro de las consultoras del retail.'])
     assert.equal(draftEvidenceSalesTone(statement), 1, statement);
   for (const statement of ['Envíenos un mensaje completando el siguiente formulario y nos pondremos en contacto con usted en breve.',
     'Recuerda también que disponemos de nuestro Call Center 600 329 2017, donde puedes cotizar.', 'FREE MARKET REPORT: Let’s talk Brazil nuts!'])

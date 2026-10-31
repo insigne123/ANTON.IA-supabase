@@ -974,7 +974,10 @@ export function draftEvidenceSalesTone(statement: unknown) {
   const value = String(statement || '').trim();
   if (SITE_CHROME.test(value)) return 2;
   if (PERSON_BIOGRAPHY.test(value)) return 1;
-  if (/\d/.test(value)) return 0;
+  // A figure keeps a first-person line a fact («Contamos con más de 350 personas»), but a year alone is its history: «Nuestros inicios
+  // datan del año 2010, cuando surgimos como un actor importante…» anchored every follow-up on «sus inicios en 2010» (real research, 31 Oct 2026).
+  const figures = value.match(/\d+(?:[.,]\d+)*/g) || [];
+  if (figures.some((figure) => !/^(?:19|20)\d\d$/.test(figure))) return 0;
   return FIRST_PERSON_PITCH.test(value) || PROMOTIONAL_WORDS.test(value) ? 1 : 0;
 }
 
