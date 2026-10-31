@@ -639,9 +639,12 @@ function materialQuantities(sentence: string) {
     const following = after.match(percent ? /^[ \t]+(?:de[l]?[ \t]+)?([\p{L}]+)/u : /^[ \t]+([\p{L}]+)/u)?.[1] || '';
     const connector = /^(?:a|al|con|de|del|el|en|es|la|las|los|para|por|que|y|o|e|sin|sobre|and|or|of|the|to|in|for|with|by|from)$/i;
     const preceding = sentence.slice(0, match.index).replace(/(?:\s+(?:en|un|el|de|del))+[ \t]*$/i, '').trim().match(/([\p{L}]+)$/u)?.[1] || '';
-    const metric = following && !connector.test(following) ? following : percent ? preceding : '';
+    // A year measures nothing: «en el 2017 abrimos la oficina» and «En 2017, DFV abrió…» are the same 2017, not «2017 abrimos» and «2017»
+    // (a real research of 31 Oct 2026 was turned back twice for it).
+    const year = !percent && /^(?:19|20)\d\d$/.test(match[0]);
+    const metric = year ? '' : following && !connector.test(following) ? following : percent ? preceding : '';
     return {
-      raw: match[0] + (following && !connector.test(following) ? ` ${following}` : ''),
+      raw: match[0] + (!year && following && !connector.test(following) ? ` ${following}` : ''),
       key: normalizeForMatch(`${match[0].replace(/%/g, ' por ciento ')} ${metric}`),
       index: match.index,
     };

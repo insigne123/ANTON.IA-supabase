@@ -339,6 +339,21 @@ Hasta `v33` solo se habían probado correos iniciales con investigaciones reales
 - **Tawa:** ya escribe «Para sus búsquedas en Perú y Chile, PSOL verifica en tiempo real la identidad…».
 - **Lo que falta:** la de DFV, cuyo ancla es «Nuestros inicios datan del año 2010…», todavía arrastra «rubro ligado a sus inicios en 2010».
 
+### Decimotercera vuelta: `native-draft/v36`, el año no es un hecho
+
+En `v35`, una empresa cuyo ancla era «Nuestros inicios datan del año 2010, cuando surgimos como un actor importante…» hacía que cada seguimiento repitiera «rubro ligado a sus inicios en 2010».
+
+**Qué cambió:**
+
+- **Un año solo no vuelve hecho una frase de autopromoción:** una cifra sigue volviendo hecho una frase en primera persona («Contamos con más de 350 personas»), pero un año solo, no. Esa empresa ahora ancla en «en el 2017 abrimos la oficina regional en Concepción». Sus seguimientos hablan de «búsquedas vinculadas a la oficina regional de Concepción».
+- **El control de cifras compara el año sin la palabra que lo sigue:** antes, «en el 2017 abrimos…» no respaldaba «En 2017, Acme abrió…», porque comparaba «2017 abrimos» con «2017».
+
+**Resultado:**
+
+- **Esa empresa:** 8 de 8 correos válidos en dos secuencias. Los iniciales salen al primer intento (antes 0 de 2).
+- **21 investigaciones reales, correo inicial:** 16 de 16 válidos.
+- **Banco:** 24 de 24 al primer intento.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
