@@ -11,6 +11,7 @@ import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { firstNameOf } from '@/lib/lead-name';
 import { sentenceCaseSubject } from '@/lib/subject-case';
+import { spanishForCopiedEnglish } from '@/lib/copied-english';
 import { buildDraftMessageBrief, draftMessageBriefForModel, draftPriorMessageReference } from '@/lib/draft-message-brief';
 import { selectOutreachExamples, selectOpeningScaffold, type OutreachOpeningKind } from '@/lib/outreach-example-library';
 import { SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
@@ -784,12 +785,13 @@ ${JSON.stringify({ subject: result.data.subject.slice(0, 1_000), opening: result
     temperature: 0.3,
     reasoningEffort: draftReasoningEffort(parsed, 'edit'),
   });
+  const ownNames = [parsed.context.company.name, parsed.context.seller.companyName];
   return {
-    subject: sentenceCaseSubject(edited.data.subject),
+    subject: sentenceCaseSubject(spanishForCopiedEnglish(edited.data.subject, ownNames)),
     body: [
       draftGreeting(parsed.context),
-      edited.data.opening,
-      edited.data.value,
+      spanishForCopiedEnglish(edited.data.opening, ownNames),
+      spanishForCopiedEnglish(edited.data.value, ownNames),
     ].join('\n\n'),
     personalization: requiredReportAwareDraftPersonalizationV2(parsed.context),
     hypothesisIds: [],
