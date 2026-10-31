@@ -841,3 +841,31 @@ test('a rejection only for a phrase repairs that phrase and keeps the rest; any 
     else process.env.OPENAI_API_KEY = previousKey;
   }
 });
+
+test('a follow-up uses the anchor as the place or moment of what it offers, not as the company\'s history', async () => {
+  // Real sequences of 31 Oct 2026: every follow-up said «con Perú y Chile en su historia».
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ subject: 'Turnos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar automatiza operaciones. ¿Conversamos?' }) } }], usage: {} }), { status: 200 });
+    };
+    await generateOutreachFromDraftContextV2({
+      context: draftContextFixture(),
+      sequenceContext: {
+        sequenceInstruction: 'Mantener continuidad con un aporte distinto.',
+        priorMessages: [{ kind: 'initial', index: 0, name: 'Inicial', subject: 'Procesos en Acme', body: 'Acme reduce trabajo manual.' }],
+        currentStep: { index: 1, total: 3, name: 'Paso', offsetDays: 3, instruction: 'Mantener el estilo elegido por el usuario.' },
+      },
+    });
+    assert.match(prompt, /no la cuentes como un dato suelto o como su historia/);
+    assert.match(prompt, /para sus búsquedas en Perú y Chile/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
