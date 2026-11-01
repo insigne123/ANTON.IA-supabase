@@ -43,6 +43,11 @@ const SEND_BATCHES_PER_CLICK = 4;
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId?: string } = {}) {
+  // «Ver seguimientos» from Por escribir opens on the follow-ups (?vista=seguimientos, audit K1).
+  const [tab, setTab] = useState('campaigns');
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get('vista') === 'seguimientos') setTab('followups'); } catch { /* stays on campaigns */ }
+  }, []);
   const confirm = useConfirm();
   const [items, setItems] = useState<Array<BulkCampaign & { stats?: CampaignListStats }>>([]);
   const [editing, setEditing] = useState(false);
@@ -215,7 +220,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
     <PageHeader title="Campañas" description="Escribe a un grupo con una sola aprobación o revisa los seguimientos uno por uno." />
     {error && <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">{error}<Button className="ml-3" size="sm" variant="outline" disabled={busy} onClick={() => void run(refresh)}>Actualizar</Button></div>}
     {feedback && <p role="status" className="text-sm text-muted-foreground">{feedback}</p>}
-    <Tabs defaultValue="campaigns">
+    <Tabs value={tab} onValueChange={setTab}>
       <TabsList data-tour="campaigns-tabs" className="grid h-auto w-full grid-cols-2 sm:w-fit"><TabsTrigger value="campaigns">Campañas masivas</TabsTrigger><TabsTrigger value="followups">Seguimientos individuales</TabsTrigger></TabsList>
       <TabsContent value="followups"><CampaignReviewInbox /></TabsContent>
       <TabsContent value="campaigns" className="space-y-5">

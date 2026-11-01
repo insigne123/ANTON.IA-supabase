@@ -73,7 +73,7 @@ export function MailConnectionsCard({ onChanged }: { onChanged?: () => void }) {
     <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.35)] dark:bg-card/70">
       <CardHeader className="border-b border-border/60 px-5 py-5 sm:px-6">
         <CardTitle className="text-lg">Correo</CardTitle>
-        <CardDescription>Las cuentas desde las que ANTON.IA envía tus correos y lee las respuestas.</CardDescription>
+        <CardDescription>Las cuentas desde las que ANTON.IA envía tus correos y lee las respuestas. También registra los correos que envías desde tu buzón a tus prospectos guardados, aunque no salgan desde ANTON.IA: solo destinatario, asunto y fecha, nunca el texto.</CardDescription>
       </CardHeader>
       <CardContent data-tour="connections-list" className="space-y-3 px-5 py-5 sm:px-6">
         {!state && !error && (
