@@ -600,7 +600,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
       }).slice(0, Math.max(0, 4 - reportDetailRequestsRef.current.size)).forEach((item) => void fetchReportDetail(item.reportId!, item.result));
     };
     poll();
-    const timer = window.setInterval(() => poll(true), 5_000);
+    // A hidden tab does not ask: the reports are read again when it comes back (audit O4).
+    const timer = window.setInterval(() => { if (!document.hidden) poll(true); }, 5_000);
     return () => window.clearInterval(timer);
   }, [baseRunItems, fetchReportDetail, reportDetails, reportDetailErrors]);
   const itemByLeadKey = useMemo(

@@ -7,7 +7,7 @@ import { Loader2, Mail, Phone } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT } from '@/lib/leads-workspace/enrichment-provider';
+import { APOLLO_EMAIL_ENRICHMENT_CREDITS, APOLLO_PHONE_ENRICHMENT_CREDITS, apolloEnrichmentCreditCost } from '@/lib/apollo-credit-costs';
 import type { ContactLookup } from '@/lib/leads-workspace/complete-contacts';
 
 export type CompleteContactsPerson = { id: string; name: string; title?: string | null; company?: string | null };
@@ -54,7 +54,8 @@ export function CompleteContactsDialog({ open, onOpenChange, people, onConfirm, 
   const values = useMemo(() => people.map(person => lookups[person.id] ?? 'email'), [people, lookups]);
   const all = values.every(value => value === values[0]) ? values[0] ?? 'email' : null;
   const withPhone = values.filter(value => value === 'email_phone').length;
-  const credits = people.length * ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT;
+  // What each lookup costs, the same figure Administración and the credit notices use: 1 for the email, 8 for email and mobile.
+  const credits = values.reduce((sum, value) => sum + apolloEnrichmentCreditCost({ revealEmail: true, revealPhone: value === 'email_phone' }), 0);
   const setAll = (value: ContactLookup) => setLookups(Object.fromEntries(people.map(person => [person.id, value])));
 
   return (
@@ -95,7 +96,7 @@ export function CompleteContactsDialog({ open, onOpenChange, people, onConfirm, 
               {loading ? 'Buscando datos…' : `Buscar datos · ${credits} ${credits === 1 ? 'crédito' : 'créditos'}`}
             </Button>
             <p className="text-center text-xs text-muted-foreground sm:text-right" aria-live="polite">
-              {withPhone ? `${withPhone} con teléfono · ` : ''}1 crédito por contacto, con o sin teléfono
+              {withPhone ? `${withPhone} con móvil · ` : ''}Correo: {APOLLO_EMAIL_ENRICHMENT_CREDITS} crédito · Correo y móvil: {APOLLO_PHONE_ENRICHMENT_CREDITS}
             </p>
           </div>
         </DialogFooter>

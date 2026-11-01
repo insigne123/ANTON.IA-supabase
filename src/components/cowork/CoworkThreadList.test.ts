@@ -125,20 +125,18 @@ test('a conversation waiting for approval says «Aprobar» in words; the time go
   assert.equal((html.match(/Aprobar/g) || []).length, 1, 'only the one that waits');
 });
 
-test('every conversation that waits for approval goes first, under its own heading with how many, however old (COW-16)', () => {
-  const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
-  const html = render({ threads: [thread(1), { ...thread(2), status: 'waiting_approval' as const, updatedAt: old }, { ...thread(3), status: 'waiting_approval' as const }] });
-  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-  assert.match(text, /^.*Esperan tu aprobación · 2 Correos para clientes 2 .*Correos para clientes 3 .*Hoy Correos para clientes 1/);
-  assert.doesNotMatch(render({ threads: [thread(1)] }), /Esperan tu aprobación/, 'no heading when nothing waits');
+test('what waits for approval stays in its own date with «Aprobar»: the list under Cowork\'s box is the one place that groups it (audit C2)', () => {
+  const html = render({ threads: [thread(1), { ...thread(3), status: 'waiting_approval' as const }] });
+  assert.doesNotMatch(html, /Esperan tu aprobación/, 'no third copy under its own heading');
+  assert.equal((html.match(/>Aprobar</g) || []).length, 1, 'the one that waits still says so');
 });
 
-test('pinned conversations stay on top under what waits, in the order they were pinned, and the menu pins or unpins (COW-12)', () => {
+test('pinned conversations stay on top, in the order they were pinned, and the menu pins or unpins (COW-12)', () => {
   const old = new Date(Date.now() - 40 * 86_400_000).toISOString();
   const threads = [thread(1), { ...thread(2), updatedAt: old }, thread(3), { ...thread(4), status: 'waiting_approval' as const }];
   const html = render({ threads, pinnedRootIds: [thread(3).rootId, thread(2).rootId], onPin: () => {}, onRename: async () => true });
   const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-  assert.match(text, /Esperan tu aprobación · 1 Correos para clientes 4 .*Fijadas Correos para clientes 3 .*Correos para clientes 2 .*Hoy Correos para clientes 1/);
+  assert.match(text, /Fijadas Correos para clientes 3 .*Correos para clientes 2 .*Hoy .*Correos para clientes 4/);
   assert.match(text, /Quitar de fijadas/, 'a pinned one offers to unpin');
   assert.match(text, /Fijar arriba/, 'the others offer to pin');
   assert.doesNotMatch(render({ threads, pinnedRootIds: [] }), /Fijadas/, 'no pins, no group');

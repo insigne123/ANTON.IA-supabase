@@ -96,7 +96,7 @@ test('known Apollo failure preserves the cached email instead of turning a parti
 test('the organization Apollo share counts only what Apollo is asked: a full cache costs nothing, a missing phone costs 8',async()=>{
   const cached=fixture();assert.equal((await cached.run()).status,200);assert.deepEqual(cached.calls.share,[0]);
   const phone=fixture({cache:{...contact,mobile:null},pending:true});assert.equal((await phone.run()).status,202);assert.deepEqual(phone.calls.share,[8]);
-  const none=fixture({cache:null,pending:true});await none.run();assert.deepEqual(none.calls.share,[9],'email 1 and phone 8');
+  const none=fixture({cache:null,pending:true});await none.run();assert.deepEqual(none.calls.share,[8],'email and mobile together cost 8 (audit T5)');
 });
 test('a used organization share is said as it is, before any credit is claimed or Apollo is asked',async()=>{
   const message='Tu organización ya usó los 300 créditos de Apollo que tiene hasta el 1 de noviembre.';

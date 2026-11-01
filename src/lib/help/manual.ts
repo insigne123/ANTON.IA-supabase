@@ -152,7 +152,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     tips: [
       'Con cero resultados, la pantalla lista los filtros activos con un botón «Quitar» en cada uno.',
-      'El correo laboral se pide al guardar o al buscar el correo. El teléfono es opcional: cuesta 10 créditos por persona y llega en 1 a 3 minutos, si el proveedor lo tiene.',
+      'El correo laboral se pide al guardar o al buscar el correo. El móvil es opcional: con el correo son 8 créditos por persona y llega en 1 a 3 minutos, si el proveedor lo tiene.',
       'Los contactos ya contactados aparecen marcados como «Contactado».',
       'Con la extensión de LinkedIn (se descarga en el modo «Perfil») buscas el correo de varias personas de una búsqueda de LinkedIn en un clic.',
     ],
@@ -220,13 +220,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Si prefieres esperar, «Guardar sin buscar» los deja al final de «Por escribir», con «Buscar sus datos» para cuando quieras.',
     ],
     tips: [
-      'Buscar datos usa tu cupo diario de enriquecimiento: un crédito por contacto, pidas o no el teléfono.',
+      'Buscar datos usa créditos: 1 por contacto con solo correo, 8 con correo y móvil.',
       'El teléfono puede tardar unos minutos: aparece solo en su fila.',
     ],
     faqs: [
       { q: '¿Dónde quedan los contactos guardados?', a: 'En «Por escribir». Los que aún no tienen correo aparecen arriba, en el aviso «aún no tienen correo», con «Buscar sus datos».' },
       { q: '¿Qué pasa si no se encuentra el correo?', a: 'El contacto queda guardado y marcado «Correo no encontrado», con la fecha. Puedes pulsar «Buscar sus datos» otro día o escribirle por LinkedIn.' },
-      { q: '¿Cuánto cuesta pedir también el teléfono?', a: 'Lo mismo: un crédito por contacto, con o sin teléfono.' },
+      { q: '¿Cuánto cuesta pedir también el teléfono?', a: 'Correo: 1 crédito por contacto. Correo y móvil: 8.' },
     ],
     related: ['por-escribir', 'buscar', 'creditos'],
   },
@@ -488,7 +488,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     steps: [
       'Tu uso del día está en «Hoy», en «Créditos y uso diario». Se reinicia a medianoche UTC.',
       '«Mis créditos» muestra tu asignación personal, si tu administrador te dio una. Si no, usas los créditos compartidos del equipo.',
-      'El teléfono es opcional y cuesta 10 créditos por persona.',
+      'El móvil es opcional: con el correo son 8 créditos por persona.',
     ],
     faqs: [
       { q: 'Me quedé sin créditos. ¿Qué hago?', a: 'Pídele más a un administrador de tu organización. Se renuevan a medianoche UTC; buscar prospectos sigue disponible.' },

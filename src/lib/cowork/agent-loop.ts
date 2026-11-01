@@ -992,7 +992,7 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
   if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
   if (action === 'contacts.import') return 'Propongo guardar en tus contactos a las personas que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.';
-  if (action === 'lead.enrich_phone') return `Propongo pedir el teléfono de ${who} al proveedor: cuesta 10 créditos y es una persona por aprobación. La tarjeta muestra tu saldo; revísalo antes de aprobar.`;
+  if (action === 'lead.enrich_phone') return `Propongo pedir el teléfono de ${who} al proveedor: cuesta 8 créditos y es una persona por aprobación. La tarjeta muestra tu saldo; revísalo antes de aprobar.`;
   if (action === 'campaign.retry') return 'Propongo reintentar los envíos de esa campaña que fallaron por un motivo que se puede reintentar. En la tarjeta ves cuáles son; si la apruebas, vuelven a la cola y salen con los frenos de siempre, sin enviarse dos veces.';
   if (action === 'email.reply_thread') return `Preparé la respuesta para ${who} y la propongo enviar en su hilo. Revisa el texto en la tarjeta antes de aprobarla: si la apruebas, sale tal cual.`;
   if (action === 'preference.save') return 'Propongo recordarlo para tus próximas conversaciones. Revisa en la tarjeta cómo quedará escrito antes de aprobarlo.';
@@ -2107,7 +2107,7 @@ async function runCoworkLoop(input: {
         const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
         const label = effectLabel(decision.action, targetId, targetName);
         if (kind === 'enrich_phone' && turn < last && repeatedEnrichment(label, input.history || [], 'enrich_phone')) {
-          throw rejected('Phone already requested in this thread', 'Ya se pidió el teléfono de este contacto en este hilo (mira history.actions): repetirlo gasta otros 10 créditos. No lo vuelvas a proponer: di que ya se pidió y que llega a los contactos enriquecidos.');
+          throw rejected('Phone already requested in this thread', 'Ya se pidió el teléfono de este contacto en este hilo (mira history.actions): repetirlo gasta otros 8 créditos. No lo vuelvas a proponer: di que ya se pidió y que llega a los contactos enriquecidos.');
         }
         if (kind === 'enrich_contact' && turn < last && repeatedEnrichment(label, input.history || [])) {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');

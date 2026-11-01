@@ -1927,7 +1927,7 @@ export default function SearchPage() {
             <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
               <div>
                 <Label htmlFor="revealPhone">Teléfono</Label>
-                <p className="text-xs text-foreground/70">Cuesta 10 créditos por persona y llega en 1 a 3 minutos, si el proveedor lo tiene.</p>
+                <p className="text-xs text-foreground/70">Correo y móvil cuestan 8 créditos por persona y llegan en 1 a 3 minutos, si el proveedor lo tiene.</p>
               </div>
               <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
             </div>

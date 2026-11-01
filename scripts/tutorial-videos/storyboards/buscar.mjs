@@ -47,7 +47,7 @@ export default {
     },
     {
       title: 'Elige qué buscar', text: 'Solo el correo, o correo y teléfono. Para todos o persona por persona.',
-      say: 'Elige qué buscar: solo correo, o correo y teléfono.', postit: 'Cuesta 1 crédito por contacto, con o sin teléfono.',
+      say: 'Elige qué buscar: solo correo, o correo y teléfono.', postit: 'Correo: 1 crédito. Correo y móvil: 8.',
       target: { role: 'radiogroup', name: 'Qué buscar para todos', within: { role: 'dialog' } }, action: 'none', zoom: 1.4, arrow: true,
     },
     {

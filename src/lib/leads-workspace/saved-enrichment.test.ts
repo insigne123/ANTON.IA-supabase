@@ -56,7 +56,7 @@ test('the lookup after saving moves only what the classification says, marks the
   assert.match(routine, /supabaseService\.markEmailNotFound\(outcome\.notFound,/);
   assert.doesNotMatch(routine, /processedRefs/, 'a processed contact without email is not moved');
   const dialog = readFileSync('src/components/enrichment/complete-contacts-dialog.tsx', 'utf8');
-  assert.match(dialog, /ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT/, 'the button names internal app credits, not upstream credits');
+  assert.match(dialog, /apolloEnrichmentCreditCost\(/, 'the button shows what each lookup costs: 1 for the email, 8 for email and mobile (audit T5)');
   assert.match(dialog, /Buscar datos · \$\{credits\}/);
   assert.match(dialog, /'Solo correo'/);
   assert.match(dialog, /'Correo \+ teléfono'/);

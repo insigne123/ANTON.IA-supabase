@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { useState } from 'react';
 import { AlertCircle, Mail, Phone } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT } from '@/lib/leads-workspace/enrichment-provider';
+import { apolloEnrichmentCreditCost } from '@/lib/apollo-credit-costs';
 
 interface EnrichmentOptionsDialogProps {
     open: boolean;
@@ -20,7 +20,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
     const [revealPhone, setRevealPhone] = useState(false);
 
     const hasSelection = revealEmail || revealPhone;
-    const creditsPerContact = ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT;
+    const creditsPerContact = apolloEnrichmentCreditCost({ revealEmail, revealPhone });
     const estimatedCredits = leadCount * creditsPerContact;
 
     const handleConfirm = () => {
@@ -70,11 +70,11 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                             <div className="flex items-center justify-between gap-3 font-medium">
                                 <span>{leadCount === 1 ? '1 contacto seleccionado' : `${leadCount} contactos seleccionados`}</span>
                                 <span className="tabular-nums">
-                                    {estimatedCredits} {estimatedCredits === 1 ? 'crédito' : 'créditos'} de ANTON.IA
+                                    {estimatedCredits} {estimatedCredits === 1 ? 'crédito' : 'créditos'}
                                 </span>
                             </div>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                Estimado: {creditsPerContact} crédito interno por contacto procesado, aunque pidas correo y teléfono. Es el cupo de ANTON.IA, independiente del proveedor de datos.
+                                Correo: 1 crédito por contacto. Correo y móvil: 8 por contacto.
                             </p>
                         </div>
                     ) : (

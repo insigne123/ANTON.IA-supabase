@@ -61,6 +61,7 @@ import { ArrowLeft, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, Sen
 import { SenderLine, type SenderState } from '@/components/compose/SenderLine';
 import { emailLengthNote, emailWordCount } from '@/lib/drafts/email-length';
 import { approvalFailureText } from '@/lib/drafts/approval-failure';
+import { emailDeliverability } from '@/lib/email-deliverability';
 
 type AnyLead = EnrichedLead | EnrichedOppLead | any;
 
@@ -1660,6 +1661,13 @@ function ComposeInner() {
                           ? `Saldrá ahora desde ${sender.email}.`
                           : `Saldrá ahora por ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.`}
         </p>
+        {/* Audit P4: Apollo's own status says whether the address was checked; an unchecked one is the kind that bounces. */}
+        {lead && (lead as { email?: string | null }).email && !sendReceipt && !nativeDraftArchived
+          && !emailDeliverability((lead as { emailStatus?: string | null }).emailStatus).verified ? (
+          <p className="text-xs leading-5 text-cw-warning" role="note">
+            {emailDeliverability((lead as { emailStatus?: string | null }).emailStatus).hint}
+          </p>
+        ) : null}
         {signatureOn !== null && !sendReceipt && !nativeDraftArchived ? (
           <p className="text-xs leading-5 text-muted-foreground">
             {signatureOn ? 'Tu firma se agrega al final al enviar. ' : 'Este correo sale sin firma. '}

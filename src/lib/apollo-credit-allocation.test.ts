@@ -18,7 +18,7 @@ const share = (remaining: number, credits = 300, extra: Partial<ApolloCreditAllo
 test('a share counts what Apollo charges: 1 for the email and 8 for the phone', () => {
   assert.equal(apolloAllocationCost({ revealEmail: true, revealPhone: false }), 1);
   assert.equal(apolloAllocationCost({ revealEmail: false, revealPhone: true }), 8);
-  assert.equal(apolloAllocationCost({ revealEmail: true, revealPhone: true }), 9);
+  assert.equal(apolloAllocationCost({ revealEmail: true, revealPhone: true }), 8);
   assert.equal(apolloAllocationCost({ revealEmail: false, revealPhone: false }), 0);
 });
 
@@ -58,7 +58,7 @@ test('the card says what is left and what was used in the cycle, the earlier use
   assert.deepEqual([copy.used, copy.total, copy.remaining, copy.spent], [2_300, 2_600, 300, false]);
   const later = apolloAllocationCopy(share(282, 300, { usedBefore: 2_300 }));
   assert.equal(later.summary, 'Quedan solo 282 créditos disponibles hasta el 1 de noviembre: ya se usaron 2.318.');
-  assert.match(copy.footnote, /Cada correo usa 1 crédito y cada teléfono, 8\./);
+  assert.match(copy.footnote, /El correo usa 1 crédito; correo y móvil, 8\./);
   assert.match(copy.footnote, /Las búsquedas no usan estos créditos/);
 });
 
