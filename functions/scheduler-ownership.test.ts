@@ -52,7 +52,7 @@ test('Firebase owns all production scheduler bridges and Vercel schedules nothin
 
     const schedules = [
         ['researchSequencePreparationTick', 'every 1 minutes', '/api/cron/research-sequences'],
-        ['campaignProcessingTick', "every 5 minutes", '/api/cron/process-campaigns'],
+        ['campaignProcessingTick', "every 5 minutes", '/api/cron/campaigns-v2'],
         ['outboundReconciliationTick', "every 5 minutes", '/api/cron/outbound-reconciliation'],
         ['apolloReconciliationTick', "every 5 minutes", '/api/cron/apollo-reconciliation'],
         ['microworldsSearchTick', 'every 1 minutes', '/api/cron/microworlds-search'],
@@ -86,14 +86,12 @@ test('Firebase owns all production scheduler bridges and Vercel schedules nothin
     }
 
     const campaignTick = sourceBlock('export const campaignProcessingTick =', 'export const outboundReconciliationTick =');
-    assert.match(campaignTick, /\/api\/cron\/process-campaigns\?dryRun=true/);
+    // Audit K2: the old campaigns (v1) ran as a dry run only and are no longer woken.
+    assert.doesNotMatch(campaignTick, /\/api\/cron\/process-campaigns/);
     assert.match(campaignTick, /\/api\/cron\/campaigns-v2/);
     assert.match(campaignTick, /name: 'campaign-v2-due-state'/);
+    assert.match(campaignTick, /\/api\/cron\/bulk-campaigns/);
     assert.match(campaignTick, /Promise\.allSettled/);
-    assert.ok(
-        campaignTick.indexOf("name: 'campaign-processing'")
-        < campaignTick.indexOf('const failures = results.filter'),
-    );
     assert.ok(
         campaignTick.indexOf("name: 'campaign-v2-due-state'")
         < campaignTick.indexOf('const failures = results.filter'),
