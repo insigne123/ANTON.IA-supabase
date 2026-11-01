@@ -7,7 +7,7 @@ const LEAD = '00000000-0000-4000-8000-000000000061';
 const who = { name: 'Paula Ríos', company: 'Transportes del Sur', linkedin: 'https://www.linkedin.com/in/paula-rios', apolloId: 'apollo-1', cost: 10 };
 
 test('a reveal costs what the app shows for a phone: ten credits', () => {
-  assert.equal(COWORK_PHONE_REVEAL_CREDITS, 10);
+  assert.equal(COWORK_PHONE_REVEAL_CREDITS, 8);
 });
 
 test('the flag is off unless it is exactly «true»', () => {

@@ -27,8 +27,10 @@ export type ApolloCreditAllocation = {
   showLimit: boolean;
 };
 
+/** Email alone is 1; a phone lookup brings the email with it and is 8 for both (audit T5, 1 Nov 2026). */
 export function apolloAllocationCost(fields: { revealEmail: boolean; revealPhone: boolean }) {
-  return (fields.revealEmail ? APOLLO_ALLOCATION_EMAIL_CREDITS : 0) + (fields.revealPhone ? APOLLO_ALLOCATION_PHONE_CREDITS : 0);
+  if (fields.revealPhone) return APOLLO_ALLOCATION_PHONE_CREDITS;
+  return fields.revealEmail ? APOLLO_ALLOCATION_EMAIL_CREDITS : 0;
 }
 
 const count = (value: number) => value.toLocaleString('es-CL');
@@ -60,7 +62,7 @@ export function apolloAllocationCopy(allocation: ApolloCreditAllocation) {
   const until = apolloAllocationEndLabel(allocation.endsAt);
   const used = allocation.usedBefore + Math.min(allocation.used, allocation.credits);
   const total = allocation.usedBefore + allocation.credits;
-  const costs = `Cada correo usa ${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito y cada teléfono, ${APOLLO_ALLOCATION_PHONE_CREDITS}. `
+  const costs = `El correo usa ${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito; correo y móvil, ${APOLLO_ALLOCATION_PHONE_CREDITS}. `
     + 'Lo que está en curso ya se cuenta. Las búsquedas no usan estos créditos.';
   if (!allocation.showLimit) {
     return {

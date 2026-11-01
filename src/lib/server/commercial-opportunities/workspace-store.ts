@@ -38,10 +38,20 @@ export async function readWorkspaceCounts(client: SupabaseClient, scope: WorkSco
   return ((data || []) as Array<{ stage: string; evaluation: string | null; total: number | string }>).map(group => ({ ...group, total: Number(group.total) || 0 }));
 }
 
+/** The database's own reason, safe to keep: a SQLSTATE and, for our functions' named exceptions, their name (never row data). */
+export function opportunityDbCause(error: { code?: string; message?: string }) {
+  const code = /^[0-9A-Z]{5}$|^PGRST\d{3}$/.test(String(error.code || '')) ? String(error.code) : '';
+  const named = /^OPPORTUNITY_[A-Z_]{3,60}$/.test(String(error.message || '').trim()) ? String(error.message).trim() : '';
+  return [code, named].filter(Boolean).join(' ');
+}
 export function opportunityDb<T>(result: { data: T; error: { code?: string; message?: string } | null }): T {
   if (result.error) {
     if (result.error.code === '40001') throw new AuthError('El equipo cambió mientras editabas. Actualiza y vuelve a intentarlo.', 409);
-    throw new AuthError('No se pudo completar la acción de Oportunidades.', 503);
+    // The cause goes with the message: every LinkedIn posts run for one organization failed with only this sentence for two
+    // weeks, and nothing said why (audit O2).
+    const cause = opportunityDbCause(result.error);
+    console.error('[opportunities] database error', cause || 'unknown');
+    throw new AuthError(`No se pudo completar la acción de Oportunidades.${cause ? ` (código ${cause})` : ''}`, 503);
   }
   return result.data;
 }

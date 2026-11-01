@@ -41,7 +41,10 @@ export const runtime = 'nodejs';
 
 // Búsqueda in-process: esta ruta nunca llama a un gateway externo.
 const TIMEOUT_MS = Number(process.env.LEADS_N8N_TIMEOUT_MS ?? 60000);
-const MAX_RETRIES = Number(process.env.LEADS_N8N_MAX_RETRIES ?? 0);
+// One automatic retry for a transient failure (timeout, dropped connection, provider 5xx): 45 searches failed this way in
+// October with nothing for the person to do but try again (audit B1). Invalid filters and rate limits are never retried.
+const MAX_RETRIES = Number(process.env.LEADS_N8N_MAX_RETRIES ?? 1);
+const NOT_RETRIED = /^(INVALID_REQUEST|RATE_LIMITED)$/;
 
 // Lead search runs in-process against Apollo: the provider key is read only
 // from server runtime configuration and never leaves this route.
@@ -256,11 +259,14 @@ type SearchAuditContext = {
 async function auditSearchResponse(response: NextResponse, context: SearchAuditContext) {
   const succeeded = response.status >= 200 && response.status < 400;
   // The failure code (never the body) so the admin panel can tell a provider outage from a bad filter.
-  const errorCode = succeeded ? null : await response.clone().json()
-    .then((body: any) => (typeof body?.error === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(body.error) ? body.error : null))
-    .catch(() => null);
+  const failure = succeeded ? null : await response.clone().json().catch(() => null) as { error?: unknown; message?: unknown } | null;
+  const errorCode = typeof failure?.error === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(failure.error) ? failure.error : null;
+  // The technical cause, not only the code: «SERVICE_ERROR» alone left 45 October failures unexplained (audit B1). The
+  // ledger redacts the text before storing it.
+  const cause = typeof failure?.message === 'string' ? failure.message.slice(0, 200) : null;
   await safeAppendAntoniaEvent({
     errorCode,
+    message: cause,
     eventKey: `search:${context.requestId}:${succeeded ? 'completed' : 'failed'}`,
     eventType: succeeded ? 'search.completed' : 'search.failed',
     organizationId: context.organizationId,
@@ -367,7 +373,7 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
       return NextResponse.json({ ...normalized, ...responseMeta, ...(meta || {}) }, { status: 200 });
     } catch (e) {
       lastErr = e;
-      if (attempt === MAX_RETRIES) break;
+      if (attempt === MAX_RETRIES || (e instanceof Error && NOT_RETRIED.test(e.message))) break;
       await new Promise(r => setTimeout(r, Math.min(1000 * 2 ** attempt, 6000)));
       attempt++;
     }

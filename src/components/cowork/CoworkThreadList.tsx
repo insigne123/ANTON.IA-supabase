@@ -72,15 +72,14 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   const searching = Boolean(onSearch) && term.length >= 3 && found.term !== term;
   const groups = useMemo(() => {
     const now = new Date();
-    // What waits for the person's approval goes first, all of it, so a proposal in an older conversation is not forgotten (COW-16).
-    const waiting = { label: 'Esperan tu aprobación', items: [] as CoworkThreadSummary[] };
+    // What waits for approval is listed once, under the box on Cowork's home, and expires after 7 days (audit C2 and C1): here
+    // it stays in its own date with its «Aprobar» pill, instead of a third copy under its own heading (COW-16 moved there).
     // The recurring ones the person pinned («Licitaciones del lunes») stay on top, whatever their date (COW-12).
     const pinned = { label: 'Fijadas', items: [] as CoworkThreadSummary[] };
     const pins = new Map(pinnedRootIds.map((rootId, index) => [rootId, index]));
-    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [waiting, pinned];
+    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [pinned];
     for (const thread of threads) {
       if (term && !thread.title.toLocaleLowerCase('es').includes(term) && !snippets?.has(thread.rootId)) continue;
-      if (thread.status === 'waiting_approval') { waiting.items.push(thread); continue; }
       if (pins.has(thread.rootId)) { pinned.items.push(thread); continue; }
       const label = coworkDateBucket(thread.updatedAt, now);
       const group = result.find(item => item.label === label);
@@ -137,7 +136,7 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
           <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
         </div>)}
       {groups.map(group => <div key={group.label} className="mt-3 first:mt-1">
-        <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}{group.label === 'Esperan tu aprobación' ? <span className="tabular-nums"> · {group.items.length}</span> : null}</h2>
+        <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}</h2>
         <ul className="space-y-px">
           {group.items.map(thread => {
             const status = coworkStatusCopy(thread.status);

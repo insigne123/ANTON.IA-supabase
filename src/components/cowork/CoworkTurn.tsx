@@ -12,6 +12,7 @@ import {
 import { coworkReplyBody, type CoworkDraftPhase, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { coworkExpiredApprovalText } from '@/lib/cowork/approval-expiry-copy';
 import { coworkBlockMeta, coworkEditedEmails, type CoworkEditedEmail } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
 import { CoworkActivity } from './CoworkActivity';
@@ -380,7 +381,7 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
           {autoRetry && onRetry ? <AutoRetry onRetry={onRetry} onStop={() => setAutoRetryStopped(true)} /> : null}
         </div>}
         {run.status === 'cancelled' && <div className="flex flex-wrap items-center gap-3 text-[13.5px] text-cw-muted">
-          <span>Lo detuviste. Lo consultado hasta aquí quedó guardado.</span>
+          <span>{events.some(event => event.kind === 'approval.expired') ? coworkExpiredApprovalText() : 'Lo detuviste. Lo consultado hasta aquí quedó guardado.'}</span>
           {latest && onRetry && <CwButton size="xs" variant="ghost" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
         </div>}
         {latest && budgetExhausted && <p className="rounded-xl border border-cw-border bg-cw-panel px-3.5 py-2.5 text-[13px] text-cw-muted">Se alcanzó el tope de pasos automáticos de este hilo. Lo logrado quedó guardado; escríbeme abajo para seguir.</p>}

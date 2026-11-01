@@ -1,5 +1,6 @@
 
 'use client';
+import { emailDeliverability } from '@/lib/email-deliverability';
 import Link from 'next/link';
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 
@@ -1072,7 +1073,8 @@ export default function EnrichedLeadsClient() {
         .forEach((status) => void loadNativeResearchDetail(status));
     };
     poll();
-    const interval = window.setInterval(() => poll(true), 5_000);
+    // A hidden tab does not ask: the reports are read again when it comes back (audit O4).
+    const interval = window.setInterval(() => { if (!document.hidden) poll(true); }, 5_000);
     return () => window.clearInterval(interval);
   }, [loadNativeResearchDetail, pageLeads, nativeResearchForLead, nativeReportDetails, nativeReportDetailErrors, nativeReportToView, openReport]);
 
@@ -1176,6 +1178,9 @@ export default function EnrichedLeadsClient() {
         {hasUsableEmail(lead.email) ? (
           <>
             <div className="truncate">{lead.email}</div>
+            {!emailDeliverability(lead.emailStatus).verified ? (
+              <div className="text-xs text-cw-warning" title={emailDeliverability(lead.emailStatus).hint || undefined}>Sin verificar</div>
+            ) : null}
             <EmailOwnerWarning email={lead.email as string} name={lead.fullName} />
           </>
         ) : (

@@ -763,7 +763,7 @@ test('a phone reveal is proposed only when it is on, for a contact read in the t
   // On: the contact read in this turn anchors the proposal, the card is named after the person and the note says what it costs.
   await runCoworkReadLoop({ ...base, phoneReveal: true, ...decide() });
   assert.deepEqual(proposals[0], { kind: 'enrich_phone', targetId: leadId, label: 'Revelar el teléfono de Paula Ríos (Transportes del Sur)', originRunId: runId });
-  assert.match(notes[0], /Propongo pedir el teléfono de Paula Ríos \(Transportes del Sur\) al proveedor: cuesta 10 créditos y es una persona por aprobación/);
+  assert.match(notes[0], /Propongo pedir el teléfono de Paula Ríos \(Transportes del Sur\) al proveedor: cuesta 8 créditos y es una persona por aprobación/);
   // A contact that was not read in this thread is refused.
   await assert.rejects(runCoworkReadLoop({ ...base, phoneReveal: true, execute: async () => ({}), decide: async () => phone }), /Effect target must be observed first/);
   // The same reveal in the thread is not proposed again: it would spend ten credits more for the same answer.
