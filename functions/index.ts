@@ -147,12 +147,9 @@ export const campaignProcessingTick = functions.scheduler.onSchedule({
     memory: '1GiB',
     secrets: ['FIREBASE_SCHEDULER_SECRET'],
 }, async () => {
+    // The old campaigns (v1) are no longer woken: their route ran as a dry run only and prepared nothing (audit K2, 1 Nov 2026).
+    // It stays for a manual check (docs/deployment.md).
     const results = await Promise.allSettled([
-        invokeFirebaseSchedulerBridge({
-            name: 'campaign-processing',
-            path: '/api/cron/process-campaigns?dryRun=true',
-            method: 'GET',
-        }),
         invokeFirebaseSchedulerBridge({
             name: 'campaign-v2-due-state',
             path: '/api/cron/campaigns-v2',
