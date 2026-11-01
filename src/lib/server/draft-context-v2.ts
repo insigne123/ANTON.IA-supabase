@@ -43,6 +43,13 @@ export const MIN_DRAFT_QUALITY_SCORE = 48;
 
 export const DEFAULT_DRAFT_CTA = '¿Te parece si lo conversamos 15 minutos esta semana?';
 export const DEFAULT_DRAFT_CTA_USTED = '¿Le parece si lo conversamos 15 minutos esta semana?';
+// The default ask in other words, one per recipient (draftVarietyIndex): a campaign that closes every email with the same sentence reads
+// like a template (the owner's read of the v40 sample, 1 Nov 2026). A CTA the person wrote is never rotated.
+export const DEFAULT_DRAFT_CTA_FORMS = {
+  tu: [DEFAULT_DRAFT_CTA, '¿Tienes 15 minutos esta semana para verlo?', '¿Te acomoda una llamada de 15 minutos esta semana?', '¿Lo vemos en 15 minutos esta semana?'],
+  usted: [DEFAULT_DRAFT_CTA_USTED, '¿Tiene 15 minutos esta semana para verlo?', '¿Le acomoda una llamada de 15 minutos esta semana?', '¿Lo vemos en 15 minutos esta semana?'],
+} as const;
+export const DEFAULT_DRAFT_CTA_ALL_FORMS: readonly string[] = [...new Set<string>([...DEFAULT_DRAFT_CTA_FORMS.tu, ...DEFAULT_DRAFT_CTA_FORMS.usted])];
 export const DRAFT_BLOCKED_SAFETY_PHRASES = [
   'soy una ia',
   'como ia',

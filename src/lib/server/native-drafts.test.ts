@@ -15,6 +15,7 @@ import {
   type DraftContextV2,
 } from './draft-context-v2';
 import type { OutreachSequenceContextV2 } from '@/lib/campaigns-v2/outreach-sequence-context';
+import { DEFAULT_DRAFT_CTA_FORMS } from '@/lib/server/draft-context-v2';
 import {
   DRAFT_FIXTURE_IDS,
   DRAFT_FIXTURE_NOW,
@@ -1342,6 +1343,21 @@ test('effective CTA follows the body tratamiento without touching custom CTAs', 
   };
   assert.equal(resolveEffectiveCta(custom, ustedBody), '¿Coordinamos una visita el martes?');
   assert.equal(resolveEffectiveCta(custom, tuBody), '¿Coordinamos una visita el martes?');
+});
+
+test('the default CTA is said in other words per recipient; a CTA the person wrote is never rotated', () => {
+  // The owner's read of the v40 sample (1 Nov 2026): every first email closed with the same sentence.
+  const base = draftContextFixture();
+  const tuBody = 'Hola Rodrigo,\n\nTe escribo por la dotación. Tu equipo podría sumar personal.';
+  const forRecipient = (email: string) => ({ ...base, recipient: { ...base.recipient, email } });
+  const picked = new Set(Array.from({ length: 30 }, (_, index) => resolveEffectiveCta(forRecipient(`persona${index}@acme.example`), tuBody)));
+  assert.ok(picked.size >= 3, [...picked].join(' / '));
+  for (const cta of picked) assert.ok((DEFAULT_DRAFT_CTA_FORMS.tu as readonly string[]).includes(cta), cta);
+  assert.equal(resolveEffectiveCta(forRecipient('persona1@acme.example'), tuBody), resolveEffectiveCta(forRecipient('persona1@acme.example'), tuBody));
+  const ustedBody = 'Hola Paula,\n\nLe escribo por la dotación. Su equipo podría sumar personal.';
+  for (let index = 0; index < 10; index += 1) {
+    assert.ok((DEFAULT_DRAFT_CTA_FORMS.usted as readonly string[]).includes(resolveEffectiveCta(forRecipient(`persona${index}@acme.example`), ustedBody)));
+  }
 });
 
 test('the CTA treatment comes from what was asked, and «les» or «su» about the company is not usted (Plan 15)', () => {

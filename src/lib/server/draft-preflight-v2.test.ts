@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { DRAFT_CLOSING_FORMS } from '@/lib/draft-variety';
 import test from 'node:test';
 
 import {
@@ -1028,6 +1029,29 @@ test('a later email may rest on the recipient\'s name when the anchor is not a d
   // A dated event still goes into every email.
   const dated = { ...evidence, statement: 'Acme abrirá dos tiendas nuevas en diciembre según nota de prensa del 2026-09-10.' };
   assert.equal(invalid(followUp, 'model', { ...base, evidence: [dated, ...base.evidence.slice(1)] }), true);
+});
+
+test('every closing form the writer is given passes the close check', () => {
+  // A v41 sample turned back four closes: «¿Te sirve que lo retome más adelante?» reads as a meeting ask.
+  const context = draftContextFixture();
+  const output = validOutput();
+  for (const form of DRAFT_CLOSING_FORMS) {
+    const closing = form.replace(/^«|»$/g, '');
+    const body = `Hola Ada,\n\nPara las búsquedas de Acme, en ${context.seller.companyName} automatizamos tareas repetitivas.\n\n${closing}`;
+    const issues = validateDraftPreflightV2(context, { ...output, body }, { expectedCtaCount: 0 }).issues.filter((issue) => issue.code === 'cta_count');
+    assert.deepEqual(issues, [], closing);
+  }
+});
+
+test('a draft with another form of the default CTA is approved with the style\'s own context', () => {
+  // The CTA is picked per recipient (and in usted for an usted email); the approval rebuilds the context with the default one.
+  const context = draftContextFixture();
+  const output = validOutput();
+  const configured = context.constraints.cta.exactText;
+  const other = '¿Te acomoda una llamada de 15 minutos esta semana?';
+  const issues = (body: string) => validateDraftPreflightV2(context, { ...output, body }).issues.filter((issue) => issue.code === 'cta_count');
+  assert.deepEqual(issues(output.body.replace(configured, other)), []);
+  assert.ok(issues(output.body.replace(configured, '¿Coordinamos una visita el martes?')).length > 0);
 });
 
 test('narrowing a statement skips the clause that only introduces the fact', () => {

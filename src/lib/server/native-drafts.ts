@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { draftVarietyIndex, draftVarietySeed } from '@/lib/draft-variety';
 import { buildSharedSequenceBrief, SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
 import { OUTREACH_OPENING_KINDS, type OutreachOpeningKind } from '@/lib/outreach-example-library';
 
@@ -27,6 +28,7 @@ import {
   createDefaultDraftWritingStyleV2,
   DEFAULT_DRAFT_CTA,
   DEFAULT_DRAFT_CTA_USTED,
+  DEFAULT_DRAFT_CTA_FORMS,
   draftFlagsForUser,
   normalizeDraftWritingStyleV2,
   requiredReportAwareDraftPersonalizationV2,
@@ -971,9 +973,11 @@ export function resolveEffectiveCta(context: DraftContextV2, modelBody: string, 
   const normalized = normalizeTreatment(modelBody);
   const asked = requestedTreatment(context, requested);
   const usted = asked ? asked === 'usted' : USTED_MARK.test(normalized) && !TU_MARK.test(normalized);
-  if (!usted) return base;
-  if (alternate.length >= 8 && alternate.length <= 240) return alternate;
-  if (base === DEFAULT_DRAFT_CTA) return DEFAULT_DRAFT_CTA_USTED;
+  if (usted && alternate.length >= 8 && alternate.length <= 240) return alternate;
+  if (base === DEFAULT_DRAFT_CTA || base === DEFAULT_DRAFT_CTA_USTED) {
+    const forms = usted ? DEFAULT_DRAFT_CTA_FORMS.usted : DEFAULT_DRAFT_CTA_FORMS.tu;
+    return forms[draftVarietyIndex(draftVarietySeed(context), forms.length)];
+  }
   return base;
 }
 
