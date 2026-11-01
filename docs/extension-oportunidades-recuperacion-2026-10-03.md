@@ -27,7 +27,7 @@ Extensión preparada: **4.1.1**, mismos permisos y hosts que 4.1.0.
 - Unitarias: **2361 aprobadas**, 417 archivos, runner seguro por cinco lotes en Windows. Tras corregir la compatibilidad de valores cero/false, se repitieron los lotes 4–5; los lotes 1–3 ya aprobados no cambian.
 - `npm run extension:test`: **100 aprobadas**.
 - `scripts/test-linkedin-extension-browser.mjs`: Chrome con frontera simulada, claro/oscuro y 320/380/520 px, informe con evidencia resuelta y enlaces, descarga manual de PDF y teclado, sin overflow.
-- `scripts/test-opportunities-recovery-browser.mjs`: workspace real con API simulada, fallo de ambas fuentes, toast de fallo al reintentar, fallo de licitaciones, primera búsqueda, vacío real y búsqueda parcial; claro/oscuro y 390/768/1440 px sin overflow. Contraste calculado de los errores por fuente superior o igual a 4,5:1 en ambos temas.
+- `scripts/test-opportunities-recovery-browser.mjs` (retirado el 1 nov 2026 con la pantalla antigua de Oportunidades, auditoría K2): workspace real con API simulada, fallo de ambas fuentes, toast de fallo al reintentar, fallo de licitaciones, primera búsqueda, vacío real y búsqueda parcial; claro/oscuro y 390/768/1440 px sin overflow. Contraste calculado de los errores por fuente superior o igual a 4,5:1 en ambos temas.
 - ZIP 4.1.1: 12 archivos, **1.965.817 bytes**, SHA-256 `c648d47ed18e9163b4e9602a66bfda61920fb1066a6988ac711e415580bcacdb`.
 
 ## Pendiente de producción

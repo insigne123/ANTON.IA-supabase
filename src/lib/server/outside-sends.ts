@@ -159,3 +159,28 @@ export async function detectOutsideSends(supabase: any, input: { organizationId:
     return { provider, listed: 0, recorded: 0, reason: String((error as Error)?.message || 'failed').slice(0, 120) };
   }
 }
+
+/**
+ * The reply sync's turn for outside sends: every mailbox that is connected, not only those that already sent from ANTON.IA, in each
+ * organization its owner belongs to. Every 30 minutes over the last 3 days, and once a day (03:00 UTC) over the last 30, which also
+ * fills the history the first day. Kept here so the reply sync route does not read the mailbox tokens itself.
+ */
+export async function detectOutsideSendsDue(supabase: any, now: Date) {
+  const outside = { mailboxes: 0, recorded: 0 };
+  if (now.getUTCMinutes() % 30 >= 5) return outside;
+  const firstRun = now.getUTCHours() === 3 && now.getUTCMinutes() < 5;
+  const { data: tokens } = await supabase.from('provider_tokens').select('user_id,provider').in('provider', ['google', 'outlook']).limit(200);
+  const userIds = [...new Set(((tokens || []) as Array<{ user_id: string }>).map(row => String(row.user_id)))];
+  const { data: memberships } = userIds.length
+    ? await supabase.from('organization_members').select('user_id,organization_id').in('user_id', userIds).limit(1000)
+    : { data: [] as any[] };
+  for (const token of (tokens || []) as Array<{ user_id: string; provider: string }>) {
+    const provider = token.provider === 'google' ? 'gmail' as const : 'outlook' as const;
+    for (const membership of ((memberships || []) as Array<{ user_id: string; organization_id: string }>).filter(row => row.user_id === token.user_id)) {
+      const result = await detectOutsideSends(supabase, { organizationId: membership.organization_id, userId: token.user_id, provider, firstRun });
+      outside.mailboxes += 1;
+      outside.recorded += result.recorded;
+    }
+  }
+  return outside;
+}
