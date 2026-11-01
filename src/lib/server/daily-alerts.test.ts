@@ -220,3 +220,23 @@ test('whoever manages Oportunidades hears of a document on its day and of what i
   assert.equal(member.documents, undefined);
   assert.equal(member.searches, undefined);
 });
+
+test('the best new ones: recommended since the last alert, open and nobody\'s, the highest score first (audit O1)', async () => {
+  const data: any = seed();
+  const op = (id: string, score: number, extra: Record<string, unknown> = {}) => ({ id, organization_id: ORG, kind: 'tender', title: `Licitación ${id}`, buyer_name: 'Servicio de Salud Sur',
+    deadline_at: '2026-11-05T18:00:00Z', score, data: { evaluation: 'recommended' }, ...extra });
+  data.commercial_opportunities.push(op('o-a', 80), op('o-b', 95), op('o-taken', 99), op('o-closed', 90, { deadline_at: '2026-10-19T18:00:00Z' }),
+    op('o-old', 97), op('o-now-review', 98, { data: { evaluation: 'review' } }), ...['c', 'd', 'e', 'f'].map((id, i) => op(`o-${id}`, 70 - i)));
+  data.opportunity_work.push({ organization_id: ORG, opportunity_id: 'o-taken', state: 'assigned', responsible_id: 'u-diego' });
+  const evaluation = (id: string, at: string) => ({ organization_id: ORG, opportunity_id: id, verdict: 'recommended', created_at: at });
+  data.opportunity_evaluations = ['o-a', 'o-b', 'o-taken', 'o-closed', 'o-now-review', 'o-c', 'o-d', 'o-e', 'o-f'].map(id => evaluation(id, '2026-10-19T20:00:00Z'))
+    .concat(evaluation('o-old', '2026-10-15T20:00:00Z'));
+  const { client } = memory(data);
+  const since = '2026-10-19T11:30:00.000Z';
+  const facts = await readAlertFacts(client, SCOPE, { now: TUESDAY, since, opportunities: 'manager' });
+  assert.deepEqual(facts.best?.map(item => item.id), ['o-b', 'o-a', 'o-c', 'o-d', 'o-e']);
+  assert.equal(facts.best?.[0].buyer, 'Servicio de Salud Sur');
+  // Only whoever manages Oportunidades hears of them.
+  const member = await readAlertFacts(client, SCOPE, { now: TUESDAY, since, opportunities: 'mine' });
+  assert.equal(member.best, undefined);
+});
