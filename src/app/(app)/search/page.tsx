@@ -83,7 +83,7 @@ import {
   buildLinkedInProfileNotice, getFriendlySearchErrorMessage as sourceSearchErrorMessage, hasBatchSearchFilters, hasLeadPhone, hasVisibleLeadEmail,
   hasVisibleLeadPhone, isPendingEnrichmentStatus, mapLeadToEnriched, normalizeLeadForUI, splitFilterInput, splitTitlesInput,
   normalizeUiPhoneNumbers, contactStateBadge, displayDomain, getPhoneFallback, type ProfileContactState,
-  companyFilterSignature, contactedKeys, isLeadContacted, isLeadSaved, peopleFilterSignature, type SavedLeadIds,
+  companyFilterSignature, contactedKeys, emailFirst, isLeadContacted, isLeadSaved, peopleFilterSignature, type SavedLeadIds,
 } from '@/lib/search/lead-ui';
 import { ResultsActionBar } from '@/components/search/ResultsActionBar';
 import { SearchIntro } from '@/components/search/SearchIntro';
@@ -129,7 +129,9 @@ export default function SearchPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DEFAULT);
   const totalPages = useMemo(() => Math.max(1, Math.ceil(leads.length / pageSize)), [leads.length, pageSize]);
-  const pagedLeads = useMemo(() => leads.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize), [leads, pageIndex, pageSize]);
+  // Audit B2: who holds an email first, who does not last.
+  const orderedLeads = useMemo(() => emailFirst(leads), [leads]);
+  const pagedLeads = useMemo(() => orderedLeads.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize), [orderedLeads, pageIndex, pageSize]);
   const fitView = useLeadFit(pagedLeads.map((lead) => ({ stage: 'search' as const, lead: searchFitLead(lead) })), !isLoading);
   const abortRef = useRef<AbortController | null>(null);
   const profileStatusAbortRef = useRef<AbortController | null>(null);
@@ -1832,10 +1834,14 @@ export default function SearchPage() {
       ) : null}
     </div>
   );
-  /** A result that has an email it does not show yet (Leads Finder). */
+  /** A result that has an email it does not show yet, or that the provider says has none (audit B2): said before any credit is spent. */
   const contactOnFile = (lead: UILaed) => (!lead.email && lead.hasEmailOnFile ? (
     <p className="mt-0.5 flex items-center gap-1 text-xs text-foreground/70">
       <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Tiene correo: se ve al buscar su correo
+    </p>
+  ) : !lead.email && lead.hasEmailOnFile === false ? (
+    <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+      <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Sin correo en la base: buscarlo puede no traerlo
     </p>
   ) : null);
 
@@ -2181,14 +2187,13 @@ export default function SearchPage() {
           </div>
         ) : null}
       </div>
+      {/* Audit B4: a quiet line, not a blue box in front of the results. */}
       {companiesStale ? (
-        <Alert variant="info" role="status">
-          <Info className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription className="flex flex-wrap items-center gap-2">
-            Cambiaste los filtros de empresa: esta lista es de la búsqueda anterior.
-            <Button type="button" size="sm" variant="outline" className="h-7 bg-background/80" onClick={runSearch} disabled={isLoading}>Actualizar empresas</Button>
-          </AlertDescription>
-        </Alert>
+        <p role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>Cambiaste los filtros de empresa: esta lista es de la búsqueda anterior.</span>
+          <Button type="button" size="sm" variant="link" className="h-auto p-0 text-xs" onClick={runSearch} disabled={isLoading}>Actualizar empresas</Button>
+        </p>
       ) : null}
       {isLoadingCompanies ? rowSkeleton('Buscando empresas') : companies.length > 0 ? (
         <>
@@ -2255,15 +2260,13 @@ export default function SearchPage() {
         </p>
       </div>
       {peopleStale ? (
-        <Alert variant="info" role="status">
-          <Info className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription className="flex flex-wrap items-center gap-2">
-            Cambiaste los filtros de contactos: estos resultados son de la búsqueda anterior.
-            <Button type="button" size="sm" variant="outline" className="h-7 bg-background/80" onClick={() => void handleSearchCompanyPeople()} disabled={isLoading || selectedCompanyIds.size === 0}>
-              Buscar de nuevo en {selectedCompanyIds.size} {selectedCompanyIds.size === 1 ? 'empresa' : 'empresas'}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <p role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>Cambiaste los filtros de contactos: estos resultados son de la búsqueda anterior.</span>
+          <Button type="button" size="sm" variant="link" className="h-auto p-0 text-xs" onClick={() => void handleSearchCompanyPeople()} disabled={isLoading || selectedCompanyIds.size === 0}>
+            Buscar de nuevo en {selectedCompanyIds.size} {selectedCompanyIds.size === 1 ? 'empresa' : 'empresas'}
+          </Button>
+        </p>
       ) : null}
       {isLoadingCompanyPeople && companyWindowList.length === 0 ? rowSkeleton('Buscando contactos') : companyWindowList.length === 0 ? (
         <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
@@ -2324,7 +2327,7 @@ export default function SearchPage() {
                   </Alert>
                 ) : activeWindow.leads.length > 0 ? (
                   <ul className="space-y-2" aria-label={`Contactos de ${activeWindow.organization.name}`}>
-                    {activeWindow.leads.map((lead) => (
+                    {emailFirst(activeWindow.leads).map((lead) => (
                       <li key={lead.id}>
                         <SearchLeadRow
                           lead={lead}
@@ -2333,6 +2336,7 @@ export default function SearchPage() {
                           contacted={isContactedLead(lead)}
                           onSelect={(checked) => handleSelectLead(lead.id, checked)}
                           lock={teamLockFor(lead)}
+                          details={contactOnFile(lead)}
                           showCompany={false}
                         />
                       </li>
