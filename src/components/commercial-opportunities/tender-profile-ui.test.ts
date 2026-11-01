@@ -23,6 +23,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/tender-profile': profile,
   '@/lib/commercial-opportunities/company-documents': documents,
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
+  './OpportunityRadar': { TenderPrerequisites: () => React.createElement('div', { 'data-prerequisites': '' }, 'Antes de postular a una licitación') },
   '@/components/confirm-dialog': { useConfirm: () => async () => true },
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };

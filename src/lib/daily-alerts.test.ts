@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { alertDay, alertEmail, closingText, composeAlert, dayWord, waitingText, type AlertFacts, documentDue } from './daily-alerts';
+import { alertDay, alertEmail, bestText, closingText, composeAlert, dayWord, waitingText, type AlertFacts, documentDue } from './daily-alerts';
 import { DEFAULT_GOALS } from './weekly-goals';
 
 // Chile is UTC−3 in October: 12:00Z is 09:00 there.
@@ -190,4 +190,19 @@ test('what Cowork proposed and waits for approval is said every day while it wai
   const one = composeAlert(facts({ coworkApprovals: 1 }), now);
   assert.ok(one?.lines.some(line => line.text === 'Una propuesta de Cowork espera tu aprobación'));
   assert.ok(!(composeAlert(facts({ coworkApprovals: 0 }), now)?.lines || []).some(line => line.kind === 'approval'));
+});
+
+test('the best new opportunities reach whoever manages them, each with its buyer and close, and one closing soon is told once (audit O1)', () => {
+  const item = (id: string, extra = {}) => ({ id, title: `Licitación ${id}`, buyer: 'Hospital Regional', deadlineAt: '2026-10-23T18:00:00Z', ...extra });
+  assert.equal(bestText(item('a'), TUESDAY), 'Licitación a · Hospital Regional · cierra el viernes');
+  assert.equal(bestText(item('b', { buyer: null, deadlineAt: null }), TUESDAY), 'Licitación b');
+  const one = composeAlert(facts({ best: [item('a')] }), TUESDAY);
+  assert.equal(one?.subject, 'Nueva y recomendada: Licitación a');
+  assert.deepEqual(one?.lines.filter(line => line.kind === 'best').map(line => line.href), ['/opportunities?op=a']);
+  const many = composeAlert(facts({ best: ['a', 'b', 'c', 'd', 'e', 'f'].map(id => item(id)) }), TUESDAY);
+  assert.equal(many?.subject, '5 oportunidades nuevas calzan con tu oferta');
+  assert.equal(many?.lines.filter(line => line.kind === 'best').length, 5);
+  const closing = { id: 'a', kind: 'tender', title: 'Licitación a', deadlineAt: '2026-10-21T18:00:00Z', recommended: true, mine: false };
+  const both = composeAlert(facts({ closing: [closing], best: [item('a'), item('b')] }), TUESDAY);
+  assert.deepEqual(both?.lines.filter(line => line.kind === 'best').map(line => line.href), ['/opportunities?op=b']);
 });

@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useConfirm } from '@/components/confirm-dialog';
 import { CompanyDocuments } from './CompanyDocuments';
+import { TenderPrerequisites } from './OpportunityRadar';
 import { CERTIFICATIONS, CHILE_REGIONS, COMPANY_SIZES, EMPTY_TENDER_PROFILE, PROVIDER_REGISTRY, WOMEN_OWNERSHIP, femaleLedSeal, normalizeRut, tenderProfileProgress,
   type TenderProfile, type TenderProfileField, type TenderProfileSuggestion } from '@/lib/commercial-opportunities/tender-profile';
 
@@ -297,6 +298,8 @@ export function TenderProfileSheet({ open, onOpenChange }: { open: boolean; onOp
           <SheetTitle>Ficha para licitaciones</SheetTitle>
           <SheetDescription>Con esto la IA no descarta una licitación por algo que sí tienes, y te pregunta lo que no sabe. Deja en blanco lo que no sepas.</SheetDescription>
         </SheetHeader>
+        {/* Audit O3: what almost every set of bases asks for, next to the company's own answers instead of above the list. */}
+        <TenderPrerequisites />
         {!view && !problem ? <div role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Abriendo la ficha…</div> : null}
         {view && !view.available ? <p className="py-6 text-sm text-muted-foreground">La ficha se está preparando. Vuelve en unos minutos.</p> : null}
         {view?.available ? <>
