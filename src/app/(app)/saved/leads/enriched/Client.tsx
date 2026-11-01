@@ -1273,27 +1273,32 @@ export default function EnrichedLeadsClient() {
         )}
       />
 
-      {withEmail.length > 0 ? (
+      {/* Audit P1: one notice above the list, not two boxes with two buttons. Saved contacts that already have an email are the main
+          action (no credits); the ones without go as a quiet second action in the same line. */}
+      {withEmail.length > 0 || withoutEmail.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/30 px-4 py-3">
           <p className="min-w-0 text-sm" aria-live="polite">
-            <span className="font-medium">{withEmail.length.toLocaleString('es-CL')} {withEmail.length === 1 ? 'contacto guardado ya tiene' : 'contactos guardados ya tienen'} correo.</span>{' '}
-            <span className="text-muted-foreground">{bringing === null ? 'Tráelos para escribirles, sin gastar créditos.' : `Trayendo ${bringing.toLocaleString('es-CL')} de ${withEmail.length.toLocaleString('es-CL')}…`}</span>
+            {withEmail.length > 0 ? <>
+              <span className="font-medium">{withEmail.length.toLocaleString('es-CL')} {withEmail.length === 1 ? 'contacto guardado ya tiene' : 'contactos guardados ya tienen'} correo.</span>{' '}
+              <span className="text-muted-foreground">{bringing === null ? 'Tráelos para escribirles, sin gastar créditos.' : `Trayendo ${bringing.toLocaleString('es-CL')} de ${withEmail.length.toLocaleString('es-CL')}…`}</span>
+            </> : null}
+            {withoutEmail.length > 0 ? <>
+              {withEmail.length > 0 ? ' ' : null}
+              <span className={withEmail.length > 0 ? 'text-muted-foreground' : 'font-medium'}>{withoutEmail.length.toLocaleString('es-CL')} {withoutEmail.length === 1 ? 'contacto guardado aún no tiene' : 'contactos guardados aún no tienen'} correo.</span>{' '}
+              {withEmail.length > 0
+                ? <Button type="button" variant="link" size="sm" className="h-auto p-0 align-baseline text-sm" onClick={() => setCompleteOpen(true)}>Buscar sus datos</Button>
+                : <span className="text-muted-foreground">Búscalo y {withoutEmail.length === 1 ? 'aparecerá' : 'aparecerán'} aquí, listos para escribirles.</span>}
+            </> : null}
           </p>
-          <Button size="sm" variant="outline" disabled={bringing !== null} onClick={() => void bringSaved()}>
-            {bringing !== null ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowDownToLine className="h-4 w-4" aria-hidden="true" />}Traerlos a «Por escribir»
-          </Button>
-        </div>
-      ) : null}
-
-      {withoutEmail.length > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/30 px-4 py-3">
-          <p className="min-w-0 text-sm">
-            <span className="font-medium">{withoutEmail.length} {withoutEmail.length === 1 ? 'contacto guardado aún no tiene' : 'contactos guardados aún no tienen'} correo.</span>{' '}
-            <span className="text-muted-foreground">Búscalo y {withoutEmail.length === 1 ? 'aparecerá' : 'aparecerán'} aquí, listos para escribirles.</span>
-          </p>
-          <Button size="sm" variant="outline" onClick={() => setCompleteOpen(true)}>
-            <Search className="h-4 w-4" aria-hidden="true" />Buscar sus datos
-          </Button>
+          {withEmail.length > 0 ? (
+            <Button size="sm" variant="outline" disabled={bringing !== null} onClick={() => void bringSaved()}>
+              {bringing !== null ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowDownToLine className="h-4 w-4" aria-hidden="true" />}Traerlos a «Por escribir»
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => setCompleteOpen(true)}>
+              <Search className="h-4 w-4" aria-hidden="true" />Buscar sus datos
+            </Button>
+          )}
         </div>
       ) : null}
 

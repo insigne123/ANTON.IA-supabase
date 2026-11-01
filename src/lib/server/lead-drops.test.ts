@@ -425,3 +425,14 @@ test('an industry the actor does not know is left out, and nobody found means on
   assert.equal((await pullDrop(nobody.client, ANA, { now: new Date('2026-10-20T15:00:00.000Z'), generate: fakeGenerate, search: fakeSearch as any })).reason?.title,
     'Esta vez no encontramos a nadie', 'not «tu equipo ya los tiene» when the search found nobody');
 });
+
+test('whoever left the last six unopened rests two weeks from the last one, then gets one more (audit B3)', async () => {
+  const { restingFromDrops } = await import('./lead-drops');
+  const sent = (dates: string[], opened: string[] = []) => dates.map(drop_date => ({ drop_date, opened_at: opened.includes(drop_date) ? `${drop_date}T12:00:00Z` : null, saved_at: null }));
+  const six = ['2026-10-14', '2026-10-16', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-28'];
+  assert.equal(restingFromDrops(sent(six), '2026-10-29'), true);
+  assert.equal(restingFromDrops(sent(six, ['2026-10-16']), '2026-10-29'), false, 'one opened is enough');
+  assert.equal(restingFromDrops(sent(six.slice(1)), '2026-10-29'), false, 'five are not two weeks');
+  assert.equal(restingFromDrops(sent(six), '2026-11-11'), false, 'after two weeks of rest, one more goes');
+  assert.equal(restingFromDrops([...sent(six), { drop_date: '2026-10-30', opened_at: null, saved_at: '2026-10-30T13:00:00Z' }], '2026-11-03'), false, 'saving counts as opening');
+});
