@@ -144,6 +144,41 @@ export default function EnrichedLeadsClient() {
   // One selection for both steps: the action bar says whether it will research, write or both.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [stageFilter, setStageFilter] = useState<'all' | EnrichedStage>('all');
+  // Follow-up plans still waiting for the first email (audit K1): they start only when it goes out, and stop after 14 days.
+  const [waitingFirstEmail, setWaitingFirstEmail] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { count } = await supabase.from('campaign_enrollments').select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id).eq('status', 'pending_initial_send');
+        if (active) setWaitingFirstEmail(count || 0);
+      } catch { /* the notice is a convenience: without it the page is the same */ }
+    })();
+    return () => { active = false; };
+  }, []);
+  // Drafts confirmed and not sent yet, by research snapshot: those contacts read «Borrador listo» (audit P1). Read again when
+  // the research statuses change; RLS keeps it to what this person may see.
+  const [draftReadySnapshots, setDraftReadySnapshots] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    const snapshotIds = [...new Set(Object.values(nativeResearchByLeadId).map(status => status.researchSnapshotId).filter((id): id is string => Boolean(id)))];
+    if (!snapshotIds.length) return;
+    let active = true;
+    void (async () => {
+      const found = new Set<string>();
+      for (let index = 0; index < snapshotIds.length; index += 100) {
+        const { data, error } = await supabase.from('messaging_drafts').select('research_snapshot_id')
+          .in('research_snapshot_id', snapshotIds.slice(index, index + 100)).eq('lifecycle', 'ready');
+        if (error) return; // without the read, the stages stay as they were
+        for (const row of (data || []) as Array<{ research_snapshot_id: string | null }>) if (row.research_snapshot_id) found.add(row.research_snapshot_id);
+      }
+      if (active) setDraftReadySnapshots(found);
+    })();
+    return () => { active = false; };
+  }, [nativeResearchByLeadId]);
+
 
   // --- Enrichment Options ---
   const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
@@ -691,15 +726,16 @@ export default function EnrichedLeadsClient() {
   const stageOf = useCallback((lead: EnrichedLead): EnrichedStage => {
     const native = nativeResearchForLead(lead);
     return enrichedStage({
+      draftReady: Boolean(native?.researchSnapshotId && draftReadySnapshots.has(native.researchSnapshotId)),
       hasEmail: hasUsableEmail(lead.email),
       researching: ['queued', 'running'].includes(native?.status || ''),
       viewable: hasViewableReport(lead),
       ready: native?.result ? nativeResearchCanCreateDraft(lead, native) : hasReport(lead),
     });
-  }, [hasReport, hasViewableReport, nativeResearchForLead]);
+  }, [hasReport, hasViewableReport, nativeResearchForLead, draftReadySnapshots]);
 
   const stageCounts = useMemo(() => {
-    const counts: Record<EnrichedStage, number> = { to_research: 0, researching: 0, review: 0, ready: 0, no_email: 0 };
+    const counts: Record<EnrichedStage, number> = { to_research: 0, researching: 0, review: 0, ready: 0, draft_ready: 0, no_email: 0 };
     for (const lead of enriched) counts[stageOf(lead)] += 1;
     return counts;
   }, [enriched, stageOf]);
@@ -739,7 +775,7 @@ export default function EnrichedLeadsClient() {
 
   const selectedLeads = useMemo(() => enriched.filter((lead) => selected.has(lead.id)), [enriched, selected]);
   const selectedToResearch = selectedLeads.filter((lead) => stageOf(lead) === 'to_research').length;
-  const selectedReady = selectedLeads.filter((lead) => stageOf(lead) === 'ready').length;
+  const selectedReady = selectedLeads.filter((lead) => ['ready', 'draft_ready'].includes(stageOf(lead))).length;
   const selectablePage = pageLeads.filter((lead) => hasUsableEmail(lead.email));
   const allPageChecked = selectablePage.length > 0 && selectablePage.every((lead) => selected.has(lead.id));
 
@@ -1083,6 +1119,7 @@ export default function EnrichedLeadsClient() {
     researching: 'Investigando',
     review: 'Revisar informe',
     ready: 'Listos para escribir',
+    draft_ready: 'Borrador listo',
     no_email: 'Correo no encontrado',
   };
   // «Por investigar» and «Listos para escribir» always show (the tour points at them); the rest only when someone is there.
@@ -1103,6 +1140,7 @@ export default function EnrichedLeadsClient() {
         {detail ? <span className="text-xs text-foreground/70">{detail}</span> : null}
       </span>
     );
+    if (stage === 'draft_ready') return withDetail(<Badge variant="success">{ENRICHED_STAGE_LABELS.draft_ready}</Badge>);
     if (stage === 'ready') return withDetail(<Badge variant="success">{ENRICHED_STAGE_LABELS.ready}</Badge>);
     if (stage === 'researching') return <Badge variant="info">{ENRICHED_STAGE_LABELS.researching}</Badge>;
     if (stage === 'review') {
@@ -1116,6 +1154,7 @@ export default function EnrichedLeadsClient() {
   /** The one button each row needs now: write when the report is ready, otherwise look at it, follow it or start it. */
   const rowAction = (lead: EnrichedLead) => {
     const stage = stageOf(lead);
+    if (stage === 'draft_ready') return <Button size="sm" onClick={() => openResearchWorkspace([lead.id])}>Revisar y enviar</Button>;
     if (canContact(lead)) return <Button size="sm" onClick={() => openResearchWorkspace([lead.id])}>Escribir</Button>;
     if (stage === 'no_email') return <Button size="sm" variant="ghost" onClick={() => initiateEnrichment([lead])}>Actualizar datos</Button>;
     if (hasViewableReport(lead)) return <Button size="sm" variant="outline" onClick={() => openResearchWorkspace([lead.id])}>Ver investigación</Button>;
@@ -1256,6 +1295,13 @@ export default function EnrichedLeadsClient() {
             <Search className="h-4 w-4" aria-hidden="true" />Buscar sus datos
           </Button>
         </div>
+      ) : null}
+
+      {waitingFirstEmail > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {waitingFirstEmail === 1 ? '1 seguimiento espera' : `${waitingFirstEmail} seguimientos esperan`} tu primer correo: empiezan cuando lo envías y se detienen solos a los 14 días.{' '}
+          <Link href="/campaigns?vista=seguimientos" className="font-medium text-foreground underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Ver seguimientos</Link>
+        </p>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtrar por etapa">

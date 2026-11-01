@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 import { syncRepliesForOrganization } from '@/lib/server/reply-sync';
 import { sweepMailboxForOwner } from '@/lib/server/mailbox-sweep';
+import { detectOutsideSends } from '@/lib/server/outside-sends';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { replySyncDueFilter } from '@/lib/server/reply-sync-policy';
 
@@ -90,10 +91,33 @@ async function runReplySync(req: NextRequest) {
       }
     }
 
+    // Emails sent from the person's own mailbox to the organization's leads, without the app (audit T1). Every mailbox that is
+    // connected, not only those that already sent from ANTON.IA: every 30 minutes over the last 3 days, and once a day (03:00 UTC)
+    // over the last 30, which also fills the history the first day.
+    const outside = { mailboxes: 0, recorded: 0 };
+    const nowDate = new Date();
+    if (nowDate.getUTCMinutes() % 30 < 5) {
+      const firstRun = nowDate.getUTCHours() === 3 && nowDate.getUTCMinutes() < 5;
+      const { data: tokens } = await supabase.from('provider_tokens').select('user_id,provider').in('provider', ['google', 'outlook']).limit(200);
+      const userIds = [...new Set((tokens || []).map((row: any) => String(row.user_id)))];
+      const { data: memberships } = userIds.length
+        ? await supabase.from('organization_members').select('user_id,organization_id').in('user_id', userIds).limit(1000)
+        : { data: [] as any[] };
+      for (const token of (tokens || []) as Array<{ user_id: string; provider: string }>) {
+        const provider = token.provider === 'google' ? 'gmail' as const : 'outlook' as const;
+        for (const membership of (memberships || []).filter((row: any) => row.user_id === token.user_id)) {
+          const result = await detectOutsideSends(supabase, { organizationId: membership.organization_id, userId: token.user_id, provider, firstRun });
+          outside.mailboxes += 1;
+          outside.recorded += result.recorded;
+        }
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       ownersProcessed: Math.min(owners.size, ownerLimit),
       ...summary,
+      outside,
     }, { headers: firebaseSchedulerResponseHeaders() });
   } catch (error) {
     console.error('[cron/reply-sync] unexpected error', error);

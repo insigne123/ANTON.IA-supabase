@@ -129,3 +129,12 @@ test('the action bar names what it will do with the selection', () => {
   assert.equal(enrichedSelectionAction({ total: 4, toResearch: 4, ready: 0 }), 'Investigar (4)');
   assert.equal(enrichedSelectionAction({ total: 5, toResearch: 3, ready: 2 }), 'Investigar y escribir (5)');
 });
+
+test('a contact with a confirmed draft not sent yet reads «Borrador listo», after «Listo para escribir» (audit P1)', async () => {
+  const { enrichedStage, ENRICHED_STAGE_LABELS, ENRICHED_STAGE_ORDER } = await import('./enriched-view');
+  assert.equal(enrichedStage({ hasEmail: true, researching: false, viewable: true, ready: true, draftReady: true }), 'draft_ready');
+  assert.equal(enrichedStage({ hasEmail: true, researching: false, viewable: true, ready: true }), 'ready');
+  assert.equal(enrichedStage({ hasEmail: false, researching: false, viewable: false, ready: false, draftReady: true }), 'no_email', 'no address, no sending');
+  assert.equal(ENRICHED_STAGE_LABELS.draft_ready, 'Borrador listo');
+  assert.deepEqual(ENRICHED_STAGE_ORDER.slice(3, 5), ['ready', 'draft_ready']);
+});

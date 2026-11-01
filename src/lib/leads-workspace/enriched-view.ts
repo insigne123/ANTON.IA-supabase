@@ -84,21 +84,24 @@ export function enrichedLeadPhoneState(lead: EnrichedLead): EnrichedPhoneState {
  * row replaces the two checkbox columns («Invest.» and «Contacto») the list had: the selection is one, and the action bar
  * says what it will do with it.
  */
-export type EnrichedStage = 'to_research' | 'researching' | 'review' | 'ready' | 'no_email';
+export type EnrichedStage = 'to_research' | 'researching' | 'review' | 'ready' | 'draft_ready' | 'no_email';
 
 export const ENRICHED_STAGE_LABELS: Record<EnrichedStage, string> = {
   to_research: 'Por investigar',
   researching: 'Investigando',
   review: 'Revisar informe',
   ready: 'Listo para escribir',
+  draft_ready: 'Borrador listo',
   no_email: 'Correo no encontrado',
 };
 
 /** The stage chips, in working order; «Investigando» and «Revisar informe» show only when someone is there. */
-export const ENRICHED_STAGE_ORDER: EnrichedStage[] = ['to_research', 'researching', 'review', 'ready', 'no_email'];
+/** «Borrador listo» (audit P1): a draft confirmed and not sent yet, the step where most of the work stopped in October. */
+export const ENRICHED_STAGE_ORDER: EnrichedStage[] = ['to_research', 'researching', 'review', 'ready', 'draft_ready', 'no_email'];
 
-export function enrichedStage(input: { hasEmail: boolean; researching: boolean; viewable: boolean; ready: boolean }): EnrichedStage {
+export function enrichedStage(input: { hasEmail: boolean; researching: boolean; viewable: boolean; ready: boolean; draftReady?: boolean }): EnrichedStage {
   if (!input.hasEmail) return 'no_email';
+  if (input.draftReady) return 'draft_ready';
   if (input.ready) return 'ready';
   if (input.researching) return 'researching';
   if (input.viewable) return 'review';
