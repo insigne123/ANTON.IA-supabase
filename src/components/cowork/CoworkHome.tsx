@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
-import Link from 'next/link';
 import { ArrowRight, ChevronDown, X } from 'lucide-react';
 import { coworkOfferMessage, coworkOverviewFigures, coworkTodayItems, type CoworkOverview, type CoworkTodayItem } from '@/lib/cowork/overview';
 import { coworkSinceWhen, type CoworkSince, type CoworkSinceKind } from '@/lib/cowork/since-visit';
@@ -69,8 +68,9 @@ function SinceLastVisit({ since, onAsk }: { since: CoworkSince; onAsk: (prompt: 
 const TODAY_ICON: Record<CoworkTodayItem['id'], CoworkIconKey> = { drafts: 'draft', write: 'send', emails: 'search' };
 
 const TODAY_ROW = 'group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]';
+// A plain link: Cowork's screen is also built outside Next (its browser tests), where next/link has no `process`.
 function TodayRow({ href, onClick, children }: { href?: string; onClick: () => void; children: ReactNode }) {
-  return href ? <Link href={href} className={TODAY_ROW}>{children}</Link> : <button type="button" onClick={onClick} className={TODAY_ROW}>{children}</button>;
+  return href ? <a href={href} className={TODAY_ROW}>{children}</a> : <button type="button" onClick={onClick} className={TODAY_ROW}>{children}</button>;
 }
 
 /** «Para hoy»: what is ready to move from your own figures, each row one click that starts the work. */
