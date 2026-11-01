@@ -110,7 +110,8 @@ export function normalizeLeadForUI(raw: Lead, options?: {
     city: raw.city || null,
     status: 'saved',
     emailEnrichment: revealEmail && raw.email ? { enriched: true } : undefined,
-    hasEmailOnFile: (raw as { has_email?: unknown }).has_email === true || undefined,
+    // Audit B2: Apollo says before any credit is spent whether it holds an email; «false» is kept too, so the list can say so.
+    hasEmailOnFile: (raw as { has_email?: unknown }).has_email === true ? true : (raw as { has_email?: unknown }).has_email === false ? false : undefined,
     // Only what the provider sent: the «probabilidad de calce» reads it, and a missing field stays out of the lead.
     ...(raw.headline?.trim() ? { headline: raw.headline.trim() } : {}),
     ...(raw.seniority?.trim() ? { seniority: raw.seniority.trim() } : {}),
@@ -342,4 +343,13 @@ export function hasBatchSearchFilters(filters: LeadSearchFilters) {
     || splitTitlesInput(filters.title).length
     || filters.seniorities.length,
   );
+}
+
+/**
+ * Audit B2: in 60 days one in four contacts completed came back without an email. The ones the provider says hold an email go
+ * first, the ones it says do not go last, and the rest keep their order between them.
+ */
+export function emailFirst<T extends { email?: string | null; hasEmailOnFile?: boolean }>(leads: T[]): T[] {
+  const rank = (lead: T) => (lead.email || lead.hasEmailOnFile === true ? 0 : lead.hasEmailOnFile === false ? 2 : 1);
+  return leads.map((lead, index) => ({ lead, index })).sort((a, b) => rank(a.lead) - rank(b.lead) || a.index - b.index).map(item => item.lead);
 }
