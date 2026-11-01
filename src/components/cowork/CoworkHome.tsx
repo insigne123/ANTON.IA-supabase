@@ -65,7 +65,13 @@ function SinceLastVisit({ since, onAsk }: { since: CoworkSince; onAsk: (prompt: 
   </section>;
 }
 
-const TODAY_ICON: Record<CoworkTodayItem['id'], CoworkIconKey> = { write: 'send', emails: 'search' };
+const TODAY_ICON: Record<CoworkTodayItem['id'], CoworkIconKey> = { drafts: 'draft', write: 'send', emails: 'search' };
+
+const TODAY_ROW = 'group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]';
+// A plain link: Cowork's screen is also built outside Next (its browser tests), where next/link has no `process`.
+function TodayRow({ href, onClick, children }: { href?: string; onClick: () => void; children: ReactNode }) {
+  return href ? <a href={href} className={TODAY_ROW}>{children}</a> : <button type="button" onClick={onClick} className={TODAY_ROW}>{children}</button>;
+}
 
 /** «Para hoy»: what is ready to move from your own figures, each row one click that starts the work. */
 function TodayList({ items, onAsk }: { items: CoworkTodayItem[]; onAsk: (prompt: string) => void }) {
@@ -74,8 +80,8 @@ function TodayList({ items, onAsk }: { items: CoworkTodayItem[]; onAsk: (prompt:
     <h2 id={id} className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">Para hoy</h2>
     <ul className="divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated shadow-[var(--cw-shadow-sm)]">
       {items.map((item, index) => <li key={item.id}>
-        <button type="button" onClick={() => onAsk(item.prompt)}
-          className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]">
+        {/* A row whose work lives in a screen (the ready drafts, audit N2) goes there; the others start a request to Cowork. */}
+        <TodayRow href={item.href} onClick={() => onAsk(item.prompt)}>
           <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cw-accent-soft text-cw-accent">
             <CoworkIcon name={TODAY_ICON[item.id]} className="h-4 w-4" />
           </span>
@@ -85,7 +91,7 @@ function TodayList({ items, onAsk }: { items: CoworkTodayItem[]; onAsk: (prompt:
             ? 'rounded-full bg-cw-accent-fill px-3 py-1 font-semibold text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-colors group-hover:bg-cw-accent-fill-hover'
             : 'text-cw-accent')}>{item.action}</span>
           <ArrowRight className={cn('hidden h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5', index > 0 && 'sm:block')} aria-hidden="true" />
-        </button>
+        </TodayRow>
       </li>)}
     </ul>
   </section>;

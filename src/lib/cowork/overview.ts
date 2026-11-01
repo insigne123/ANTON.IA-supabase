@@ -17,6 +17,8 @@ export type CoworkOverview = {
   linkedin: { used: number; limit: number } | null;
   /** Saved contacts with an email nobody in the organization has written to yet: who «Escribir a mis contactos» reaches. */
   toWrite?: number | null;
+  /** Your drafts the writer finished and nobody sent yet (messaging_drafts «ready»): audit N2, 38 waited in one company. */
+  draftsReady?: number | null;
   /** What changed since the person's last own turn (since-visit.ts); null without a previous visit or when it could not be read. */
   since?: CoworkSince | null;
   /** Whether this person's turns can search the web: «¿Qué puedes hacer?» only offers it then. */
@@ -47,7 +49,10 @@ export function coworkOverviewFigures(overview: CoworkOverview | null): CoworkOv
   return figures;
 }
 
-export type CoworkTodayItem = { id: 'write' | 'emails'; text: string; action: string; prompt: string };
+/** A row of «Para hoy»: a request Cowork starts (`prompt`) or, when the work lives in a screen, the way there (`href`). */
+export type CoworkTodayItem = { id: 'drafts' | 'write' | 'emails'; text: string; action: string; prompt: string; href?: string };
+/** Where the ready drafts wait: «Por escribir» on its «Borrador listo» stage. */
+export const COWORK_DRAFTS_HREF = '/saved/leads/enriched?etapa=draft_ready';
 
 /** Writing starts as the starter «Escribir a mis contactos» does, so it shares its corpus case. */
 export const COWORK_TODAY_PROMPTS = {
@@ -55,12 +60,16 @@ export const COWORK_TODAY_PROMPTS = {
   emails: 'Busca el correo de mis contactos guardados que todavía no lo tienen.',
 } as const;
 
-/** «Para hoy» on the home: what is ready to move without being asked, from the account's own figures. Who has an email and
- * never got one comes first; then who still lacks an email. Nothing when the figures are unknown or there is nobody. */
+/** «Para hoy» on the home: what is ready to move without being asked, from the account's own figures. Drafts ready to send come
+ * first; then who has an email and never got one; then who still lacks an email. Nothing when the figures are unknown or there is nobody. */
 export function coworkTodayItems(overview: CoworkOverview | null): CoworkTodayItem[] {
   if (!overview) return [];
   const items: CoworkTodayItem[] = [];
   const plural = (value: number, one: string, many: string) => (value === 1 ? one : many);
+  // Audit N2: drafts already written go first, because sending them is the step closest to an answer.
+  const drafts = overview.draftsReady ?? null;
+  if (drafts !== null && drafts > 0) items.push({ id: 'drafts', action: 'Revisar y enviar', prompt: '', href: COWORK_DRAFTS_HREF,
+    text: `${drafts} ${plural(drafts, 'borrador listo espera', 'borradores listos esperan')} que ${plural(drafts, 'lo revises y lo envíes', 'los revises y los envíes')}` });
   const toWrite = overview.toWrite ?? null;
   if (toWrite !== null && toWrite > 0) items.push({ id: 'write', action: 'Escribirles',
     text: `${toWrite} ${plural(toWrite, 'contacto con correo aún no recibe', 'contactos con correo aún no reciben')} nada de ti`, prompt: COWORK_TODAY_PROMPTS.write });

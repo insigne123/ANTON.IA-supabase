@@ -117,3 +117,12 @@ test('the goal rides in «Tu semana» and next to each person, and counts as act
     personal: personal(), team: null, opportunities: null, goal: { ...goal(0, 0), targets: { contacted: 0, found: 0 } } }, 'https://app.example');
   assert.doesNotMatch(off.text, /meta/i);
 });
+
+test('the week\'s funnel names the step where most is left waiting, and nothing when no step loses three (audit N1)', async () => {
+  const { funnelStall } = await import('./weekly-report');
+  assert.deepEqual(funnelStall({ saved: 20, withEmail: 15, researched: 4, drafts: 4, contacted: 3, replies: 1 }), { from: 'Con correo', to: 'Investigados', lost: 11 });
+  assert.equal(funnelStall({ saved: 2, withEmail: 2, researched: 1, drafts: 1, contacted: 1, replies: 0 }), null);
+  // A later step can be larger in the same week (drafts of contacts saved before): that is no fall.
+  assert.deepEqual(funnelStall({ saved: 0, withEmail: 0, researched: 0, drafts: 6, contacted: 6, replies: 0 }), { from: 'Contactados', to: 'Respuestas', lost: 6 });
+  assert.equal(funnelStall(null), null);
+});

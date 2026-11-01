@@ -47,3 +47,13 @@ test('«Para hoy» brings who is ready to write and who still lacks an email, fr
   assert.equal(coworkTodayItems(null).length, 0);
   assert.equal(coworkTodayItems(overview({ contacts: 7, withEmail: 4, toWrite: 4 }))[0].prompt, COWORK_TODAY_PROMPTS.write);
 });
+
+test('ready drafts lead «Para hoy» and open «Borrador listo» in «Por escribir» (audit N2)', () => {
+  const items = coworkTodayItems(overview({ contacts: 7, withEmail: 4, toWrite: 4, draftsReady: 38 }));
+  assert.deepEqual(items.map(item => item.id), ['drafts', 'write', 'emails']);
+  assert.equal(items[0].text, '38 borradores listos esperan que los revises y los envíes');
+  assert.equal(items[0].action, 'Revisar y enviar');
+  assert.equal(items[0].href, '/saved/leads/enriched?etapa=draft_ready');
+  assert.equal(coworkTodayItems(overview({ contacts: 1, withEmail: 1, toWrite: 0, draftsReady: 1 }))[0].text, '1 borrador listo espera que lo revises y lo envíes');
+  assert.equal(coworkTodayItems(overview({ contacts: 1, withEmail: 1, toWrite: 0, draftsReady: null })).length, 0, 'an unknown count is left out');
+});

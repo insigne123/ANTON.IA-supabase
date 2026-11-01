@@ -93,13 +93,20 @@ function openCommitments(rows: any[], now: Date): Commitment[] {
 
 export async function readPersonal(client: Client, scope: ReportScope, week: ReportWeek, now = new Date()): Promise<PersonalSection> {
   const own = (table: string, columns: string) => client.from(table).select(columns).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
-  const [dispatches, replies, waiting, commitments, touches] = await Promise.all([
+  const counted = (table: string, column: string) => client.from(table).select('id', { count: 'exact', head: true })
+    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).gte(column, week.from).lt(column, week.to);
+  const [dispatches, replies, waiting, commitments, touches, saved, withEmail, researched, drafts] = await Promise.all([
     all(() => own('outbound_dispatches', 'id,channel,metadata,completed_at,reconciliation_details').eq('status', 'sent').gte('completed_at', week.previousFrom).lt('completed_at', week.to).order('id')),
     all(() => own('contacted_leads', 'id,email,reply_intent,replied_at').gte('replied_at', week.previousFrom).lt('replied_at', week.to).order('id')),
     own('contacted_leads', 'id,email,name,company,reply_intent,replied_at,conversation_resolved_at,conversation_outbound_at').not('replied_at', 'is', null).order('replied_at', { ascending: false }).limit(200),
     own('contacted_leads', 'id,name,company,data').not('data->commitment', 'is', null).limit(200),
     // «Llamadas y LinkedIn» (contact_touches) may not exist yet: the report goes on without it.
     own('contact_touches', 'channel,done_at').eq('state', 'done').gte('done_at', week.from).lt('done_at', week.to).limit(2000),
+    // The week's funnel (audit N1): how many were saved, got an email, were researched and got a draft, this week.
+    countOf(() => counted('leads', 'created_at')),
+    countOf(() => counted('enriched_leads', 'created_at').not('email', 'is', null).neq('email', '')),
+    countOf(() => counted('lead_research_jobs', 'completed_at').in('status', ['completed', 'partial'])),
+    countOf(() => counted('messaging_drafts', 'created_at')),
   ]);
   for (const result of [waiting, commitments]) if ((result as any).error) throw new WeeklyReportError('No pudimos leer tus pendientes.', 503);
   const touchRows = (touches as any).error ? null : ((touches as any).data || []) as Array<{ channel: string }>;
@@ -110,7 +117,19 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
     pending: pendingReplies((waiting as any).data || []).slice(0, 10),
     commitments: openCommitments((commitments as any).data || [], now).slice(0, 10),
     touches: touchRows ? { calls: touchRows.filter(row => row.channel === 'call').length, linkedin: touchRows.filter(row => row.channel === 'linkedin').length } : null,
+    funnel: [saved, withEmail, researched, drafts].every(value => value !== null)
+      ? { saved: saved!, withEmail: withEmail!, researched: researched!, drafts: drafts!, contacted: sent.contacted.now, replies: answered.replies.now } : null,
   };
+}
+
+/** A count of rows («head» request); null when it could not be read, so the funnel is left out instead of showing a false zero. */
+async function countOf(query: () => any): Promise<number | null> {
+  try {
+    const { count, error } = await query();
+    return error || typeof count !== 'number' ? null : count;
+  } catch {
+    return null;
+  }
 }
 
 /** Each member of the organization this week, the busiest first; for owners and admins. */
