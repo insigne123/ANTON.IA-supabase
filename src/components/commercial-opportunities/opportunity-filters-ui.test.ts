@@ -61,3 +61,17 @@ test('a button adds its line to the ones picked, or takes it away', () => {
   by('Seguridad').props.onClick();
   assert.deepEqual(calls, [['seguridad', 'aseo'], []]);
 });
+
+test('source and line of service sit behind one «Filtros» button, closed while none is on and open with how many are on (audit O3)', () => {
+  const closed = render();
+  assert.match(closed, /aria-expanded="false"[^>]*>.*Filtros/);
+  assert.doesNotMatch(closed, /aria-label="Fuente"/);
+  assert.doesNotMatch(closed, /aria-label="Rubro"/);
+  const on = render({ source: 'tenders', categories: ['seguridad'] });
+  assert.match(on, /aria-expanded="true"/);
+  assert.match(text(on), /Filtros · 2/);
+  assert.match(on, /aria-label="Fuente"/);
+  assert.match(on, /aria-label="Rubro"/);
+  // Who does not see sources has only the search.
+  assert.doesNotMatch(render({ showSources: false }), /Filtros/);
+});

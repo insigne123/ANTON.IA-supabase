@@ -64,7 +64,7 @@ import { buyerSearch, readAdminSettings, ruleFor, ruleLabel, sameSearch, searchN
 import { ADMIN_LIST_VIEWS, inListView, listStageOf, type DiscardReason } from '@/lib/commercial-opportunities/list-stages';
 import { WorkspaceCompanyFields } from './WorkspaceCompanyFields';
 import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
-import { AdvicePill, ExclusionGroups, NewsList, StartHere, TenderPrerequisites } from './OpportunityRadar';
+import { AdvicePill, ExclusionGroups, NewsList, StartHere } from './OpportunityRadar';
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
 import { pickPrefillFiles } from '@/lib/commercial-opportunities/prefill-package';
@@ -120,11 +120,6 @@ export function OpportunityWorkWorkspace() {
   const [opened, setOpened] = useState<Record<string, number>>({});
   const openedRef = useRef(opened); openedRef.current = opened;
   useEffect(() => { try { setOpened(parseOpened(window.localStorage.getItem(openedKey(user?.id)))); } catch { setOpened({}); } }, [user?.id]);
-  // «Prepara tu empresa» put away in this browser; shown again only in another one (the steps stay true either way).
-  const setupKey = `anton:opportunities-setup-hidden:${user?.id || 'anon'}`;
-  const [setupHidden, setSetupHidden] = useState(true);
-  useEffect(() => { try { setSetupHidden(window.localStorage.getItem(setupKey) === '1'); } catch { setSetupHidden(false); } }, [setupKey]);
-  const hideSetup = () => { setSetupHidden(true); try { window.localStorage.setItem(setupKey, '1'); } catch { /* private mode: hidden until the page closes */ } };
   const [overview, setOverview] = useState<(WorkspaceOverview & { suggestion?: any }) | null>(null);
   const [problem, setProblem] = useState(''); const [busy, setBusy] = useState(false);
   // Nothing is read before the address says which filters (workspace-url.ts): otherwise the first reading would be thrown away.
@@ -677,12 +672,21 @@ export function OpportunityWorkWorkspace() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the draft of the moment the dialog opens, not each keystroke.
   useEffect(() => { if (modal) draftAtOpen.current = JSON.stringify(draft); }, [modal]);
   const confirm = useConfirm();
+  /** Closes the form, asking first when something was written; false when it stays open. */
   const closeModal = async () => {
-    if (busy) return;
+    if (busy) return false;
     const dirty = JSON.stringify(draft) !== draftAtOpen.current || files.length > 0;
     if (dirty && !(await confirm({ title: '¿Descartar lo que escribiste?', description: 'Si cierras ahora, se pierde lo que escribiste en este formulario y los documentos que elegiste.',
-      confirmLabel: 'Descartar', cancelLabel: 'Seguir editando', tone: 'danger' }))) return;
+      confirmLabel: 'Descartar', cancelLabel: 'Seguir editando', tone: 'danger' }))) return false;
     setModal(null); setFiles([]);
+    return true;
+  };
+  // «Prepara tu empresa», now inside «Tu empresa»: a step leaves the form (asking first if something was written) and goes there.
+  const setupStep = async (step: SetupStepId) => {
+    if (!(await closeModal())) return;
+    if (step === 'documents') setProfileOpen(true);
+    else if (step === 'assign') { setView('list'); setFilter('recommended'); }
+    else if (step === 'competitors') setView('market');
   };
   // «Bases y anexos» of a new opportunity: how many went up of how many, while «Guardar» waits for them.
   const [uploading, setUploading] = useState<{ done: number; total: number } | null>(null);
@@ -912,12 +916,8 @@ export function OpportunityWorkWorkspace() {
         <div className="-ml-3 flex flex-wrap items-center sm:ml-0">{(overview.context as any).criteria?.postQueries?.length || (overview.context as any).criteria?.keywords?.length ? <Button variant="ghost" size="sm" onClick={openCriteria}>Qué buscamos</Button> : null}
           <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>Ficha para licitaciones</Button>
           {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy || searching.length > 0} onClick={() => void discover()}>{searching.length ? 'Buscando…' : 'Actualizar oportunidades'}</Button> : null}</div></div>}
-      {admin && overview.context && overview.health ? <SearchHealthLine health={overview.health} /> : null}
-      {admin && overview.context && overview.setup && !setupHidden ? <CompanySetup facts={overview.setup} onHide={hideSetup} onStep={(step: SetupStepId) => {
-        if (step === 'documents') setProfileOpen(true);
-        else if (step === 'assign') { setView('list'); setFilter('recommended'); }
-        else if (step === 'competitors') setView('market');
-      }} /> : null}
+      {/* Audit O3: above the list only a source that is failing; the full state of the search and «Prepara tu empresa» are in «Tu empresa». */}
+      {admin && overview.context && overview.health && overview.health.sources.some(item => item.state !== 'ok') ? <SearchHealthLine health={overview.health} /> : null}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
         <Button onClick={openContext}>Confirmar oferta</Button></div>}
       {view !== 'assistant' && view !== 'market' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={(id, section) => open(id, section)} onDecision={id => open(id, 'decision')}
@@ -925,7 +925,6 @@ export function OpportunityWorkWorkspace() {
       {admin && view !== 'assistant' && overview.documentAlerts?.length ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-4 py-3 text-sm">
         <p className="min-w-0"><span className="font-medium">{overview.documentAlerts[0].text}</span>{overview.documentAlerts.length > 1 ? <span className="text-muted-foreground"> · y {overview.documentAlerts.length - 1} más por renovar</span> : null}</p>
         <Button size="sm" variant="outline" onClick={() => setProfileOpen(true)}>Ver documentos</Button></div> : null}
-      {view !== 'assistant' && view !== 'market' && <TenderPrerequisites />}
       {/* «Mis tareas» (OPP-27) for everyone who works: a member always sees it; an administrator once they have tasks of their own. */}
       {/* The views are tabs (OPP-43): arrow keys between them, «pestaña 2 de 4», and on a phone one row that scrolls instead of wrapping. */}
       <SegmentedTabs label="Vistas de Oportunidades" idPrefix="opp-view" className="w-fit"
@@ -1116,6 +1115,8 @@ export function OpportunityWorkWorkspace() {
     <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignMany ? `Asignar ${assignMany.length === 1 ? 'una oportunidad' : `${assignMany.length} oportunidades`}` : assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : draft.id ? 'Editar tarea' : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'Dónde buscamos y qué. La IA preparó los criterios desde tu oferta; corrígelos si algo no calza. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>
+          {overview?.health ? <SearchHealthLine health={overview.health} /> : null}
+          {overview?.setup ? <CompanySetup facts={overview.setup} onStep={step => void setupStep(step)} /> : null}
           <WorkspaceCompanyFields draft={draft} field={field} />
           <OpportunityTicketConnection />
         </>

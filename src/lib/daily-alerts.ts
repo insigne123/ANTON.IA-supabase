@@ -43,13 +43,20 @@ export type AlertFacts = {
   documents?: Array<{ label: string; daysLeft: number }>;
   /** The new opportunities of the saved searches this person hears of (admin-settings.ts). */
   searches?: Array<{ name: string; count: number; href: string }>;
+  /**
+   * The best new ones (audit O1, 1 Nov 2026): what the evaluation recommended since the last alert, still open and nobody's, the highest
+   * score first and at most BEST_PER_ALERT, for whoever manages Oportunidades. The daily search kept thousands a month nobody opened.
+   */
+  best?: Array<{ id: string; title: string; buyer: string | null; deadlineAt: string | null }>;
   goal: GoalProgress | null;
   /** Today's «Contacto del día», when it is ready. */
   drop?: { id: string; items: DropItem[] } | null;
   /** Conversations of Cowork whose proposal waits for the person (COW-04): every day while they wait, as the decisions above. */
   coworkApprovals?: number;
 };
-export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'approval' | 'source' | 'document' | 'closing' | 'assigned' | 'report' | 'search' | 'drop' | 'research' | 'ready' | 'goal';
+export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'approval' | 'source' | 'document' | 'closing' | 'assigned' | 'best' | 'report' | 'search' | 'drop' | 'research' | 'ready' | 'goal';
+/** How many of the best new opportunities one alert names. */
+export const BEST_PER_ALERT = 5;
 
 /**
  * The days a document of the company is told on before it lapses: two weeks ahead (time to ask for a new F30), a week, the day before
@@ -98,6 +105,14 @@ export function closingText(items: AlertOpportunity[], now: Date) {
     return `Una ${one}${singular} cierra ${when}: ${items[0].title}`;
   }
   return `${items.length.toLocaleString('es-CL')} ${many}${qualifier} cierran ${when}`;
+}
+
+/** «Aseo Hospital Regional · Servicio de Salud Sur · cierra el viernes»: one of the best new ones. */
+export function bestText(item: NonNullable<AlertFacts['best']>[number], now: Date) {
+  const title = item.title.replace(/\s+/g, ' ').trim().slice(0, 140);
+  const buyer = item.buyer ? ` · ${item.buyer.replace(/\s+/g, ' ').trim().slice(0, 80)}` : '';
+  const due = item.deadlineAt && Number.isFinite(Date.parse(item.deadlineAt)) ? ` · cierra ${dayWord(item.deadlineAt, now)}` : '';
+  return `${title}${buyer}${due}`;
 }
 
 /** «Diego pide una decisión: Aseo Hospital Regional · espera hace 3 días», «Bloqueada: …», with the date asked for when it is close. */
@@ -177,6 +192,14 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     const text = closingText(facts.closing, now);
     lead(facts.closing.length === 1 ? text.split(':')[0] : text);
     lines.push({ kind: 'closing', text, href: facts.closing.length === 1 ? `/opportunities?op=${encodeURIComponent(facts.closing[0].id)}` : '/opportunities' });
+  }
+
+  // The best new ones, each opening its file; one that already closes soon is told above, once.
+  const told = new Set(facts.closing.map(item => item.id));
+  const best = (facts.best || []).filter(item => !told.has(item.id)).slice(0, BEST_PER_ALERT);
+  if (best.length) {
+    lead(best.length === 1 ? `Nueva y recomendada: ${best[0].title.replace(/\s+/g, ' ').trim().slice(0, 140)}` : `${best.length.toLocaleString('es-CL')} oportunidades nuevas calzan con tu oferta`);
+    for (const item of best) lines.push({ kind: 'best', text: bestText(item, now), href: `/opportunities?op=${encodeURIComponent(item.id)}` });
   }
 
   // What is new in the searches the person keeps, each one opening the list with its filters.
