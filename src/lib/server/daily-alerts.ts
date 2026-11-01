@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
-import { alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson } from '@/lib/daily-alerts';
+import { BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
 import { preferredFullName } from '@/lib/lead-name';
@@ -162,11 +162,36 @@ async function readOpportunityNews(client: Client, scope: AlertScope, options: {
   };
   const news = { assigned: once('assignment', /^Oportunidad asignada:\s*/), reports: once('report', /^Informe (?:listo|disponible):\s*/) };
   if (!options.manager) return news;
-  const [waiting, health, documents, searches] = await Promise.all([readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null),
+  const [waiting, health, documents, searches, best] = await Promise.all([readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null),
     readSearchHealth(client, scope.organizationId, options.now).catch(() => null), readDueDocuments(client, scope.organizationId, options).catch(() => []),
-    readSearchNews(client, scope, options).catch(() => [])]);
+    readSearchNews(client, scope, options).catch(() => []), readBestNew(client, scope.organizationId, options).catch(() => [])]);
   const sources = health ? failingSources(health.sources).map(item => ({ label: item.label, days: item.failingDays })) : [];
-  return { ...news, ...(waiting ? { waiting } : {}), ...(sources.length ? { sources } : {}), ...(documents.length ? { documents } : {}), ...(searches.length ? { searches } : {}) };
+  return { ...news, ...(waiting ? { waiting } : {}), ...(sources.length ? { sources } : {}), ...(documents.length ? { documents } : {}), ...(searches.length ? { searches } : {}),
+    ...(best.length ? { best } : {}) };
+}
+
+/**
+ * The best new ones (audit O1): what the evaluation recommended since the last alert (opportunity_evaluations keeps the first time a
+ * verdict was given, so a re-read of the same tender is not new), still recommended, open and nobody's, the highest score first.
+ */
+async function readBestNew(client: Client, organizationId: string, options: { now: Date; since: string }) {
+  const fresh: any = await client.from('opportunity_evaluations').select('opportunity_id').eq('organization_id', organizationId).eq('verdict', 'recommended')
+    .gte('created_at', options.since).limit(200);
+  if (fresh.error || !fresh.data?.length) return [];
+  const ids = [...new Set<string>((fresh.data as any[]).map(row => String(row.opportunity_id)))];
+  const [rows, work]: any[] = await Promise.all([
+    client.from('commercial_opportunities').select('id,title,buyer_name,company_name,deadline_at,score,data').eq('organization_id', organizationId).in('id', ids),
+    client.from('opportunity_work').select('opportunity_id,state,responsible_id').eq('organization_id', organizationId).in('opportunity_id', ids),
+  ]);
+  if (rows.error || work.error) return [];
+  const taken = new Set(((work.data || []) as any[]).filter(row => CLOSED_WORK.has(String(row.state)) || (row.responsible_id && row.state !== 'unassigned'))
+    .map(row => String(row.opportunity_id)));
+  return ((rows.data || []) as any[])
+    .filter(row => row.data?.evaluation === 'recommended' && !taken.has(String(row.id)) && (!row.deadline_at || Date.parse(row.deadline_at) > options.now.getTime()))
+    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || String(a.deadline_at || '9').localeCompare(String(b.deadline_at || '9')))
+    .slice(0, BEST_PER_ALERT)
+    .map(row => ({ id: String(row.id), title: String(row.title || 'Oportunidad').slice(0, 140), buyer: String(row.buyer_name || row.company_name || '').trim() || null,
+      deadlineAt: row.deadline_at ? String(row.deadline_at) : null }));
 }
 
 const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00.000Z`) - Date.parse(`${from}T12:00:00.000Z`)) / 86_400_000);

@@ -70,7 +70,9 @@ test('the evaluation asks why an excluded one was left out and keeps it next to 
   assert.match(page, /bySource\(items\)\.map\(group =>/);
   assert.match(page, /listGroups\.map\(group =>/);
   assert.match(page, /shownFilter === 'excluded' \? <ExclusionGroups items=\{group\.items\}/);
-  assert.match(page, /<TenderPrerequisites \/>/);
+  // Audit O3: «Antes de postular» moved from above the list to the «Ficha para licitaciones».
+  assert.doesNotMatch(page, /<TenderPrerequisites \/>/);
+  assert.match(readFileSync('src/components/commercial-opportunities/TenderProfileSheet.tsx', 'utf8'), /<TenderPrerequisites \/>/);
   assert.ok(TENDER_PREREQUISITES.length >= 4 && TENDER_PREREQUISITES.every(block => block.items.length >= 3));
 });
 
