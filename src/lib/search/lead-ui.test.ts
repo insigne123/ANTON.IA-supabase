@@ -126,3 +126,13 @@ test('profile contact states read as palette badges with a word', () => {
   assert.deepEqual(contactStateBadge('missing'), { variant: 'warning', label: 'No disponible' });
   assert.deepEqual(contactStateBadge('not_requested'), { variant: 'neutral', label: 'No solicitado' });
 });
+
+test('who holds an email goes first and who has none goes last, before any credit is spent (audit B2)', async () => {
+  const { emailFirst, normalizeLeadForUI } = await import('./lead-ui');
+  const lead = (id: string, has_email?: boolean) => normalizeLeadForUI({ id, name: id, has_email } as any, { revealEmail: false, revealPhone: false });
+  assert.equal(lead('a', true).hasEmailOnFile, true);
+  assert.equal(lead('b', false).hasEmailOnFile, false);
+  assert.equal(lead('c').hasEmailOnFile, undefined);
+  const ordered = emailFirst([lead('none', false), lead('unknown'), lead('yes', true), { ...lead('shown'), email: 'x@y.cl' }, lead('none2', false)]);
+  assert.deepEqual(ordered.map(item => item.id), ['yes', 'shown', 'unknown', 'none', 'none2']);
+});
