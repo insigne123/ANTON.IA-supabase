@@ -16,7 +16,7 @@ import { GoalsEditor } from '@/components/weekly-goals/GoalsEditor';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import { goalSentence, paceSentence } from '@/lib/weekly-goals';
-import { REPORT_ROLES, activeGoal, deltaText, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeeklyReport as Report } from '@/lib/weekly-report';
+import { FUNNEL_STEPS, REPORT_ROLES, activeGoal, deltaText, funnelStall, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeekFunnel, type WeeklyReport as Report } from '@/lib/weekly-report';
 import { chipClass } from '@/components/ui/chip';
 
 type Response = { report: Report; email: boolean; alerts?: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; yago?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
@@ -33,6 +33,21 @@ function Stat({ label, value, note }: { label: string; value: string; note?: str
     <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
     {note ? <p className="mt-0.5 text-xs text-muted-foreground">{note}</p> : null}
   </div>;
+}
+
+/** Audit N1: the week's steps in one line, and the one where most is left waiting. */
+function WeekFunnelRow({ funnel }: { funnel: WeekFunnel }) {
+  const stall = funnelStall(funnel);
+  return <section aria-labelledby="week-funnel-title" className="space-y-2">
+    <h2 id="week-funnel-title" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tu semana, paso a paso</h2>
+    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
+      {FUNNEL_STEPS.map((step, index) => <li key={step.key} className="inline-flex items-center gap-1.5">
+        {index > 0 ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /> : null}
+        <span className="text-muted-foreground">{step.label}</span><span className="font-semibold tabular-nums">{funnel[step.key].toLocaleString('es-CL')}</span>
+      </li>)}
+    </ol>
+    {stall ? <p className="text-sm text-muted-foreground">Donde más se queda: de {stall.from.toLowerCase()} a {stall.to.toLowerCase()}, {stall.lost.toLocaleString('es-CL')} esta semana.</p> : null}
+  </section>;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -162,6 +177,7 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         <Stat label="Respuestas" value={report.personal.replies.now.toLocaleString('es-CL')} note={rate(report.personal.replies.now, report.personal.contacted.now) !== null ? `${rate(report.personal.replies.now, report.personal.contacted.now)} % de quienes escribiste` : deltaText(report.personal.replies)} />
         <Stat label="Reuniones pedidas" value={report.personal.meetings.toLocaleString('es-CL')} />
       </div>}
+      {quietWeek || !report.personal.funnel ? null : <WeekFunnelRow funnel={report.personal.funnel} />}
       {nextActions(report).length ? <Section title="Para esta semana">
         <ul className="divide-y rounded-2xl border">{nextActions(report).map(action => <li key={action.text}>
           <Link href={action.href} className="flex items-center justify-between gap-3 px-4 py-3 text-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">

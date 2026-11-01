@@ -29,7 +29,7 @@ export async function GET() {
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const own = (table: string) => auth.supabase.from(table).select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
-    const [contacts, withEmail, campaigns, linkedin, context, since, toWrite] = await Promise.allSettled([
+    const [contacts, withEmail, campaigns, linkedin, context, since, toWrite, draftsReady] = await Promise.allSettled([
       own('leads'),
       own('leads').not('email', 'is', null).neq('email', ''),
       own('bulk_campaigns'),
@@ -41,6 +41,8 @@ export async function GET() {
       loadCoworkSinceLastVisit({ client: auth.supabase, admin: getSupabaseAdminClient }, scope),
       // «Para hoy»: who has an email and never got one (the same count «¿qué tengo pendiente?» reads).
       readNeverWritten(auth.supabase, scope).then(waiting => waiting.count),
+      // «Para hoy» (audit N2): your drafts the writer finished and nobody sent yet.
+      own('messaging_drafts').eq('lifecycle', 'ready'),
     ]);
     const quota = linkedin.status === 'fulfilled' ? linkedin.value : null;
     const person = context.status === 'fulfilled' ? context.value : null;
@@ -53,6 +55,7 @@ export async function GET() {
       linkedin: quota ? { used: quota.pending + quota.sent7d, limit: quota.limit } : null,
       since: since.status === 'fulfilled' ? since.value : null,
       toWrite: toWrite.status === 'fulfilled' ? toWrite.value : null,
+      draftsReady: counted(draftsReady as PromiseSettledResult<Count>),
       web: coworkWebAvailable(process.env, scope.userId),
     };
     return NextResponse.json(overview, { headers: privateHeaders });

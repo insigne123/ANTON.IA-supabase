@@ -144,6 +144,13 @@ export default function EnrichedLeadsClient() {
   // One selection for both steps: the action bar says whether it will research, write or both.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [stageFilter, setStageFilter] = useState<'all' | EnrichedStage>('all');
+  // A link can open one stage (Cowork's «Para hoy» opens «Borrador listo», audit N2): ?etapa=draft_ready.
+  useEffect(() => {
+    try {
+      const wanted = new URLSearchParams(window.location.search).get('etapa');
+      if (wanted && (ENRICHED_STAGE_ORDER as string[]).includes(wanted)) setStageFilter(wanted as EnrichedStage);
+    } catch { /* no address to read: all stages, as before */ }
+  }, []);
   // Follow-up plans still waiting for the first email (audit K1): they start only when it goes out, and stop after 14 days.
   const [waitingFirstEmail, setWaitingFirstEmail] = useState(0);
   useEffect(() => {

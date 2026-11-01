@@ -46,7 +46,29 @@ export type Commitment = { id: string; name: string; company: string | null; tit
 export type PersonalSection = {
   sent: Counted; contacted: Counted; replies: Counted; meetings: number;
   pending: PendingReply[]; commitments: Commitment[]; touches: { calls: number; linkedin: number } | null;
+  /** The week's steps, from saving a contact to an answer (audit N1); absent in reports stored before it or when a count failed. */
+  funnel?: WeekFunnel | null;
 };
+/** Audit N1 (1 Nov 2026): where each person's week stops, between finding someone and getting an answer. */
+export type WeekFunnel = { saved: number; withEmail: number; researched: number; drafts: number; contacted: number; replies: number };
+export const FUNNEL_STEPS: Array<{ key: keyof WeekFunnel; label: string }> = [
+  { key: 'saved', label: 'Guardados' }, { key: 'withEmail', label: 'Con correo' }, { key: 'researched', label: 'Investigados' },
+  { key: 'drafts', label: 'Borradores' }, { key: 'contacted', label: 'Contactados' }, { key: 'replies', label: 'Respuestas' },
+];
+/**
+ * The step where most is left waiting: between two steps in a row, the biggest fall from the one before, when it is at least three
+ * and the one before had at least three. The steps are counted in the same week, so a later step can be larger: that is no fall.
+ */
+export function funnelStall(funnel: WeekFunnel | null | undefined) {
+  if (!funnel) return null;
+  let best: { from: string; to: string; lost: number } | null = null;
+  for (let index = 1; index < FUNNEL_STEPS.length; index += 1) {
+    const before = funnel[FUNNEL_STEPS[index - 1].key], after = funnel[FUNNEL_STEPS[index].key];
+    const lost = before - after;
+    if (before >= 3 && lost >= 3 && (!best || lost > best.lost)) best = { from: FUNNEL_STEPS[index - 1].label, to: FUNNEL_STEPS[index].label, lost };
+  }
+  return best;
+}
 /** `detail` is the member's email, only when another member has the same name; `goal`, their weekly goal and progress. */
 export type TeamMember = { userId: string; name: string; detail?: string | null; role: string; sent: number; replies: number; meetings: number; pending: number; goal?: GoalProgress | null };
 export type TeamSection = { members: TeamMember[]; totals: { sent: Counted; replies: Counted; meetings: number } };
