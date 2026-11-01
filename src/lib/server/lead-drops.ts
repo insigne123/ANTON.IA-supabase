@@ -156,6 +156,35 @@ const customerFor = (team: Team, userId: string, company: DropCriteria | null = 
 /** How many a search asks for: twice what the group needs and some more (some are known already, some have no email), ten at least. */
 const searchCount = (people: number) => Math.max(10, Math.min(100, people * DROP_SIZE * 2 + 5));
 
+/**
+ * Audit B3 (1 Nov 2026): of 109 «Contacto del día» sent in 30 days, 14 were opened. Whoever left the last six unopened (two weeks of
+ * Tuesday, Wednesday and Friday) gets a rest of two weeks from the last one; then one more, and opening it brings the rhythm back.
+ * «Hoy» still offers one at any time (pullDrop), so nobody loses it.
+ */
+export const UNOPENED_TO_PAUSE = 6;
+export const PAUSE_DAYS = 14;
+const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00.000Z`) - Date.parse(`${from}T12:00:00.000Z`)) / 86_400_000);
+export function restingFromDrops(sent: Array<{ drop_date: string; opened_at: string | null; saved_at: string | null }>, today: string) {
+  const recent = [...sent].sort((a, b) => b.drop_date.localeCompare(a.drop_date)).slice(0, UNOPENED_TO_PAUSE);
+  if (recent.length < UNOPENED_TO_PAUSE || recent.some(drop => drop.opened_at || drop.saved_at)) return false;
+  return daysBetween(recent[0].drop_date, today) < PAUSE_DAYS;
+}
+/** Who among `people` is resting (restingFromDrops). A failed read rests nobody: the morning run goes on as before. */
+export async function restingPeople(client: Client, people: string[], now: Date): Promise<Set<string>> {
+  const today = dayInZone(now);
+  const since = new Date(now.getTime() - 60 * 86_400_000).toISOString().slice(0, 10);
+  const resting = new Set<string>();
+  for (let start = 0; start < people.length; start += 200) {
+    const rows: any = await client.from('lead_drops').select('user_id,drop_date,opened_at,saved_at').in('user_id', people.slice(start, start + 200))
+      .eq('status', 'sent').gte('drop_date', since).limit(5000);
+    if (rows.error) return new Set();
+    const byUser = new Map<string, any[]>();
+    for (const row of rows.data || []) byUser.set(String(row.user_id), [...(byUser.get(String(row.user_id)) || []), row]);
+    for (const [userId, sent] of byUser) if (restingFromDrops(sent, today)) resting.add(userId);
+  }
+  return resting;
+}
+
 /** Why a drop came empty, as it is kept; `emptyReason` says it to the person. */
 const NO_CUSTOMER = 'Sin cliente ideal en «Perfil» ni contactos guardados para inferirlo.';
 const NO_BUDGET = 'Se acabó el presupuesto del mes para el contacto del día.';

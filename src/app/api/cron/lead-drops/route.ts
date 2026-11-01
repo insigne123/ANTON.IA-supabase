@@ -3,7 +3,7 @@ import { generateStructured } from '@/ai/openai-json';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { dropDay } from '@/lib/lead-drops';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
-import { dropsEnabled, dropsMonthlyUsd, monthSpend, planOrganizationDrops, writeDrop } from '@/lib/server/lead-drops';
+import { dropsEnabled, dropsMonthlyUsd, monthSpend, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
 import { canEmailEveryone, isTestAddress } from '@/lib/server/self-email';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   const today = dayInZone(now);
   const generate = (options: Parameters<Parameters<typeof writeDrop>[2]['generate']>[0]) =>
     generateStructured({ ...options, allowDefaultModelFallback: false, maxAttempts: 1 });
-  const result = { written: 0, planned: 0, empty: 0, failed: 0, spentUsd: 0 };
+  const result = { written: 0, planned: 0, empty: 0, failed: 0, resting: 0, spentUsd: 0 };
 
   const writePending = async () => {
     const pending: any = await admin.from('lead_drops').select('id,organization_id,user_id,items').eq('drop_date', today).eq('status', 'pending').limit(60);
@@ -86,8 +86,11 @@ export async function POST(request: Request) {
         const current = home.get(userId);
         if (!current || (size.get(org) || 0) > (size.get(current) || 0)) home.set(userId, org);
       }
+      // Audit B3: whoever left the last six unopened rests two weeks (restingFromDrops); a run asked for by name never skips anyone.
+      const resting = only ? new Set<string>() : await restingPeople(admin, [...home.keys()], now);
+      result.resting = resting.size;
       const byOrg = new Map<string, string[]>();
-      for (const [userId, org] of home) byOrg.set(org, [...(byOrg.get(org) || []), userId]);
+      for (const [userId, org] of home) if (!resting.has(userId)) byOrg.set(org, [...(byOrg.get(org) || []), userId]);
       let spent = await monthSpend(admin, now);
       const budget = dropsMonthlyUsd();
       for (const [organizationId, people] of byOrg) {
