@@ -355,6 +355,15 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
     }
   }
 
+  // «Vi que en Acme se pueden suscribir planes mensuales.» (real research, 1 Nov 2026): without a dated fact, «vi que» sells what the
+  // company says of itself as news. The opening names it in passing instead, as the prompt asks.
+  // Only when the caller knows there is none (the preflight passes it): other callers keep their «Vi que».
+  if (input.hasSignal === false && /(?<!\w)vi que(?!\w)/.test(normModel)) {
+    const finding = { code: 'tone_ficha', message: 'Sin un hecho con fecha, no digas «Vi que…»: nombra el dato de la empresa de pasada en la primera oración («En una empresa de software como Acme, …»).', blocking: !input.finalAttempt } as const;
+    if (finding.blocking) errors.push({ ...finding });
+    else warnings.push({ ...finding });
+  }
+
   // «La plataforma captura imágenes durante el test; esta es la última vez que te escribo sobre esto» (real research, 31 Oct 2026).
   if (/[;,]\s*esta es la [úu]ltima vez\b/i.test(modelBody)) {
     const finding = { code: 'tone_formato', message: 'Escribe «Esta es la última vez…» como oración aparte, después de un punto, no pegada a otra idea con «;» o coma.', blocking: !input.finalAttempt } as const;

@@ -329,3 +329,11 @@ test('the closing line is a sentence of its own, and a forced link between servi
   assert.deepEqual(blockedPhrasesIn('Acme está entre los portales de empleo más grandes de Chile.'), ['entre los portales de empleo mas grandes']);
   assert.deepEqual(blockedPhrasesIn('Está entre las tareas que más tiempo toman.'), []);
 });
+
+test('without a dated fact, «Vi que» does not sell what the company says of itself as news', () => {
+  // Real research, 1 Nov 2026: «Vi que en Acme se pueden suscribir planes mensuales.»
+  const viQue = (hasSignal: boolean, finalAttempt = false) => checkHumanTone({ subject: 'Evaluaciones online', body: 'Hola Ana,\n\nVi que en Acme se pueden suscribir planes mensuales. En selección, comparar postulantes se demora.\n\n¿Conversamos?', companyName: 'Acme', hasSignal, finalAttempt });
+  assert.equal(viQue(false).errors.filter((finding) => /Vi que/.test(finding.message)).length, 1);
+  assert.deepEqual(viQue(true).errors.filter((finding) => /Vi que/.test(finding.message)), []);
+  assert.deepEqual(viQue(false, true).errors.filter((finding) => /Vi que/.test(finding.message)), []);
+});

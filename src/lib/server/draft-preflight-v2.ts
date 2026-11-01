@@ -5,7 +5,7 @@ import {
   canonicalSha256,
   type MessagingPreflightV1,
 } from '@/lib/messaging-contracts';
-import { DRAFT_STYLE_ADVISORIES, isDatedEventEvidence, isSignalLikeEvidence, requiredReportAwareDraftPersonalizationV2, type DraftContextV2 } from '@/lib/server/draft-context-v2';
+import { DEFAULT_DRAFT_CTA_ALL_FORMS, DRAFT_STYLE_ADVISORIES, isDatedEventEvidence, isSignalLikeEvidence, requiredReportAwareDraftPersonalizationV2, type DraftContextV2 } from '@/lib/server/draft-context-v2';
 import { checkHumanTone } from '@/lib/server/human-tone-checks';
 import { EDITED_EMAIL_BODY_WORDS } from '@/lib/drafts/email-length';
 
@@ -789,7 +789,12 @@ export function validateDraftPreflightV2(
     }
   }
 
-  const requiredCta = text(context.constraints.cta.exactText);
+  // The default CTA has equivalent forms (tú, usted and the ones picked per recipient): the one the draft carries is the required one, also
+  // when it is approved with the style's own context.
+  const configuredCta = text(context.constraints.cta.exactText);
+  const requiredCta = DEFAULT_DRAFT_CTA_ALL_FORMS.includes(configuredCta)
+    ? DEFAULT_DRAFT_CTA_ALL_FORMS.find((form) => text(output.body).includes(form)) || configuredCta
+    : configuredCta;
   if (options.checkGeneratedCopy) {
     const blocks = contentBlocks(rawBody, requiredCta);
     const opening = normalizeForMatch(blocks[0] || '')
@@ -826,7 +831,7 @@ export function validateDraftPreflightV2(
   const sellerStatements = draftSellerStatementsV2(context.seller);
   const sellerNames = sellerSpeakingNames(context.seller);
   const recipientName = normalizeForMatch(context.company.name);
-  const materialContent = `${subject}\n\n${requiredCta ? rawBody.split(context.constraints.cta.exactText).join(' ') : rawBody}`;
+  const materialContent = `${subject}\n\n${requiredCta ? rawBody.split(requiredCta).join(' ') : rawBody}`;
   const claimCheckContent = modelClosingQuestion ? materialContent.split(modelClosingQuestion).join(' ') : materialContent;
   // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.
   const materialSentences = claimCheckContent.replace(/^[ \t]*\d+[.)][ \t]+(?=\S)/gm, '').split(/\r?\n/).flatMap(sentenceParts);
@@ -1010,7 +1015,7 @@ export function validateDraftPreflightV2(
     const tone = checkHumanTone({
       subject,
       body: rawBody,
-      ctaExactText: context.constraints.cta.exactText,
+      ctaExactText: requiredCta,
       recipientFirstName: String(context.recipient.displayName || '').trim().split(/\s+/)[0] || null,
       companyName: context.company.name,
       maxModelQuestions: expectedCtaCount === 1 ? 0 : 1,

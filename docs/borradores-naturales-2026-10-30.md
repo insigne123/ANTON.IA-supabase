@@ -451,6 +451,38 @@ Se tomaron, en solo lectura, 8 investigaciones reales de empresas que no estaban
 
 **Lo que todavía se lee raro:** cuando el único hecho de la investigación no tiene relación con lo que se vende («se pueden suscribir planes mensuales»), el primer correo todavía lo nombra. El arreglo está en la investigación (traer un hecho con fecha), no en el correo.
 
+### Decimoctava vuelta: `native-draft/v41`, la estructura no se nota
+
+`v40` quedó en producción (`7d117ac8`, 1 de noviembre a las 03:47 UTC). Leyendo 48 correos de `v40`, el dueño lo dijo así:
+
+- **Casi todos los iniciales siguen el mismo esqueleto:** hecho, problema del rubro, «Soy X, de Y; hacemos…» y «¿Te parece si lo conversamos 15 minutos esta semana?». Uno por uno se leen bien, pero quien reciba varios nota el patrón.
+- **El cierre de la secuencia es casi siempre el mismo:** «Esta es la última vez que te escribo sobre esto. ¿Lo dejamos hasta aquí?».
+- **La segunda oración a veces es genérica:** «si la comparación se alarga, la decisión se demora».
+
+**Qué cambió:**
+
+- **Variedad por destinatario (`src/lib/draft-variety.ts`):** cada destinatario recibe, de forma estable, una de varias formas de presentarse («Soy X, de Y; …», «Soy X y trabajo en Y, donde…», «Te escribo desde Y: …») y de cerrar la secuencia. Dos personas de una campaña reciben formas distintas; un reintento o la aprobación del mismo borrador conservan la suya.
+- **El CTA por defecto se dice de cuatro maneras** («¿Tienes 15 minutos esta semana para verlo?», «¿Te acomoda una llamada de 15 minutos esta semana?», «¿Lo vemos en 15 minutos esta semana?»), en tú o en usted. Un CTA escrito por la persona nunca se cambia. Las formas por defecto se aceptan al aprobar, también en usted.
+- **Ninguna forma de cierre pide reunión:** la primera versión usaba «¿Te sirve que lo retome más adelante?», que el control lee como pedido de reunión, y cuatro cierres no se crearon. Una prueba valida ahora cada forma de cierre contra el control.
+- **La segunda oración tiene que sonar escrita para esa persona** (el cargo de la vacante, la región, el proyecto, su rol), en el prompt y en la revisión editorial.
+- **Sin un hecho con fecha, «Vi que…» no presenta como novedad lo que la empresa dice de sí misma** («Vi que en Acme se pueden suscribir planes mensuales»). Pide reescribir solo esa frase.
+
+**Resultado:**
+
+| | Correos | Válidos | Al primer intento |
+| --- | --- | --- | --- |
+| `v41` con solo el control de «Vi que», 12 secuencias | 48 | 48 | 45 |
+| `v41` con la variedad, 12 secuencias, primera versión de los cierres | 48 | 44 | 41 |
+| Las 4 secuencias con el cierre rechazado, cierres corregidos | 16 | 16 | 15 |
+
+En las 12 secuencias, las presentaciones se reparten entre las tres formas, el CTA entre las cuatro y el cierre entre las cuatro.
+
+**Lo que no se arregla en el redactor:**
+
+- **Seguimientos finos:** cuando el perfil del vendedor trae una sola línea del servicio, los seguimientos son correctos pero planos. Se arregla con pruebas, casos y alcance por servicio en el perfil.
+- **Correos tibios:** con solo la autodescripción de la empresa, los correos quedan correctos pero tibios. Se arregla trayendo hechos con fecha (proyectos, vacantes, aperturas).
+- **Leads que no calzan:** si el lead no calza con lo que se vende, ningún redactor lo salva.
+
 ## Lo que falta
 
 - **La investigación.** El filtro saca lo que no es un hecho, pero el redactor necesita hechos con fecha y dato concreto (una apertura, una vacante, una licitación adjudicada). Siguen entrando fragmentos de buscador con «…», perfiles de LinkedIn de otras personas y la descripción de la empresa escrita por ella misma. En los borradores reales del 28 y 29 de octubre, casi todas las aperturas salieron de esa autodescripción o del servicio de quien escribe: ninguna traía un hecho con fecha. `v25` hace que ese correo abra mejor, pero un hecho con fecha sigue valiendo más que cualquier regla de redacción (`docs/senales-de-la-investigacion-al-correo.md`).
