@@ -125,10 +125,14 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
 /**
  * `options` names where the opportunity came from when it was not received by the team (a line of the purchase plan, for
  * one), and `dedupeKey` makes it one per workspace whoever adds it.
+ *
+ * Anyone who works Oportunidades may bring one they received (2 Nov 2026): before, only owners and administrators could, and in a
+ * workspace whose only administrator never came in nobody could. A member sees only what they take part in, so whoever is not an
+ * administrator becomes its responsible person, and it is theirs to work from the start; the administrators see it as always.
  */
 export async function createPrivateOpportunity(client: SupabaseClient, scope: WorkScope, input: z.infer<typeof privateOpportunitySchema>,
   options: { reason?: string; origin?: string; documentName?: string; dedupeKey?: string; activity?: string } = {}) {
-  assertOpportunityAdmin(scope);
+  const own = !isOpportunityAdmin(scope.role);
   const requestId=input.requestId||randomUUID();const key=options.dedupeKey||`private:${scope.userId}:${requestId}`;
   const existing=opportunityDb(await client.from('commercial_opportunities').select('id').eq('organization_id',scope.organizationId).eq('kind','private').eq('dedupe_key',key).maybeSingle());
   let id = existing?.id || randomUUID();
@@ -141,12 +145,23 @@ export async function createPrivateOpportunity(client: SupabaseClient, scope: Wo
     if(!won)throw new AuthError('No se pudo recuperar la oportunidad recibida.',503);id=won.id;
    }else opportunityDb(inserted);
   }
+  if (own) await takeOwnOpportunity(client, scope, id);
   if (input.description) {
     const { saveOpportunityDocument } = await import('./workspace-documents');
     await saveOpportunityDocument(client, scope, id, { name: options.documentName || 'Invitación recibida.txt', bytes: Buffer.from(input.description), sourceKind: 'pasted' });
   }
   await addOpportunityActivity(client, scope, id, 'created', options.activity || 'Oportunidad recibida incorporada a la organización',{},`private-created:${id}`);
   return id;
+}
+/**
+ * The member who brought an opportunity works it: its responsible person and its only participant, as an administrator's assignment
+ * leaves it (opportunity_assign), without the notice of an assignment to oneself. Written once: a retry of the same form keeps it.
+ */
+async function takeOwnOpportunity(client: SupabaseClient, scope: WorkScope, id: string) {
+  opportunityDb(await client.from('opportunity_work').upsert({ organization_id: scope.organizationId, opportunity_id: id, revision: 1, state: 'assigned',
+    responsible_id: scope.userId, assigned_by: scope.userId, updated_at: new Date().toISOString() }, { onConflict: 'opportunity_id', ignoreDuplicates: true }));
+  opportunityDb(await client.from('opportunity_participants').upsert({ organization_id: scope.organizationId, opportunity_id: id, user_id: scope.userId },
+    { onConflict: 'opportunity_id,user_id', ignoreDuplicates: true }));
 }
 export async function addOpportunityActivity(client: SupabaseClient, scope: WorkScope, id: string, kind: string, body: string, data: Record<string, unknown> = {}, eventKey?: string) {
   await assertOpportunityRead(client, scope, id);

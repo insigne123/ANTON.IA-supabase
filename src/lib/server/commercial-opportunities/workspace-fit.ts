@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
-import { femaleLedSeal, readTenderProfile, tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
+import { femaleLedSeal, readTenderProfile, tenderProfileForModel, tenderProfileProgress } from '@/lib/commercial-opportunities/tender-profile';
 import { requirementFitPrompt, requirementFitSchema, resolveRequirementFit, type ReportFit } from '@/lib/commercial-opportunities/requirement-fit';
 import { opportunityDb } from './workspace-store';
 import { assertOpportunityRead } from './workspace-access';
@@ -19,7 +19,10 @@ const FIT_KINDS = ['tender', 'compra_agil', 'private'];
 const fitFromRow = (row: any): ReportFit => ({ items: row.items || {}, noRestsOnRequirements: Boolean(row.no_rests_on_requirements),
   profileRevision: Number(row.profile_revision), createdAt: row.created_at });
 
-/** What the report shows: the latest reading of its requirements, and the profile's revision to tell if it is current. */
+/**
+ * What the report shows: the latest reading of its requirements, the profile's revision to tell if it is current, and how much of the
+ * profile is answered, so a nearly empty one is asked for once instead of a «falta un dato» on every requirement.
+ */
 export async function readOpportunityFit(client: SupabaseClient, organizationId: string, reportId: string | null | undefined) {
   const [fit, profile] = await Promise.all([
     reportId ? client.from(TABLE).select('items,no_rests_on_requirements,profile_revision,created_at').eq('organization_id', organizationId).eq('report_id', reportId)
@@ -27,10 +30,11 @@ export async function readOpportunityFit(client: SupabaseClient, organizationId:
     client.from('opportunity_tender_profile').select('revision,answers').eq('organization_id', organizationId).maybeSingle(),
   ]);
   // Before its migration the table is missing: the report reads as before.
-  if (fit.error) return { available: false, latest: null, profileRevision: null, seal: null };
+  if (fit.error) return { available: false, latest: null, profileRevision: null, seal: null, progress: null };
   const stored = profile.error || !profile.data ? null : profile.data;
+  const answers = stored ? readTenderProfile(stored.answers) : null;
   return { available: true, latest: fit.data ? fitFromRow(fit.data) : null, profileRevision: stored ? Number(stored.revision) : null,
-    seal: stored ? femaleLedSeal(readTenderProfile(stored.answers)) : null };
+    seal: answers ? femaleLedSeal(answers) : null, progress: answers ? tenderProfileProgress(answers) : null };
 }
 
 /** A reading of the latest report with the current profile, once per report and profile version. Returns the job's key. */

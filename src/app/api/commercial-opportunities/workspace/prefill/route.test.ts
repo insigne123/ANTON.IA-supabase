@@ -88,10 +88,13 @@ test('the invitation pasted in the form is read the same way; a few words are no
   assert.deepEqual(await post(new FormData()), { status: 400, body: { error: 'Elige el documento que recibiste.' } });
 });
 
-test('only an administrator loads an opportunity', async () => {
+test('a member who brings an opportunity has its form completed too: it stays theirs (workspace-store.ts, createPrivateOpportunity)', async () => {
   state.role = 'member'; state.jobs = [];
   const form = new FormData();
   form.append('text', 'Estimados: los invitamos a cotizar el servicio de aseo para el hospital. Cierre: 30 de octubre a las 15:00.');
-  assert.equal((await post(form)).status, 403);
-  assert.equal(state.jobs.length, 0);
+  const { status, body } = await post(form);
+  assert.equal(status, 200);
+  assert.deepEqual(body.fields, { title: 'Guardias para 3 recintos' });
+  assert.equal(state.jobs.length, 1);
+  assert.match(state.jobs[0].payload.text || '', /servicio de aseo para el hospital/);
 });
