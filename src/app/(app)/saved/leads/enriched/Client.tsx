@@ -44,6 +44,7 @@ import {
   type ResearchReportDetail,
 } from '@/lib/research-workspace';
 import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
+import { composeDraftHref, saveDraftQueue } from '@/lib/draft-queue';
 import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import { researchDetailLoadingState } from '@/lib/research-report-loading';
@@ -173,19 +174,30 @@ export default function EnrichedLeadsClient() {
   // Drafts confirmed and not sent yet, by research snapshot: those contacts read «Borrador listo» (audit P1). Read again when
   // the research statuses change; RLS keeps it to what this person may see.
   const [draftReadySnapshots, setDraftReadySnapshots] = useState<Set<string>>(() => new Set());
+  // The newest ready draft of each snapshot: «Revisar y enviar en serie» opens them one after another (plan de uso A1).
+  const [draftIdBySnapshot, setDraftIdBySnapshot] = useState<Map<string, string>>(() => new Map());
   useEffect(() => {
     const snapshotIds = [...new Set(Object.values(nativeResearchByLeadId).map(status => status.researchSnapshotId).filter((id): id is string => Boolean(id)))];
     if (!snapshotIds.length) return;
     let active = true;
     void (async () => {
       const found = new Set<string>();
+      const newest = new Map<string, { id: string; at: string }>();
       for (let index = 0; index < snapshotIds.length; index += 100) {
-        const { data, error } = await supabase.from('messaging_drafts').select('research_snapshot_id')
+        const { data, error } = await supabase.from('messaging_drafts').select('id,research_snapshot_id,updated_at')
           .in('research_snapshot_id', snapshotIds.slice(index, index + 100)).eq('lifecycle', 'ready');
         if (error) return; // without the read, the stages stay as they were
-        for (const row of (data || []) as Array<{ research_snapshot_id: string | null }>) if (row.research_snapshot_id) found.add(row.research_snapshot_id);
+        for (const row of (data || []) as Array<{ id: string; research_snapshot_id: string | null; updated_at: string | null }>) {
+          if (!row.research_snapshot_id) continue;
+          found.add(row.research_snapshot_id);
+          const known = newest.get(row.research_snapshot_id);
+          if (!known || String(row.updated_at || '') > known.at) newest.set(row.research_snapshot_id, { id: String(row.id), at: String(row.updated_at || '') });
+        }
       }
-      if (active) setDraftReadySnapshots(found);
+      if (active) {
+        setDraftReadySnapshots(found);
+        setDraftIdBySnapshot(new Map([...newest].map(([snapshot, draft]) => [snapshot, draft.id])));
+      }
     })();
     return () => { active = false; };
   }, [nativeResearchByLeadId]);
@@ -796,6 +808,17 @@ export default function EnrichedLeadsClient() {
         : filtered.filter((lead) => stageOf(lead) === stageFilter),
     [filtered, stageFilter, stageOf, awaitsCall],
   );
+  // «Revisar y enviar en serie» (plan de uso A1): the ready drafts of the list, in its order. Each one is still reviewed and sent
+  // on its own page; the queue only opens the next one after a send or a skip.
+  const queuedDrafts = useMemo(() => stageFilter !== 'draft_ready' ? [] : listed.flatMap((lead) => {
+    const snapshot = nativeResearchForLead(lead)?.researchSnapshotId;
+    const draftId = snapshot ? draftIdBySnapshot.get(snapshot) : undefined;
+    return draftId ? [draftId] : [];
+  }), [stageFilter, listed, nativeResearchForLead, draftIdBySnapshot]);
+  const reviewInSeries = () => {
+    const ids = saveDraftQueue(queuedDrafts);
+    if (ids?.length) router.push(composeDraftHref(ids[0]));
+  };
 
   useEffect(() => {
     setPage(1);
@@ -1364,6 +1387,15 @@ export default function EnrichedLeadsClient() {
           return <span key={option.value} className="inline-flex">{chip}</span>;
         })}
       </div>
+
+      {queuedDrafts.length > 1 ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-foreground/80">
+            {`${queuedDrafts.length.toLocaleString('es-CL')} borradores listos. Revísalos y envíalos uno tras otro: al enviar o saltar uno, se abre el siguiente.`}
+          </p>
+          <Button size="sm" className="shrink-0" onClick={reviewInSeries}>Revisar y enviar en serie</Button>
+        </div>
+      ) : null}
 
       {pendingPhoneCount > 0 ? (
         <Alert variant="info" role="status">
