@@ -12,6 +12,7 @@ import { readSearchHealth } from '@/lib/server/commercial-opportunities/workspac
 import { failingSources } from '@/lib/commercial-opportunities/source-health';
 import { matchesSearch, readAdminSettings, searchHref, type NewOpportunity } from '@/lib/commercial-opportunities/admin-settings';
 import { readPersonGoal } from '@/lib/server/weekly-goals';
+import { readPeopleToCall } from '@/lib/server/contact-calls';
 import type { SendSelf } from '@/lib/server/weekly-report';
 
 /** The reads and the delivery of «Avisos» (src/lib/daily-alerts.ts), with the service client and an explicit organization. */
@@ -75,7 +76,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
   const { now, since } = options;
   const own = (table: string, columns: string) => client.from(table).select(columns).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
   const week = reportWeek(now, 'current');
-  const [profile, replied, commitments, enriched, sent, research, goal, saved, coworkApprovals] = await Promise.all([
+  const [profile, replied, commitments, enriched, sent, research, goal, saved, coworkApprovals, toCall] = await Promise.all([
     client.from('profiles').select('full_name').eq('id', scope.userId).maybeSingle(),
     own('contacted_leads', 'id,email,name,company,reply_intent,replied_at,conversation_resolved_at,conversation_outbound_at').not('replied_at', 'is', null).order('replied_at', { ascending: false }).limit(200),
     own('contacted_leads', 'id,name,company,data').not('data->commitment', 'is', null).limit(200),
@@ -86,6 +87,8 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     // Whether the person ever saved a contact: who only works Oportunidades gets no prospecting goal (below).
     options.opportunities === 'none' ? Promise.resolve({ data: [{}], error: null }) : own('leads', 'id').limit(1),
     readCoworkApprovals(client, scope),
+    // «Por llamar» (plan de uso U3): best effort, the alert goes out without the line when it cannot be read.
+    readPeopleToCall(client, scope, since).catch(() => null),
   ]);
   for (const result of [replied, commitments, enriched, sent, research] as any[]) if (result.error) throw new DailyAlertsError('No pudimos leer los pendientes.', 503);
 
@@ -141,6 +144,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     // APP-15: «Meta de la semana: personas contactadas» went to everyone, also to whoever only works tenders. With access to Oportunidades
     // and nobody ever saved, given an email or written to, the goal is not theirs (a failed read keeps it, as before).
     ...(coworkApprovals ? { coworkApprovals } : {}),
+    ...(toCall?.count ? { toCall } : {}),
     goal: options.opportunities !== 'none' && !(saved as any).error && !((saved as any).data || []).length && !ready.size && !written.size && !people.length ? null : goal,
   };
 }
