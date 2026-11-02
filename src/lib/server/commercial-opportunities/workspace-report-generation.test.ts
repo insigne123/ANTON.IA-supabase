@@ -77,11 +77,11 @@ test('a seven-document report stays under the 0.75 USD cap of one research, and 
   const prompt = 'á'.repeat(60_000); // 120 kB of UTF-8, the size of the synthesis that was refused in production
   await opportunityGenerateReport(f.client, f.job, { ...f.input, prompt }, f.generate);
   const bytes = Buffer.byteLength(prompt, 'utf8');
-  // Haiku above its 100k line costs 0.5 USD per million input tokens and 2.5 per million output, 40k output with reasoning; bytes bound tokens.
+  // Haiku above its 100k line costs 0.5 USD per million input tokens and 2.5 per million output, 48k output with reasoning; bytes bound tokens.
   // The report cannot be split, so it is reserved at that price instead of being refused (reading and screening are: see below).
-  assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 40_000 * 2.5, 'the documents and the whole output stay reserved');
+  assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 48_000 * 2.5, 'the documents and the whole output stay reserved');
   assert.ok(f.reservations[0].p_micro <= 727_000, `fits next to the reading steps (${f.reservations[0].p_micro})`);
-  assert.equal(f.requests[0].maxOutputTokens, 32_000, 'room for the report of a long tender');
+  assert.equal(f.requests[0].maxOutputTokens, 40_000, 'room for the report of a long tender');
 });
 
 test('the 28 Oct tender (seven documents, 101 pages, about 380 kB of facts) is reserved, not refused as too long', async () => {
