@@ -47,7 +47,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Sigue las respuestas en «Conversaciones» y en «Hoy».',
     ],
     tips: [
-      '«Hoy» muestra en «Prepara tu cuenta» qué te falta (perfil, correo conectado, primeros contactos y primer envío).',
+      '«Hoy» muestra en «Prepara tu cuenta» qué te falta (perfil, correo conectado, contactos y primer contacto).',
       'El botón «?» de la barra superior explica la pantalla en la que estás, con su video, y el botón ▶ «Ver tutorial», junto a «Centro de ayuda» al final del menú, repite el recorrido.',
     ],
     faqs: [
@@ -68,7 +68,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       '«Lo primero hoy» muestra una sola acción, en este orden: responder a quien te respondió, resolver lo que impide enviar, un compromiso que vence hoy, escribir a tus contactos con correo, completar correos o buscar prospectos.',
       '«Lo que te espera» lista hasta 6 pendientes, los urgentes primero. Cada uno abre la conversación exacta.',
       'Con Oportunidades, «Oportunidades» trae lo que espera respuesta, las que trabajas, los informes listos y lo que cierra esta semana sin equipo.',
-      '«Prepara tu cuenta» tiene cuatro pasos comprobados: perfil con empresa y oferta, correo conectado, primeros contactos y primer envío, cada uno con su enlace.',
+      '«Prepara tu cuenta» tiene cuatro pasos comprobados: perfil con empresa y oferta, correo conectado, contactos guardados y primer contacto (correo o llamada), cada uno con su enlace.',
       '«Para retomar» aparece cuando alguien vale la pena de nuevo: una conversación cerrada «Sin acuerdo» hace 60 días, alguien que no respondió en 45 días o una empresa que ahora contrata o licita. «Retomar» prepara un correo con otro ángulo; con «…» lo pospones o lo descartas.',
       '«Llamadas y LinkedIn» te recuerda llamar o invitar por LinkedIn a quien no respondió tu primer correo, el día que elijas: por defecto, LinkedIn el día 1 y la llamada el día 3. Se enciende con «Activar» y se cambia con «Ajustar».',
       'En cada fila llamas o abres su LinkedIn. «Guion y resultado» prepara qué decir y la nota de la invitación; marca qué pasó y pulsa «Guardar». «Subir grabación» deja el resumen, los acuerdos y el próximo paso en el CRM.',
