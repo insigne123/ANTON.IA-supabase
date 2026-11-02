@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 import * as React from 'react';
 import * as behavior from './draft-editor-behavior';
 import { quickRewrites, readRewriteProposal, reconcileSavedText, versionConflictMessage } from './draft-editor-behavior';
+import * as draftQueue from '../../lib/draft-queue';
 
 test('preview protocol accepts a proposal without a draft and preserves the original', () => {
   const draft = { versionId: 'v1', content: { subject: 'Antes', text: 'Original' } };
@@ -234,6 +235,8 @@ test('rendered editors preserve edits across proposals/conflicts/overlapping sav
       '@/components/commercial/ContactabilityStatusCard': { ContactabilityStatusCard: () => null },
       '@/components/commercial/CampaignQaPanel': { CampaignQaPanel: () => null },
       '@/components/compose/SenderLine': { SenderLine: () => null },
+      // «Revisar y enviar en serie» (plan de uso A1): the real queue, which only reads the tab's storage and sends nothing.
+      '@/lib/draft-queue': draftQueue,
     };
     // Import-only legacy utilities are intentionally inert: they must not generate or send anything.
     for (const match of readFileSync('src/app/(app)/contact/compose/page.tsx', 'utf8').matchAll(/from '(@\/lib\/[^']+)'/g)) modules[match[1]] ??= {};
