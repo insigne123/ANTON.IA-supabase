@@ -10,7 +10,7 @@ import * as results from '../../lib/credit-results';
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-const passthrough = (tag: string) => ({ children, ...props }: any) => React.createElement(tag, props, children);
+const passthrough = (tag: string) => { const Plain = ({ children, ...props }: any) => React.createElement(tag, props, children); Plain.displayName = tag; return Plain; };
 const dependencies: Record<string, unknown> = {
   'next/link': ({ href, children, ...props }: any) => React.createElement('a', { href, ...props }, children),
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
