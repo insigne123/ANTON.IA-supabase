@@ -17,7 +17,7 @@ import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
 import { leadsFinderMaxRunUsd, leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
-import { leadsFinderIndustry } from '@/lib/server/leads-finder/input';
+import { LEADS_FINDER_MAX_PER_RUN, leadsFinderIndustry } from '@/lib/server/leads-finder/input';
 import { enrichedLeadRow } from '@/lib/server/leads-finder/reveal';
 import { forgetInVault, readFromVault, storeInVault, type VaultEntry } from '@/lib/server/leads-finder/vault';
 
@@ -226,15 +226,15 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       continue;
     }
     let found: Awaited<ReturnType<Search>>;
+    // The run's cap, not its cost (that comes from what it returns): one person's search is too small for a cap of its
+    // own, which Apify refuses under its minimum, so never below an ordinary search's (leadsFinderMaxRunUsd).
+    const searchDeps = (wanted: number) => ({ fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: Math.max(leadsFinderMaxRunUsd(), Math.min(1, wanted * usdPerLead * 1.5)) });
     try {
-      // The run's cap, not its cost (that comes from what it returns): one person's search is too small for a cap of its
-      // own, which Apify refuses under its minimum, so never below an ordinary search's (leadsFinderMaxRunUsd).
-      const deps = { fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: Math.max(leadsFinderMaxRunUsd(), Math.min(1, count * usdPerLead * 1.5)) };
       const narrow = searchInput(criteria, count);
-      found = await search(narrow, deps);
+      found = await search(narrow, searchDeps(count));
       // Nobody with those industries or sizes: once more with the titles and places only.
       if (!found.results.length && (narrow.industryKeywords.length || narrow.employeeRanges.length)) {
-        const broad = await search(searchInput(criteria, count, true), deps);
+        const broad = await search(searchInput(criteria, count, true), searchDeps(count));
         found = { ...broad, costUsd: found.costUsd + broad.costUsd };
       }
     } catch (error) {
@@ -244,6 +244,24 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     spent += found.costUsd;
     const entries = new Map<string, VaultEntry>(found.results.map(entry => [entry.lead.id, entry]));
     const assigned = assignDrops(found.results.map(candidateOf), members, known, criteria, DROP_SIZE, userId => own.get(userId)!);
+    // Plan de uso A5 (audit B3): the same search every day ends up bringing only people already known; 29 drops came empty that
+    // way at the end of October. Then once more, wider: the titles and places only, and further down the list (three times as
+    // many). Each contact's fit (dropFit) shows what no longer matches, the industry or the size. A failure leaves it as before.
+    const waiting = members.filter(userId => !(assigned.get(userId) || []).length);
+    const deeper = Math.min(LEADS_FINDER_MAX_PER_RUN, count * 3);
+    if (waiting.length && found.results.length && deeper > count && spent + deeper * usdPerLead <= deps.budgetUsd) {
+      try {
+        const wider = await search(searchInput(criteria, deeper, true), searchDeps(deeper));
+        spent += wider.costUsd;
+        found = { ...found, costUsd: found.costUsd + wider.costUsd };
+        const taken = new Set([...assigned.values()].flat().map(pick => pick.leadId));
+        for (const entry of wider.results) if (!entries.has(entry.lead.id)) entries.set(entry.lead.id, entry);
+        const more = assignDrops(wider.results.map(candidateOf).filter(item => !taken.has(item.leadId)), waiting, known, criteria, DROP_SIZE, userId => own.get(userId)!);
+        for (const [userId, picks] of more) if (picks.length) assigned.set(userId, picks);
+      } catch {
+        // The wider search failed: those people keep the empty drop and its reason, as before.
+      }
+    }
     const share = members.length ? Math.round((found.costUsd / members.length) * 10_000) / 10_000 : 0;
     for (const userId of members) {
       // What the person sees and keeps is their own customer, not the group's search.
