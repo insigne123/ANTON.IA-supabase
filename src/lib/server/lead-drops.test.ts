@@ -436,3 +436,42 @@ test('whoever left the last six unopened rests two weeks from the last one, then
   assert.equal(restingFromDrops(sent(six), '2026-11-11'), false, 'after two weeks of rest, one more goes');
   assert.equal(restingFromDrops([...sent(six), { drop_date: '2026-10-30', opened_at: null, saved_at: '2026-10-30T13:00:00Z' }], '2026-11-03'), false, 'saving counts as opening');
 });
+
+test('when the search brings only people the team has, it looks once more, wider and further down the list (plan de uso A5)', async () => {
+  const known = () => {
+    const data = seed();
+    data.enriched_leads = POOL.map((company, index) => ({ id: `e-${index}`, organization_id: ORG, user_id: 'u-ana', email: `p${index + 1}@${company.toLowerCase()}.cl`,
+      linkedin_url: null, source_provider_id: null, title: 'Gerente de Personas', organization_industry: 'Retail', created_at: '2026-10-01T00:00:00Z' }));
+    return data;
+  };
+  const NEW = ['Cencosud', 'Mallplaza'];
+  const calls: any[] = [];
+  const search = (fail = false) => async (input: any) => {
+    calls.push(input);
+    if (calls.length > 1 && fail) throw new Error('Apify: se cortó');
+    const items = [...POOL.map((company, index) => actorItem(index + 1, company)), ...(calls.length > 1 ? NEW.map((company, index) => actorItem(100 + index, company)) : [])];
+    return { results: splitLeadsFinderItems(items, ['validated']), fetched: items.length, notApplied: [], costUsd: 0.04 };
+  };
+  const unique = { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } };
+
+  const wide = memory(known(), unique);
+  await planOrganizationDrops(wide.client, ORG, ['u-ana'], { now: TUESDAY, search: search() as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
+  assert.equal(calls.length, 2, 'once more');
+  assert.ok(calls[0].industryKeywords.length, 'the first one by the customer\'s industry');
+  assert.deepEqual([calls[1].industryKeywords, calls[1].employeeRanges], [[], []], 'the second by titles and places only');
+  assert.equal(calls[1].maxResults, calls[0].maxResults * 3, 'and further down the list');
+  const drop = wide.tables.lead_drops[0];
+  assert.equal(drop.status, 'pending');
+  assert.ok(drop.items.length && drop.items.every((item: any) => NEW.includes(item.company)), 'someone new');
+  assert.equal(drop.cost_usd, 0.08, 'both searches are its cost');
+
+  calls.length = 0;
+  const failing = memory(known(), unique);
+  await planOrganizationDrops(failing.client, ORG, ['u-ana'], { now: TUESDAY, search: search(true) as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
+  assert.deepEqual([failing.tables.lead_drops[0].status, failing.tables.lead_drops[0].error], ['empty', 'La búsqueda no trajo contactos nuevos con correo.'], 'a failed second search leaves it as before');
+
+  calls.length = 0;
+  const tight = memory(known(), unique);
+  await planOrganizationDrops(tight.client, ORG, ['u-ana'], { now: TUESDAY, search: search() as any, budgetUsd: 0.06, spentUsd: 0, usdPerLead: 0.0035 });
+  assert.equal(calls.length, 1, 'without budget for it, no second search');
+});
