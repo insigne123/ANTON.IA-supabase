@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { ReplyTargetError } from '@/lib/server/reply-target';
+import { sendTracking } from '@/lib/server/open-tracking';
 
 const source = readFileSync('src/app/api/providers/send/route.ts', 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -13,6 +14,8 @@ function load(overrides: Record<string, any> = {}) {
     if (name === 'next/server') return { NextResponse: { json: (body: any, init: any) => Response.json(body, init) } };
     if (name === '@supabase/auth-helpers-nextjs') return { createRouteHandlerClient: () => ({ auth: { getUser: async () => ({ data: { user: { id: 'owner' } } }) } }) };
     if (name === '@/lib/email-provider') return { normalizeConnectedEmailProvider: () => 'google' };
+    // «Medir aperturas» (plan de uso M4): the real decision, with the organization's opens off unless a test turns them on.
+    if (name === '@/lib/server/open-tracking') return { sendTracking, readOpenTracking: async () => false };
     return {};
   }, exports);
   return exports.POST;
@@ -136,4 +139,47 @@ test('contact reply replay reads durable receipt without accessing tokens or rec
   const result = await response.json();
   assert.equal(result.success, true);
   assert.equal(result.receipt.replayed, true);
+});
+
+test('with the organization measuring opens, a new message carries the dispatch pixel and keeps its links (plan de uso M4)', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { assert.fail('External sends forbidden'); });
+  const draft = { draftId: 'draft', versionId: 'version', recipient: { leadRef: null }, researchSnapshotId: null, content: {} };
+  const query: any = { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: { organization_id: 'org' }, error: null }) };
+  for (const [organizationOpens, tracking, expected] of [
+    [true, undefined, { trackingDispatchId: 'dispatch', trackLinks: false }],
+    [false, undefined, { trackingDispatchId: undefined, trackLinks: undefined }],
+    [true, { open: false }, { trackingDispatchId: undefined, trackLinks: undefined }],
+  ] as const) {
+    let seen: any = null;
+    const post = load({
+      '@/lib/server/open-tracking': { sendTracking, readOpenTracking: async (_client: unknown, organizationId: string) => { assert.equal(organizationId, 'org'); return organizationOpens; } },
+      '@/lib/email-provider': { normalizeConnectedEmailProvider: () => 'google' },
+      '@supabase/auth-helpers-nextjs': { createRouteHandlerClient: () => ({
+        auth: { getUser: async () => ({ data: { user: { id: 'owner' } } }) },
+        from: (table: string) => table === 'organization_members' ? query : { ...query, maybeSingle: async () => ({ data: null, error: null }) },
+      }) },
+      '@/lib/server/messaging-drafts': { getCurrentMessagingDraftVersionV1: async () => draft },
+      '@/lib/messaging-contracts': {
+        resolveApprovedEmailSendV1: () => ({ draft, to: 'ada@example.com', subject: 'Hello', text: null, html: '<p>Approved</p>' }),
+        assertCanonicalEmailSendCompatibilityV1: () => {}, createMessagingSendMetadataV1: () => ({}),
+      },
+      '@/lib/server/privacy-subject-data': { isEmailSuppressedForScope: async () => false },
+      '@/lib/unsubscribe-helpers': { generateUnsubscribeLink: () => 'https://example.test/unsubscribe?test' },
+      '@/lib/email-outbound': { prepareOutboundEmail: () => ({ html: '<p>Approved</p>', text: 'Approved' }), validateOutboundEmail: () => ({ ok: true }) },
+      '@/lib/server/email-signature': { readSendSignature: async () => null },
+      '@/lib/services/token-service': { tokenService: { getToken: async () => ({ refresh_token: 'fake' }) } },
+      '@/lib/server-auth-helpers': { refreshGoogleToken: async () => ({ access_token: 'fake' }), refreshMicrosoftToken: async () => ({ access_token: 'fake' }) },
+      '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({}) },
+      '@/lib/server/reply-target': { ReplyTargetError, resolveCampaignReplyTarget: async () => null },
+      '@/lib/server/daily-quota-store': { getEffectiveDailyQuotaLimits: async () => ({ contact: 10 }), reserveOutboundContactQuota: async () => ({ allowed: true }) },
+      '@/lib/server-email-sender': { sendGmail: async (_token: any, _to: any, _subject: any, _html: any, options: any) => { seen = options; return { id: 'sent', threadId: 'thread' }; } },
+      '@/lib/server/outbound-dispatch': { dispatchOutboundMessage: async ({ provider }: any) => {
+        const result = await provider.send({ dispatchId: 'dispatch' });
+        return { status: 'sent', replayed: false, dispatch: { id: 'dispatch', idempotencyKey: 'key', providerMessageId: result.providerMessageId } };
+      } },
+    });
+    const response = await post({ json: async () => ({ provider: 'google', organizationId: 'org', draftId: 'draft', versionId: 'version', idempotencyKey: 'key', ...(tracking ? { tracking } : {}) }), headers: new Headers() });
+    assert.equal(response.status, 200);
+    assert.deepEqual({ trackingDispatchId: seen.trackingDispatchId, trackLinks: seen.trackLinks }, expected);
+  }
 });
