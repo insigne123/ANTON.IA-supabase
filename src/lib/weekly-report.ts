@@ -1,6 +1,7 @@
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
 import { emailShell } from '@/lib/email-shell';
-import { goalSentence, goalsOff, type GoalProgress } from '@/lib/weekly-goals';
+import { goalMet, goalSentence, goalsOff, type GoalProgress } from '@/lib/weekly-goals';
+import { monthRows, type MonthSection } from '@/lib/month-summary';
 
 /**
  * «Informe semanal» (propuesta 2): one report per person with a section for each role they have. Everyone gets «Tu
@@ -48,6 +49,8 @@ export type PersonalSection = {
   pending: PendingReply[]; commitments: Commitment[]; touches: { calls: number; linkedin: number; whatsapp?: number } | null;
   /** The week's steps, from saving a contact to an answer (audit N1); absent in reports stored before it or when a count failed. */
   funnel?: WeekFunnel | null;
+  /** Meetings booked on a call or a WhatsApp this week (contact_calls, outcome «meeting»); `meetings` are the ones asked for in a reply. */
+  callMeetings?: number;
 };
 /** Audit N1 (1 Nov 2026): where each person's week stops, between finding someone and getting an answer. */
 export type WeekFunnel = { saved: number; withEmail: number; researched: number; drafts: number; contacted: number; replies: number };
@@ -70,8 +73,8 @@ export function funnelStall(funnel: WeekFunnel | null | undefined) {
   return best;
 }
 /** `detail` is the member's email, only when another member has the same name; `goal`, their weekly goal and progress. */
-export type TeamMember = { userId: string; name: string; detail?: string | null; role: string; sent: number; replies: number; meetings: number; pending: number; goal?: GoalProgress | null };
-export type TeamSection = { members: TeamMember[]; totals: { sent: Counted; replies: Counted; meetings: number } };
+export type TeamMember = { userId: string; name: string; detail?: string | null; role: string; sent: number; replies: number; meetings: number; pending: number; goal?: GoalProgress | null; callMeetings?: number };
+export type TeamSection = { members: TeamMember[]; totals: { sent: Counted; replies: Counted; meetings: number; callMeetings?: number } };
 export type ClosingOpportunity = { id: string; kind: string; title: string; buyer: string | null; deadlineAt: string; amount: number | null; currency: string | null; assigned: boolean };
 export type OpportunitiesSection = {
   found: { total: number; recommended: number; byKind: Array<{ kind: string; label: string; count: number }> };
@@ -82,6 +85,8 @@ export type WeeklyReport = {
   personal: PersonalSection; team: TeamSection | null; opportunities: OpportunitiesSection | null;
   /** The person's weekly goal (src/lib/weekly-goals.ts); absent in reports stored before it. */
   goal?: GoalProgress | null;
+  /** «Resumen del mes» (src/lib/month-summary.ts): the month before, for administrators, in the first seven days of a month. */
+  month?: MonthSection | null;
 };
 
 /** The goal when the team has one: a team that set both goals to 0 has none. */
@@ -129,6 +134,7 @@ export function personalHeadline(section: PersonalSection, which: ReportWeek['wh
   return [
     first,
     section.meetings ? `${section.meetings === 1 ? 'Una pidió' : `${section.meetings} pidieron`} reunión.` : '',
+    section.callMeetings ? `Agendaste ${section.callMeetings === 1 ? 'una reunión' : `${section.callMeetings.toLocaleString('es-CL')} reuniones`} por teléfono.` : '',
     section.pending.length ? `Te ${section.pending.length === 1 ? 'espera una respuesta' : `esperan ${section.pending.length} respuestas`}.` : '',
   ].filter(Boolean).join(' ');
 }
@@ -143,8 +149,21 @@ const dueDay = (at: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long
  * only works Oportunidades, read as a table of zeros.
  */
 export function teamActivity(team: TeamSection) {
-  const active = team.members.filter(member => member.sent || member.replies || member.meetings || member.pending || member.goal?.counts.contacted || member.goal?.counts.found);
+  const active = team.members.filter(member => member.sent || member.replies || member.meetings || member.callMeetings || member.pending || member.goal?.counts.contacted || member.goal?.counts.found);
   return { active, idle: team.members.filter(member => !active.includes(member)) };
+}
+
+/** Who met their weekly goal (src/lib/weekly-goals.ts), in the table's order; nobody when the team has no goals. */
+export function goalAchievers(team: TeamSection) {
+  return team.members.filter(member => { const goal = activeGoal(member.goal); return Boolean(goal && goalMet(goal)); });
+}
+
+/** «Cumplieron su meta: Ana Soto y Leo Rojas.»; null when nobody did. */
+export function achieversSentence(team: TeamSection, which: ReportWeek['which']) {
+  const names = goalAchievers(team).map(member => member.name);
+  if (!names.length) return null;
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} y ${names[names.length - 1]}`;
+  return `${which === 'current' ? 'Ya cumpli' : 'Cumpli'}${names.length === 1 ? 'ó' : 'eron'} su meta: ${list}.`;
 }
 
 /** The team's sentence: its emails and replies, or that nobody wrote (and the contacts they found, when they did). */
@@ -152,11 +171,21 @@ export function teamHeadline(team: TeamSection, which: ReportWeek['which']) {
   const when = which === 'current' ? 'esta semana' : 'la semana pasada';
   const { active } = teamActivity(team);
   const found = active.reduce((sum, member) => sum + (member.goal?.counts.found || 0), 0);
+  const callMeetings = team.totals.callMeetings || 0;
   if (!active.length || (!team.totals.sent.now && !team.totals.replies.now)) {
-    return found ? `Nadie del equipo envió correos ${when}, pero sumaron ${plural(found, 'contacto nuevo', 'contactos nuevos')}.` : `Nadie del equipo envió correos ${when}.`;
+    // A team that works by phone sends no emails: what it did by other means is said, not «nadie».
+    const contacted = active.reduce((sum, member) => sum + (member.goal?.counts.contacted || 0), 0);
+    const parts = [
+      contacted ? `contactaron a ${plural(contacted, 'persona', 'personas')} por teléfono, WhatsApp o LinkedIn` : '',
+      callMeetings ? `agendaron ${plural(callMeetings, 'reunión', 'reuniones')}` : '',
+      found ? `sumaron ${plural(found, 'contacto nuevo', 'contactos nuevos')}` : '',
+    ].filter(Boolean);
+    const joined = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`;
+    return parts.length ? `Nadie del equipo envió correos ${when}, pero ${joined}.` : `Nadie del equipo envió correos ${when}.`;
   }
   const { sent, replies, meetings } = team.totals;
-  return `Tu equipo envió ${plural(sent.now, 'correo', 'correos')} y recibió ${plural(replies.now, 'respuesta', 'respuestas')}.${meetings === 1 ? ' Una pidió reunión.' : meetings ? ` ${meetings.toLocaleString('es-CL')} pidieron reunión.` : ''}`;
+  return `Tu equipo envió ${plural(sent.now, 'correo', 'correos')} y recibió ${plural(replies.now, 'respuesta', 'respuestas')}.${meetings === 1 ? ' Una pidió reunión.' : meetings ? ` ${meetings.toLocaleString('es-CL')} pidieron reunión.` : ''}`
+    + (callMeetings ? ` ${callMeetings === 1 ? 'Agendaron una reunión' : `Agendaron ${callMeetings.toLocaleString('es-CL')} reuniones`} por teléfono.` : '');
 }
 
 /** Up to three things for the coming days, the most urgent first. */
@@ -200,7 +229,8 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
   section('Tu semana');
   const goal = activeGoal(report.goal);
   if (goal) row(goalSentence(goal, week.which));
-  row(`${plural(personal.sent.now, 'correo enviado', 'correos enviados')} · ${plural(personal.replies.now, 'respuesta', 'respuestas')} · ${plural(personal.meetings, 'reunión pedida', 'reuniones pedidas')}`);
+  row(`${plural(personal.sent.now, 'correo enviado', 'correos enviados')} · ${plural(personal.replies.now, 'respuesta', 'respuestas')} · ${plural(personal.meetings, 'reunión pedida', 'reuniones pedidas')}`
+    + (personal.callMeetings ? ` · ${plural(personal.callMeetings, 'reunión agendada por teléfono', 'reuniones agendadas por teléfono')}` : ''));
   const touched = touchesSentence(personal.touches);
   if (touched) row(touched.charAt(0).toUpperCase() + touched.slice(1));
   if (team) {
@@ -211,10 +241,17 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
       row(`${plural(team.totals.sent.now, 'correo enviado', 'correos enviados')} y ${plural(team.totals.replies.now, 'respuesta', 'respuestas')} entre ${plural(team.members.length, 'persona', 'personas')}`);
       active.slice(0, 8).forEach(member => {
         const goal = activeGoal(member.goal);
-        row(`${member.name}${member.detail ? ` (${member.detail})` : ''}: ${member.sent} enviados, ${member.replies} respuestas${member.pending ? `, ${member.pending} por responder` : ''}${goal?.targets.contacted ? ` · meta ${goal.counts.contacted} de ${goal.targets.contacted}` : ''}`);
+        row(`${member.name}${member.detail ? ` (${member.detail})` : ''}: ${member.sent} enviados, ${member.replies} respuestas${member.callMeetings ? `, ${plural(member.callMeetings, 'reunión', 'reuniones')} por teléfono` : ''}${member.pending ? `, ${member.pending} por responder` : ''}${goal?.targets.contacted ? ` · meta ${goal.counts.contacted} de ${goal.targets.contacted}` : ''}`);
       });
       if (idle.length) row(`${plural(idle.length, 'persona', 'personas')} sin actividad`);
     }
+    const achieved = achieversSentence(team, week.which);
+    if (achieved) row(achieved.replace(/\.$/, ''));
+  }
+  const monthLines = report.month ? monthRows(report.month) : [];
+  if (report.month && monthLines.length) {
+    section(`Resumen de ${report.month.label}`);
+    monthLines.forEach(line => row(line.text, line.href));
   }
   if (opportunities) {
     section('Oportunidades');

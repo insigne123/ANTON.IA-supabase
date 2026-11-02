@@ -162,3 +162,56 @@ test('turning the email on keeps the rest of the signatures', async () => {
   await saveReportEmail(client, 'u-admin', false);
   assert.deepEqual(tables.profiles[0].signatures, { weekly_report: { email: false }, other: 1 });
 });
+
+test('the first Monday of a month, an administrator also gets the month before: credits, what came of them and the opportunities', async () => {
+  const data: Record<string, any[]> = seed();
+  const callback = (id: string, userId: string, lead: string, phone: boolean, at: string) => ({ id, organization_id: ORG, user_id: userId, target_table: 'enriched_leads',
+    target_lead_id: lead, apollo_person_id: `p-${lead}`, reveal_email: true, reveal_phone: phone, terminal_state: 'succeeded', created_at: at });
+  data.apollo_enrichment_callbacks = [
+    callback('cb1', 'u-ana', 'l1', true, '2026-10-05T15:00:00Z'), callback('cb2', 'u-admin', 'l2', false, '2026-10-10T15:00:00Z'),
+    callback('cb3', 'u-admin', 'l3', false, '2026-11-01T15:00:00Z'), // November: next month's
+  ];
+  data.enriched_leads = ['l1', 'l2', 'l3'].map(id => ({ id, organization_id: ORG, email: `${id}@sur.cl`, source_provider_id: `p-${id}` }));
+  data.contacted_leads.push({ id: 'c-l1', organization_id: ORG, user_id: 'u-ana', email: 'l1@sur.cl', name: 'Persona l1', sent_at: '2026-10-06T12:00:00Z',
+    replied_at: '2026-10-07T12:00:00Z', reply_intent: 'meeting_request', conversation_resolved_at: '2026-10-08T12:00:00Z', conversation_outbound_at: null, data: {} });
+  data.opportunity_activity = [
+    { id: 'a1', organization_id: ORG, opportunity_id: 'o1', kind: 'state', data: { to: 'submitted' }, created_at: '2026-10-08T12:00:00Z' },
+    { id: 'a2', organization_id: ORG, opportunity_id: 'o1', kind: 'state', data: { to: 'won', amount: 750000000 }, created_at: '2026-10-28T12:00:00Z' },
+    { id: 'a3', organization_id: ORG, opportunity_id: 'o2', kind: 'state', data: { to: 'lost' }, created_at: '2026-10-29T12:00:00Z' },
+    { id: 'a4', organization_id: ORG, opportunity_id: 'o2', kind: 'comment', data: { to: 'won' }, created_at: '2026-10-30T12:00:00Z' }, // not a move
+  ];
+  const { client } = memory(data, ['contact_touches']);
+  const firstMonday = new Date('2026-11-02T12:00:00.000Z');
+  const { report } = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: firstMonday });
+  assert.equal(report.month?.label, 'octubre');
+  assert.deepEqual(report.month?.credits, { credits: 10, paid: 2, withPhone: 1, contacted: 1, conversations: 1, meetings: 1, waiting: 1 });
+  assert.deepEqual(report.month?.opportunities, { submitted: 1, won: 1, lost: 1, wonAmounts: [{ currency: 'CLP', amount: 750000000 }], wonWithoutAmount: 0 });
+
+  const member = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-ana' }, { which: 'previous', canSeeOpportunities: canSee, now: firstMonday });
+  assert.equal(member.report.month, undefined, 'only administrators');
+  const hidden = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: async () => false, now: firstMonday });
+  assert.equal(hidden.report.month?.opportunities, null, 'without Oportunidades, only the credits');
+  assert.equal(hidden.report.month?.credits?.credits, 10);
+  const later = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: new Date('2026-11-09T12:00:00.000Z') });
+  assert.equal(later.report.month, undefined, 'the second Monday has no month');
+});
+
+test('meetings booked on a call or a WhatsApp count for the person and the team, and nothing breaks before the table exists (plan de uso U4)', async () => {
+  const data: Record<string, any[]> = seed();
+  const call = (id: string, userId: string, outcome: string, at: string) => ({ id, organization_id: ORG, user_id: userId, lead_id: null, channel: 'call', outcome, started_at: at, outcome_at: at });
+  data.contact_calls = [
+    call('c1', 'u-admin', 'meeting', '2026-10-14T15:00:00Z'), call('c2', 'u-admin', 'answered', '2026-10-15T15:00:00Z'),
+    call('c3', 'u-ana', 'meeting', '2026-10-16T15:00:00Z'), call('c4', 'u-ana', 'meeting', '2026-10-08T15:00:00Z'), // the week before
+  ];
+  const { client } = memory(data, ['contact_touches']);
+  const { report } = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
+  assert.equal(report.personal.callMeetings, 1);
+  assert.deepEqual(report.personal.touches, { calls: 2, linkedin: 0, whatsapp: 0 });
+  assert.deepEqual(report.team!.members.map(member => [member.name, member.callMeetings]), [['Nicolás Yarur', 1], ['Ana Soto', 1]]);
+  assert.equal(report.team!.totals.callMeetings, 2);
+
+  const before = memory(seed(), ['contact_touches', 'contact_calls']);
+  const old = await buildWeeklyReport(before.client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
+  assert.equal(old.report.personal.callMeetings, 0);
+  assert.equal(old.report.team!.totals.callMeetings, 0);
+});

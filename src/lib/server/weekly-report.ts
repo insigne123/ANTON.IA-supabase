@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { replyNeedsAnswer } from '@/lib/home/today';
 import { readPersonGoal, readTeamGoals } from '@/lib/server/weekly-goals';
 import { preferredFullName } from '@/lib/lead-name';
+import { readCreditResults } from '@/lib/server/credit-results';
+import { monthOpportunities, reportMonth, type MonthRange, type MonthSection, type OpportunityMove } from '@/lib/month-summary';
 import {
   OPPORTUNITY_KINDS, reportEmail, reportWeek, type ClosingOpportunity, type Commitment, type OpportunitiesSection, type PendingReply,
   type PersonalSection, type ReportRole, type ReportWeek, type TeamMember, type TeamSection, type WeeklyReport,
@@ -103,7 +105,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
     // «Llamadas y LinkedIn» (contact_touches) may not exist yet: the report goes on without it.
     own('contact_touches', 'channel,done_at').eq('state', 'done').gte('done_at', week.from).lt('done_at', week.to).limit(2000),
     // «Llamar» y «WhatsApp» (contact_calls): the ones with a result told this week. Missing table: none.
-    own('contact_calls', 'channel,outcome_at').not('outcome', 'is', null).gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
+    own('contact_calls', 'channel,outcome,outcome_at').not('outcome', 'is', null).gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
     // The week's funnel (audit N1): how many were saved, got an email, were researched and got a draft, this week.
     countOf(() => counted('leads', 'created_at')),
     countOf(() => counted('enriched_leads', 'created_at').not('email', 'is', null).neq('email', '')),
@@ -112,7 +114,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
   ]);
   for (const result of [waiting, commitments]) if ((result as any).error) throw new WeeklyReportError('No pudimos leer tus pendientes.', 503);
   const touchRows = (touches as any).error ? null : ((touches as any).data || []) as Array<{ channel: string }>;
-  const callRows = (calls as any).error ? [] : ((calls as any).data || []) as Array<{ channel: string }>;
+  const callRows = (calls as any).error ? [] : ((calls as any).data || []) as Array<{ channel: string; outcome?: string | null }>;
   const sent = countDispatches(dispatches, week);
   const answered = countReplies(replies, week);
   return {
@@ -124,6 +126,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
       linkedin: (touchRows || []).filter(row => row.channel === 'linkedin').length,
       whatsapp: callRows.filter(row => row.channel === 'whatsapp').length,
     } : null,
+    callMeetings: callRows.filter(row => row.outcome === 'meeting').length,
     funnel: [saved, withEmail, researched, drafts].every(value => value !== null)
       ? { saved: saved!, withEmail: withEmail!, researched: researched!, drafts: drafts!, contacted: sent.contacted.now, replies: answered.replies.now } : null,
   };
@@ -146,12 +149,15 @@ export async function readTeam(client: Client, organizationId: string, week: Rep
   const ids = (members.data || []).map((row: any) => String(row.user_id));
   const org = (table: string, columns: string) => client.from(table).select(columns).eq('organization_id', organizationId);
   const since = new Date(Date.parse(week.to) - 30 * 86_400_000).toISOString();
-  const [profiles, dispatches, replies, waiting] = await Promise.all([
+  const [profiles, dispatches, replies, waiting, booked] = await Promise.all([
     ids.length ? client.from('profiles').select('id,full_name,email').in('id', ids) : Promise.resolve({ data: [], error: null }),
     all(() => org('outbound_dispatches', 'id,user_id,channel,metadata,completed_at,reconciliation_details').eq('status', 'sent').gte('completed_at', week.previousFrom).lt('completed_at', week.to).order('id')),
     all(() => org('contacted_leads', 'id,user_id,email,reply_intent,replied_at').gte('replied_at', week.previousFrom).lt('replied_at', week.to).order('id')),
     all(() => org('contacted_leads', 'id,user_id,email,name,reply_intent,replied_at,conversation_resolved_at,conversation_outbound_at').gte('replied_at', since).order('id')),
+    // Meetings booked on a call or a WhatsApp (contact_calls); before the table exists, none.
+    org('contact_calls', 'user_id').eq('outcome', 'meeting').gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
   ]);
+  const bookedRows = ((booked as any).error ? [] : (booked as any).data || []) as Array<{ user_id: string }>;
   if ((profiles as any).error) throw new WeeklyReportError('No pudimos leer el equipo.', 503);
   const names = new Map<string, string>(((profiles as any).data || []).map((row: any) => [String(row.id), String(row.full_name || String(row.email || '').split('@')[0] || 'Sin nombre').trim()]));
   const emails = new Map<string, string>(((profiles as any).data || []).filter((row: any) => row.email).map((row: any) => [String(row.id), String(row.email)]));
@@ -163,11 +169,11 @@ export async function readTeam(client: Client, organizationId: string, week: Rep
     const answered = countReplies(of(replies, userId), week);
     const name = names.get(userId) || 'Sin nombre';
     return { userId, name, detail: shared(name) ? emails.get(userId) || null : null, role: String(member.role || 'member'), sent: sent.sent.now, replies: answered.replies.now,
-      meetings: answered.meetings, pending: pendingReplies(of(waiting, userId)).length };
+      meetings: answered.meetings, callMeetings: bookedRows.filter(row => String(row.user_id) === userId).length, pending: pendingReplies(of(waiting, userId)).length };
   }).sort((a: TeamMember, b: TeamMember) => b.sent - a.sent || b.replies - a.replies || a.name.localeCompare(b.name, 'es'));
   const totalSent = countDispatches(dispatches, week);
   const totalReplies = countReplies(replies, week);
-  return { members: list, totals: { sent: totalSent.sent, replies: totalReplies.replies, meetings: totalReplies.meetings } };
+  return { members: list, totals: { sent: totalSent.sent, replies: totalReplies.replies, meetings: totalReplies.meetings, callMeetings: bookedRows.length } };
 }
 
 /** What Oportunidades found this week and what closes in the next seven days, with who has it. */
@@ -231,26 +237,56 @@ export async function reportRoles(client: Client, scope: ReportScope, canSeeOppo
   const roles: ReportRole[] = ['personal'];
   if (admin) roles.push('team');
   if ((managers.value.includes(scope.userId) || !managers.value.length) && mayOpportunities) roles.push('opportunities');
-  return { roles, admin, managers: managers.value };
+  return { roles, admin, managers: managers.value, mayOpportunities };
+}
+
+/**
+ * «Resumen del mes» (src/lib/month-summary.ts): what the organization's credits of the month got, and its opportunities presented,
+ * won and lost, from the moves the team and the pipeline recorded. Each half that cannot be read is left out.
+ */
+export async function readMonth(client: Client, organizationId: string, month: MonthRange, options: { opportunities: boolean; now?: Date }): Promise<MonthSection> {
+  const [credits, opportunities] = await Promise.all([
+    readCreditResults(client, { organizationId, from: month.from, to: month.to, now: options.now }).then(result => result.totals, () => null),
+    options.opportunities ? readMonthOpportunities(client, organizationId, month).catch(() => null) : Promise.resolve(null),
+  ]);
+  return { ...month, credits, opportunities };
+}
+
+async function readMonthOpportunities(client: Client, organizationId: string, month: MonthRange) {
+  const rows = await all(() => client.from('opportunity_activity').select('id,opportunity_id,kind,data,created_at').eq('organization_id', organizationId)
+    .in('kind', ['state', 'auto_state']).gte('created_at', month.from).lt('created_at', month.to).order('id'));
+  const moves: OpportunityMove[] = rows.map(row => ({ opportunityId: String(row.opportunity_id), to: row.data?.to ? String(row.data.to) : null,
+    amount: typeof row.data?.amount === 'number' ? row.data.amount : null, createdAt: String(row.created_at) }));
+  const won = [...new Set(moves.filter(move => move.to === 'won').map(move => move.opportunityId))];
+  const values: any[] = [];
+  for (let start = 0; start < won.length; start += 200) {
+    const result: any = await client.from('commercial_opportunities').select('id,amount,currency').eq('organization_id', organizationId).in('id', won.slice(start, start + 200));
+    if (result.error) throw new WeeklyReportError('No pudimos leer las oportunidades del mes.', 503);
+    values.push(...(result.data || []));
+  }
+  return monthOpportunities(moves, values.map(row => ({ id: String(row.id), amount: row.amount === null || row.amount === undefined ? null : Number(row.amount), currency: row.currency || null })));
 }
 
 export async function buildWeeklyReport(client: Client, scope: ReportScope, options: { which: ReportWeek['which']; canSeeOpportunities: () => Promise<boolean>; now?: Date }) {
   const now = options.now ?? new Date();
   const week = reportWeek(now, options.which);
-  const { roles, admin, managers } = await reportRoles(client, scope, options.canSeeOpportunities);
-  // The goals are an addition: when they cannot be read, the report goes on without them.
+  const { roles, admin, managers, mayOpportunities } = await reportRoles(client, scope, options.canSeeOpportunities);
+  // The goals and the month are additions: when they cannot be read, the report goes on without them.
   const range = { from: week.from, to: week.to };
-  const [profile, personal, team, opportunities, goal, teamGoals] = await Promise.all([
+  // On the first Monday of a month, and through its first week, an administrator also gets the month before.
+  const monthRange = roles.includes('team') ? reportMonth(now) : null;
+  const [profile, personal, team, opportunities, goal, teamGoals, month] = await Promise.all([
     client.from('profiles').select('full_name').eq('id', scope.userId).maybeSingle(),
     readPersonal(client, scope, week, now),
     roles.includes('team') ? readTeam(client, scope.organizationId, week) : Promise.resolve(null),
     roles.includes('opportunities') ? readOpportunities(client, scope.organizationId, week, now) : Promise.resolve(null),
     readPersonGoal(client, scope, range).catch(() => null),
     roles.includes('team') ? readTeamGoals(client, scope.organizationId, range).catch(() => null) : Promise.resolve(null),
+    monthRange ? readMonth(client, scope.organizationId, monthRange, { opportunities: mayOpportunities, now }).catch(() => null) : Promise.resolve(null),
   ]);
   if (team && teamGoals) for (const member of team.members) member.goal = teamGoals(member.userId);
   const name = String((profile as any).data?.full_name || '').trim().split(/\s+/)[0] || '';
-  const report: WeeklyReport = { week, roles, name, personal, team, opportunities, goal };
+  const report: WeeklyReport = { week, roles, name, personal, team, opportunities, goal, ...(month ? { month } : {}) };
   return { report, admin, managers };
 }
 
