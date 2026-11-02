@@ -2,6 +2,7 @@ import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
 import { emailShell } from '@/lib/email-shell';
 import { goalMet, goalSentence, goalsOff, type GoalProgress } from '@/lib/weekly-goals';
 import { monthRows, type MonthSection } from '@/lib/month-summary';
+import { workStall } from '@/lib/team-funnel';
 
 /**
  * «Informe semanal» (propuesta 2): one report per person with a section for each role they have. Everyone gets «Tu
@@ -52,25 +53,26 @@ export type PersonalSection = {
   /** Meetings booked on a call or a WhatsApp this week (contact_calls, outcome «meeting»); `meetings` are the ones asked for in a reply. */
   callMeetings?: number;
 };
-/** Audit N1 (1 Nov 2026): where each person's week stops, between finding someone and getting an answer. */
+/**
+ * Audit N1 (1 Nov 2026): where each person's week stops, between finding someone and a conversation. Since the calls (plan de
+ * uso U1), `contacted` also counts the calls and WhatsApps with a result and `replies` the calls answered: the same steps as
+ * «El trabajo, paso a paso» in Administración (src/lib/team-funnel.ts).
+ */
 export type WeekFunnel = { saved: number; withEmail: number; researched: number; drafts: number; contacted: number; replies: number };
 export const FUNNEL_STEPS: Array<{ key: keyof WeekFunnel; label: string }> = [
   { key: 'saved', label: 'Guardados' }, { key: 'withEmail', label: 'Con correo' }, { key: 'researched', label: 'Investigados' },
-  { key: 'drafts', label: 'Borradores' }, { key: 'contacted', label: 'Contactados' }, { key: 'replies', label: 'Respuestas' },
+  { key: 'drafts', label: 'Borradores' }, { key: 'contacted', label: 'Contactados' }, { key: 'replies', label: 'Conversaciones' },
 ];
 /**
- * The step where most is left waiting: between two steps in a row, the biggest fall from the one before, when it is at least three
- * and the one before had at least three. The steps are counted in the same week, so a later step can be larger: that is no fall.
+ * The step where most is left waiting, by the rule of Administración (workStall): the biggest fall of at least three after a step
+ * with at least three, that no later step made up (who saved 30 and called 30 did not stop at the email). A conversation depends
+ * on the other side, so the fall from «Contactados» is not read as a stop.
  */
 export function funnelStall(funnel: WeekFunnel | null | undefined) {
-  if (!funnel) return null;
-  let best: { from: string; to: string; lost: number } | null = null;
-  for (let index = 1; index < FUNNEL_STEPS.length; index += 1) {
-    const before = funnel[FUNNEL_STEPS[index - 1].key], after = funnel[FUNNEL_STEPS[index].key];
-    const lost = before - after;
-    if (before >= 3 && lost >= 3 && (!best || lost > best.lost)) best = { from: FUNNEL_STEPS[index - 1].label, to: FUNNEL_STEPS[index].label, lost };
-  }
-  return best;
+  const stall = funnel ? workStall({ ...funnel, conversations: funnel.replies }) : null;
+  if (!stall) return null;
+  const index = FUNNEL_STEPS.findIndex(step => step.key === stall.step);
+  return { from: FUNNEL_STEPS[index - 1].label, to: FUNNEL_STEPS[index].label, lost: stall.lost };
 }
 /** `detail` is the member's email, only when another member has the same name; `goal`, their weekly goal and progress. */
 export type TeamMember = { userId: string; name: string; detail?: string | null; role: string; sent: number; replies: number; meetings: number; pending: number; goal?: GoalProgress | null; callMeetings?: number };

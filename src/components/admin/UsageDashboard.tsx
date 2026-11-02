@@ -20,6 +20,7 @@ import {cn} from '@/lib/utils';
 import {SEGMENT_TRACK,chipClass,segmentClass} from '@/components/ui/chip';
 import {ApolloAllocationCard} from '@/components/admin/ApolloAllocationCard';
 import {CreditResultsCard} from '@/components/admin/CreditResultsCard';
+import {TeamFunnelCard} from '@/components/admin/TeamFunnelCard';
 
 const n=(value:number|null|undefined)=>value===null||value===undefined?'—':value.toLocaleString('es-CL');
 const date=(value:string)=>new Date(value+'T12:00:00Z').toLocaleDateString('es-CL',{day:'numeric',month:'short',timeZone:'UTC'}).replace('.','');
@@ -105,6 +106,8 @@ export function UsageDashboard(){
     {!person&&<ApolloAllocationCard/>}
     {/* What the period's Apollo credits got, by person and team (credit-results.ts); a platform view needs one company. */}
     {(!data?.platform||Boolean(org))&&<CreditResultsCard from={from} to={to} organizationId={org||undefined} groupId={group||undefined} userId={person||undefined}/>}
+    {/* Where the period's work stops, for the team and each person (team-funnel.ts, plan de uso A4); same scope as above. */}
+    {(!data?.platform||Boolean(org))&&<TeamFunnelCard from={from} to={to} organizationId={org||undefined} groupId={group||undefined} userId={person||undefined}/>}
     {error&&<div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm"><p>{error}</p><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={()=>void load()}>Reintentar</Button><Button variant="ghost" size="sm" onClick={()=>{setOrg('');setGroup('');setPerson('');}}>Restablecer alcance</Button></div></div>}
     {exportError&&<p role="alert" className="text-sm text-destructive">{exportError}</p>}
     {loading&&!data&&<Loading/>}
