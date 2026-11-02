@@ -1,10 +1,14 @@
-export function addMessageTracking(input: { html: string; baseUrl: string; trackingKey?: string | null }) {
+/**
+ * The open pixel and, unless `links` is false, the click redirects of a message sent through an outbound dispatch. Opens only
+ * (`links: false`) is what an organization turns on for the emails sent one by one (plan de uso M4): rewritten links hurt delivery.
+ */
+export function addMessageTracking(input: { html: string; baseUrl: string; trackingKey?: string | null; links?: boolean }) {
   const html = String(input.html || '');
   const key = String(input.trackingKey || '').trim();
   if (!key) return { html, trackedLinks: 0, pixelEnabled: false };
   let trackedLinks = 0;
   const origin = String(input.baseUrl || '').replace(/\/$/, '');
-  const tracked = html.replace(/(<a\b[^>]*\bhref\s*=\s*)(["'])(https?:\/\/[^"']+)\2/gi, (whole, prefix: string, quote: string, destination: string) => {
+  const tracked = input.links === false ? html : html.replace(/(<a\b[^>]*\bhref\s*=\s*)(["'])(https?:\/\/[^"']+)\2/gi, (whole, prefix: string, quote: string, destination: string) => {
     try {
       const url = new URL(destination);
       if (url.pathname.toLowerCase().includes('unsubscribe') || url.pathname.startsWith('/api/tracking/')) return whole;

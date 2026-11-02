@@ -27,6 +27,7 @@ import {
     OutboundDispatchConflictError,
     OutboundPreProviderDeferredError,
 } from '@/lib/server/outbound-dispatch';
+import { readOpenTracking, sendTracking } from '@/lib/server/open-tracking';
 import { ensureMessagingDraftV1, getCurrentMessagingDraftVersionV1 } from '@/lib/server/messaging-drafts';
 import { resolveCampaignReplyTarget, resolveContactedReplyTarget, ReplyTargetError } from '@/lib/server/reply-target';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -250,7 +251,10 @@ export async function POST(req: NextRequest) {
         const trackingClicks = tracking && typeof tracking === 'object' ? tracking.clicks : undefined;
         if (trackingOpen !== undefined && typeof trackingOpen !== 'boolean') return NextResponse.json({ error: 'tracking.open must be a boolean' }, { status: 400 });
         if (trackingClicks !== undefined && typeof trackingClicks !== 'boolean') return NextResponse.json({ error: 'tracking.clicks must be a boolean' }, { status: 400 });
-        const trackEngagement = trackingOpen === true || trackingClicks === true;
+        // «Medir aperturas» (plan de uso M4): what the request asked for, else the organization's choice for a new message.
+        const measured = sendTracking({ open: trackingOpen, clicks: trackingClicks, newMessage: deliveryMode !== 'reply_contact',
+            organizationOpens: trackingOpen === undefined && deliveryMode !== 'reply_contact' ? await readOpenTracking(getSupabaseAdminClient(), orgId) : false });
+        const trackEngagement = measured.track;
         if (
             provider === 'google'
             && delivery.text !== null
@@ -443,12 +447,12 @@ export async function POST(req: NextRequest) {
                         return { outcome: 'rejected' as const, code: 'recipient_unsubscribed', message: 'El destinatario solicitó la baja.', response: { providerInvoked: false } };
                     }
                     const providerReceipt = provider === 'google'
-                        ? await sendGmail(accessToken, delivery.to, delivery.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, oneClickUnsubscribeUrl: toOneClickUnsubscribeUrl(unsubscribeUrl), idempotencyKey, ...(trackEngagement ? { trackingDispatchId: dispatchId } : {}), ...(replyTarget ? { replyTarget } : {}) })
+                        ? await sendGmail(accessToken, delivery.to, delivery.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, oneClickUnsubscribeUrl: toOneClickUnsubscribeUrl(unsubscribeUrl), idempotencyKey, ...(trackEngagement ? { trackingDispatchId: dispatchId, trackLinks: measured.links } : {}), ...(replyTarget ? { replyTarget } : {}) })
                         : await sendOutlook(accessToken, delivery.to, delivery.subject, prepared.html, {
                             textBody: prepared.text,
                             unsubscribeUrl,
                             idempotencyKey,
-                            ...(trackEngagement ? { trackingDispatchId: dispatchId } : {}),
+                            ...(trackEngagement ? { trackingDispatchId: dispatchId, trackLinks: measured.links } : {}),
                             requestReceipts: sendDraft.content.deliveryOptions?.requestReceipts === true,
                             ...(replyTarget ? { replyTarget } : {}),
                         });
