@@ -20,7 +20,7 @@ import {
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { ApolloGatewayError } from '@/lib/server/apollo-provider/apollo';
-import { consumeEndpointRateLimit, getGatewayConfig } from '@/lib/server/apollo-provider/gateway';
+import { getGatewayConfig, waitForEndpointRateLimit } from '@/lib/server/apollo-provider/gateway';
 import { executeProviderLeadSearch } from '@/lib/server/apollo-provider/lead-provider';
 import { validateLeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { buildBatchLeadSearchPayload } from '@/lib/server/lead-search-payload';
@@ -327,10 +327,13 @@ function normalizeEmployeeRangeForBackend(value: string): string | null {
   return null;
 }
 
+/** Who the search is for (every payload of this route carries it), so the minute's allowance is counted per person. */
+const searchPerson = (payload: any) => String(payload?.user_id || payload?.userId || '').trim() || null;
+
 async function runLeadSearchInProcess(payload: any): Promise<{ ok: true; json: any } | { ok: false; error: string }> {
   if (!getProviderApiKey()) return { ok: false, error: 'APOLLO_PROVIDER_NOT_CONFIGURED' };
   const config = getGatewayConfig();
-  const rateLimit = consumeEndpointRateLimit('lead-search', config);
+  const rateLimit = await waitForEndpointRateLimit('lead-search', config, searchPerson(payload));
   if (!rateLimit.allowed) return { ok: false, error: 'RATE_LIMITED' };
   const input = validateLeadSearchInput({ ...((payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>), provider: 'apollo' }, config);
   if (!input.ok) return { ok: false, error: 'INVALID_REQUEST' };
@@ -361,7 +364,7 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
   while (attempt <= MAX_RETRIES) {
     try {
       const config = getGatewayConfig();
-      const rateLimit = consumeEndpointRateLimit('lead-search', config);
+      const rateLimit = await waitForEndpointRateLimit('lead-search', config, searchPerson(payload));
       if (!rateLimit.allowed) throw new Error('RATE_LIMITED');
       const input = validateLeadSearchInput({ ...((payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>), provider: 'apollo' }, config);
       if (!input.ok) throw new Error('INVALID_REQUEST');

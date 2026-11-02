@@ -13,7 +13,10 @@ export type GatewayConfig = {
   providerTimeoutMs: number;
   defaultProvider: LeadProvider;
   rateLimitWindowMs: number;
+  /** Searches a minute for the whole instance: the ceiling that protects the provider. */
   leadSearchMaxRequests: number;
+  /** Searches a minute for one person, inside that ceiling, so one person's burst does not block the rest. */
+  leadSearchMaxPerPerson: number;
   enrichMaxRequests: number;
 };
 
@@ -41,7 +44,11 @@ export function getGatewayConfig(environment: GatewayEnvironment = process.env):
     providerTimeoutMs: boundedInteger(environment, 'APOLLO_BACKEND_PROVIDER_TIMEOUT_MS', 20_000, 1_000, 60_000),
     defaultProvider: configuredLeadProvider(environment),
     rateLimitWindowMs: boundedInteger(environment, 'APOLLO_BACKEND_RATE_LIMIT_WINDOW_MS', 60_000, 1_000, 3_600_000),
-    leadSearchMaxRequests: boundedInteger(environment, 'APOLLO_BACKEND_LEAD_SEARCH_MAX_REQUESTS', 20, 1, 1_000),
+    // 20 a minute for everyone, left from the external gateway, stopped one person searching contacts in 15 companies at
+    // once (five at a time) on 2 Nov 2026, with «Llegaste al límite disponible por hoy» on screen. Apollo's own limit still
+    // answers APOLLO_RATE_LIMITED.
+    leadSearchMaxRequests: boundedInteger(environment, 'APOLLO_BACKEND_LEAD_SEARCH_MAX_REQUESTS', 180, 1, 1_000),
+    leadSearchMaxPerPerson: boundedInteger(environment, 'APOLLO_BACKEND_LEAD_SEARCH_MAX_PER_PERSON', 60, 1, 1_000),
     enrichMaxRequests: boundedInteger(environment, 'APOLLO_BACKEND_ENRICH_MAX_REQUESTS', 60, 1, 1_000),
   };
 }
@@ -141,30 +148,48 @@ export type RateLimitResult = {
   retryAfterSeconds: number;
 };
 
-export function consumeEndpointRateLimit(route: 'lead-search' | 'enrich', config: GatewayConfig, now = Date.now()): RateLimitResult {
+const bucketOf = (name: string, config: GatewayConfig, now: number): RateBucket => {
+  const bucket = rateBuckets.get(name);
+  return !bucket || bucket.resetAt <= now ? { used: 0, resetAt: now + config.rateLimitWindowMs } : bucket;
+};
+const refused = (limit: number, bucket: RateBucket, now: number): RateLimitResult => ({
+  allowed: false, limit, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000)),
+});
+
+/**
+ * One request of the route in this minute, when there is room: the instance's ceiling for everyone and, for a search with
+ * the person who asked, that person's own share. Without a person, only the ceiling counts.
+ */
+export function consumeEndpointRateLimit(route: 'lead-search' | 'enrich', config: GatewayConfig, now = Date.now(), person?: string | null): RateLimitResult {
   const limit = route === 'lead-search' ? config.leadSearchMaxRequests : config.enrichMaxRequests;
-  const bucket = rateBuckets.get(route);
-  const activeBucket = !bucket || bucket.resetAt <= now
-    ? { used: 0, resetAt: now + config.rateLimitWindowMs }
-    : bucket;
-
-  if (activeBucket.used >= limit) {
-    return {
-      allowed: false,
-      limit,
-      remaining: 0,
-      retryAfterSeconds: Math.max(1, Math.ceil((activeBucket.resetAt - now) / 1_000)),
-    };
+  const shared = bucketOf(route, config, now);
+  if (shared.used >= limit) return refused(limit, shared, now);
+  const key = route === 'lead-search' && String(person || '').trim() ? `${route}:${String(person).trim()}` : '';
+  if (key) {
+    const own = bucketOf(key, config, now);
+    if (own.used >= config.leadSearchMaxPerPerson) return refused(config.leadSearchMaxPerPerson, own, now);
+    own.used += 1;
+    rateBuckets.set(key, own);
   }
+  shared.used += 1;
+  rateBuckets.set(route, shared);
+  // The people's minutes that ended are dropped now and then, so the map stays the size of who searches.
+  if (rateBuckets.size > 500) for (const [name, bucket] of rateBuckets) if (bucket.resetAt <= now) rateBuckets.delete(name);
+  return { allowed: true, limit, remaining: Math.max(0, limit - shared.used), retryAfterSeconds: 0 };
+}
 
-  activeBucket.used += 1;
-  rateBuckets.set(route, activeBucket);
-  return {
-    allowed: true,
-    limit,
-    remaining: Math.max(0, limit - activeBucket.used),
-    retryAfterSeconds: 0,
-  };
+/**
+ * The same, but a request that arrives seconds before the minute turns waits for it instead of failing: a burst of searches
+ * (contacts in many companies at once) takes a little longer rather than leaving companies without results.
+ */
+export async function waitForEndpointRateLimit(route: 'lead-search' | 'enrich', config: GatewayConfig, person?: string | null, options: {
+  maxWaitMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number;
+} = {}): Promise<RateLimitResult> {
+  const now = options.now ?? Date.now;
+  const first = consumeEndpointRateLimit(route, config, now(), person);
+  if (first.allowed || first.retryAfterSeconds * 1_000 > (options.maxWaitMs ?? 20_000)) return first;
+  await (options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))))(first.retryAfterSeconds * 1_000);
+  return consumeEndpointRateLimit(route, config, now(), person);
 }
 
 export function getRequestId(headers: Headers) {

@@ -39,6 +39,12 @@ export function getFriendlySearchErrorMessage(message?: string) {
 
   if (lower.includes('crédito') || lower.includes('credito')) return raw;
 
+  // Too many searches in the same minute (contacts in many companies at once), ours or Apollo's: seconds, not the day's
+  // allowance. «rate_limited» also contains «limite», which read as the daily limit (2 Nov 2026).
+  if (lower.includes('rate_limited') || lower.includes('too many requests')) {
+    return 'Hay muchas búsquedas al mismo tiempo. Espera un minuto y vuelve a intentarlo: no es tu límite del día.';
+  }
+
   if (lower.includes('quota') || lower.includes('limite') || lower.includes('límite') || lower.includes('429')) {
     if (lower.includes('alcanzaste el límite diario') || lower.includes('alcanzaste el limite diario')) return raw;
     return 'Llegaste al límite disponible por hoy. Puedes volver a intentarlo más tarde o pedir más cupo a quien administra tu cuenta.';
