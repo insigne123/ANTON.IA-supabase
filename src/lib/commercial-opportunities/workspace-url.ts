@@ -17,8 +17,16 @@ const SECTION_WORDS: Record<string, string> = { informe: 'summary', postular: 'a
 const FILTERS: readonly string[] = [...LIST_VIEWS, 'done'];
 export const WORKSPACE_URL_DEFAULTS: WorkspaceUrlState = { view: 'pipeline', filter: 'recommended', source: 'all', query: '', categories: [], sort: 'priority' };
 
+/**
+ * «Asignar» in the morning alert (accion=asignar): the opportunity opens with its assignment dialog. Only read, never written back, so
+ * the address loses it once the file is open and a reload does not ask again.
+ */
+const ASSIGN_WORD = 'asignar';
+/** The address of «Asignar» for one opportunity, from the morning alert. */
+export const opportunityAssignHref = (id: string) => `/opportunities?op=${encodeURIComponent(id)}&accion=${ASSIGN_WORD}`;
+
 /** What an address asks for; anything unknown is the default. */
-export function readWorkspaceUrl(search: string): WorkspaceUrlState & { op: string | null; section: string | null } {
+export function readWorkspaceUrl(search: string): WorkspaceUrlState & { op: string | null; section: string | null; assign: boolean } {
   const params = new URLSearchParams(search);
   const view = (Object.entries(VIEW_WORDS).find(([, word]) => word === params.get('vista'))?.[0] ?? WORKSPACE_URL_DEFAULTS.view) as WorkspaceView;
   const filter = params.get('etapa') || '';
@@ -27,7 +35,7 @@ export function readWorkspaceUrl(search: string): WorkspaceUrlState & { op: stri
     view, filter: FILTERS.includes(filter) ? filter : WORKSPACE_URL_DEFAULTS.filter,
     source: isOpportunitySource(source) ? source : 'all', query: (params.get('q') || '').slice(0, 200),
     categories: parseCategories(params.get('rubro')), sort: parsePrioritySort(params.get('orden')), op: params.get('op'),
-    section: SECTION_WORDS[params.get('seccion') || ''] ?? null,
+    section: SECTION_WORDS[params.get('seccion') || ''] ?? null, assign: Boolean(params.get('op')) && params.get('accion') === ASSIGN_WORD,
   };
 }
 
