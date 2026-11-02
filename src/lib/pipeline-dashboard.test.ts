@@ -61,7 +61,7 @@ test('the panel reads itself: contacts against the period before, replies, and t
   const rows = [send('a', 3, true), send('b', 4), send('c', 5, true), send('d', 40), ...stalled];
   const panel = buildPipelineDashboard(rows, { now: NOW, period: '30d' });
   const text = panel.insights.map(insight => insight.text);
-  assert.equal(text[0], 'En últimos 30 días contactaste a 3 personas, 2 menos que en los 30 días anteriores.');
+  assert.equal(text[0], 'En los últimos 30 días contactaste a 3 personas, 2 menos que en los 30 días anteriores.');
   assert.match(text[1], /^Respondió el 67 % de quienes contactaste, más que en los 30 días anteriores \(0 %\)\.$/);
   assert.equal(panel.insights[2].stage, 'contacted');
   assert.match(text[2], /«Contactado» tiene 5 leads sin movimiento hace más de 14 días/);

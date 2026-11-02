@@ -152,9 +152,9 @@ export function generateMailFromStyle(
     report: {
       overview: report?.overview || "su iniciativa actual de crecimiento",
       pains: (report?.pains || []).join("; ") || "prioridades comerciales y operativas del equipo",
-      valueProps: (report?.valueProps || []).join("; ") || "automatizacion comercial, mejor priorizacion y seguimiento consistente",
-      useCases: (report?.useCases || []).join("; ") || "casos de prospeccion, seguimiento y activacion de pipeline",
-      talkTracks: (report?.talkTracks || []).join("; ") || "un enfoque practico y rapido de implementar",
+      valueProps: (report?.valueProps || []).join("; ") || "automatización comercial, mejor priorización y seguimiento consistente",
+      useCases: (report?.useCases || []).join("; ") || "casos de prospección, seguimiento y activación de pipeline",
+      talkTracks: (report?.talkTracks || []).join("; ") || "un enfoque práctico y rápido de implementar",
     },
   };
 
