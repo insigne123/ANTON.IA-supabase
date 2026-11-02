@@ -38,6 +38,12 @@ export const REPORT_WRITING_RULES = [
   'Fechas siempre como «28 de octubre de 2026, 15:00», nunca en formato ISO. Montos con separador de miles y su unidad (UF, CLP).',
   'Habla de «tu empresa» o por su nombre, nunca de «workspace», «radar», «ficha», «campo», «null», «JSON», «puntaje del sistema», nombres de variables ni de fórmulas, ni de «recalcular con código». Si falta un dato, di cuál falta y dónde conseguirlo.',
   'Si una advertencia es sobre una conexión o configuración interna del sistema, no la incluyas: warnings solo lleva lo que la persona debe saber o conseguir para decidir.',
+  // Since the writer is Haiku (23 Oct 2026), «MUY completo» with the schema's wide limits ran every report to the 40k tokens of its call
+  // (2 Nov 2026: 5 of 5 cut, CLAUDE_MAX_TOKENS): a report that is cut is lost and paid. This budget keeps it whole.
+  'Extensión: el informe entero debe caber con holgura en tu respuesta; uno cortado se pierde. Completo no es largo: unas 5.000 palabras en total como máximo. '
+    + 'Una sección por punto del índice, de 1 a 3 párrafos de 120 palabras como máximo, y en cada sección solo los 3 a 6 hechos que respaldan lo que dice. '
+    + 'requirements hasta 25 (agrupa los menores), tasks hasta 12, risks hasta 8, milestones solo las fechas documentadas, warnings hasta 6. Cada cita, una o dos frases. '
+    + 'Si hay más, prioriza lo que cambia la decisión o puede dejar la oferta fuera.',
 ];
 /**
  * The questions of the report: every one the person needs to ask, complete and ready to paste. For a purchase with bases they go to the

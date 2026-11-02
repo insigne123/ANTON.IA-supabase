@@ -68,6 +68,8 @@ test('the report reads like a decision for a busy person and a LinkedIn signal g
   const tender = opportunityReportPrompt('2026-10-15', {}, 'tender');
   assert.match(tender, /Requisitos para postular y qué falta/);
   assert.match(tender, /como máximo 90 palabras/);
+  // A report that runs past its call is cut and lost (2 Nov 2026): every kind gets a length budget.
+  for (const kind of ['tender', 'compra_agil', 'private', 'hiring']) assert.match(opportunityReportPrompt('2026-10-15', {}, kind), /Completo no es largo: unas 5\.000 palabras/);
   assert.match(tender, /nunca en formato ISO/);
   assert.match(tender, /nunca de «workspace», «radar», «ficha», «campo», «null»/);
   assert.doesNotMatch(tender, /son para recalcular con código|ofrece fórmulas paramétricas/);
