@@ -31,9 +31,11 @@ export const PRICING_VERSION = '2026-10-12';
 /**
  * Room for the written report, besides its reasoning (8k at «medium»). 16k fell short on 28 Oct 2026: a private tender of seven
  * documents and 101 pages gave about 127k tokens of facts, and the report, a JSON inside a string, was cut at the 24k of output
- * twice (CLAUDE_MAX_TOKENS, «La evaluación no terminó»). At about 240 tokens a second, the 40k fit in the 230 s of the call.
+ * twice (CLAUDE_MAX_TOKENS, «La evaluación no terminó»). On 2 Nov 2026, with a length budget in the prompt, two whole reports took
+ * 31k and 36k of the 40k (the JSON about 15k, the rest reasoning): 40k of room leaves a long tender margin, and at the 260 tokens a
+ * second measured then the 48k fit in the 230 s of the call.
  */
-export const OPPORTUNITY_REPORT_OUTPUT_TOKENS = 32_000;
+export const OPPORTUNITY_REPORT_OUTPUT_TOKENS = 40_000;
 
 /**
  * The lease, the budget and the replay of one paid step, for the one-shot calls below and for each round of an agent (workspace-agent.ts).
