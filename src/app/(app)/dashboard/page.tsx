@@ -13,6 +13,7 @@ import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 import { ReconnectCard } from '@/components/home/ReconnectCard';
 import { TouchesCard } from '@/components/home/TouchesCard';
+import { MyCreditResults } from '@/components/home/MyCreditResults';
 import { CallsCard } from '@/components/home/CallsCard';
 import { WeeklyGoalCard } from '@/components/home/WeeklyGoalCard';
 import { LeadDropBanner } from '@/components/home/LeadDropBanner';
@@ -84,6 +85,7 @@ export default function DashboardPage() {
           <WeeklyGoalCard onEditGoals={open} />
           <HomeSummary />
           <PersonalCredits />
+          <MyCreditResults />
         </aside>
 
         <div className="min-w-0 xl:col-start-1">
