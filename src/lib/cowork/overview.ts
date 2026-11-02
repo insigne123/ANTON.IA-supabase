@@ -19,6 +19,11 @@ export type CoworkOverview = {
   toWrite?: number | null;
   /** Your drafts the writer finished and nobody sent yet (messaging_drafts «ready»): audit N2, 38 waited in one company. */
   draftsReady?: number | null;
+  /**
+   * Plan de uso A2 (audit C1): your conversations whose last turn failed in the last two weeks, and the newest one's latest turn to
+   * open (its reason and «Reintentar» are there). Ten failed tasks waited with nobody asking again.
+   */
+  failed?: { count: number; latestId: string } | null;
   /** What changed since the person's last own turn (since-visit.ts); null without a previous visit or when it could not be read. */
   since?: CoworkSince | null;
   /** Whether this person's turns can search the web: «¿Qué puedes hacer?» only offers it then. */
@@ -50,7 +55,7 @@ export function coworkOverviewFigures(overview: CoworkOverview | null): CoworkOv
 }
 
 /** A row of «Para hoy»: a request Cowork starts (`prompt`) or, when the work lives in a screen, the way there (`href`). */
-export type CoworkTodayItem = { id: 'drafts' | 'write' | 'emails'; text: string; action: string; prompt: string; href?: string };
+export type CoworkTodayItem = { id: 'drafts' | 'failed' | 'write' | 'emails'; text: string; action: string; prompt: string; href?: string };
 /** Where the ready drafts wait: «Por escribir» on its «Borrador listo» stage. */
 export const COWORK_DRAFTS_HREF = '/saved/leads/enriched?etapa=draft_ready';
 
@@ -70,6 +75,10 @@ export function coworkTodayItems(overview: CoworkOverview | null): CoworkTodayIt
   const drafts = overview.draftsReady ?? null;
   if (drafts !== null && drafts > 0) items.push({ id: 'drafts', action: 'Revisar y enviar', prompt: '', href: COWORK_DRAFTS_HREF,
     text: `${drafts} ${plural(drafts, 'borrador listo espera', 'borradores listos esperan')} que ${plural(drafts, 'lo revises y lo envíes', 'los revises y los envíes')}` });
+  // Plan de uso A2: what you asked for and did not finish, opened where it says why and offers «Reintentar».
+  const failed = overview.failed ?? null;
+  if (failed && failed.count > 0) items.push({ id: 'failed', action: 'Abrir', prompt: '', href: `/cowork?work=${encodeURIComponent(failed.latestId)}`,
+    text: failed.count === 1 ? 'Una tarea no se pudo completar' : `${failed.count} tareas no se pudieron completar` });
   const toWrite = overview.toWrite ?? null;
   if (toWrite !== null && toWrite > 0) items.push({ id: 'write', action: 'Escribirles',
     text: `${toWrite} ${plural(toWrite, 'contacto con correo aún no recibe', 'contactos con correo aún no reciben')} nada de ti`, prompt: COWORK_TODAY_PROMPTS.write });
@@ -77,6 +86,20 @@ export function coworkTodayItems(overview: CoworkOverview | null): CoworkTodayIt
   if (missing > 0) items.push({ id: 'emails', action: 'Buscar sus correos',
     text: `${missing} ${plural(missing, 'contacto guardado no tiene', 'contactos guardados no tienen')} correo`, prompt: COWORK_TODAY_PROMPTS.emails });
   return items;
+}
+
+/** How far back a failed conversation still shows in «Para hoy». */
+export const FAILED_TASK_DAYS = 14;
+
+/**
+ * Plan de uso A2: the conversations whose last turn failed in the last two weeks, without the ones the person deleted, and the newest
+ * one's latest turn (what `?work=` opens). Null when there is none.
+ */
+export function failedTasks(threads: Array<{ id: string; rootId: string; status: string; updatedAt: string }>, hidden: Set<string>, now = Date.now()) {
+  const since = now - FAILED_TASK_DAYS * 86_400_000;
+  const failed = threads.filter(thread => thread.status === 'failed' && !hidden.has(thread.rootId) && Date.parse(thread.updatedAt) >= since)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  return failed.length ? { count: failed.length, latestId: failed[0].id } : null;
 }
 
 /** The message the «Cuéntame qué vendes» card sends: what you wrote, and your site if you gave it. With only the site, Cowork reads
