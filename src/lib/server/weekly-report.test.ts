@@ -3,14 +3,17 @@ import test from 'node:test';
 
 import { buildWeeklyReport, deliverWeeklyReport, readOpportunityManagers, reportRoles, saveOpportunityManagers, saveReportEmail } from './weekly-report';
 
-/** The tables in memory, with the query methods the report uses. A table listed in `missing` answers as not created yet. */
+/**
+ * The tables in memory, with the query methods the report uses. A table listed in `missing` answers as not created yet; a
+ * «head» count answers the number of rows that match.
+ */
 function memory(seed: Record<string, any[]>, missing: string[] = []) {
   const tables: Record<string, any[]> = { weekly_reports: [], organization_report_roles: [], ...seed };
   let serial = 0;
   const from = (name: string) => {
     const filters: Array<(row: any) => boolean> = [];
     let action: { kind: string; values?: any; conflict?: string[] } = { kind: 'select' };
-    let one: 'single' | 'maybe' | null = null; let limit = Infinity; let range: [number, number] | null = null;
+    let one: 'single' | 'maybe' | null = null; let limit = Infinity; let range: [number, number] | null = null; let head = false;
     const run = () => {
       if (missing.includes(name)) return { data: null, error: { code: '42P01', message: 'missing' } };
       const rows = tables[name] ||= [];
@@ -27,6 +30,7 @@ function memory(seed: Record<string, any[]>, missing: string[] = []) {
       const found = rows.filter(row => filters.every(filter => filter(row)));
       if (action.kind === 'update') { found.forEach(row => Object.assign(row, action.values)); return { data: null, error: null }; }
       if (action.kind === 'delete') { tables[name] = rows.filter(row => !found.includes(row)); return { data: null, error: null }; }
+      if (head) return { data: null, count: found.length, error: null };
       const page = range ? found.slice(range[0], range[1] + 1) : found.slice(0, limit);
       if (one === 'single') return page.length ? { data: page[0], error: null } : { data: null, error: { code: 'PGRST116' } };
       if (one === 'maybe') return { data: page[0] ?? null, error: null };
@@ -34,12 +38,13 @@ function memory(seed: Record<string, any[]>, missing: string[] = []) {
     };
     const value = (row: any, key: string) => key.split('->').reduce((current, part) => current?.[part.replace(/^>/, '')], row);
     const chain: any = {
-      select: () => chain,
+      select: (_columns?: string, options?: { head?: boolean }) => { if (options?.head) head = true; return chain; },
       insert: (values: any) => { action = { kind: 'insert', values }; return chain; },
       upsert: (values: any, options: any) => { action = { kind: 'upsert', values, conflict: options?.onConflict?.split(',') }; return chain; },
       update: (values: any) => { action = { kind: 'update', values }; return chain; },
       delete: () => { action = { kind: 'delete' }; return chain; },
       eq: (key: string, expected: any) => { filters.push(row => String(value(row, key)) === String(expected)); return chain; },
+      neq: (key: string, expected: any) => { filters.push(row => String(value(row, key)) !== String(expected)); return chain; },
       in: (key: string, values: any[]) => { filters.push(row => values.includes(row[key])); return chain; },
       gte: (key: string, bound: any) => { filters.push(row => row[key] != null && Date.parse(row[key]) >= Date.parse(bound)); return chain; },
       lt: (key: string, bound: any) => { filters.push(row => row[key] != null && Date.parse(row[key]) < Date.parse(bound)); return chain; },
@@ -214,4 +219,24 @@ test('meetings booked on a call or a WhatsApp count for the person and the team,
   const old = await buildWeeklyReport(before.client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
   assert.equal(old.report.personal.callMeetings, 0);
   assert.equal(old.report.team!.totals.callMeetings, 0);
+});
+
+test('«Tu semana, paso a paso» counts the calls too, a person written to and called once (plan de uso A4)', async () => {
+  const data: Record<string, any[]> = seed();
+  data.leads = [{ id: 'l1', organization_id: ORG, user_id: 'u-admin', created_at: '2026-10-13T12:00:00Z' }, { id: 'l2', organization_id: ORG, user_id: 'u-ana', created_at: '2026-10-13T12:00:00Z' }];
+  const call = (id: string, outcome: string, extra: Record<string, unknown>) => ({ id, organization_id: ORG, user_id: 'u-admin', channel: 'call', outcome, outcome_at: '2026-10-15T15:00:00Z', ...extra });
+  data.contact_calls = [
+    call('c1', 'answered', { contact_email: 'A@x.cl' }), // also written to: once
+    call('c2', 'no_answer', { lead_id: 'e9', channel: 'whatsapp' }),
+    call('c3', 'wrong_number', { provider_person_id: 'p3' }), // reached nobody
+  ];
+  const { client } = memory(data, ['contact_touches']);
+  const { report } = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
+  // Written to a@ and b@ (a@ also called, and answered); e9 rang without an answer. Replies from r1 and r3, plus a@ on the phone.
+  assert.deepEqual(report.personal.funnel, { saved: 1, withEmail: 0, researched: 0, drafts: 0, contacted: 3, replies: 3 });
+  assert.deepEqual([report.personal.contacted.now, report.personal.replies.now], [2, 2], 'the email figures stay the emails');
+
+  const before = memory(seed(), ['contact_touches', 'contact_calls']);
+  const old = await buildWeeklyReport(before.client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
+  assert.deepEqual(old.report.personal.funnel, { saved: 0, withEmail: 0, researched: 0, drafts: 0, contacted: 2, replies: 2 });
 });

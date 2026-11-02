@@ -122,8 +122,12 @@ test('the week\'s funnel names the step where most is left waiting, and nothing 
   const { funnelStall } = await import('./weekly-report');
   assert.deepEqual(funnelStall({ saved: 20, withEmail: 15, researched: 4, drafts: 4, contacted: 3, replies: 1 }), { from: 'Con correo', to: 'Investigados', lost: 11 });
   assert.equal(funnelStall({ saved: 2, withEmail: 2, researched: 1, drafts: 1, contacted: 1, replies: 0 }), null);
-  // A later step can be larger in the same week (drafts of contacts saved before): that is no fall.
-  assert.deepEqual(funnelStall({ saved: 0, withEmail: 0, researched: 0, drafts: 6, contacted: 6, replies: 0 }), { from: 'Contactados', to: 'Respuestas', lost: 6 });
+  // A later step can be larger in the same week (drafts of contacts saved before): that is no fall; nor is contacted without a
+  // conversation, which depends on the other side (plan de uso A4).
+  assert.equal(funnelStall({ saved: 0, withEmail: 0, researched: 0, drafts: 6, contacted: 6, replies: 0 }), null);
+  // Calls make up for the steps before: saving 30 and calling 30 is no stop at the email.
+  assert.equal(funnelStall({ saved: 30, withEmail: 4, researched: 0, drafts: 0, contacted: 30, replies: 8 }), null);
+  assert.deepEqual(funnelStall({ saved: 4, withEmail: 4, researched: 4, drafts: 12, contacted: 2, replies: 0 }), { from: 'Borradores', to: 'Contactados', lost: 10 });
   assert.equal(funnelStall(null), null);
 });
 
