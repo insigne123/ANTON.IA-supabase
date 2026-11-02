@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { GoalProgressRows } from '@/components/weekly-goals/GoalProgressRows';
 import { GoalsEditor } from '@/components/weekly-goals/GoalsEditor';
+import { MonthSummary } from './MonthSummary';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import { goalSentence, paceSentence } from '@/lib/weekly-goals';
@@ -204,6 +205,7 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
 
     {report?.team && team && shown === 'team' ? <div className={cn('space-y-6 transition-opacity', loading && 'opacity-60')}>
       <p className="text-lg leading-7">{teamHeadline(report.team, report.week.which)}</p>
+      {report.month ? <MonthSummary month={report.month} /> : null}
       {/* Nobody wrote: one sentence instead of three zeros and a row of zeros per person. */}
       {!team.active.length ? <div className="space-y-3">
         <p className="text-sm leading-6 text-muted-foreground">Cuando escriban desde ANTON.IA, aquí verás quién envió, a quién le respondieron, quién tiene respuestas por contestar y cómo va cada uno con su meta.</p>
