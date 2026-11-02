@@ -107,6 +107,32 @@ test('LinkedIn searches ask for a week of ads after a pause, five post queries, 
   }
 });
 
+test('a LinkedIn post with a NUL character is stored without it, so the paid run is not lost (plan de uso A6)', async () => {
+  const { captureOpportunityLinkedIn } = await load(STUBS);
+  const realFetch = globalThis.fetch;
+  process.env.APIFY_TOKEN = 'test';
+  Object.assign(process.env, { OPPORTUNITIES_POST_USD_PER_ITEM: '0.002', OPPORTUNITIES_POST_START_USD: '0.00005', OPPORTUNITIES_POST_EMPTY_QUERY_USD: '0.001' });
+  // What GrupoExpro's search brought back from 26 Oct: Postgres refused it whole (22P05) and every day's run was lost.
+  const post = { type: 'post', linkedinUrl: 'https://www.linkedin.com/feed/update/urn:li:activity:7390000000000000001/', content: 'Buscamos\u0000 proveedor de guardias', author: { name: 'Acme\u0000 SpA' } };
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const data = init?.method === 'POST' ? { id: 'run-1' } : String(url).includes('/actor-runs/') ? { status: 'SUCCEEDED', usageTotalUsd: 0.01, defaultDatasetId: 'ds-1' } : null;
+    return new Response(JSON.stringify(data ? { data } : [post]), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const client = memoryClient({ opportunity_jobs: { id: 'j3', updated_at: new Date(Date.now() - 3_600_000).toISOString() } });
+    const context = { priority: 'hiring', territories: [], revision: 1, criteria: { roles: [], postQueries: ['guardias'] } };
+    await captureOpportunityLinkedIn(client as any, { id: 'j3', organization_id: 'org', requested_by: 'u1', kind: 'posts', lease_token: 'l', payload: {} } as any, context);
+    const settled = client.rpcs.filter(([name]) => name === 'opportunity_budget_settle').at(-1)![1];
+    assert.equal(settled.p_data.items[0].content, 'Buscamos proveedor de guardias', 'the run and its cost are settled');
+    const persisted = client.rpcs.find(([name]) => name === 'opportunity_persist_candidates')![1];
+    assert.deepEqual([persisted.p_rows[0].description, persisted.p_rows[0].company], ['Buscamos proveedor de guardias', 'Acme SpA']);
+    assert.equal(JSON.stringify(client.rpcs).includes('\\u0000'), false);
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const name of ['APIFY_TOKEN', 'OPPORTUNITIES_POST_USD_PER_ITEM', 'OPPORTUNITIES_POST_START_USD', 'OPPORTUNITIES_POST_EMPTY_QUERY_USD']) delete process.env[name];
+  }
+});
+
 test('the tenders job runs the listing and Compra Ágil only when each is on in «Qué buscamos»', async () => {
   const { captureOpportunityTenders } = await load({ ...STUBS, './mercado-publico': 'export async function listOpenLicitaciones(){ globalThis.__listed = (globalThis.__listed || 0) + 1; return [] }' });
   const upserts: unknown[] = [];
