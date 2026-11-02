@@ -3,6 +3,8 @@ import { replyNeedsAnswer } from '@/lib/home/today';
 import { readPersonGoal, readTeamGoals } from '@/lib/server/weekly-goals';
 import { preferredFullName } from '@/lib/lead-name';
 import { readCreditResults } from '@/lib/server/credit-results';
+import { callPersonKey } from '@/lib/server/team-funnel';
+import { countsAsContacted, isCallOutcome, reachedPerson } from '@/lib/contact-calls';
 import { monthOpportunities, reportMonth, type MonthRange, type MonthSection, type OpportunityMove } from '@/lib/month-summary';
 import {
   OPPORTUNITY_KINDS, reportEmail, reportWeek, type ClosingOpportunity, type Commitment, type OpportunitiesSection, type PendingReply,
@@ -105,7 +107,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
     // «Llamadas y LinkedIn» (contact_touches) may not exist yet: the report goes on without it.
     own('contact_touches', 'channel,done_at').eq('state', 'done').gte('done_at', week.from).lt('done_at', week.to).limit(2000),
     // «Llamar» y «WhatsApp» (contact_calls): the ones with a result told this week. Missing table: none.
-    own('contact_calls', 'channel,outcome,outcome_at').not('outcome', 'is', null).gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
+    own('contact_calls', 'id,channel,outcome,outcome_at,lead_id,provider_person_id,contact_email').not('outcome', 'is', null).gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
     // The week's funnel (audit N1): how many were saved, got an email, were researched and got a draft, this week.
     countOf(() => counted('leads', 'created_at')),
     countOf(() => counted('enriched_leads', 'created_at').not('email', 'is', null).neq('email', '')),
@@ -114,7 +116,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
   ]);
   for (const result of [waiting, commitments]) if ((result as any).error) throw new WeeklyReportError('No pudimos leer tus pendientes.', 503);
   const touchRows = (touches as any).error ? null : ((touches as any).data || []) as Array<{ channel: string }>;
-  const callRows = (calls as any).error ? [] : ((calls as any).data || []) as Array<{ channel: string; outcome?: string | null }>;
+  const callRows = (calls as any).error ? [] : ((calls as any).data || []) as Array<{ id?: string; channel: string; outcome?: string | null; lead_id?: string | null; provider_person_id?: string | null; contact_email?: string | null }>;
   const sent = countDispatches(dispatches, week);
   const answered = countReplies(replies, week);
   return {
@@ -128,8 +130,31 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
     } : null,
     callMeetings: callRows.filter(row => row.outcome === 'meeting').length,
     funnel: [saved, withEmail, researched, drafts].every(value => value !== null)
-      ? { saved: saved!, withEmail: withEmail!, researched: researched!, drafts: drafts!, contacted: sent.contacted.now, replies: answered.replies.now } : null,
+      ? { saved: saved!, withEmail: withEmail!, researched: researched!, drafts: drafts!, ...weekReach(dispatches, replies, callRows, week) } : null,
   };
+}
+
+/**
+ * The funnel's last two steps (plan de uso A4, as in Administración: src/lib/team-funnel.ts): the people written to and the ones
+ * who answered, as counted above, plus the calls and WhatsApps with a result this week; a person reached both ways counts once.
+ */
+function weekReach(dispatches: any[], replies: any[], calls: any[], week: ReportWeek) {
+  const contacted = new Set<string>(), conversations = new Set<string>();
+  for (const row of dispatches) {
+    const email = String(row.metadata?.recipient?.email || '').trim().toLowerCase();
+    if (row.channel === 'email' && email && inRange(row.reconciliation_details?.sentAt || row.completed_at, week.from, week.to)) contacted.add(`email:${email}`);
+  }
+  for (const row of replies) {
+    if (!HUMAN.has(row.reply_intent) || !inRange(row.replied_at, week.from, week.to)) continue;
+    const email = String(row.email || '').trim().toLowerCase();
+    conversations.add(email ? `email:${email}` : `reply:${row.id}`);
+  }
+  for (const row of calls) {
+    if (!isCallOutcome(row.outcome)) continue;
+    if (countsAsContacted(row.outcome)) contacted.add(callPersonKey(row));
+    if (reachedPerson(row.outcome)) conversations.add(callPersonKey(row));
+  }
+  return { contacted: contacted.size, replies: conversations.size };
 }
 
 /** A count of rows («head» request); null when it could not be read, so the funnel is left out instead of showing a false zero. */
