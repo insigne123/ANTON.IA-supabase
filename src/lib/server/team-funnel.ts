@@ -35,6 +35,13 @@ async function pages(build: () => any, optional = false) {
 
 type Counts = Omit<WorkFunnel, 'contacted' | 'conversations'> & { contacted: Set<string>; conversations: Set<string> };
 
+/** Who a call or WhatsApp reached, keyed as an email to them is when the call kept their address, so both count once. */
+export function callPersonKey(row: { id?: unknown; contact_email?: unknown; lead_id?: unknown; provider_person_id?: unknown }) {
+  if (lower(row.contact_email)) return `email:${lower(row.contact_email)}`;
+  if (text(row.lead_id)) return `lead:${text(row.lead_id)}`;
+  return text(row.provider_person_id) ? `person:${text(row.provider_person_id)}` : `call:${text(row.id)}`;
+}
+
 /**
  * The period's steps for each of the people, everyone listed even with nothing done (so an administrator sees who did not
  * start), the busiest first. A person reached by email and by phone counts once when the call kept their email.
@@ -76,9 +83,7 @@ export async function readTeamFunnel(client: Client, input: { organizationId: st
     if (!isCallOutcome(row.outcome)) continue;
     const person = of(row);
     if (!person) continue;
-    const key = lower(row.contact_email) ? `email:${lower(row.contact_email)}`
-      : text(row.lead_id) ? `lead:${text(row.lead_id)}`
-        : text(row.provider_person_id) ? `person:${text(row.provider_person_id)}` : `call:${text(row.id)}`;
+    const key = callPersonKey(row);
     if (countsAsContacted(row.outcome)) person.contacted.add(key);
     if (reachedPerson(row.outcome)) person.conversations.add(key);
   }
