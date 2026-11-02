@@ -11,6 +11,8 @@ type ServerEmailSendOptions = {
     textBody?: string;
     idempotencyKey?: string;
     trackingDispatchId?: string;
+    /** With a tracking id: false adds the open pixel only and leaves the links as they are (plan de uso M4). */
+    trackLinks?: boolean;
     requestReceipts?: boolean;
     replyTarget?: EmailReplyTarget;
 };
@@ -87,7 +89,7 @@ export async function sendGmail(accessToken: string, to: string, subject: string
     if (!preflight.ok) {
         rejectBeforeSend(preflight.errors.join(' '));
     }
-    const tracking = addMessageTracking({ html: prepared.html, baseUrl: process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai', trackingKey: options.trackingDispatchId });
+    const tracking = addMessageTracking({ html: prepared.html, baseUrl: process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai', trackingKey: options.trackingDispatchId, links: options.trackLinks !== false });
     let replyHeaders: string[] = [];
     const listUnsubscribeUrl = oneClickUrl(options);
     if (listUnsubscribeUrl) replyHeaders.push(`List-Unsubscribe: <${sanitizeHeaderText(listUnsubscribeUrl)}>`, 'List-Unsubscribe-Post: List-Unsubscribe=One-Click');
@@ -161,7 +163,7 @@ export async function sendOutlook(accessToken: string, to: string, subject: stri
     if (!preflight.ok) {
         rejectBeforeSend(preflight.errors.join(' '));
     }
-    const tracking = addMessageTracking({ html: prepared.html, baseUrl: process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai', trackingKey: options.trackingDispatchId });
+    const tracking = addMessageTracking({ html: prepared.html, baseUrl: process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai', trackingKey: options.trackingDispatchId, links: options.trackLinks !== false });
     const safeSubject = sanitizeHeaderText(subject);
     const sentAfter = new Date();
     const dispatchHeader = options.idempotencyKey ? [{ name: 'X-ANTON-Dispatch', value: sanitizeHeaderText(options.idempotencyKey) }] : [];
