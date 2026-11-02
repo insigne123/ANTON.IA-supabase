@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { deltaText, nextActions, personalHeadline, reportEmail, reportWeek, teamActivity, teamHeadline, weekLabel, type PersonalSection, type TeamSection, type WeeklyReport } from './weekly-report';
+import { deltaText, nextActions, personalHeadline, reportEmail, reportWeek, teamActivity, teamHeadline, touchesSentence, weekLabel, type PersonalSection, type TeamSection, type WeeklyReport } from './weekly-report';
 
 const personal = (patch: Partial<PersonalSection> = {}): PersonalSection => ({
   sent: { now: 34, before: 20 }, contacted: { now: 30, before: 18 }, replies: { now: 5, before: 2 }, meetings: 1,
@@ -125,4 +125,13 @@ test('the week\'s funnel names the step where most is left waiting, and nothing 
   // A later step can be larger in the same week (drafts of contacts saved before): that is no fall.
   assert.deepEqual(funnelStall({ saved: 0, withEmail: 0, researched: 0, drafts: 6, contacted: 6, replies: 0 }), { from: 'Contactados', to: 'Respuestas', lost: 6 });
   assert.equal(funnelStall(null), null);
+});
+
+test('calls, WhatsApps and LinkedIn contacts read as one line with only what happened', () => {
+  assert.equal(touchesSentence({ calls: 3, linkedin: 1, whatsapp: 2 }), '3 llamadas, 2 WhatsApp y 1 contacto por LinkedIn');
+  assert.equal(touchesSentence({ calls: 1, linkedin: 0, whatsapp: 0 }), '1 llamada');
+  assert.equal(touchesSentence({ calls: 0, linkedin: 2 }), '2 contactos por LinkedIn');
+  assert.equal(touchesSentence({ calls: 2, linkedin: 0, whatsapp: 1 }), '2 llamadas y 1 WhatsApp');
+  assert.equal(touchesSentence({ calls: 0, linkedin: 0, whatsapp: 0 }), null);
+  assert.equal(touchesSentence(null), null);
 });

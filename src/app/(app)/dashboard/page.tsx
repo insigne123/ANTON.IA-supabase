@@ -13,6 +13,7 @@ import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 import { ReconnectCard } from '@/components/home/ReconnectCard';
 import { TouchesCard } from '@/components/home/TouchesCard';
+import { CallsCard } from '@/components/home/CallsCard';
 import { WeeklyGoalCard } from '@/components/home/WeeklyGoalCard';
 import { LeadDropBanner } from '@/components/home/LeadDropBanner';
 import { OpportunitiesTodayCard } from '@/components/home/OpportunitiesTodayCard';
@@ -73,6 +74,7 @@ export default function DashboardPage() {
         <div className="min-w-0 space-y-4 xl:col-start-1">
           <TodayPanel afterPrimary={primary => <LeadDropBanner quietProfile={primary.href === '/profile'} />} />
           <OpportunitiesTodayCard />
+          <CallsCard />
           <TouchesCard />
           <ReconnectCard />
         </div>

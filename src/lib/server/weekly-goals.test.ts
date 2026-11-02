@@ -48,6 +48,23 @@ test('progress counts people and addresses once, inside the week', async () => {
   assert.deepEqual([...ana.keys()], ['u-ana']);
 });
 
+test('a call or WhatsApp with its result counts once per person, keyed by the contact\'s email; a wrong number does not', async () => {
+  const data: any = seed();
+  const call = (id: string, userId: string, outcome: string, at: string, extra: Record<string, unknown> = {}) => ({
+    id, organization_id: ORG, user_id: userId, lead_id: null, contact_email: null, channel: 'call', outcome, outcome_at: at, started_at: at, ...extra,
+  });
+  data.contact_calls = [
+    call('k1', 'u-ana', 'answered', '2026-10-20T20:00:00Z', { contact_email: 'a@x.cl' }), // she also emailed a@: once
+    call('k2', 'u-ana', 'no_answer', '2026-10-20T20:30:00Z', { channel: 'whatsapp', lead_id: 'l9' }), // a new person
+    call('k3', 'u-ana', 'wrong_number', '2026-10-20T21:00:00Z', { contact_email: 'z@x.cl' }),
+    call('k4', 'u-leo', 'meeting', '2026-10-19T20:00:00Z', { lead_id: 'l6', contact_email: 'd@x.cl' }),
+  ];
+  const { client } = memory(data);
+  const counts = await readGoalCounts(client, ORG, WEEK);
+  assert.deepEqual(counts.get('u-ana'), { found: 2, contacted: 4 });
+  assert.deepEqual(counts.get('u-leo'), { found: 1, contacted: 2 });
+});
+
 test('without the touches table the goal counts the emails only', async () => {
   const { client } = memory(seed(), { missing: ['contact_touches'] });
   assert.deepEqual((await readGoalCounts(client, ORG, WEEK)).get('u-ana'), { found: 2, contacted: 2 });

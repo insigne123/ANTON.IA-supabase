@@ -16,7 +16,7 @@ import { GoalsEditor } from '@/components/weekly-goals/GoalsEditor';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import { goalSentence, paceSentence } from '@/lib/weekly-goals';
-import { FUNNEL_STEPS, REPORT_ROLES, activeGoal, deltaText, funnelStall, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeekFunnel, type WeeklyReport as Report } from '@/lib/weekly-report';
+import { FUNNEL_STEPS, REPORT_ROLES, activeGoal, deltaText, funnelStall, nextActions, personalHeadline, rate, teamActivity, teamHeadline, touchesSentence, type ReportRole, type TeamMember, type WeekFunnel, type WeeklyReport as Report } from '@/lib/weekly-report';
 import { chipClass } from '@/components/ui/chip';
 
 type Response = { report: Report; email: boolean; alerts?: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; yago?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
@@ -198,8 +198,8 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
             <span className={cn('shrink-0 text-xs', Date.parse(item.dueAt) < Date.now() ? 'text-destructive' : 'text-muted-foreground')}>{dateLabel(item.dueAt, { weekday: 'short', day: 'numeric', month: 'short' })}</span></Link>
         </li>)}</ul>
       </Section> : null}
-      {report.personal.touches && (report.personal.touches.calls || report.personal.touches.linkedin) ? <p className="text-sm text-muted-foreground">
-        Además hiciste {report.personal.touches.calls} {report.personal.touches.calls === 1 ? 'llamada' : 'llamadas'} y {report.personal.touches.linkedin} {report.personal.touches.linkedin === 1 ? 'contacto' : 'contactos'} por LinkedIn.</p> : null}
+      {touchesSentence(report.personal.touches) ? <p className="text-sm text-muted-foreground">
+        Además hiciste {touchesSentence(report.personal.touches)}.</p> : null}
     </div> : null}
 
     {report?.team && team && shown === 'team' ? <div className={cn('space-y-6 transition-opacity', loading && 'opacity-60')}>

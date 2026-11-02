@@ -14,11 +14,13 @@ import { useToast } from '@/hooks/use-toast';
 import type { EnrichedLead, Lead, LeadResearchReport } from '@/lib/types';
 import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/lead-research-storage';
 import { v4 as uuid } from 'uuid';
-import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, AlertTriangle, MoreHorizontal, ArrowRight, ChevronDown, ListFilter, MailCheck, Search, Upload, ArrowDownToLine, Loader2 } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, AlertTriangle, MoreHorizontal, ArrowRight, ChevronDown, ListFilter, MailCheck, Search, Upload, ArrowDownToLine, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PhoneCallModal } from '@/components/phone-call-modal';
+import { ContactActions } from '@/components/contact/ContactActions';
+import { dialable, lastCallLine, needsCall, type CallOutcome, type LastCall } from '@/lib/contact-calls';
+import { CALL_OUTCOME_EVENT, recordFinishedCall, type CallOutcomeDetail } from '@/lib/contact-calls-client';
 import { supabaseService } from '@/lib/supabase-service';
 import { CompleteContactsDialog } from '@/components/enrichment/complete-contacts-dialog';
 import { bringSavedWithEmail } from '@/lib/leads-workspace/saved-enrichment';
@@ -143,12 +145,14 @@ export default function EnrichedLeadsClient() {
 
   // One selection for both steps: the action bar says whether it will research, write or both.
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [stageFilter, setStageFilter] = useState<'all' | EnrichedStage>('all');
-  // A link can open one stage (Cowork's «Para hoy» opens «Borrador listo», audit N2): ?etapa=draft_ready.
+  const [stageFilter, setStageFilter] = useState<'all' | EnrichedStage | 'to_call'>('all');
+  // A link can open one stage (Cowork's «Para hoy» opens «Borrador listo», audit N2): ?etapa=draft_ready. «Hoy» opens
+  // «Por llamar» with ?etapa=to_call: the contacts with a mobile nobody called yet (src/lib/contact-calls.ts).
   useEffect(() => {
     try {
       const wanted = new URLSearchParams(window.location.search).get('etapa');
-      if (wanted && (ENRICHED_STAGE_ORDER as string[]).includes(wanted)) setStageFilter(wanted as EnrichedStage);
+      if (wanted === 'to_call') setStageFilter('to_call');
+      else if (wanted && (ENRICHED_STAGE_ORDER as string[]).includes(wanted)) setStageFilter(wanted as EnrichedStage);
     } catch { /* no address to read: all stages, as before */ }
   }, []);
   // Follow-up plans still waiting for the first email (audit K1): they start only when it goes out, and stop after 14 days.
@@ -747,9 +751,50 @@ export default function EnrichedLeadsClient() {
     return counts;
   }, [enriched, stageOf]);
 
+  // The last call of each contact (contact_calls), read once the list is known and updated as results are told.
+  const [lastCalls, setLastCalls] = useState<Map<string, LastCall>>(new Map());
+  const enrichedIdsKey = useMemo(() => enriched.map((lead) => lead.id).sort().join(','), [enriched]);
+  useEffect(() => {
+    const ids = enrichedIdsKey ? enrichedIdsKey.split(',') : [];
+    if (!ids.length) return;
+    let active = true;
+    void (async () => {
+      const next = new Map<string, LastCall>();
+      // A hundred ids per request keeps the address short enough for every proxy on the way.
+      for (let start = 0; start < ids.length; start += 100) {
+        try {
+          const response = await authenticatedApiFetch(`/api/contact-calls?leads=${encodeURIComponent(ids.slice(start, start + 100).join(','))}`, { cache: 'no-store' });
+          if (!response.ok) return;
+          const body = await response.json().catch(() => null);
+          for (const [id, last] of Object.entries((body?.last || {}) as Record<string, LastCall>)) next.set(id, last);
+        } catch { return; }
+      }
+      if (active) setLastCalls(next);
+    })();
+    return () => { active = false; };
+  }, [enrichedIdsKey]);
+  useEffect(() => {
+    const onOutcome = (event: Event) => {
+      const detail = (event as CustomEvent<CallOutcomeDetail>).detail;
+      if (!detail?.leadId) return;
+      setLastCalls((previous) => new Map(previous).set(detail.leadId!, { outcome: detail.outcome, channel: detail.channel, at: detail.at }));
+    };
+    window.addEventListener(CALL_OUTCOME_EVENT, onOutcome);
+    return () => window.removeEventListener(CALL_OUTCOME_EVENT, onOutcome);
+  }, []);
+  const leadPhone = useCallback((lead: EnrichedLead) => {
+    if (dialable(lead.primaryPhone)) return lead.primaryPhone as string;
+    const fallback = (lead.phoneNumbers || []).map((entry) => entry?.sanitized_number).find((number) => dialable(number));
+    return fallback || null;
+  }, []);
+  const awaitsCall = useCallback((lead: EnrichedLead) => needsCall(Boolean(leadPhone(lead)), lastCalls.get(lead.id)), [lastCalls, leadPhone]);
+  const toCallCount = useMemo(() => enriched.filter(awaitsCall).length, [enriched, awaitsCall]);
+
   const listed = useMemo(
-    () => stageFilter === 'all' ? filtered : filtered.filter((lead) => stageOf(lead) === stageFilter),
-    [filtered, stageFilter, stageOf],
+    () => stageFilter === 'all' ? filtered
+      : stageFilter === 'to_call' ? filtered.filter(awaitsCall)
+        : filtered.filter((lead) => stageOf(lead) === stageFilter),
+    [filtered, stageFilter, stageOf, awaitsCall],
   );
 
   useEffect(() => {
@@ -969,45 +1014,24 @@ export default function EnrichedLeadsClient() {
     });
   }
 
+  // The script's «Registrar llamada»: the call and its result go to contact_calls and the contact stays in its list, with
+  // the result under its number. A voicemail is a call nobody answered, with the note saying so.
   async function handleLogCall(result: 'connected' | 'voicemail' | 'wrong_number' | 'no_answer', notes: string) {
     if (!leadToCall) return;
-
-    try {
-      // 1. Guardar en Contactados con notas completas
-      const resultLabel = result === 'connected' ? 'Contactado' :
-        result === 'voicemail' ? 'Buzón de voz' :
-          result === 'wrong_number' ? 'Número equivocado' :
-            'No contestó';
-
-      await contactedLeadsStorage.add({
-        id: uuid(),
-        leadId: leadToCall.id,
-        name: leadToCall.fullName,
-        email: leadToCall.email || '',
-        company: leadToCall.companyName,
-        role: leadToCall.title,
-        industry: leadToCall.industry || undefined,
-        city: leadToCall.city || leadToCall.country || undefined,
-        country: leadToCall.country || undefined,
-        subject: notes ? `Llamada: ${resultLabel} - ${notes}` : `Llamada telefónica: ${resultLabel}`,
-        sentAt: new Date().toISOString(),
-        status: result === 'connected' ? 'sent' : 'failed',
-        provider: 'phone',
-        lastUpdateAt: new Date().toISOString(),
-      });
-
-      // 2. Remover de Enriquecidos
-      await removeEnrichedLeadById(leadToCall.id);
-      setEnriched(prev => prev.filter(e => e.id !== leadToCall.id));
-
-      toast({
-        title: 'Llamada registrada',
-        description: `Contacto movido a Conversaciones. ${notes ? 'Notas guardadas.' : ''}`
-      });
-    } catch (e) {
-      console.error(e);
-      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la llamada.' });
+    const outcome: CallOutcome = result === 'connected' ? 'answered' : result === 'wrong_number' ? 'wrong_number' : 'no_answer';
+    const note = [result === 'voicemail' ? 'Buzón de voz' : '', notes.trim()].filter(Boolean).join('. ');
+    const saved = await recordFinishedCall('call', {
+      leadId: leadToCall.id,
+      providerPersonId: leadToCall.sourceProviderId || leadToCall.apolloId || null,
+      name: leadToCall.fullName,
+      company: leadToCall.companyName || null,
+      email: leadToCall.email || null,
+    }, outcome, note || null);
+    if (!saved.ok) {
+      toast({ variant: 'destructive', title: 'No se guardó la llamada', description: saved.message });
+      return;
     }
+    toast({ title: 'Llamada registrada', description: 'Queda junto a su número y cuenta para tu meta de la semana.' });
   }
 
   async function handleDeleteEnriched(id: string) {
@@ -1130,8 +1154,10 @@ export default function EnrichedLeadsClient() {
     no_email: 'Correo no encontrado',
   };
   // «Por investigar» and «Listos para escribir» always show (the tour points at them); the rest only when someone is there.
-  const stageChips: Array<{ value: 'all' | EnrichedStage; label: string; count: number }> = [
+  // «Por llamar» shows while someone waits for a call: the contacts with a mobile nobody called, or who did not answer.
+  const stageChips: Array<{ value: 'all' | EnrichedStage | 'to_call'; label: string; count: number }> = [
     { value: 'all', label: 'Todos', count: enriched.length },
+    ...(toCallCount > 0 || stageFilter === 'to_call' ? [{ value: 'to_call' as const, label: 'Por llamar', count: toCallCount }] : []),
     ...ENRICHED_STAGE_ORDER
       .filter((stage) => stage === 'to_research' || stage === 'ready' || stageCounts[stage] > 0 || stageFilter === stage)
       .map((stage) => ({ value: stage, label: STAGE_CHIP_LABELS[stage], count: stageCounts[stage] })),
@@ -1235,20 +1261,19 @@ export default function EnrichedLeadsClient() {
         {noPhone ? (
           <div className="text-xs text-foreground/70">Sin teléfono</div>
         ) : shownPhone ? (
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded text-xs font-medium text-cw-success underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => {
-              setLeadToCall(lead);
-              setReportToView(reportForLead(lead) || null);
-              setCallModalOpen(true);
-            }}
-            aria-label={`Llamar a ${lead.fullName} al ${shownPhone}`}
-          >
-            <Phone className="h-3 w-3" aria-hidden="true" />
-            <span>{shownPhone}</span>
-            {lead.phoneNumbers && lead.phoneNumbers.length > 1 ? <span className="text-[10px] text-foreground/70">+{lead.phoneNumbers.length - 1}</span> : null}
-          </button>
+          <div className="space-y-1">
+            <ContactActions
+              phone={shownPhone}
+              morePhones={lead.phoneNumbers && lead.phoneNumbers.length > 1 ? lead.phoneNumbers.length - 1 : 0}
+              contact={{ leadId: lead.id, providerPersonId: lead.sourceProviderId || lead.apolloId || null, name: lead.fullName, company: lead.companyName || null, email: lead.email || null }}
+              onScript={() => {
+                setLeadToCall(lead);
+                setReportToView(reportForLead(lead) || null);
+                setCallModalOpen(true);
+              }}
+            />
+            {lastCalls.get(lead.id) ? <div className="text-xs text-foreground/70">{lastCallLine(lastCalls.get(lead.id)!)}</div> : null}
+          </div>
         ) : (
           <div className="inline-flex items-center gap-1.5 text-xs text-primary">
             <RotateCw className="h-3 w-3 motion-safe:animate-spin" aria-hidden="true" />
