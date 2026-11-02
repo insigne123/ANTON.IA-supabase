@@ -19,6 +19,8 @@ export function GoalProgressRows({ goal, className }: { goal: GoalProgress; clas
           </span>
         </div>
         <Progress value={Math.min(100, (done / target) * 100)} className="h-1.5" aria-label={`${metric.label}: ${done} de ${target}`} />
+        {/* What counts: whoever works by phone saw «contactadas» as emails only. */}
+        {metric.hint ? <p className="text-xs text-muted-foreground">{metric.hint}</p> : null}
       </li>;
     })}
   </ul>;

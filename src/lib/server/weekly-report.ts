@@ -105,7 +105,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
     // «Llamadas y LinkedIn» (contact_touches) may not exist yet: the report goes on without it.
     own('contact_touches', 'channel,done_at').eq('state', 'done').gte('done_at', week.from).lt('done_at', week.to).limit(2000),
     // «Llamar» y «WhatsApp» (contact_calls): the ones with a result told this week. Missing table: none.
-    own('contact_calls', 'channel,outcome_at').not('outcome', 'is', null).gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
+    own('contact_calls', 'channel,outcome,outcome_at').not('outcome', 'is', null).gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
     // The week's funnel (audit N1): how many were saved, got an email, were researched and got a draft, this week.
     countOf(() => counted('leads', 'created_at')),
     countOf(() => counted('enriched_leads', 'created_at').not('email', 'is', null).neq('email', '')),
@@ -114,7 +114,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
   ]);
   for (const result of [waiting, commitments]) if ((result as any).error) throw new WeeklyReportError('No pudimos leer tus pendientes.', 503);
   const touchRows = (touches as any).error ? null : ((touches as any).data || []) as Array<{ channel: string }>;
-  const callRows = (calls as any).error ? [] : ((calls as any).data || []) as Array<{ channel: string }>;
+  const callRows = (calls as any).error ? [] : ((calls as any).data || []) as Array<{ channel: string; outcome?: string | null }>;
   const sent = countDispatches(dispatches, week);
   const answered = countReplies(replies, week);
   return {
@@ -126,6 +126,7 @@ export async function readPersonal(client: Client, scope: ReportScope, week: Rep
       linkedin: (touchRows || []).filter(row => row.channel === 'linkedin').length,
       whatsapp: callRows.filter(row => row.channel === 'whatsapp').length,
     } : null,
+    callMeetings: callRows.filter(row => row.outcome === 'meeting').length,
     funnel: [saved, withEmail, researched, drafts].every(value => value !== null)
       ? { saved: saved!, withEmail: withEmail!, researched: researched!, drafts: drafts!, contacted: sent.contacted.now, replies: answered.replies.now } : null,
   };
@@ -148,12 +149,15 @@ export async function readTeam(client: Client, organizationId: string, week: Rep
   const ids = (members.data || []).map((row: any) => String(row.user_id));
   const org = (table: string, columns: string) => client.from(table).select(columns).eq('organization_id', organizationId);
   const since = new Date(Date.parse(week.to) - 30 * 86_400_000).toISOString();
-  const [profiles, dispatches, replies, waiting] = await Promise.all([
+  const [profiles, dispatches, replies, waiting, booked] = await Promise.all([
     ids.length ? client.from('profiles').select('id,full_name,email').in('id', ids) : Promise.resolve({ data: [], error: null }),
     all(() => org('outbound_dispatches', 'id,user_id,channel,metadata,completed_at,reconciliation_details').eq('status', 'sent').gte('completed_at', week.previousFrom).lt('completed_at', week.to).order('id')),
     all(() => org('contacted_leads', 'id,user_id,email,reply_intent,replied_at').gte('replied_at', week.previousFrom).lt('replied_at', week.to).order('id')),
     all(() => org('contacted_leads', 'id,user_id,email,name,reply_intent,replied_at,conversation_resolved_at,conversation_outbound_at').gte('replied_at', since).order('id')),
+    // Meetings booked on a call or a WhatsApp (contact_calls); before the table exists, none.
+    org('contact_calls', 'user_id').eq('outcome', 'meeting').gte('outcome_at', week.from).lt('outcome_at', week.to).limit(2000),
   ]);
+  const bookedRows = ((booked as any).error ? [] : (booked as any).data || []) as Array<{ user_id: string }>;
   if ((profiles as any).error) throw new WeeklyReportError('No pudimos leer el equipo.', 503);
   const names = new Map<string, string>(((profiles as any).data || []).map((row: any) => [String(row.id), String(row.full_name || String(row.email || '').split('@')[0] || 'Sin nombre').trim()]));
   const emails = new Map<string, string>(((profiles as any).data || []).filter((row: any) => row.email).map((row: any) => [String(row.id), String(row.email)]));
@@ -165,11 +169,11 @@ export async function readTeam(client: Client, organizationId: string, week: Rep
     const answered = countReplies(of(replies, userId), week);
     const name = names.get(userId) || 'Sin nombre';
     return { userId, name, detail: shared(name) ? emails.get(userId) || null : null, role: String(member.role || 'member'), sent: sent.sent.now, replies: answered.replies.now,
-      meetings: answered.meetings, pending: pendingReplies(of(waiting, userId)).length };
+      meetings: answered.meetings, callMeetings: bookedRows.filter(row => String(row.user_id) === userId).length, pending: pendingReplies(of(waiting, userId)).length };
   }).sort((a: TeamMember, b: TeamMember) => b.sent - a.sent || b.replies - a.replies || a.name.localeCompare(b.name, 'es'));
   const totalSent = countDispatches(dispatches, week);
   const totalReplies = countReplies(replies, week);
-  return { members: list, totals: { sent: totalSent.sent, replies: totalReplies.replies, meetings: totalReplies.meetings } };
+  return { members: list, totals: { sent: totalSent.sent, replies: totalReplies.replies, meetings: totalReplies.meetings, callMeetings: bookedRows.length } };
 }
 
 /** What Oportunidades found this week and what closes in the next seven days, with who has it. */

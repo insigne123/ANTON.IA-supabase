@@ -18,8 +18,8 @@ export const GOAL_MAX = 500;
 
 /** The two goals, the main one first: contacting people is the work; finding contacts is what makes it possible. */
 export const GOAL_METRICS = [
-  { key: 'contacted', label: 'Personas contactadas', one: 'persona contactada', many: 'personas contactadas' },
-  { key: 'found', label: 'Contactos nuevos con correo', one: 'contacto nuevo con correo', many: 'contactos nuevos con correo' },
+  { key: 'contacted', label: 'Personas contactadas', one: 'persona contactada', many: 'personas contactadas', hint: 'Por correo, llamada, WhatsApp o LinkedIn' },
+  { key: 'found', label: 'Contactos nuevos con correo', one: 'contacto nuevo con correo', many: 'contactos nuevos con correo', hint: null },
 ] as const;
 
 const count = (value: number, one: string, many: string) => `${value.toLocaleString('es-CL')} ${value === 1 ? one : many}`;
