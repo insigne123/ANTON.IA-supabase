@@ -53,8 +53,13 @@ export type AlertFacts = {
   drop?: { id: string; items: DropItem[] } | null;
   /** Conversations of Cowork whose proposal waits for the person (COW-04): every day while they wait, as the decisions above. */
   coworkApprovals?: number;
+  /**
+   * Plan de uso U3 (2 Nov 2026): the person's contacts with a mobile still to call («Por llamar», src/lib/contact-calls.ts), how many
+   * were saved since the last alert, and the names of the newest two. Absent when it could not be read.
+   */
+  toCall?: { count: number; fresh: number; names: string[] } | null;
 };
-export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'approval' | 'source' | 'document' | 'closing' | 'assigned' | 'best' | 'report' | 'search' | 'drop' | 'research' | 'ready' | 'goal';
+export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'approval' | 'source' | 'document' | 'closing' | 'assigned' | 'best' | 'report' | 'search' | 'call' | 'drop' | 'research' | 'ready' | 'goal';
 /** How many of the best new opportunities one alert names. */
 export const BEST_PER_ALERT = 5;
 
@@ -82,6 +87,19 @@ const who = (person: AlertPerson) => `${person.name}${person.company ? ` (${pers
 export const alertDay = (now: Date) => { const weekday = weekdayOf(dayInZone(now)); return weekday >= 2 && weekday <= 5; };
 /** Wednesday and Friday: the days a goal that is behind is worth an email on its own. */
 const goalDay = (now: Date) => [3, 5].includes(weekdayOf(dayInZone(now)));
+/** Tuesday and Thursday: the days the contacts with a mobile still to call are worth an email on their own (the other two are the goal's). */
+const callDay = (now: Date) => [2, 4].includes(weekdayOf(dayInZone(now)));
+
+/**
+ * «Llama a Ana Rojas, Leo Soto y 3 personas más: ya tienes sus móviles», the newest first. A mobile on hand is the shortest way to a
+ * conversation, and whoever prospects by phone had nothing in the morning that said so.
+ */
+export function callText(toCall: { count: number; names: string[] }) {
+  const [first, second] = toCall.names;
+  if (toCall.count === 1 || !second) return toCall.count === 1 ? `Llama a ${first}: ya tienes su móvil` : `Llama a ${first} y ${plural(toCall.count - 1, 'persona más', 'personas más')}: ya tienes sus móviles`;
+  if (toCall.count === 2) return `Llama a ${first} y ${second}: ya tienes sus móviles`;
+  return `Llama a ${first}, ${second} y ${plural(toCall.count - 2, 'persona más', 'personas más')}: ya tienes sus móviles`;
+}
 
 /** «hoy», «mañana», «el viernes», relative to today in Chile; a week or more ahead with its date («el martes 27»), or it reads as today. */
 export function dayWord(at: string, now: Date) {
@@ -216,6 +234,16 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     lines.push({ kind: 'report', text, href: reports.length === 1 ? `/opportunities?op=${encodeURIComponent(reports[0].id)}` : '/opportunities' });
   }
 
+  // The contacts with a mobile still to call: a reason on their own when some are new since the last alert, and on Tuesdays and
+  // Thursdays; any other day they ride along with the rest (below), so a list that waits does not write every morning.
+  const toCall = facts.toCall?.count ? facts.toCall : null;
+  const callLine: AlertLine | null = toCall ? { kind: 'call', text: callText(toCall), href: '/saved/leads/enriched?etapa=to_call' } : null;
+  const callReason = Boolean(toCall && (toCall.fresh > 0 || callDay(now)));
+  if (callLine && callReason) {
+    lead(toCall!.count === 1 ? `Llama hoy a ${toCall!.names[0]}` : `${toCall!.count.toLocaleString('es-CL')} contactos con móvil para llamar hoy`);
+    lines.push(callLine);
+  }
+
   if (facts.drop?.items.length) {
     const count = facts.drop.items.length;
     lead(dropSubject(facts.drop.items));
@@ -242,11 +270,12 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
 
   const remindGoal = Boolean(options.goalReminders !== false && goal && goalBehind && goalDay(now));
   if (!lines.length && !remindGoal) return null;
+  if (callLine && !callReason) lines.push(callLine);
 
   if (facts.olderPending && lines.length) lines.push({ kind: 'pending', text: `${facts.olderPending === 1 ? 'Te espera 1 respuesta' : `Te esperan ${facts.olderPending.toLocaleString('es-CL')} respuestas`} de días anteriores`, href: '/contacted/replied' });
 
   if (goal) {
-    const step = goalNextStep(goal, facts.ready);
+    const step = goalNextStep(goal, facts.ready, facts.toCall?.count || 0);
     if (remindGoal) lead(`Vas ${goal.counts.contacted.toLocaleString('es-CL')} de ${goal.targets.contacted.toLocaleString('es-CL')} en tu meta de la semana`);
     lines.push({ kind: 'goal', text: `Meta de la semana: ${progressText(goal)}${step ? `. ${step.text}` : ''}`, href: step?.href || '/dashboard' });
   }
