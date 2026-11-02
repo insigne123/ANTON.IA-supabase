@@ -11,6 +11,7 @@ import { listOpenLicitaciones } from './mercado-publico';
 import { resolveTicketForOrganization } from './tickets';
 import { CompraAgilError, searchCompraAgil, compraAgilQuery } from './compra-agil';
 import { opportunityDb } from './workspace-store';
+import { withoutNul } from '@/lib/postgres-json';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { budgetRefusal } from './workspace-budget';
 import { EXCLUSION_MOTIVES, RULE_MOTIVE, tenderWordsOfTheDay } from '@/lib/commercial-opportunities/workspace-radar';
@@ -41,7 +42,8 @@ export async function persistOpportunityCandidates(client: SupabaseClient, job: 
   let changed = 0;
   const cursor = Number(job.payload.cursor || 0);
   for (let offset = cursor; offset < Math.min(cursor + 400, candidates.length); offset += 100) {
-    const batch = [...new Map(candidates.slice(offset, offset + 100).map(c => [c.key,c])).values()];
+    // Postgres refuses a NUL character anywhere in the rows (22P05), so it is taken out before the hash (plan de uso A6).
+    const batch = [...new Map(candidates.slice(offset, offset + 100).map(c => [c.key,withoutNul(c)])).values()];
     const toEvaluate = opportunityDb(await client.rpc('opportunity_persist_candidates',{p_job:job.id,p_lease:job.lease_token,p_revision:revision,
       p_rows:batch.map(c=>({...c,hash:candidateFingerprint(c)}))})) as string[] || [];
     changed+=toEvaluate.length;
@@ -85,14 +87,14 @@ export async function captureOpportunityTenders(client: SupabaseClient, job: Opp
         return { waiting: true as const, retry: { tries, nextAt: new Date(Date.now() + COMPRA_AGIL_RETRY_MINUTES[tries - 1] * 60_000).toISOString() } };
       throw error instanceof CompraAgilError ? new AuthError(error.message, 503) : error;
     }
-    const candidates=response.tenders.map(tenderCandidate);
+    const candidates=withoutNul(response.tenders.map(tenderCandidate));
     opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
     return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), coverage: response.error ? 'partial' : 'up_to_four_pages' };
   }
   // The sources the administrator chose in «Qué buscamos» (search-settings.ts): the listing of tenders, Compra Ágil, or both.
   const settings = readSearchSettings(context.search);
   const tenders = sourceOn(settings, 'tenders') ? await listOpenLicitaciones({ fetch: globalThis.fetch, ticket: ticket.ticket }) : [];
-  const candidates=tenders.map(tenderCandidate);
+  const candidates=withoutNul(tenders.map(tenderCandidate));
   opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
   if (sourceOn(settings, 'compraAgil')) for (const keyword of tenderWordsOfTheDay(context.criteria?.keywords || [], Date.now() / 86_400_000)) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: job.organization_id, requested_by: job.requested_by,
     kind: 'tenders', dedupe_key: `${job.dedupe_key}:agil:${createHash('sha256').update(keyword).digest('hex')}`, payload: { keyword, revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
@@ -129,7 +131,9 @@ async function apifyOpportunityItems(client: SupabaseClient, job: OpportunityJob
   }
   const response = await fetch(`https://api.apify.com/v2/datasets/${encodeURIComponent(run.defaultDatasetId)}/items?format=json&limit=300`, { headers, signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new AuthError('La fuente terminó; falta recuperar sus resultados.', 503);
-  const items = await response.json();
+  // A LinkedIn post can carry a NUL character, which Postgres refuses (22P05): kept with it, the whole paid run was lost
+  // every day, its cost unsettled (plan de uso A6).
+  const items = withoutNul(await response.json());
   if (!Array.isArray(items)) throw new AuthError('Los resultados de la fuente no se pudieron leer.', 503);
   opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: cost, p_receipt: { ...receipt, status: run.status, fetched: items.length, cap }, p_data: { items } }));
   return { waiting: false as const, items };
