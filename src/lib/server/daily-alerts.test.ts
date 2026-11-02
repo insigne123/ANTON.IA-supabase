@@ -267,3 +267,17 @@ test('the contacts with a mobile still to call reach the morning alert, the newe
   before.tables.enriched_leads.push(lead('l-1', 'Ana Rojas', '+56987654321', '2026-10-19T20:00:00Z'));
   assert.deepEqual((await readAlertFacts(before.client, SCOPE, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'none' })).toCall, { count: 1, fresh: 1, names: ['Ana Rojas'] });
 });
+
+test('how long the person has been away: the latest of their sign-in and what they did (plan de uso U5)', async () => {
+  const data: any = seed();
+  data.antonia_event_ledger = [
+    { id: 'e1', actor_user_id: 'u-ana', occurred_at: '2026-10-08T12:00:00Z', source_confidence: 'observed' },
+    { id: 'e2', actor_user_id: 'u-other', occurred_at: '2026-10-19T12:00:00Z', source_confidence: 'observed' },
+  ];
+  const { client } = memory(data, { unique: UNIQUE });
+  const read = (lastSignInAt?: string | null) => readAlertFacts(client, SCOPE, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'none', lastSignInAt });
+  assert.equal((await read()).idleDays, 11, 'what they did, 11 days and a half ago');
+  assert.equal((await read('2026-10-18T09:00:00Z')).idleDays, 2, 'a later sign-in wins');
+  const nothing = memory(seed(), { unique: UNIQUE });
+  assert.equal((await readAlertFacts(nothing.client, SCOPE, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'none' })).idleDays, undefined, 'unknown is left out');
+});
