@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { addMessageTracking } from '../email-tracking';
-import { readOpenTracking, saveOpenTracking, sendTracking } from './open-tracking';
+import { readOpenTracking, readOpenTrackingState, saveOpenTracking, sendTracking } from './open-tracking';
 
 test('what a send measures: what it asked for, else the organization\'s choice for a new message; clicks only when asked (plan de uso M4)', () => {
   assert.deepEqual(sendTracking({ organizationOpens: true, newMessage: true }), { track: true, links: false }, 'opens only, links as they are');
@@ -52,6 +52,8 @@ test('read and saved for the organization, by its owners and administrators only
   assert.equal(await readOpenTracking(client({ organizations: [org] }).client, 'org-1'), true);
   assert.equal(await readOpenTracking(client({ organizations: [{ id: 'org-1', open_tracking_enabled: null }] }).client, 'org-1'), false);
   assert.equal(await readOpenTracking(client({}, { missingColumn: true }).client, 'org-1'), false, 'missing column: off');
+  assert.deepEqual(await readOpenTrackingState(client({}, { missingColumn: true }).client, 'org-1'), { enabled: false, available: false }, 'and no switch is offered');
+  assert.deepEqual(await readOpenTrackingState(client({ organizations: [org] }).client, 'org-1'), { enabled: true, available: true });
 
   const saving = client({ organizations: [org], members });
   assert.deepEqual(await saveOpenTracking(saving.client, { organizationId: 'org-1', userId: 'u-admin' }, false), { enabled: false });

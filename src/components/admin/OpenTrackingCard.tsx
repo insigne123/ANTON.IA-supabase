@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 
-type State = { enabled: boolean; canEdit: boolean };
+type State = { enabled: boolean; canEdit: boolean; available: boolean };
 
 /**
  * «Medir aperturas» in Administración › Empresa (plan de uso M4, src/lib/server/open-tracking.ts): the open pixel in the emails the
@@ -18,7 +18,7 @@ export function OpenTrackingCard() {
   useEffect(() => {
     let active = true;
     void fetch('/api/admin/open-tracking', { cache: 'no-store' }).then(response => response.ok ? response.json() : null)
-      .then(body => { if (active && body) setState({ enabled: body.enabled === true, canEdit: body.canEdit === true }); })
+      .then(body => { if (active && body) setState({ enabled: body.enabled === true, canEdit: body.canEdit === true, available: body.available !== false }); })
       .catch(() => undefined);
     return () => { active = false; };
   }, []);
@@ -35,8 +35,8 @@ export function OpenTrackingCard() {
       setSaving(false);
     }
   }, []);
-  // Read for everyone, shown to whoever may change it: a member has nothing to do with it.
-  if (!state?.canEdit) return null;
+  // Read for everyone, shown to whoever may change it: a member has nothing to do with it. Before its column exists, nobody can.
+  if (!state?.canEdit || !state.available) return null;
   return <div className="mx-auto mt-6 max-w-5xl">
     <Card className="rounded-2xl">
       <CardContent className="flex items-start justify-between gap-4 p-5">

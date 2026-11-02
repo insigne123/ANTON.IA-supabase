@@ -11,15 +11,23 @@ export class OpenTrackingError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-/** Whether the organization measures opens; off when it cannot be read. */
-export async function readOpenTracking(client: Client, organizationId: string): Promise<boolean> {
+/**
+ * Whether the organization measures opens (off when it cannot be read), and whether it can: before the column exists the
+ * switch is not offered, rather than one that always fails.
+ */
+export async function readOpenTrackingState(client: Client, organizationId: string): Promise<{ enabled: boolean; available: boolean }> {
   try {
     const result = await client.from('organizations').select('open_tracking_enabled').eq('id', organizationId).maybeSingle();
-    if (result.error) return false;
-    return result.data?.open_tracking_enabled === true;
+    if (result.error) return { enabled: false, available: !MISSING.has(String(result.error.code || '')) };
+    return { enabled: result.data?.open_tracking_enabled === true, available: true };
   } catch {
-    return false;
+    return { enabled: false, available: false };
   }
+}
+
+/** Whether the organization measures opens; off when it cannot be read. */
+export async function readOpenTracking(client: Client, organizationId: string): Promise<boolean> {
+  return (await readOpenTrackingState(client, organizationId)).enabled;
 }
 
 /** Turns it on or off, for owners and administrators of the organization only. */

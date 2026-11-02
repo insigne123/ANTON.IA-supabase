@@ -2,22 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthError, handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { OpenTrackingError, readOpenTracking, saveOpenTracking } from '@/lib/server/open-tracking';
+import { OpenTrackingError, readOpenTrackingState, saveOpenTracking } from '@/lib/server/open-tracking';
 
 export const dynamic = 'force-dynamic';
 const noStore = { 'Cache-Control': 'private, no-store' };
 const toAuthError = (error: unknown) => (error instanceof OpenTrackingError ? new AuthError(error.message, error.status) : error);
 
-/** «Medir aperturas» of the organization (src/lib/server/open-tracking.ts): whether it is on, and whether this person may change it. */
+/**
+ * «Medir aperturas» of the organization (src/lib/server/open-tracking.ts): whether it is on, whether it can be yet (its column
+ * exists), and whether this person may change it.
+ */
 export async function GET() {
   try {
     const auth = await requireAuth();
     const admin = getSupabaseAdminClient();
-    const [enabled, member] = await Promise.all([
-      readOpenTracking(admin, auth.organizationId),
+    const [state, member] = await Promise.all([
+      readOpenTrackingState(admin, auth.organizationId),
       admin.from('organization_members').select('role').eq('organization_id', auth.organizationId).eq('user_id', auth.user.id).maybeSingle(),
     ]);
-    return NextResponse.json({ enabled, canEdit: ['owner', 'admin'].includes(String((member as any).data?.role || '')) }, { headers: noStore });
+    return NextResponse.json({ ...state, canEdit: ['owner', 'admin'].includes(String((member as any).data?.role || '')) }, { headers: noStore });
   } catch (error) {
     return handleAuthError(toAuthError(error));
   }
