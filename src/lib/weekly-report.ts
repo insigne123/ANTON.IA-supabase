@@ -45,7 +45,7 @@ export type PendingReply = { id: string; name: string; company: string | null; r
 export type Commitment = { id: string; name: string; company: string | null; title: string; dueAt: string };
 export type PersonalSection = {
   sent: Counted; contacted: Counted; replies: Counted; meetings: number;
-  pending: PendingReply[]; commitments: Commitment[]; touches: { calls: number; linkedin: number } | null;
+  pending: PendingReply[]; commitments: Commitment[]; touches: { calls: number; linkedin: number; whatsapp?: number } | null;
   /** The week's steps, from saving a contact to an answer (audit N1); absent in reports stored before it or when a count failed. */
   funnel?: WeekFunnel | null;
 };
@@ -93,6 +93,21 @@ export const OPPORTUNITY_KINDS: Record<string, string> = {
 };
 
 const plural = (count: number, one: string, many: string) => `${count.toLocaleString('es-CL')} ${count === 1 ? one : many}`;
+
+/**
+ * The week's calls, WhatsApps and LinkedIn contacts in one line, only what happened: «3 llamadas, 2 WhatsApp y 1 contacto
+ * por LinkedIn». Calls and WhatsApps count the ones with a result told (src/lib/contact-calls.ts) and the call tasks done.
+ */
+export function touchesSentence(touches: { calls: number; linkedin: number; whatsapp?: number } | null | undefined) {
+  if (!touches) return null;
+  const parts = [
+    touches.calls ? plural(touches.calls, 'llamada', 'llamadas') : '',
+    touches.whatsapp ? `${touches.whatsapp.toLocaleString('es-CL')} WhatsApp` : '',
+    touches.linkedin ? `${plural(touches.linkedin, 'contacto', 'contactos')} por LinkedIn` : '',
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`;
+}
 export const rate = (replies: number, contacted: number) => contacted ? Math.round((replies / contacted) * 100) : null;
 
 /** «+5 vs. la semana anterior», «igual que la semana anterior»; null without a week before to compare. */
@@ -186,7 +201,8 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
   const goal = activeGoal(report.goal);
   if (goal) row(goalSentence(goal, week.which));
   row(`${plural(personal.sent.now, 'correo enviado', 'correos enviados')} · ${plural(personal.replies.now, 'respuesta', 'respuestas')} · ${plural(personal.meetings, 'reunión pedida', 'reuniones pedidas')}`);
-  if (personal.touches && (personal.touches.calls || personal.touches.linkedin)) row(`${plural(personal.touches.calls, 'llamada', 'llamadas')} y ${plural(personal.touches.linkedin, 'contacto', 'contactos')} por LinkedIn`);
+  const touched = touchesSentence(personal.touches);
+  if (touched) row(touched.charAt(0).toUpperCase() + touched.slice(1));
   if (team) {
     section('Equipo');
     const { active, idle } = teamActivity(team);
