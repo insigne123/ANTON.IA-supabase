@@ -10,11 +10,12 @@ import type { UnifiedKind, UnifiedRow } from '@/lib/unified-sheet-types';
  * of a lead is a photo of today until the stage history (PR 4b) is in.
  */
 export type DashboardPeriod = '7d' | '30d' | '90d' | '365d';
-export const DASHBOARD_PERIODS: Array<{ id: DashboardPeriod; label: string; days: number; previous: string; short: string }> = [
-  { id: '7d', label: 'Últimos 7 días', days: 7, previous: 'los 7 días anteriores', short: '7 días antes' },
-  { id: '30d', label: 'Últimos 30 días', days: 30, previous: 'los 30 días anteriores', short: '30 días antes' },
-  { id: '90d', label: 'Últimos 90 días', days: 90, previous: 'los 90 días anteriores', short: '90 días antes' },
-  { id: '365d', label: 'Último año', days: 365, previous: 'el año anterior', short: 'el año anterior' },
+// `during` is the period inside a sentence («En los últimos 30 días contactaste…»), with its article.
+export const DASHBOARD_PERIODS: Array<{ id: DashboardPeriod; label: string; during: string; days: number; previous: string; short: string }> = [
+  { id: '7d', label: 'Últimos 7 días', during: 'los últimos 7 días', days: 7, previous: 'los 7 días anteriores', short: '7 días antes' },
+  { id: '30d', label: 'Últimos 30 días', during: 'los últimos 30 días', days: 30, previous: 'los 30 días anteriores', short: '30 días antes' },
+  { id: '90d', label: 'Últimos 90 días', during: 'los últimos 90 días', days: 90, previous: 'los 90 días anteriores', short: '90 días antes' },
+  { id: '365d', label: 'Último año', during: 'el último año', days: 365, previous: 'el año anterior', short: 'el año anterior' },
 ];
 export type DashboardOrigin = 'all' | UnifiedKind;
 export const DASHBOARD_ORIGINS: Array<{ id: DashboardOrigin; label: string }> = [
@@ -149,7 +150,7 @@ export function buildPipelineDashboard(rows: UnifiedRow[], options: { now?: numb
   if (contacted.value || contacted.previous) {
     const change = contacted.delta === 0 ? 'lo mismo que en'
       : `${Math.abs(contacted.delta)} ${contacted.delta > 0 ? 'más' : 'menos'} que en`;
-    insights.push({ id: 'contacts', text: `En ${period.label.toLowerCase()} contactaste a ${plural(contacted.value, 'persona', 'personas')}, ${change} ${period.previous}.` });
+    insights.push({ id: 'contacts', text: `En ${period.during} contactaste a ${plural(contacted.value, 'persona', 'personas')}, ${change} ${period.previous}.` });
   }
   if (responseNow !== null && sentNow.length >= 3) {
     const comparison = responseBefore === null ? '' : responseNow > responseBefore ? `, más que en ${period.previous} (${percent(responseBefore)})`
