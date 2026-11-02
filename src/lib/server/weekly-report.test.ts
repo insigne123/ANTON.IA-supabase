@@ -195,3 +195,23 @@ test('the first Monday of a month, an administrator also gets the month before: 
   const later = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: new Date('2026-11-09T12:00:00.000Z') });
   assert.equal(later.report.month, undefined, 'the second Monday has no month');
 });
+
+test('meetings booked on a call or a WhatsApp count for the person and the team, and nothing breaks before the table exists (plan de uso U4)', async () => {
+  const data: Record<string, any[]> = seed();
+  const call = (id: string, userId: string, outcome: string, at: string) => ({ id, organization_id: ORG, user_id: userId, lead_id: null, channel: 'call', outcome, started_at: at, outcome_at: at });
+  data.contact_calls = [
+    call('c1', 'u-admin', 'meeting', '2026-10-14T15:00:00Z'), call('c2', 'u-admin', 'answered', '2026-10-15T15:00:00Z'),
+    call('c3', 'u-ana', 'meeting', '2026-10-16T15:00:00Z'), call('c4', 'u-ana', 'meeting', '2026-10-08T15:00:00Z'), // the week before
+  ];
+  const { client } = memory(data, ['contact_touches']);
+  const { report } = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
+  assert.equal(report.personal.callMeetings, 1);
+  assert.deepEqual(report.personal.touches, { calls: 2, linkedin: 0, whatsapp: 0 });
+  assert.deepEqual(report.team!.members.map(member => [member.name, member.callMeetings]), [['Nicolás Yarur', 1], ['Ana Soto', 1]]);
+  assert.equal(report.team!.totals.callMeetings, 2);
+
+  const before = memory(seed(), ['contact_touches', 'contact_calls']);
+  const old = await buildWeeklyReport(before.client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
+  assert.equal(old.report.personal.callMeetings, 0);
+  assert.equal(old.report.team!.totals.callMeetings, 0);
+});
