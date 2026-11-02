@@ -1,6 +1,7 @@
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
 import { emailShell } from '@/lib/email-shell';
 import { goalSentence, goalsOff, type GoalProgress } from '@/lib/weekly-goals';
+import { monthRows, type MonthSection } from '@/lib/month-summary';
 
 /**
  * «Informe semanal» (propuesta 2): one report per person with a section for each role they have. Everyone gets «Tu
@@ -82,6 +83,8 @@ export type WeeklyReport = {
   personal: PersonalSection; team: TeamSection | null; opportunities: OpportunitiesSection | null;
   /** The person's weekly goal (src/lib/weekly-goals.ts); absent in reports stored before it. */
   goal?: GoalProgress | null;
+  /** «Resumen del mes» (src/lib/month-summary.ts): the month before, for administrators, in the first seven days of a month. */
+  month?: MonthSection | null;
 };
 
 /** The goal when the team has one: a team that set both goals to 0 has none. */
@@ -215,6 +218,11 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
       });
       if (idle.length) row(`${plural(idle.length, 'persona', 'personas')} sin actividad`);
     }
+  }
+  const monthLines = report.month ? monthRows(report.month) : [];
+  if (report.month && monthLines.length) {
+    section(`Resumen de ${report.month.label}`);
+    monthLines.forEach(line => row(line.text, line.href));
   }
   if (opportunities) {
     section('Oportunidades');
