@@ -27,7 +27,7 @@ export const SUGGESTED_QUESTIONS = {
 
 type Opportunity = { id?: string; kind?: string; code?: string | null; url?: string | null; title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
 const ROUTE_ICONS: Record<string, typeof PenLine> = { prepare: PenLine, ask: MessageCircleQuestion, submit: Upload, wait: Hourglass, decide: Award, contact: Phone };
-export function OpportunityWorkReport({ report, previous, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people, fit, fitBusy = false, onFit, onAnswer }: {
+export function OpportunityWorkReport({ report, previous, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people, fit, fitBusy = false, onFit, onAnswer, onProfile }: {
   report: OpportunityReport & { route?: { steps: Array<{ title: string; detail: string; date: string; kind: 'prepare' | 'ask' | 'submit' | 'wait' | 'decide' | 'contact' }> } | null };
   /** This version and the one before it, to say what changed (OPP-20); absent for the first report. */
   previous?: { latest: { created_at: string; report: OpportunityReport }; before: { created_at: string; report: OpportunityReport } } | null;
@@ -39,6 +39,7 @@ export function OpportunityWorkReport({ report, previous, opportunity, onTask, o
   people?: Array<{ user_id: string; name: string }>;
   /** «¿Cumplimos?»: the requirements against the company's tender profile (workspace-fit.ts); absent before its migration. */
   fit?: OpportunityFitView | null; fitBusy?: boolean; onFit?: () => void; onAnswer?: (question: string, answer: string) => void;
+  /** Opens the «Ficha para licitaciones» (an administrator's): offered when it is nearly empty. */ onProfile?: () => void;
 }) {
   const { interactive, marks, pending, change } = useReportMarks(initialMarks, onMark);
   const itemMarks = interactive ? marks : null;
@@ -181,7 +182,7 @@ export function OpportunityWorkReport({ report, previous, opportunity, onTask, o
 
       {report.requirements.length > 0 && <section aria-labelledby="report-requirements" className="space-y-3">
         {heading('requirements', signal ? 'Qué validar con la empresa' : 'Requisitos para postular', report.requirements.length)}
-        {!signal && fit ? <FitBar fit={fit} busy={fitBusy} onFit={onFit} /> : null}
+        {!signal && fit ? <FitBar fit={fit} busy={fitBusy} onFit={onFit} onProfile={onProfile} /> : null}
         <ul className="divide-y rounded-2xl border">{report.requirements.map((r, i) => { const itemFit = signal ? null : fit?.latest?.items[reportItemKey('requirement', r.title)] ?? null; return <li key={i} className="p-4">
           <MarkedItem markKey={reportItemKey('requirement', r.title)} label={r.title} {...markProps}>
             <div className="flex flex-wrap items-start justify-between gap-2"><p className="mark-title min-w-0 font-medium">{r.title}</p>

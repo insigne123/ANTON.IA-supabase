@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { requireOpportunityWorkspace, opportunityScope, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
+import { requireOpportunityWorkspace, opportunityScope } from '@/lib/server/commercial-opportunities/workspace-access';
 import { extractOpportunityFile, opportunityLegacyAsText, opportunityMime } from '@/lib/server/commercial-opportunities/workspace-documents';
 import { DocumentFileError } from '@/lib/server/commercial-opportunities/document-files';
 import { opportunityDb } from '@/lib/server/commercial-opportunities/workspace-store';
@@ -36,12 +36,12 @@ async function readPrefillFile(file: Upload) {
  * bases, contract, annexes), from the e-mail that brought them (.eml, .msg: its message and its attachments, OPP-49), or from the
  * text pasted in the form: the text is read here, the model proposes the form's fields (prefill.ts) and the person reviews them.
  * The documents are not saved: the form uploads them with the opportunity, as its bases. A package is read together
- * (prefill-package.ts); a scan or a photo is read by the model itself only when it is the one document.
+ * (prefill-package.ts); a scan or a photo is read by the model itself only when it is the one document. Anyone who may load an
+ * opportunity may have its form completed (workspace-store.ts, createPrivateOpportunity).
  */
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
-    assertOpportunityAdmin(scope);
     const form = await request.formData().catch(() => null);
     const uploaded = (form?.getAll('file') ?? []).filter((file): file is File => typeof file !== 'string');
     // The text of the invitation pasted in the form, when there is no document: read the same way.

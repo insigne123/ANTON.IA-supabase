@@ -16,6 +16,8 @@ import { assignOpportunities, bulkSchema, discardOpportunities, moveOpportunitie
 import { notifyBulkAssignment, readTeams } from '@/lib/server/commercial-opportunities/workspace-assignment-notice';
 import { adminSettingsInputSchema, saveAdminSettings } from '@/lib/server/commercial-opportunities/workspace-admin-settings';
 import { countMyOpportunityTasks, readMyOpportunityTasks } from '@/lib/server/commercial-opportunities/workspace-tasks';
+import { findOpportunityDuplicates } from '@/lib/server/commercial-opportunities/workspace-duplicates';
+import { duplicateQuerySchema } from '@/lib/commercial-opportunities/duplicates';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
@@ -47,14 +49,17 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
-    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria', 'pipeline_review', 'bulk', 'admin_settings']), data: z.unknown() }).strict().parse(await request.json());
+    const body = z.object({ action: z.enum(['create', 'duplicates', 'context', 'discover', 'notification', 'criteria', 'pipeline_review', 'bulk', 'admin_settings']), data: z.unknown() }).strict().parse(await request.json());
     if (body.action === 'notification') {
       const { id } = z.object({ id: z.string().uuid() }).strict().parse(body.data);
       opportunityDb(await auth.admin.from('opportunity_notifications').update({ read_at: new Date().toISOString() }).eq('id', id).eq('organization_id', scope.organizationId).eq('user_id', scope.userId));
       return opportunitiesJson({ ok: true });
     }
-    assertOpportunityAdmin(scope);
+    // «Cargar oportunidad» is anyone's who works Oportunidades (a member becomes its responsible person, workspace-store.ts), and so is
+    // asking first whether those bases are already loaded (duplicates.ts).
     if (body.action === 'create') return opportunitiesJson({ id: await createPrivateOpportunity(auth.admin, scope, privateOpportunitySchema.parse(body.data)) }, 201);
+    if (body.action === 'duplicates') return opportunitiesJson({ matches: await findOpportunityDuplicates(auth.admin, scope, duplicateQuerySchema.parse(body.data).hashes) });
+    assertOpportunityAdmin(scope);
     if (body.action === 'discover') return opportunitiesJson(await requestOpportunityDiscovery(auth.admin, scope), 202);
     if (body.action === 'bulk') {
       // Several opportunities of the list at once: put aside with a reason, the same team, or another stage (workspace-discards.ts).
