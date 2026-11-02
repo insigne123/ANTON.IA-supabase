@@ -88,6 +88,7 @@ import {
 import { ResultsActionBar } from '@/components/search/ResultsActionBar';
 import { SearchIntro } from '@/components/search/SearchIntro';
 import { SearchLeadRow } from '@/components/search/SearchLeadRow';
+import { autoSavedMessage, paidLeadKey, paidLeadsToSave } from '@/lib/search/auto-save';
 import { LeadFitBadge, LeadFitNotice } from '@/components/leads/LeadFitBadge';
 import { useLeadFit } from '@/hooks/use-lead-fit';
 import type { LeadFitLead } from '@/lib/lead-fit/core';
@@ -829,6 +830,42 @@ export default function SearchPage() {
   const [companySelectionPending, setCompanySelectionPending] = useState(false);
   const [isEnrichingOrganization, setIsEnrichingOrganization] = useState(false);
   const organizationEnrichmentOperationsRef = useRef(new Map<string, string>());
+
+  // Plan de uso U2: a contact paid for in «Buscar por perfil» is saved on its own, to whoever asked, so the credits never
+  // end in a number copied and lost (src/lib/search/auto-save.ts). A mobile that arrives later reaches the saved contact
+  // through «Por escribir»'s phone sync; a contact someone else holds or a failed save stays for «Guardar».
+  const autoSavedRef = useRef(new Set<string>());
+  useEffect(() => {
+    const candidates = paidLeadsToSave(leads, {
+      revealed: filters.searchMode === 'linkedin_profile' && (filters.revealEmail || filters.revealPhone),
+      isSaved: isSavedLead,
+      isContacted: isContactedLead,
+      isClaimed: isClaimedLead,
+      done: autoSavedRef.current,
+    });
+    if (!candidates.length) return;
+    for (const lead of candidates) autoSavedRef.current.add(paidLeadKey(lead));
+    void (async () => {
+      try {
+        const result = await enrichedLeadsStorage.addDedup(candidates.map(mapLeadToEnriched));
+        await refreshSavedApolloIds();
+        if (!result.addedCount) return;
+        const message = autoSavedMessage(candidates, result.addedCount);
+        toast({
+          title: message.title,
+          description: message.description,
+          action: <ToastAction altText="Ver en «Por escribir»" onClick={() => router.push(message.href)}>Ver</ToastAction>,
+        });
+      } catch (error) {
+        const claim = leadClaimRefusal(error);
+        toast(claim
+          ? { title: 'Ya está adjudicado', description: claim.message }
+          : { title: 'No se guardó solo', description: 'Usa «Guardar» para dejarlo en «Por escribir».' });
+      }
+    })();
+    // The list is what changes: the checks read the latest saved, contacted and held sets when it does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads, filters.searchMode, filters.revealEmail, filters.revealPhone]);
 
   const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
