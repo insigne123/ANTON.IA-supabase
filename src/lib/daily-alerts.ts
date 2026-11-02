@@ -49,6 +49,8 @@ export type AlertFacts = {
    */
   best?: Array<{ id: string; title: string; buyer: string | null; deadlineAt: string | null }>;
   goal: GoalProgress | null;
+  /** Days since the person last signed in or did something recorded (plan de uso U5); null or absent when unknown. */
+  idleDays?: number | null;
   /** Today's «Contacto del día», when it is ready. */
   drop?: { id: string; items: DropItem[] } | null;
   /** Conversations of Cowork whose proposal waits for the person (COW-04): every day while they wait, as the decisions above. */
@@ -62,6 +64,8 @@ export type AlertFacts = {
 export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'approval' | 'source' | 'document' | 'closing' | 'assigned' | 'best' | 'report' | 'search' | 'call' | 'drop' | 'research' | 'ready' | 'goal';
 /** How many of the best new opportunities one alert names. */
 export const BEST_PER_ALERT = 5;
+/** A week without coming in: from then on, on Tuesdays, the contacts already waiting are reason enough for the alert (U5). */
+export const IDLE_DAYS = 7;
 
 /**
  * The days a document of the company is told on before it lapses: two weeks ahead (time to ask for a new F30), a week, the day before
@@ -266,6 +270,15 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     const text = count === 1 ? `El contacto ${saved} ya tiene correo` : `Los ${count.toLocaleString('es-CL')} contactos ${saved} ya tienen correo`;
     lead(text);
     lines.push({ kind: 'ready', text: `${text}: escríbe${count === 1 ? 'le' : 'les'} desde «Por escribir»`, href: '/saved/leads/enriched' });
+  }
+
+  // Plan de uso U5: whoever has not come in for a week hears on Tuesdays of the contacts already waiting for them, by name of what
+  // to do, before a goal that is behind (which alone told them «Vas 0 de 10» and nothing they could do in a minute).
+  const idle = (facts.idleDays ?? 0) >= IDLE_DAYS && weekdayOf(dayInZone(now)) === 2;
+  if (idle && facts.ready > 0 && !lines.some(line => line.kind === 'ready')) {
+    const text = facts.ready === 1 ? 'Te espera un contacto con correo, listo para escribirle' : `Te esperan ${facts.ready.toLocaleString('es-CL')} contactos con correo, listos para escribirles`;
+    lead(text);
+    lines.push({ kind: 'ready', text, href: '/saved/leads/enriched' });
   }
 
   const remindGoal = Boolean(options.goalReminders !== false && goal && goalBehind && goalDay(now));

@@ -14,6 +14,7 @@ export type MemberSignals = {
   lastActivityAt: string | null;
   mailConnected: boolean;
   profileReady: boolean;
+  /** Sent an email, or called or wrote by WhatsApp with a result told (contact_calls), from ANTON.IA. */
   hasSent: boolean;
 };
 
@@ -97,7 +98,7 @@ export function buildAdoption(members: MemberSignals[], now = new Date()): Adopt
       { id: 'signed_in', label: 'Entraron alguna vez', value: signedIn.length },
       { id: 'active', label: 'Activas en 30 días', value: members.filter((member) => seenWithin(member, 30, now)).length },
       { id: 'mail', label: 'Con correo conectado', value: members.filter((member) => member.mailConnected).length },
-      { id: 'first_send', label: 'Enviaron su primer correo', value: members.filter((member) => member.hasSent).length },
+      { id: 'first_send', label: 'Hicieron su primer contacto', value: members.filter((member) => member.hasSent).length },
     ],
   };
 }
@@ -120,7 +121,7 @@ function helpFor(member: MemberSignals, now: Date): Omit<HelpItem, 'userId' | 'n
     return { reason: 'inactive', title: `Sin actividad hace ${idleDays} días`, detail: 'Tiene todo listo, pero dejó de usar la app.', action: 'open_person' };
   }
   if (!member.hasSent) {
-    return { reason: 'no_send', title: 'Aún no envía su primer correo', detail: 'Tiene correo y perfil listos: le falta el primer envío.', action: 'open_person' };
+    return { reason: 'no_send', title: 'Aún no hace su primer contacto', detail: 'Tiene correo y perfil listos: le falta escribir o llamar a su primer contacto.', action: 'open_person' };
   }
   return null;
 }

@@ -89,8 +89,8 @@ export async function loadAdminValue(supabase: any, organizationId: string, quer
   const activitySince = new Date(now.getTime() - 30 * 86_400_000).toISOString();
 
   const empty = { data: [], error: null };
-  const [identities, tokens, profiles, sentRows, activityRows] = userIds.length === 0
-    ? [{ data: { users: [] }, error: null }, empty, empty, empty, empty]
+  const [identities, tokens, profiles, sentRows, activityRows, callRows] = userIds.length === 0
+    ? [{ data: { users: [] }, error: null }, empty, empty, empty, empty, empty]
     : await Promise.all([
       loadMemberIdentities(supabase, userIds),
       // Tokens are service-only; only which providers are connected leaves the server.
@@ -100,6 +100,8 @@ export async function loadAdminValue(supabase: any, organizationId: string, quer
       supabase.from('antonia_event_ledger').select('actor_user_id, occurred_at').eq('organization_id', organizationId)
         .gte('occurred_at', activitySince).neq('source_confidence', 'diagnostic_test').in('actor_user_id', userIds)
         .order('occurred_at', { ascending: false }).limit(MAX_ROWS),
+      // A first contact by phone counts as one (plan de uso U5): a call or WhatsApp with its result. Before the table exists, none.
+      supabase.from('contact_calls').select('user_id').eq('organization_id', organizationId).not('outcome', 'is', null).in('user_id', userIds).limit(MAX_ROWS),
     ]);
 
   if (identities.error) {
@@ -110,6 +112,7 @@ export async function loadAdminValue(supabase: any, organizationId: string, quer
   const mailUsers = new Set(rowsOrThrow(tokens, 'provider_tokens').filter((row: any) => text(row.provider)).map((row: any) => text(row.user_id)));
   const profileById = new Map(rowsOrThrow(profiles, 'profiles').map((row: any) => [text(row.id), row]));
   const senders = new Set(rowsOrThrow(sentRows, 'contacted_leads.senders').map((row: any) => text(row.user_id)));
+  for (const row of ((callRows as any).error ? [] : (callRows as any).data || []) as any[]) senders.add(text(row.user_id));
   const lastActivity = new Map<string, string>();
   for (const row of rowsOrThrow(activityRows, 'antonia_event_ledger')) {
     const userId = text((row as any).actor_user_id);
