@@ -29,6 +29,9 @@ test('provider errors read as plain Spanish, and filter or credit messages pass 
   assert.equal(getFriendlySearchErrorMessage('Debes elegir al menos un filtro'), 'Debes elegir al menos un filtro');
   assert.equal(getFriendlySearchErrorMessage('No tienes créditos suficientes'), 'No tienes créditos suficientes');
   assert.match(getFriendlySearchErrorMessage('429 quota exceeded'), /límite disponible por hoy/);
+  // Too many searches in a minute is no daily limit (2 Nov 2026): «RATE_LIMITED» read as one.
+  assert.match(getFriendlySearchErrorMessage('RATE_LIMITED'), /^Hay muchas búsquedas al mismo tiempo.*no es tu límite del día\.$/);
+  assert.match(getFriendlySearchErrorMessage('APOLLO_RATE_LIMITED'), /muchas búsquedas al mismo tiempo/);
   assert.match(getFriendlySearchErrorMessage('Unauthorized'), /sesión necesita renovarse/);
 });
 
