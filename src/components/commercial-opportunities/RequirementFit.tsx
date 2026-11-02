@@ -7,12 +7,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { FIT_LABELS, fitSummary, type RequirementFit, type ReportFit } from '@/lib/commercial-opportunities/requirement-fit';
+import { FIT_LABELS, fitSummary, tenderProfileThin, type RequirementFit, type ReportFit } from '@/lib/commercial-opportunities/requirement-fit';
 import type { SealNote } from '@/lib/commercial-opportunities/gender-criterion';
 import type { FemaleLedSeal } from '@/lib/commercial-opportunities/tender-profile';
 
-/** `seal` is what the profile says about the «Sello Empresa Mujer»: null before the profile exists. */
-export type OpportunityFitView = { available: boolean; latest: ReportFit | null; profileRevision: number | null; seal?: FemaleLedSeal | null };
+/**
+ * `seal` is what the profile says about the «Sello Empresa Mujer» and `progress` how much of it is answered: both null before the
+ * profile exists.
+ */
+export type OpportunityFitView = { available: boolean; latest: ReportFit | null; profileRevision: number | null; seal?: FemaleLedSeal | null;
+  progress?: { answered: number; total: number } | null };
 const TONE: Record<RequirementFit['fit'], string> = { meets: 'text-cw-success', missing: 'text-cw-warning', fails: 'text-destructive', na: 'text-muted-foreground' };
 const ICON = { meets: Check, missing: CircleHelp, fails: X, na: null } as const;
 
@@ -99,27 +103,51 @@ export function FitQuestion({ id, question, why, kind, busy, onAnswer }: {
 }
 
 /** Above the requirements: how many the company meets, and the way to read them (again) with the current profile. */
-export function FitBar({ fit, busy, onFit }: { fit: OpportunityFitView; busy: boolean; onFit?: () => void }) {
+/**
+ * The line over the requirements. With a profile that is nearly empty (requirement-fit.ts, tenderProfileThin) almost every requirement
+ * reads «falta un dato» for the same reason: it says so once and asks for the profile, which then serves every tender. `onProfile`
+ * opens it for an administrator; a member hears who completes it.
+ */
+export function FitBar({ fit, busy, onFit, onProfile }: { fit: OpportunityFitView; busy: boolean; onFit?: () => void; onProfile?: () => void }) {
   if (!fit.available) return null;
+  const complete = onProfile
+    ? <Button type="button" size="sm" variant="outline" onClick={onProfile}>Completar ficha</Button>
+    : null;
   if (fit.profileRevision === null) {
-    return <p className="rounded-xl bg-muted/40 px-4 py-3 text-sm text-muted-foreground">Con la «Ficha para licitaciones» de tu empresa, la IA te dice qué requisitos cumples y cuáles faltan. Un administrador la completa en Oportunidades.</p>;
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/40 px-4 py-3">
+        <p className="text-sm text-muted-foreground">Con la «Ficha para licitaciones» de tu empresa, la IA te dice qué requisitos cumples y cuáles faltan.{onProfile ? ' Se completa una vez y sirve para todas.' : ' Un administrador la completa en Oportunidades.'}</p>
+        {complete}
+      </div>
+    );
   }
   const summary = fitSummary(fit.latest);
   const stale = !fit.latest || fit.latest.profileRevision < fit.profileRevision;
+  const thin = fit.progress && tenderProfileThin(fit.progress) ? fit.progress : null;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/40 px-4 py-3" aria-live="polite">
-      <p className="text-sm">
-        {summary ? <>
-          <span className="font-medium text-cw-success">{summary.meets} cumples</span>
-          <span className="text-muted-foreground"> · </span><span className="font-medium text-cw-warning">{summary.missing} falta{summary.missing === 1 ? '' : 'n'} un dato</span>
-          <span className="text-muted-foreground"> · </span><span className="font-medium text-destructive">{summary.fails} no cumples</span>
-          {stale ? <span className="text-muted-foreground"> · tu ficha cambió desde esta revisión</span> : null}
-        </> : <span className="text-muted-foreground">¿Cumplimos? La IA compara cada requisito con tu ficha para licitaciones.</span>}
-      </p>
-      {stale && onFit ? (
-        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onFit}>
-          {busy ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}{summary ? 'Revisar de nuevo con mi ficha' : 'Revisar con mi ficha'}
-        </Button>
+    <div className="space-y-2 rounded-xl bg-muted/40 px-4 py-3" aria-live="polite">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm">
+          {summary ? <>
+            <span className="font-medium text-cw-success">{summary.meets} cumples</span>
+            <span className="text-muted-foreground"> · </span><span className="font-medium text-cw-warning">{summary.missing} falta{summary.missing === 1 ? '' : 'n'} un dato</span>
+            <span className="text-muted-foreground"> · </span><span className="font-medium text-destructive">{summary.fails} no cumples</span>
+            {stale ? <span className="text-muted-foreground"> · tu ficha cambió desde esta revisión</span> : null}
+          </> : <span className="text-muted-foreground">¿Cumplimos? La IA compara cada requisito con tu ficha para licitaciones.</span>}
+        </p>
+        {stale && onFit ? (
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onFit}>
+            {busy ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}{summary ? 'Revisar de nuevo con mi ficha' : 'Revisar con mi ficha'}
+          </Button>
+        ) : null}
+      </div>
+      {thin ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-2">
+          <p className="text-sm text-muted-foreground">
+            Tu ficha para licitaciones tiene {thin.answered} de {thin.total} datos: por eso falta un dato en casi todos los requisitos.{onProfile ? ' Complétala una vez y sirve para todas las licitaciones.' : ' Pídele a un administrador que la complete en Oportunidades.'}
+          </p>
+          {complete}
+        </div>
       ) : null}
     </div>
   );

@@ -105,3 +105,10 @@ export function fitSummary(fit: ReportFit | null) {
   const count = (value: FitValue) => requirementItems(fit).filter(item => item.fit === value).length;
   return { meets: count('meets'), missing: count('missing'), fails: count('fails') };
 }
+
+/**
+ * Whether the «Ficha para licitaciones» is too empty to read requirements against (tender-profile.ts, tenderProfileProgress): fewer
+ * than half of its questions answered. Then almost every requirement says «falta un dato» for the same reason, and the report asks
+ * for the profile once instead (RequirementFit.tsx).
+ */
+export const tenderProfileThin = (progress: { answered: number; total: number }) => progress.total > 0 && progress.answered * 2 < progress.total;

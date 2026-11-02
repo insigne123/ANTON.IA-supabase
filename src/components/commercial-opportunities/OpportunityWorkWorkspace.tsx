@@ -68,6 +68,7 @@ import { AdvicePill, ExclusionGroups, NewsList, StartHere } from './OpportunityR
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
 import { pickPrefillFiles } from '@/lib/commercial-opportunities/prefill-package';
+import { duplicateNotice, fileFingerprint, type DuplicateMatch } from '@/lib/commercial-opportunities/duplicates';
 import { OPPORTUNITY_SOURCES, bySource, closesLabel, inCategories, parseCategories, sourceKinds, workAdvice, type OpportunityCategory, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { humanDate, reportDecision, reportNextSteps } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
@@ -192,6 +193,8 @@ export function OpportunityWorkWorkspace() {
   // «Cargar oportunidad»: from a document the AI reads (prefill.ts) or typed, and what the reading found.
   const [createMode, setCreateMode] = useState<'upload' | 'write'>('upload');
   const [prefill, setPrefill] = useState<{ status: 'idle' | 'reading' | 'done' | 'error'; name?: string; missing?: string[]; partial?: boolean; message?: string; read?: string[]; kept?: number; notes?: string[]; pasted?: boolean }>({ status: 'idle' });
+  // «Estas bases ya están en…» (duplicates.ts): the opportunities that already have some of the files chosen in the form.
+  const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
   const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const watching = useRef<string | null>(null);
@@ -361,6 +364,21 @@ export function OpportunityWorkWorkspace() {
     setFiles(current => [...current, ...opened.filter(file => !current.some(item => item.name === file.name))]);
     if (notes.length) setProblem(notes.map(note => note.message).join(' '));
   };
+  // The files of the form against what the workspace already has (duplicates.ts), read again whenever the list changes: the same bases
+  // loaded again repeat the report. Best effort: a failure says nothing and the form goes on as before.
+  useEffect(() => {
+    if (modal !== 'create' || !files.length) { setDuplicates([]); return; }
+    let current = true;
+    void (async () => {
+      try {
+        const hashes = await Promise.all(files.slice(0, 60).map(file => fileFingerprint(file)));
+        const result = await json(await fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'duplicates', data: { hashes } }) }));
+        if (current) setDuplicates(Array.isArray(result.matches) ? result.matches : []);
+      } catch { if (current) setDuplicates([]); }
+    })();
+    return () => { current = false; };
+  }, [modal, files]);
+  const duplicate = modal === 'create' ? duplicateNotice(duplicates, files.length) : null;
   const review = async () => {
     setReviewing(true); setProblem('');
     try { const result = await json(await fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pipeline_review', data: {} }) }));
@@ -764,7 +782,7 @@ export function OpportunityWorkWorkspace() {
         await Promise.all(Array.from({ length: Math.min(UPLOADS_AT_ONCE, queue.length) }, async () => { for (let file = queue.shift(); file; file = queue.shift()) await send(file); }));
         setUploading(null); setBusy(false); open(createdId); await load();
         if (failed.length) setProblem(`La oportunidad quedó creada. ${failed.join(' ')} Puedes subirlos de nuevo en Documentos.`);
-        else setFeedback('Oportunidad creada. Genera el informe cuando tengas todos los documentos.');
+        else setFeedback(admin ? 'Oportunidad creada. Genera el informe cuando tengas todos los documentos.' : 'Oportunidad creada y a tu cargo. Genera el informe cuando tengas todos los documentos.');
       }
     }
     if (result) { setModal(null); setFiles([]); }
@@ -913,7 +931,8 @@ export function OpportunityWorkWorkspace() {
       </div>
     </div>}
     {!selected && <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{admin ? 'Hallazgos y oportunidades recibidas, con un equipo y una siguiente acción.' : 'Tus asignaciones, el equipo de trabajo y lo que hay que hacer después.'}</p></div>
-      {admin && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={openContext}><Settings className="mr-2 h-4 w-4" />Tu empresa</Button><Button onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setCreateMode('upload'); setPrefill({ status: 'idle' }); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button></div>}
+      {/* «Cargar oportunidad» is anyone's (2 Nov 2026): a member who brings one becomes its responsible person. «Tu empresa» stays an administrator's. */}
+      <div className="flex flex-wrap gap-2">{admin ? <Button variant="outline" onClick={openContext}><Settings className="mr-2 h-4 w-4" />Tu empresa</Button> : null}<Button variant={admin ? 'default' : 'outline'} onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setDuplicates([]); setCreateMode('upload'); setPrefill({ status: 'idle' }); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button></div>
     </header>}
     {problem && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm"><p>{problem}</p><Button size="sm" variant="outline" onClick={() => { setProblem(''); void load(); if (selected) void loadDetail(selected); }}>Reintentar</Button></div>}
     {/* A notice floats at the bottom instead of pushing the page down (it moved «← Oportunidades» ≈46 px). */}
@@ -1075,7 +1094,8 @@ export function OpportunityWorkWorkspace() {
             <OpportunityWorkReport report={latest.report} previous={detail.reports[1] ? { latest, before: detail.reports[1] } : null} opportunity={{ id: item.id, kind: item.kind, code: (item.data as { observed?: { code?: string } } | null)?.observed?.code ?? null, url: item.url, title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency }}
               onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')}
               marks={detail.marks} onMark={mark} people={detail.members || detail.participants}
-              fit={detail.fit} fitBusy={busy} onFit={() => void checkFit('fit', {})} onAnswer={(question, answer) => void checkFit('fit_answer', { question, answer })} />
+              fit={detail.fit} fitBusy={busy} onFit={() => void checkFit('fit', {})} onAnswer={(question, answer) => void checkFit('fit_answer', { question, answer })}
+              onProfile={admin ? () => setProfileOpen(true) : undefined} />
           </>}
         </div>}
         {tab === 'apply' && !signal && <div className="space-y-5">
@@ -1153,6 +1173,8 @@ export function OpportunityWorkWorkspace() {
         : <>
           <div role="group" aria-label="Cómo cargarla" className="flex w-full rounded-xl bg-muted p-1 sm:w-fit">{([['upload', 'Subir documento'], ['write', 'Escribir los datos']] as const).map(([key, label]) =>
             <button key={key} type="button" aria-pressed={createMode === key} disabled={prefill.status === 'reading'} onClick={() => setCreateMode(key)} className={cn('flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:flex-none', createMode === key ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>)}</div>
+          {duplicate ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-3 py-2.5 text-sm leading-6"><p>{duplicate.text}</p>
+            {duplicate.open ? <Button type="button" size="sm" variant="outline" onClick={() => { const id = duplicate.open!.id; setModal(null); setFiles([]); setDuplicates([]); open(id); }}>Abrir esa</Button> : null}</div> : null}
           {createMode === 'upload' ? <div className="space-y-3">
             <label htmlFor="op-prefill-file" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const dropped = Array.from(e.dataTransfer.files || []); if (dropped.length && prefill.status !== 'reading') void readDocuments(dropped); }}
               className={cn('flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-10 text-center transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-muted/40', prefill.status === 'reading' && 'cursor-wait')}>
