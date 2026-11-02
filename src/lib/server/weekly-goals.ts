@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveTargets, validTargets, type GoalCounts, type GoalProgress, type GoalTargets } from '@/lib/weekly-goals';
+import { readCallContacts } from '@/lib/server/contact-calls';
 
 /** The reads and the save of «Metas semanales» (src/lib/weekly-goals.ts), with the service client and an explicit organization. */
 type Client = SupabaseClient;
@@ -50,20 +51,22 @@ export async function readGoalSettings(client: Client, organizationId: string): 
 
 /**
  * What each person did toward the goal in the range: new contacts with an email (saved in the range, one per address) and
- * people contacted (an email confirmed sent, or a LinkedIn message or a call marked done, one per person). Only one person
- * when `userId` is given.
+ * people contacted (an email confirmed sent, a LinkedIn message or a call marked done, or a call or WhatsApp started from
+ * «Llamar» with its result, one per person). Only one person when `userId` is given.
  */
 export async function readGoalCounts(client: Client, organizationId: string, range: GoalRange, userId?: string) {
   const scoped = (table: string, columns: string) => {
     const query = client.from(table).select(columns).eq('organization_id', organizationId);
     return userId ? query.eq('user_id', userId) : query;
   };
-  const [saved, dispatches, touches] = await Promise.all([
+  const [saved, dispatches, touches, calls] = await Promise.all([
     pages(() => scoped('enriched_leads', 'id,user_id,email').gte('created_at', range.from).lt('created_at', range.to).not('email', 'is', null).neq('email', '').order('id')),
     pages(() => scoped('outbound_dispatches', 'id,user_id,metadata,completed_at,reconciliation_details').eq('status', 'sent').eq('channel', 'email')
       .gte('completed_at', range.from).lt('completed_at', range.to).order('id')),
     // «Llamadas y LinkedIn» may not exist in an old database: the goal then counts the emails only.
     scoped('contact_touches', 'user_id,contacted_id').eq('state', 'done').in('channel', ['linkedin', 'call']).gte('done_at', range.from).lt('done_at', range.to).limit(5000),
+    // «Llamar» y «WhatsApp» (contact_calls): every result but a wrong number, keyed by the contact's email when it had one.
+    readCallContacts(client, organizationId, range, userId),
   ]);
   const touchRows = ((touches as any).error ? [] : (touches as any).data || []) as Array<{ user_id: string; contacted_id: string }>;
   // A person written to by email and also called counts once: a touch is keyed by the address of its conversation.
@@ -82,6 +85,7 @@ export async function readGoalCounts(client: Client, organizationId: string, ran
     add(contacted, String(row.user_id), String(row.metadata?.recipient?.email || '').trim().toLowerCase() || `dispatch:${row.id}`);
   }
   for (const row of touchRows) add(contacted, String(row.user_id), addresses.get(String(row.contacted_id)) || `touch:${row.contacted_id}`);
+  for (const row of calls) add(contacted, row.userId, row.key);
   const counts = new Map<string, GoalCounts>();
   for (const user of new Set([...found.keys(), ...contacted.keys()])) counts.set(user, { contacted: contacted.get(user)?.size || 0, found: found.get(user)?.size || 0 });
   return counts;

@@ -89,6 +89,8 @@ import { ResultsActionBar } from '@/components/search/ResultsActionBar';
 import { SearchIntro } from '@/components/search/SearchIntro';
 import { SearchLeadRow } from '@/components/search/SearchLeadRow';
 import { autoSavedMessage, paidLeadKey, paidLeadsToSave } from '@/lib/search/auto-save';
+import { ContactActions } from '@/components/contact/ContactActions';
+import { telHref } from '@/lib/contact-calls';
 import { LeadFitBadge, LeadFitNotice } from '@/components/leads/LeadFitBadge';
 import { useLeadFit } from '@/hooks/use-lead-fit';
 import type { LeadFitLead } from '@/lib/lead-fit/core';
@@ -2168,7 +2170,13 @@ export default function SearchPage() {
       {filters.revealEmail && !lead.email ? <span className="text-cw-warning">Correo no disponible</span> : null}
       {filters.revealPhone ? (
         lead.primaryPhone ? (
-          <span className="font-medium text-cw-success">{lead.primaryPhone}</span>
+          // «Llamar» y «WhatsApp» right where the mobile arrives (src/lib/contact-calls.ts); a number that cannot be dialed stays as text.
+          telHref(lead.primaryPhone) ? (
+            <ContactActions
+              phone={lead.primaryPhone}
+              contact={{ providerPersonId: lead.sourceProviderId || lead.apolloId || null, name: lead.name, company: lead.company || null, email: lead.email || null }}
+            />
+          ) : <span className="font-medium text-cw-success">{lead.primaryPhone}</span>
         ) : isPendingEnrichmentStatus(lead.enrichmentStatus) ? (
           <span className="inline-flex items-center gap-1 text-primary">
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />

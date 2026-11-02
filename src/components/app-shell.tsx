@@ -8,6 +8,7 @@ import { PageHelpButton } from '@/components/help/PageHelp';
 import Logo from '@/components/logo';
 import { ProductTourProvider } from '@/components/onboarding/ProductTour';
 import { FullNamePrompt, useFullNamePrompt } from '@/components/profile/FullNamePrompt';
+import { CallOutcomePrompt } from '@/components/contact/CallOutcomePrompt';
 import QuotaSync from '@/components/quota/quota-sync';
 import ThemeToggle from '@/components/theme-toggle';
 import { CommandPalette, CommandPaletteButton } from '@/components/command-palette';
@@ -111,6 +112,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </main>
         </SidebarInset>
         <FullNamePrompt open={fullName.state === 'missing'} onSaved={fullName.onSaved} />
+        {/* After a call or WhatsApp started from ANTON.IA, asks how it went when the person comes back (src/lib/contact-calls.ts). */}
+        {user ? <CallOutcomePrompt /> : null}
       </ProductTourProvider>
     </SidebarProvider>
   );

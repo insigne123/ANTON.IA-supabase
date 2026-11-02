@@ -246,7 +246,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     tips: [
       '«Información limitada» indica que se encontró poca evidencia: el correo será más general.',
-      'Filtra por teléfono (disponible, en proceso o sin teléfono) y por empresa, nombre o cargo, incluyendo o excluyendo términos.',
+      'Junto al móvil, «Llamar» y «WhatsApp»; al volver anotas cómo te fue. «Por llamar» filtra a quien falta llamar.',
     ],
     faqs: [
       { q: '¿Tengo que investigar antes de escribir?', a: 'Es lo recomendado: con evidencia de la empresa y del rol, el correo es más concreto.' },
