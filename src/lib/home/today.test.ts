@@ -96,3 +96,11 @@ test('the number beside «Conversaciones» counts each person who waits once, by
   ]), 2, 'Ana once, and the reply without an e-mail; not the auto-reply nor the one already answered');
   assert.equal(repliesWaiting([]), 0);
 });
+
+test('a first call with its result is a first contact too, for whoever works by phone (plan de uso U5)', () => {
+  const step = (counts: TodayInput['counts']) => buildTodayPlan(base({ counts })).setup.find(item => item.id === 'first_send')!;
+  assert.equal(step({ saved: 3, withEmail: 0, readyToWrite: 0, sent: 0 }).done, false);
+  assert.equal(step({ saved: 3, withEmail: 0, readyToWrite: 0, sent: 0, calls: 1 }).done, true);
+  assert.equal(step({ saved: 3, withEmail: 2, readyToWrite: 2, sent: 1 }).done, true);
+  assert.equal(step({ saved: 0, withEmail: 0, readyToWrite: 0, sent: 0 }).title, 'Haz tu primer contacto');
+});

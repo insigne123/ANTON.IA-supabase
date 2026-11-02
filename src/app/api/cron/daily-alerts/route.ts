@@ -67,6 +67,7 @@ export async function POST(request: Request) {
         appUrl, now, send: input => sendReportEmail(admin, input),
         opportunities: !mayOpportunities ? 'none' : manager ? 'manager' : 'mine',
         goalReminders: home.get(scope.userId) === scope.organizationId,
+        lastSignInAt: (data?.user as { last_sign_in_at?: string | null } | undefined)?.last_sign_in_at ?? null,
       });
       if (outcome.status === 'already_sent') result.already++;
       else result[outcome.status]++;

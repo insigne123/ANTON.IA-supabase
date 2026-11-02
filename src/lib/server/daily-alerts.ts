@@ -72,11 +72,22 @@ async function readCoworkApprovals(client: Client, scope: AlertScope): Promise<n
  * and opportunities closing, since `since`; plus the goal of the week. Opportunities only when the person may see them:
  * theirs, and the recommended ones nobody has when they manage Oportunidades.
  */
-export async function readAlertFacts(client: Client, scope: AlertScope, options: { now: Date; since: string; opportunities: 'none' | 'mine' | 'manager' }): Promise<AlertFacts> {
+/**
+ * Days since the person last signed in or did something the ledger recorded, in any workspace (plan de uso U5); null when neither is
+ * known. Best effort: a failed read leaves only the sign-in.
+ */
+async function readIdleDays(client: Client, userId: string, now: Date, lastSignInAt?: string | null) {
+  const latest: any = await client.from('antonia_event_ledger').select('occurred_at').eq('actor_user_id', userId)
+    .neq('source_confidence', 'diagnostic_test').order('occurred_at', { ascending: false }).limit(1);
+  const times = [Date.parse(String(lastSignInAt || '')), latest.error ? Number.NaN : Date.parse(String(latest.data?.[0]?.occurred_at || ''))].filter(Number.isFinite);
+  return times.length ? Math.floor((now.getTime() - Math.max(...times)) / 86_400_000) : null;
+}
+
+export async function readAlertFacts(client: Client, scope: AlertScope, options: { now: Date; since: string; opportunities: 'none' | 'mine' | 'manager'; lastSignInAt?: string | null }): Promise<AlertFacts> {
   const { now, since } = options;
   const own = (table: string, columns: string) => client.from(table).select(columns).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
   const week = reportWeek(now, 'current');
-  const [profile, replied, commitments, enriched, sent, research, goal, saved, coworkApprovals, toCall] = await Promise.all([
+  const [profile, replied, commitments, enriched, sent, research, goal, saved, coworkApprovals, toCall, idleDays] = await Promise.all([
     client.from('profiles').select('full_name').eq('id', scope.userId).maybeSingle(),
     own('contacted_leads', 'id,email,name,company,reply_intent,replied_at,conversation_resolved_at,conversation_outbound_at').not('replied_at', 'is', null).order('replied_at', { ascending: false }).limit(200),
     own('contacted_leads', 'id,name,company,data').not('data->commitment', 'is', null).limit(200),
@@ -89,6 +100,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     readCoworkApprovals(client, scope),
     // «Por llamar» (plan de uso U3): best effort, the alert goes out without the line when it cannot be read.
     readPeopleToCall(client, scope, since).catch(() => null),
+    readIdleDays(client, scope.userId, now, options.lastSignInAt).catch(() => null),
   ]);
   for (const result of [replied, commitments, enriched, sent, research] as any[]) if (result.error) throw new DailyAlertsError('No pudimos leer los pendientes.', 503);
 
@@ -145,6 +157,7 @@ export async function readAlertFacts(client: Client, scope: AlertScope, options:
     // and nobody ever saved, given an email or written to, the goal is not theirs (a failed read keeps it, as before).
     ...(coworkApprovals ? { coworkApprovals } : {}),
     ...(toCall?.count ? { toCall } : {}),
+    ...(idleDays !== null ? { idleDays } : {}),
     goal: options.opportunities !== 'none' && !(saved as any).error && !((saved as any).data || []).length && !ready.size && !written.size && !people.length ? null : goal,
   };
 }
@@ -274,6 +287,8 @@ async function readTodayDrop(client: Client, scope: AlertScope, today: string): 
  */
 export async function deliverDailyAlert(client: Client, scope: AlertScope, deps: {
   send: SendSelf; appUrl: string; now?: Date; opportunities: 'none' | 'mine' | 'manager'; goalReminders: boolean;
+  /** The person's last sign-in (auth), to tell how long they have been away (U5). */
+  lastSignInAt?: string | null;
 }) {
   const now = deps.now ?? new Date();
   const today = dayInZone(now);
@@ -284,7 +299,7 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const floor = now.getTime() - 4 * 86_400_000;
   const since = new Date(last.data ? Math.max(Date.parse(last.data.created_at), floor) : now.getTime() - 86_400_000).toISOString();
   const [facts, drop] = await Promise.all([
-    readAlertFacts(client, scope, { now, since, opportunities: deps.opportunities }),
+    readAlertFacts(client, scope, { now, since, opportunities: deps.opportunities, lastSignInAt: deps.lastSignInAt }),
     dropDay(now) ? readTodayDrop(client, scope, today) : Promise.resolve(null),
   ]);
   facts.drop = drop;
