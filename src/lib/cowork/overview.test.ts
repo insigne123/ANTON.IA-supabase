@@ -73,3 +73,14 @@ test('«Para hoy» names the tasks that could not be finished and opens the newe
   assert.deepEqual(rows[1], { id: 'failed', action: 'Abrir', prompt: '', href: '/cowork?work=b', text: '2 tareas no se pudieron completar' });
   assert.equal(items({ ...overview, draftsReady: 0, failed: { count: 1, latestId: 'x' } })[0].text, 'Una tarea no se pudo completar');
 });
+
+test('the follow-ups due that wait for you go next to the drafts and open «Seguimientos» in Campañas (plan de uso A3)', async () => {
+  const { coworkTodayItems: items, COWORK_FOLLOWUPS_HREF } = await import('./overview');
+  const overview = { firstName: null, hasOffer: true, contacts: 4, withEmail: 4, campaigns: 2, linkedin: null, draftsReady: 2, followupsWaiting: 3, failed: { count: 1, latestId: 'x' } };
+  const rows = items(overview);
+  assert.deepEqual(rows.map(row => row.id), ['drafts', 'followups', 'failed']);
+  assert.deepEqual(rows[1], { id: 'followups', action: 'Revisar', prompt: '', href: COWORK_FOLLOWUPS_HREF, text: '3 seguimientos esperan tu revisión hoy' });
+  assert.equal(COWORK_FOLLOWUPS_HREF, '/campaigns?vista=seguimientos');
+  assert.equal(items({ ...overview, followupsWaiting: 1 })[1].text, '1 seguimiento espera tu revisión hoy');
+  assert.deepEqual(items({ ...overview, followupsWaiting: null }).map(row => row.id), ['drafts', 'failed'], 'unknown says nothing');
+});

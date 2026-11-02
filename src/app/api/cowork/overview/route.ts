@@ -7,7 +7,7 @@ import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkFirstName, type CoworkOverview } from '@/lib/cowork/overview';
 import { coworkWebAvailable } from '@/lib/cowork/harness-config';
 import { loadCoworkSinceLastVisit } from '@/lib/server/cowork/since-visit';
-import { readNeverWritten } from '@/lib/server/cowork/agenda-read';
+import { readCampaignSteps, readNeverWritten } from '@/lib/server/cowork/agenda-read';
 import { readFailedTasks } from '@/lib/server/cowork/failed-tasks';
 
 export const dynamic = 'force-dynamic';
@@ -30,7 +30,7 @@ export async function GET() {
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const own = (table: string) => auth.supabase.from(table).select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
-    const [contacts, withEmail, campaigns, linkedin, context, since, toWrite, draftsReady, failed] = await Promise.allSettled([
+    const [contacts, withEmail, campaigns, linkedin, context, since, toWrite, draftsReady, failed, steps] = await Promise.allSettled([
       own('leads'),
       own('leads').not('email', 'is', null).neq('email', ''),
       own('bulk_campaigns'),
@@ -46,6 +46,8 @@ export async function GET() {
       own('messaging_drafts').eq('lifecycle', 'ready'),
       // «Para hoy» (plan de uso A2): your conversations whose last turn failed.
       readFailedTasks(auth.supabase, scope),
+      // «Para hoy» (plan de uso A3): the follow-ups due that wait for you, as «¿Qué toca hoy?» counts them.
+      readCampaignSteps(auth.supabase, scope),
     ]);
     const quota = linkedin.status === 'fulfilled' ? linkedin.value : null;
     const person = context.status === 'fulfilled' ? context.value : null;
@@ -60,6 +62,7 @@ export async function GET() {
       toWrite: toWrite.status === 'fulfilled' ? toWrite.value : null,
       draftsReady: counted(draftsReady as PromiseSettledResult<Count>),
       failed: failed.status === 'fulfilled' ? failed.value : null,
+      followupsWaiting: steps.status === 'fulfilled' && steps.value.enabled ? steps.value.count : null,
       web: coworkWebAvailable(process.env, scope.userId),
     };
     return NextResponse.json(overview, { headers: privateHeaders });

@@ -24,6 +24,8 @@ export type CoworkOverview = {
    * open (its reason and «Reintentar» are there). Ten failed tasks waited with nobody asking again.
    */
   failed?: { count: number; latestId: string } | null;
+  /** Plan de uso A3 (audit N2): campaign follow-ups due that wait for the person (prepare, review, send or resolve); null unknown. */
+  followupsWaiting?: number | null;
   /** What changed since the person's last own turn (since-visit.ts); null without a previous visit or when it could not be read. */
   since?: CoworkSince | null;
   /** Whether this person's turns can search the web: «¿Qué puedes hacer?» only offers it then. */
@@ -55,7 +57,9 @@ export function coworkOverviewFigures(overview: CoworkOverview | null): CoworkOv
 }
 
 /** A row of «Para hoy»: a request Cowork starts (`prompt`) or, when the work lives in a screen, the way there (`href`). */
-export type CoworkTodayItem = { id: 'drafts' | 'failed' | 'write' | 'emails'; text: string; action: string; prompt: string; href?: string };
+export type CoworkTodayItem = { id: 'drafts' | 'followups' | 'failed' | 'write' | 'emails'; text: string; action: string; prompt: string; href?: string };
+/** Where the follow-ups wait: «Campañas», on its «Seguimientos» tab. */
+export const COWORK_FOLLOWUPS_HREF = '/campaigns?vista=seguimientos';
 /** Where the ready drafts wait: «Por escribir» on its «Borrador listo» stage. */
 export const COWORK_DRAFTS_HREF = '/saved/leads/enriched?etapa=draft_ready';
 
@@ -75,6 +79,10 @@ export function coworkTodayItems(overview: CoworkOverview | null): CoworkTodayIt
   const drafts = overview.draftsReady ?? null;
   if (drafts !== null && drafts > 0) items.push({ id: 'drafts', action: 'Revisar y enviar', prompt: '', href: COWORK_DRAFTS_HREF,
     text: `${drafts} ${plural(drafts, 'borrador listo espera', 'borradores listos esperan')} que ${plural(drafts, 'lo revises y lo envíes', 'los revises y los envíes')}` });
+  // Plan de uso A3: the follow-ups due that wait for you, next to the drafts: both are emails one review away from leaving.
+  const followups = overview.followupsWaiting ?? null;
+  if (followups !== null && followups > 0) items.push({ id: 'followups', action: 'Revisar', prompt: '', href: COWORK_FOLLOWUPS_HREF,
+    text: `${followups} ${plural(followups, 'seguimiento espera', 'seguimientos esperan')} tu revisión hoy` });
   // Plan de uso A2: what you asked for and did not finish, opened where it says why and offers «Reintentar».
   const failed = overview.failed ?? null;
   if (failed && failed.count > 0) items.push({ id: 'failed', action: 'Abrir', prompt: '', href: `/cowork?work=${encodeURIComponent(failed.latestId)}`,
