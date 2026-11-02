@@ -234,3 +234,16 @@ test('with no email ready, the goal\'s next step is calling the mobiles on hand'
   assert.equal(goalNextStep(goal, 2, 3)?.text, 'Escribe a tus contactos listos', 'an email ready still goes first');
   assert.equal(goalNextStep(goal, 0, 0)?.text, 'Busca contactos nuevos');
 });
+
+test('a week without coming in: on Tuesdays the contacts already waiting lead the alert, before a goal that is behind (plan de uso U5)', () => {
+  const NEXT_TUESDAY = new Date('2026-10-27T12:00:00.000Z');
+  const idle = facts({ ready: 12, idleDays: 9 });
+  const alert = composeAlert(idle, NEXT_TUESDAY);
+  assert.equal(alert?.subject, 'Te esperan 12 contactos con correo, listos para escribirles');
+  assert.deepEqual(alert?.lines[0], { kind: 'ready', text: 'Te esperan 12 contactos con correo, listos para escribirles', href: '/saved/leads/enriched' });
+  assert.equal(composeAlert(facts({ ready: 1, idleDays: 7, goal: null }), NEXT_TUESDAY)?.subject, 'Te espera un contacto con correo, listo para escribirle');
+  assert.equal(composeAlert(facts({ ready: 12, idleDays: 6, goal: null }), NEXT_TUESDAY), null, 'six days is not a week away');
+  assert.equal(composeAlert(facts({ ready: 12, idleDays: 9, goal: null }), WEDNESDAY), null, 'once a week, on Tuesdays');
+  assert.equal(composeAlert(facts({ ready: 12, goal: null }), NEXT_TUESDAY), null, 'unknown is not away');
+  assert.equal(composeAlert(facts({ ready: 0, idleDays: 30, goal: null }), NEXT_TUESDAY), null, 'nothing waiting, nothing to say');
+});

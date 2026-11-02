@@ -38,6 +38,9 @@ export async function GET(request:Request) {
     for(const result of [profileRes,tokensRes,savedRes,enrichedRes,sentRes,repliedRes,commitmentsRes])if(result.error)throw Error('No pudimos comprobar tus pendientes.');
     const firstSend=await own(supabase.from('outbound_dispatches').select('id',{count:'exact',head:true})).eq('status','sent').eq('channel','email');
     if(firstSend.error)throw Error('No pudimos comprobar tu primer envío.');
+    // A first contact by phone counts too (contact_calls has no client policies: the service client reads it). Without the table, none.
+    const firstCall=firstSend.count?{count:0,error:null}:await getSupabaseAdminClient().from('contact_calls').select('id',{count:'exact',head:true})
+      .eq('organization_id',organizationId).eq('user_id',user.id).not('outcome','is',null);
 
     const form = mapProfileToForm(withCompanyProfile(profileRes.data as any, company));
     const hasOffer = [form.valueProposition, form.description, form.services].some((value) => String(value || '').trim().length > 0);
@@ -59,6 +62,7 @@ export async function GET(request:Request) {
         withEmail: enrichedEmails.length,
         readyToWrite: enrichedEmails.filter((email) => !contactedEmails.has(email)).length,
         sent: firstSend.count||0,
+        calls: firstCall.error?0:firstCall.count||0,
       },
       replies: [...pendingReplies.values()].slice(0, 10).map((row: any) => ({
         id: String(row.id), name: String(row.name || ''), company: String(row.company || ''),

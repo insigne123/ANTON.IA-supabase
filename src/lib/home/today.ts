@@ -37,7 +37,8 @@ export type TodayInput = {
   now: Date;
   profile: { companyName: string; hasOffer: boolean };
   mailProviders: string[];
-  counts: { saved: number; withEmail: number; readyToWrite: number; sent: number };
+  /** `calls`: calls and WhatsApps started from ANTON.IA with their result told (contact_calls); a first contact by phone counts too. */
+  counts: { saved: number; withEmail: number; readyToWrite: number; sent: number; calls?: number };
   replies: Array<{ id: string; name: string; company: string; intent: string | null; repliedAt: string }>;
   commitments: Array<{ id: string; name: string; company: string; kind: string; title: string; dueAt: string }>;
 };
@@ -77,10 +78,11 @@ export function buildTodayPlan(input: TodayInput): TodayPlan {
       done: counts.saved + counts.withEmail > 0,
     },
     {
-      id: 'first_send', title: 'Envía tu primer correo', cta: 'Escribir',
+      // Plan de uso U5 (2 Nov 2026): whoever works by phone never «sent a first email» and saw the account as unfinished forever.
+      id: 'first_send', title: 'Haz tu primer contacto', cta: 'Escribir o llamar',
       href: counts.withEmail > 0 ? '/saved/leads/enriched' : '/search',
-      description: 'Elige un contacto con correo, revisa el borrador de la IA y envíalo.',
-      done: counts.sent > 0,
+      description: 'Envía un correo con el borrador de la IA, o llama desde «Por escribir»: la llamada queda registrada.',
+      done: counts.sent > 0 || (counts.calls || 0) > 0,
     },
   ];
   const setupDone = setup.filter((step) => step.done).length;
