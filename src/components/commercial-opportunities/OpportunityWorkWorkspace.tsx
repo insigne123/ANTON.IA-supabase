@@ -196,9 +196,12 @@ export function OpportunityWorkWorkspace() {
   const [reviewing, setReviewing] = useState(false);
   const watching = useRef<string | null>(null);
   useEffect(() => { if (!feedback) { setUndo(null); return; } const timer = setTimeout(() => setFeedback(''), undo ? 9000 : 6000); return () => clearTimeout(timer); }, [feedback, undo]);
+  // «Asignar» from the morning alert (?accion=asignar): the opportunity whose assignment dialog opens once its file has loaded.
+  const assignOnOpen = useRef<string | null>(null);
   // The filters and the open opportunity live in the address (workspace-url.ts): read when the page opens and when the browser goes back.
   useEffect(() => {
     const read = () => { const state = readWorkspaceUrl(window.location.search); if (state.op && state.section) openOn.current = state.section;
+      assignOnOpen.current = state.assign ? state.op : null;
       setView(state.view); setFilter(state.filter); setSource(state.source); setQuery(state.query); setSearch(state.query);
       setCategories(state.categories); setSort(state.sort); setSelected(state.op); setUrlRead(true); };
     read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read);
@@ -702,6 +705,18 @@ export function OpportunityWorkWorkspace() {
     setAssignRule(rule ? `Elegida por tu regla «${ruleLabel(rule, name.split(' ')[0])}».` : '');
     setDraft({ teamId: '', participantIds: rule ? [rule.userId] : [], responsibleId: rule?.userId || '', objective: '' }); setModal('assign');
   };
+  // «Asignar» from the morning alert: the same dialog as a card's, once, when the file is open and an administrator reads it. One
+  // somebody took since the email says who has it instead.
+  useEffect(() => {
+    if (!detail || !admin || detail.item.id !== assignOnOpen.current) return;
+    assignOnOpen.current = null;
+    const state = detail.work?.state || 'unassigned';
+    if (state === 'unassigned') { void openQuickAssign(detail.item); return; }
+    const owner = detail.participants.find(person => person.user_id === detail.work?.responsible_id)?.name;
+    setFeedback(`Esta oportunidad ya está ${(STATES[state] || 'asignada').toLowerCase()}${owner ? `: la tiene ${owner}` : ''}.`);
+    // openQuickAssign is a plain function of this render; the file and the role are what decide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail, admin]);
   // «Asignar» on the list's selection: the same dialog, for all of them at once.
   const [assignMany, setAssignMany] = useState<string[] | null>(null);
   const openBulkAssign = () => { setProblem(''); setFeedback(''); setAssignMany([...picked]); setDraft({ teamId: '', participantIds: [], responsibleId: '', objective: '' }); setModal('assign'); };

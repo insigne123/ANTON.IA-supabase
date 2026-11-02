@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { alertDay, alertEmail, bestText, callText, closingText, composeAlert, dayWord, waitingText, type AlertFacts, documentDue } from './daily-alerts';
+import { alertDay, alertEmail, bestText, callText, closingText, composeAlert, dayWord, managesOpportunityAlert, waitingText, type AlertFacts, documentDue } from './daily-alerts';
 import { DEFAULT_GOALS, goalNextStep } from './weekly-goals';
 
 // Chile is UTC−3 in October: 12:00Z is 09:00 there.
@@ -198,10 +198,11 @@ test('the best new opportunities reach whoever manages them, each with its buyer
   assert.equal(bestText(item('b', { buyer: null, deadlineAt: null }), TUESDAY), 'Licitación b');
   const one = composeAlert(facts({ best: [item('a')] }), TUESDAY);
   assert.equal(one?.subject, 'Nueva y recomendada: Licitación a');
-  assert.deepEqual(one?.lines.filter(line => line.kind === 'best').map(line => line.href), ['/opportunities?op=a']);
+  assert.deepEqual(one?.lines.filter(line => line.kind === 'best').map(line => [line.href, line.action]),
+    [['/opportunities?op=a', { label: 'Asignar', href: '/opportunities?op=a&accion=asignar' }]]);
   const many = composeAlert(facts({ best: ['a', 'b', 'c', 'd', 'e', 'f'].map(id => item(id)) }), TUESDAY);
-  assert.equal(many?.subject, '5 oportunidades nuevas calzan con tu oferta');
-  assert.equal(many?.lines.filter(line => line.kind === 'best').length, 5);
+  assert.equal(many?.subject, '3 oportunidades nuevas calzan con tu oferta');
+  assert.equal(many?.lines.filter(line => line.kind === 'best').length, 3);
   const closing = { id: 'a', kind: 'tender', title: 'Licitación a', deadlineAt: '2026-10-21T18:00:00Z', recommended: true, mine: false };
   const both = composeAlert(facts({ closing: [closing], best: [item('a'), item('b')] }), TUESDAY);
   assert.deepEqual(both?.lines.filter(line => line.kind === 'best').map(line => line.href), ['/opportunities?op=b']);
@@ -246,4 +247,27 @@ test('a week without coming in: on Tuesdays the contacts already waiting lead th
   assert.equal(composeAlert(facts({ ready: 12, idleDays: 9, goal: null }), WEDNESDAY), null, 'once a week, on Tuesdays');
   assert.equal(composeAlert(facts({ ready: 12, goal: null }), NEXT_TUESDAY), null, 'unknown is not away');
   assert.equal(composeAlert(facts({ ready: 0, idleDays: 30, goal: null }), NEXT_TUESDAY), null, 'nothing waiting, nothing to say');
+});
+
+test('each of the best new ones has «Asignar» in the email: a small button under it, the dark one stays «Abrir ANTON.IA»', () => {
+  const best = [{ id: 'o-1', title: 'Evaluación psicolaboral <Concurso>', buyer: 'Municipalidad', deadlineAt: '2026-10-23T18:00:00Z' }];
+  const email = alertEmail(composeAlert(facts({ best }), TUESDAY)!, 'Ana', 'https://app.antonia.ai/');
+  assert.match(email.text, /- Evaluación psicolaboral <Concurso> · Municipalidad · cierra el viernes \(https:\/\/app\.antonia\.ai\/opportunities\?op=o-1\)\. Asignar: https:\/\/app\.antonia\.ai\/opportunities\?op=o-1&accion=asignar/);
+  assert.match(email.html, /<br><a href="https:\/\/app\.antonia\.ai\/opportunities\?op=o-1&amp;accion=asignar" style="display:inline-block;[^"]*border:1px solid #d1d5db[^"]*">Asignar<\/a><\/p>/);
+  assert.match(email.html, /Evaluación psicolaboral &lt;Concurso&gt;/);
+  assert.equal((email.html.match(/background:#111827/g) || []).length, 1, 'one main button');
+  // A line without its own step has none.
+  const plain = alertEmail(composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana', company: null }] }), TUESDAY)!, 'Ana', 'https://app.antonia.ai/');
+  assert.doesNotMatch(plain.html, /accion=asignar|<br><a/);
+});
+
+test('the manager\'s alert goes to who can assign: a named manager who is a member gets a member\'s, and the administrators keep it', () => {
+  const admins = new Set(['u-admin', 'u-owner']);
+  assert.equal(managesOpportunityAlert('u-admin', 'admin', [], admins), true, 'none named: the administrators');
+  assert.equal(managesOpportunityAlert('u-member', 'member', [], admins), false);
+  assert.equal(managesOpportunityAlert('u-owner', 'owner', ['u-admin'], admins), false, 'one named who can assign: only them');
+  assert.equal(managesOpportunityAlert('u-admin', 'admin', ['u-admin'], admins), true);
+  // Named but a member: Oportunidades only shows a member what was given to them, so the links would open nothing.
+  assert.equal(managesOpportunityAlert('u-member', 'member', ['u-member'], admins), false);
+  assert.equal(managesOpportunityAlert('u-admin', 'admin', ['u-member'], admins), true, 'nobody named can assign: as with none');
 });

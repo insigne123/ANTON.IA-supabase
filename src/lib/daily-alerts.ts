@@ -1,4 +1,6 @@
 import { dayInZone, shiftDay } from '@/lib/admin/chile-time';
+import { isOpportunityAdmin } from '@/lib/commercial-opportunities/workspace';
+import { opportunityAssignHref } from '@/lib/commercial-opportunities/workspace-url';
 import { emailShell } from '@/lib/email-shell';
 import { dropEmailSection, dropHref, dropSubject, type DropItem } from '@/lib/lead-drops';
 import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } from '@/lib/weekly-goals';
@@ -46,6 +48,7 @@ export type AlertFacts = {
   /**
    * The best new ones (audit O1, 1 Nov 2026): what the evaluation recommended since the last alert, still open and nobody's, the highest
    * score first and at most BEST_PER_ALERT, for whoever manages Oportunidades. The daily search kept thousands a month nobody opened.
+   * Each comes with «Asignar» (2 Nov 2026): who manages them gives it to someone from the email, without looking for it first.
    */
   best?: Array<{ id: string; title: string; buyer: string | null; deadlineAt: string | null }>;
   goal: GoalProgress | null;
@@ -62,8 +65,19 @@ export type AlertFacts = {
   toCall?: { count: number; fresh: number; names: string[] } | null;
 };
 export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'approval' | 'source' | 'document' | 'closing' | 'assigned' | 'best' | 'report' | 'search' | 'call' | 'drop' | 'research' | 'ready' | 'goal';
-/** How many of the best new opportunities one alert names. */
-export const BEST_PER_ALERT = 5;
+/** How many of the best new opportunities one alert names: three a manager can give out before the day starts (five read as a list). */
+export const BEST_PER_ALERT = 3;
+/**
+ * Whether the morning alert speaks to this person as who manages Oportunidades: the decisions, the best new ones with «Asignar» and
+ * what closes with nobody on it. Only an owner or an administrator can assign there, so a manager named in «Tu semana» who is neither
+ * gets a member's alert (its links would open nothing), and while no named manager can assign, the owners and administrators keep it,
+ * as when none is named.
+ */
+export function managesOpportunityAlert(userId: string, role: string, named: readonly string[], admins: ReadonlySet<string>) {
+  const able = named.filter(id => admins.has(id));
+  return able.length ? able.includes(userId) : isOpportunityAdmin(role);
+}
+
 /** A week without coming in: from then on, on Tuesdays, the contacts already waiting are reason enough for the alert (U5). */
 export const IDLE_DAYS = 7;
 
@@ -79,7 +93,8 @@ export const DOCUMENT_ALERT_DAYS = [15, 7, 1, 0, -1];
 export const documentDue = (daysLeft: number, gapDays: number) => DOCUMENT_ALERT_DAYS.some(day => daysLeft <= day && day < daysLeft + Math.max(1, gapDays));
 const documentText = (item: { label: string; daysLeft: number }) => (item.daysLeft < 0 ? `Venció ${item.label}: renuévalo antes de la próxima postulación`
   : item.daysLeft === 0 ? `${item.label} vence hoy` : item.daysLeft === 1 ? `${item.label} vence mañana` : `${item.label} vence en ${item.daysLeft} días`);
-export type AlertLine = { kind: AlertKind; text: string; href: string };
+/** A line of the alert; `action` is a second, smaller step beside it («Asignar» on the best new opportunities). */
+export type AlertLine = { kind: AlertKind; text: string; href: string; action?: { label: string; href: string } };
 export type DailyAlert = { subject: string; lines: AlertLine[] };
 
 const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -221,7 +236,8 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
   const best = (facts.best || []).filter(item => !told.has(item.id)).slice(0, BEST_PER_ALERT);
   if (best.length) {
     lead(best.length === 1 ? `Nueva y recomendada: ${best[0].title.replace(/\s+/g, ' ').trim().slice(0, 140)}` : `${best.length.toLocaleString('es-CL')} oportunidades nuevas calzan con tu oferta`);
-    for (const item of best) lines.push({ kind: 'best', text: bestText(item, now), href: `/opportunities?op=${encodeURIComponent(item.id)}` });
+    for (const item of best) lines.push({ kind: 'best', text: bestText(item, now), href: `/opportunities?op=${encodeURIComponent(item.id)}`,
+      action: { label: 'Asignar', href: opportunityAssignHref(item.id) } });
   }
 
   // What is new in the searches the person keeps, each one opening the list with its filters.
@@ -314,13 +330,16 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
   const intro = lines.length || !section ? 'Esto te espera hoy en ANTON.IA' : drop!.items.length === 1 ? 'Tu contacto del día ya está listo' : 'Tus contactos del día ya están listos';
   const text = [
     `${greeting}. ${intro}${lines.length ? ':' : '.'}`, '',
-    ...lines.map(line => `- ${line.text} (${link(line.href)})`), ...(lines.length ? [''] : []),
+    ...lines.map(line => `- ${line.text} (${link(line.href)})${line.action ? `. ${line.action.label}: ${link(line.action.href)}` : ''}`), ...(lines.length ? [''] : []),
     ...(section ? [section.text, ''] : []),
     `Abrir ANTON.IA: ${link('/dashboard')}`,
     `Te avisamos solo cuando hay algo que hacer. Los apagas en «Tu semana»: ${settings}`,
   ].join('\n');
+  // A line's own step («Asignar») is a small outlined button under it: the dark «Abrir ANTON.IA» stays the one main button.
   const rows = lines.map(line => `<p style="margin:0;padding:12px 0;border-top:1px solid #e5e7eb;font-size:15px;line-height:22px">`
-    + `<a href="${escape(link(line.href))}" style="color:#111827;text-decoration:none">${escape(line.text)}<span style="color:#2563eb"> &rsaquo;</span></a></p>`).join('');
+    + `<a href="${escape(link(line.href))}" style="color:#111827;text-decoration:none">${escape(line.text)}<span style="color:#2563eb"> &rsaquo;</span></a>`
+    + (line.action ? `<br><a href="${escape(link(line.action.href))}" style="display:inline-block;margin-top:8px;padding:4px 12px;border:1px solid #d1d5db;border-radius:8px;color:#111827;text-decoration:none;font-size:13px;line-height:20px">${escape(line.action.label)}</a>` : '')
+    + '</p>').join('');
   const open = section
     ? `<p style="margin:24px 0 0;font-size:14px"><a href="${escape(link('/dashboard'))}" style="color:#2563eb;text-decoration:none">Abrir ANTON.IA &rsaquo;</a></p>`
     : `<p style="margin:24px 0 0"><a href="${escape(link('/dashboard'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Abrir ANTON.IA</a></p>`;

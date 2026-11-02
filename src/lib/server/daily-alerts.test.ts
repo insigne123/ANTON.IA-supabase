@@ -234,7 +234,7 @@ test('the best new ones: recommended since the last alert, open and nobody\'s, t
   const { client } = memory(data);
   const since = '2026-10-19T11:30:00.000Z';
   const facts = await readAlertFacts(client, SCOPE, { now: TUESDAY, since, opportunities: 'manager' });
-  assert.deepEqual(facts.best?.map(item => item.id), ['o-b', 'o-a', 'o-c', 'o-d', 'o-e']);
+  assert.deepEqual(facts.best?.map(item => item.id), ['o-b', 'o-a', 'o-c']);
   assert.equal(facts.best?.[0].buyer, 'Servicio de Salud Sur');
   // Only whoever manages Oportunidades hears of them.
   const member = await readAlertFacts(client, SCOPE, { now: TUESDAY, since, opportunities: 'mine' });
