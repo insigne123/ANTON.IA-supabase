@@ -194,6 +194,26 @@ export async function readCallsToday(client: Client, scope: CallScope, now: Date
 }
 
 /**
+ * For the morning alert (src/lib/daily-alerts.ts): the person's contacts with a mobile still to call, by the rule of «Por llamar»,
+ * how many of them were saved since the last alert and the names of the newest two.
+ */
+export async function readPeopleToCall(client: Client, scope: CallScope, since: string) {
+  const leads = await client.from('enriched_leads').select('id,full_name,primary_phone,phone_numbers,created_at')
+    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).order('created_at', { ascending: false }).limit(SCAN_LIMIT);
+  if (leads.error) throw new ContactCallError('No pudimos leer tus contactos.', 503);
+  const withPhone = ((leads.data || []) as any[]).filter(hasPhone);
+  const last = await readLastCalls(client, scope.organizationId, withPhone.map(row => String(row.id)));
+  const people = withPhone.filter(row => needsCall(true, last.get(String(row.id))))
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const sinceTime = Date.parse(since);
+  return {
+    count: people.length,
+    fresh: people.filter(row => Date.parse(String(row.created_at || '')) >= sinceTime).length,
+    names: people.slice(0, 2).map(row => String(row.full_name || '').trim() || 'un contacto'),
+  };
+}
+
+/**
  * People contacted by phone or WhatsApp in the range, for the week's goal: one key per person (their email when the
  * contact had one, so a person written to and called counts once), every result but a wrong number.
  */

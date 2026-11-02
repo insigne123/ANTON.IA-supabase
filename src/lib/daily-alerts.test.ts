@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { alertDay, alertEmail, bestText, closingText, composeAlert, dayWord, waitingText, type AlertFacts, documentDue } from './daily-alerts';
-import { DEFAULT_GOALS } from './weekly-goals';
+import { alertDay, alertEmail, bestText, callText, closingText, composeAlert, dayWord, waitingText, type AlertFacts, documentDue } from './daily-alerts';
+import { DEFAULT_GOALS, goalNextStep } from './weekly-goals';
 
 // Chile is UTC−3 in October: 12:00Z is 09:00 there.
 const TUESDAY = new Date('2026-10-20T12:00:00.000Z');
@@ -205,4 +205,32 @@ test('the best new opportunities reach whoever manages them, each with its buyer
   const closing = { id: 'a', kind: 'tender', title: 'Licitación a', deadlineAt: '2026-10-21T18:00:00Z', recommended: true, mine: false };
   const both = composeAlert(facts({ closing: [closing], best: [item('a'), item('b')] }), TUESDAY);
   assert.deepEqual(both?.lines.filter(line => line.kind === 'best').map(line => line.href), ['/opportunities?op=b']);
+});
+
+test('the contacts with a mobile still to call: a reason on Tuesdays and Thursdays or when new ones arrived, else they ride along (plan de uso U3)', () => {
+  const THURSDAY = new Date('2026-10-22T12:00:00.000Z');
+  const toCall = { count: 5, fresh: 0, names: ['Ana Rojas', 'Leo Soto'] };
+  assert.equal(callText({ count: 1, names: ['Ana Rojas'] }), 'Llama a Ana Rojas: ya tienes su móvil');
+  assert.equal(callText({ count: 2, names: ['Ana Rojas', 'Leo Soto'] }), 'Llama a Ana Rojas y Leo Soto: ya tienes sus móviles');
+  assert.equal(callText(toCall), 'Llama a Ana Rojas, Leo Soto y 3 personas más: ya tienes sus móviles');
+
+  const noGoal = { goal: null };
+  const tuesday = composeAlert(facts({ ...noGoal, toCall }), TUESDAY);
+  assert.equal(tuesday?.subject, '5 contactos con móvil para llamar hoy');
+  assert.deepEqual(tuesday?.lines, [{ kind: 'call', text: 'Llama a Ana Rojas, Leo Soto y 3 personas más: ya tienes sus móviles', href: '/saved/leads/enriched?etapa=to_call' }]);
+  assert.equal(composeAlert(facts({ ...noGoal, toCall }), THURSDAY)?.subject, '5 contactos con móvil para llamar hoy');
+  assert.equal(composeAlert(facts({ ...noGoal, toCall }), WEDNESDAY), null, 'a list that waits does not write every morning');
+  assert.equal(composeAlert(facts({ ...noGoal, toCall: { count: 1, fresh: 1, names: ['Ana Rojas'] } }), WEDNESDAY)?.subject, 'Llama hoy a Ana Rojas', 'a new one is reason enough any day');
+
+  // Another day with something else to say, the calls go along, after it.
+  const withReply = composeAlert(facts({ ...noGoal, toCall, newReplies: [{ id: 'c1', name: 'Juan Pérez', company: null }] }), WEDNESDAY);
+  assert.equal(withReply?.subject, 'Te respondió Juan Pérez');
+  assert.deepEqual(withReply?.lines.map(line => line.kind), ['reply', 'call']);
+});
+
+test('with no email ready, the goal\'s next step is calling the mobiles on hand', () => {
+  const goal = { targets: DEFAULT_GOALS, counts: { contacted: 2, found: 20 }, source: 'default' as const };
+  assert.deepEqual(goalNextStep(goal, 0, 3), { text: 'Llama a tus contactos con móvil', href: '/saved/leads/enriched?etapa=to_call' });
+  assert.equal(goalNextStep(goal, 2, 3)?.text, 'Escribe a tus contactos listos', 'an email ready still goes first');
+  assert.equal(goalNextStep(goal, 0, 0)?.text, 'Busca contactos nuevos');
 });

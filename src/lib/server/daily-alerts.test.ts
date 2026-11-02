@@ -240,3 +240,30 @@ test('the best new ones: recommended since the last alert, open and nobody\'s, t
   const member = await readAlertFacts(client, SCOPE, { now: TUESDAY, since, opportunities: 'mine' });
   assert.equal(member.best, undefined);
 });
+
+test('the contacts with a mobile still to call reach the morning alert, the newest first (plan de uso U3)', async () => {
+  const data = seed();
+  const lead = (id: string, name: string, phone: string | null, at: string) => ({ id, organization_id: ORG, user_id: 'u-ana', full_name: name, email: null, primary_phone: phone, phone_numbers: [], created_at: at });
+  data.enriched_leads.push(
+    lead('l-old', 'Leo Soto', '+56 9 1234 5678', '2026-10-10T12:00:00Z'),
+    lead('l-new', 'Ana Rojas', '+56987654321', '2026-10-19T20:00:00Z'), // saved after the window opened: new
+    lead('l-done', 'Rosa Díaz', '+56911112222', '2026-10-12T12:00:00Z'), // answered already
+    lead('l-again', 'Pía Mella', '+56933334444', '2026-10-11T12:00:00Z'), // did not answer: call again
+    lead('l-none', 'Sin Móvil', null, '2026-10-19T21:00:00Z'),
+  );
+  const call = (leadId: string, outcome: string) => ({ id: `call-${leadId}`, organization_id: ORG, user_id: 'u-ana', lead_id: leadId, channel: 'call', outcome, started_at: '2026-10-15T15:00:00Z', outcome_at: '2026-10-15T15:01:00Z' });
+  (data as any).contact_calls = [call('l-done', 'answered'), call('l-again', 'no_answer')];
+  const { client } = memory(data, { unique: UNIQUE });
+  const facts = await readAlertFacts(client, SCOPE, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'none' });
+  assert.deepEqual(facts.toCall, { count: 3, fresh: 1, names: ['Ana Rojas', 'Pía Mella'] });
+
+  const { sent, send } = sender();
+  assert.deepEqual(await deliverDailyAlert(client, SCOPE, { ...deps(send), now: TUESDAY }), { status: 'sent' });
+  assert.equal(sent[0].subject, '3 contactos con móvil para llamar hoy');
+  assert.match(sent[0].text, /- Llama a Ana Rojas, Pía Mella y 1 persona más: ya tienes sus móviles \(https:\/\/app\.antonia\.ai\/saved\/leads\/enriched\?etapa=to_call\)/);
+
+  // Before contact_calls exists, everyone with a mobile is still to call.
+  const before = memory(seed(), { missing: ['contact_calls'] });
+  before.tables.enriched_leads.push(lead('l-1', 'Ana Rojas', '+56987654321', '2026-10-19T20:00:00Z'));
+  assert.deepEqual((await readAlertFacts(before.client, SCOPE, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'none' })).toCall, { count: 1, fresh: 1, names: ['Ana Rojas'] });
+});
