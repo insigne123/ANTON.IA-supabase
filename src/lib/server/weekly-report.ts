@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { replyNeedsAnswer } from '@/lib/home/today';
 import { readPersonGoal, readTeamGoals } from '@/lib/server/weekly-goals';
 import { preferredFullName } from '@/lib/lead-name';
+import { readCreditResults } from '@/lib/server/credit-results';
+import { monthOpportunities, reportMonth, type MonthRange, type MonthSection, type OpportunityMove } from '@/lib/month-summary';
 import {
   OPPORTUNITY_KINDS, reportEmail, reportWeek, type ClosingOpportunity, type Commitment, type OpportunitiesSection, type PendingReply,
   type PersonalSection, type ReportRole, type ReportWeek, type TeamMember, type TeamSection, type WeeklyReport,
@@ -231,26 +233,56 @@ export async function reportRoles(client: Client, scope: ReportScope, canSeeOppo
   const roles: ReportRole[] = ['personal'];
   if (admin) roles.push('team');
   if ((managers.value.includes(scope.userId) || !managers.value.length) && mayOpportunities) roles.push('opportunities');
-  return { roles, admin, managers: managers.value };
+  return { roles, admin, managers: managers.value, mayOpportunities };
+}
+
+/**
+ * «Resumen del mes» (src/lib/month-summary.ts): what the organization's credits of the month got, and its opportunities presented,
+ * won and lost, from the moves the team and the pipeline recorded. Each half that cannot be read is left out.
+ */
+export async function readMonth(client: Client, organizationId: string, month: MonthRange, options: { opportunities: boolean; now?: Date }): Promise<MonthSection> {
+  const [credits, opportunities] = await Promise.all([
+    readCreditResults(client, { organizationId, from: month.from, to: month.to, now: options.now }).then(result => result.totals, () => null),
+    options.opportunities ? readMonthOpportunities(client, organizationId, month).catch(() => null) : Promise.resolve(null),
+  ]);
+  return { ...month, credits, opportunities };
+}
+
+async function readMonthOpportunities(client: Client, organizationId: string, month: MonthRange) {
+  const rows = await all(() => client.from('opportunity_activity').select('id,opportunity_id,kind,data,created_at').eq('organization_id', organizationId)
+    .in('kind', ['state', 'auto_state']).gte('created_at', month.from).lt('created_at', month.to).order('id'));
+  const moves: OpportunityMove[] = rows.map(row => ({ opportunityId: String(row.opportunity_id), to: row.data?.to ? String(row.data.to) : null,
+    amount: typeof row.data?.amount === 'number' ? row.data.amount : null, createdAt: String(row.created_at) }));
+  const won = [...new Set(moves.filter(move => move.to === 'won').map(move => move.opportunityId))];
+  const values: any[] = [];
+  for (let start = 0; start < won.length; start += 200) {
+    const result: any = await client.from('commercial_opportunities').select('id,amount,currency').eq('organization_id', organizationId).in('id', won.slice(start, start + 200));
+    if (result.error) throw new WeeklyReportError('No pudimos leer las oportunidades del mes.', 503);
+    values.push(...(result.data || []));
+  }
+  return monthOpportunities(moves, values.map(row => ({ id: String(row.id), amount: row.amount === null || row.amount === undefined ? null : Number(row.amount), currency: row.currency || null })));
 }
 
 export async function buildWeeklyReport(client: Client, scope: ReportScope, options: { which: ReportWeek['which']; canSeeOpportunities: () => Promise<boolean>; now?: Date }) {
   const now = options.now ?? new Date();
   const week = reportWeek(now, options.which);
-  const { roles, admin, managers } = await reportRoles(client, scope, options.canSeeOpportunities);
-  // The goals are an addition: when they cannot be read, the report goes on without them.
+  const { roles, admin, managers, mayOpportunities } = await reportRoles(client, scope, options.canSeeOpportunities);
+  // The goals and the month are additions: when they cannot be read, the report goes on without them.
   const range = { from: week.from, to: week.to };
-  const [profile, personal, team, opportunities, goal, teamGoals] = await Promise.all([
+  // On the first Monday of a month, and through its first week, an administrator also gets the month before.
+  const monthRange = roles.includes('team') ? reportMonth(now) : null;
+  const [profile, personal, team, opportunities, goal, teamGoals, month] = await Promise.all([
     client.from('profiles').select('full_name').eq('id', scope.userId).maybeSingle(),
     readPersonal(client, scope, week, now),
     roles.includes('team') ? readTeam(client, scope.organizationId, week) : Promise.resolve(null),
     roles.includes('opportunities') ? readOpportunities(client, scope.organizationId, week, now) : Promise.resolve(null),
     readPersonGoal(client, scope, range).catch(() => null),
     roles.includes('team') ? readTeamGoals(client, scope.organizationId, range).catch(() => null) : Promise.resolve(null),
+    monthRange ? readMonth(client, scope.organizationId, monthRange, { opportunities: mayOpportunities, now }).catch(() => null) : Promise.resolve(null),
   ]);
   if (team && teamGoals) for (const member of team.members) member.goal = teamGoals(member.userId);
   const name = String((profile as any).data?.full_name || '').trim().split(/\s+/)[0] || '';
-  const report: WeeklyReport = { week, roles, name, personal, team, opportunities, goal };
+  const report: WeeklyReport = { week, roles, name, personal, team, opportunities, goal, ...(month ? { month } : {}) };
   return { report, admin, managers };
 }
 
