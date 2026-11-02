@@ -126,7 +126,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Si administras la organización, «Equipo» muestra lo mismo por persona, con quién tiene respuestas por atender. Quien no tuvo actividad en la semana queda contado en una línea, y «Ver» lo muestra; si nadie escribió, una frase lo dice.',
       '«Oportunidades» muestra lo que llegó en la semana, lo que cierra en los próximos 7 días y lo que nadie tiene asignado. Lo ven los gestores de oportunidades que elija un administrador; mientras no haya, todo el que usa Oportunidades.',
       'Abajo, «Recibirlo por correo cada lunes» te lo envía a las 8:00 con la semana anterior, a tu correo. Viene activado y lo apagas ahí mismo. «Enviármelo ahora» te manda el que estás viendo.',
-      '«Avisos por correo» te escribe de martes a viernes en la mañana, solo cuando hay algo que hacer: alguien respondió, vence un compromiso, cierra una oportunidad o tu meta va atrasada. Se apaga ahí mismo.',
+      '«Avisos por correo» te escribe de martes a viernes en la mañana, solo cuando hay algo que hacer: alguien respondió, vence un compromiso, hay móviles para llamar, cierra una oportunidad o tu meta va atrasada. Se apaga ahí mismo.',
     ],
     faqs: [
       { q: '¿Desde dónde sale el correo del informe?', a: 'Desde una dirección de Yago, o desde tu Gmail u Outlook conectado si esa aún no está activa, hacia tu mismo correo. No lo recibe nadie más y no usa tu cupo de envíos.' },
