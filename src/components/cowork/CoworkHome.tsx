@@ -65,7 +65,7 @@ function SinceLastVisit({ since, onAsk }: { since: CoworkSince; onAsk: (prompt: 
   </section>;
 }
 
-const TODAY_ICON: Record<CoworkTodayItem['id'], CoworkIconKey> = { drafts: 'draft', write: 'send', emails: 'search' };
+const TODAY_ICON: Record<CoworkTodayItem['id'], CoworkIconKey> = { drafts: 'draft', followups: 'campaign', failed: 'alert', write: 'send', emails: 'search' };
 
 const TODAY_ROW = 'group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]';
 // A plain link: Cowork's screen is also built outside Next (its browser tests), where next/link has no `process`.

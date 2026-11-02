@@ -47,7 +47,8 @@ export function waitingCampaignSteps(inbox: Inbox): Steps {
   };
 }
 
-async function readCampaignSteps(client: SupabaseClient, scope: Scope): Promise<Steps> {
+/** Also «Para hoy» on Cowork's home (plan de uso A3): the follow-ups waiting for the person today. */
+export async function readCampaignSteps(client: SupabaseClient, scope: Scope): Promise<Steps> {
   const { queryCoworkDomainRead } = await import('./domain-reads');
   return waitingCampaignSteps(await queryCoworkDomainRead(client, scope, 'campaigns.inbox', '') as Inbox);
 }
