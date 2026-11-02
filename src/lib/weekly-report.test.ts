@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { deltaText, nextActions, personalHeadline, reportEmail, reportWeek, teamActivity, teamHeadline, touchesSentence, weekLabel, type PersonalSection, type TeamSection, type WeeklyReport } from './weekly-report';
+import { achieversSentence, deltaText, nextActions, personalHeadline, reportEmail, reportWeek, teamActivity, teamHeadline, touchesSentence, weekLabel, type PersonalSection, type TeamSection, type WeeklyReport } from './weekly-report';
 
 const personal = (patch: Partial<PersonalSection> = {}): PersonalSection => ({
   sent: { now: 34, before: 20 }, contacted: { now: 30, before: 18 }, replies: { now: 5, before: 2 }, meetings: 1,
@@ -134,4 +134,26 @@ test('calls, WhatsApps and LinkedIn contacts read as one line with only what hap
   assert.equal(touchesSentence({ calls: 2, linkedin: 0, whatsapp: 1 }), '2 llamadas y 1 WhatsApp');
   assert.equal(touchesSentence({ calls: 0, linkedin: 0, whatsapp: 0 }), null);
   assert.equal(touchesSentence(null), null);
+});
+
+test('meetings booked by phone are told next to the ones asked for in a reply, and a team that only calls is not «nadie» (plan de uso U4)', () => {
+  assert.equal(personalHeadline(personal({ meetings: 0, callMeetings: 2 }), 'previous'),
+    'La semana pasada escribiste a 30 personas y te respondieron 5 (17 %). Agendaste 2 reuniones por teléfono.');
+  const goal = (contacted: number, found: number) => ({ targets: { contacted: 10, found: 15 }, counts: { contacted, found }, source: 'team' as const });
+  const phone: TeamSection = { members: [member('Ana', { goal: goal(12, 15), callMeetings: 1 }), member('Leo', { goal: goal(4, 0) })],
+    totals: { sent: { now: 0, before: 0 }, replies: { now: 0, before: 0 }, meetings: 0, callMeetings: 1 } };
+  assert.equal(teamHeadline(phone, 'previous'), 'Nadie del equipo envió correos la semana pasada, pero contactaron a 16 personas por teléfono, WhatsApp o LinkedIn, agendaron 1 reunión y sumaron 15 contactos nuevos.');
+  const writing: TeamSection = { ...phone, totals: { sent: { now: 4, before: 0 }, replies: { now: 1, before: 0 }, meetings: 1, callMeetings: 2 } };
+  assert.equal(teamHeadline(writing, 'current'), 'Tu equipo envió 4 correos y recibió 1 respuesta. Una pidió reunión. Agendaron 2 reuniones por teléfono.');
+
+  assert.equal(achieversSentence(phone, 'previous'), 'Cumplió su meta: Ana.');
+  assert.equal(achieversSentence({ ...phone, members: [...phone.members, member('Caro', { goal: goal(10, 20) })] }, 'current'), 'Ya cumplieron su meta: Ana y Caro.');
+  assert.equal(achieversSentence({ ...phone, members: [member('Leo', { goal: goal(4, 0) })] }, 'previous'), null);
+  assert.equal(achieversSentence({ ...phone, members: [member('Off', { goal: { ...goal(0, 0), targets: { contacted: 0, found: 0 } } })] }, 'previous'), null, 'a team without goals has no one to name');
+
+  const email = reportEmail({ week: reportWeek(new Date('2026-10-20T12:00:00.000Z'), 'previous'), roles: ['personal', 'team'], name: 'Gonzalo',
+    personal: personal({ callMeetings: 1 }), team: phone, opportunities: null }, 'https://app.example');
+  assert.match(email.text, /- 34 correos enviados · 5 respuestas · 1 reunión pedida · 1 reunión agendada por teléfono\n/);
+  assert.match(email.text, /- Ana: 0 enviados, 0 respuestas, 1 reunión por teléfono · meta 12 de 10\n/);
+  assert.match(email.text, /- Cumplió su meta: Ana\n/);
 });

@@ -45,7 +45,7 @@ export function WeeklyGoalCard({ onEditGoals }: { onEditGoals?: (href: string) =
         <Link href={EDIT_GOALS} className="underline underline-offset-2 hover:text-foreground" onClick={event => {
           if (!onEditGoals || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
           event.preventDefault(); onEditGoals(EDIT_GOALS);
-        }}>Cambiar las metas del equipo</Link></> : null}</p>
+        }}>{data.goal.source === 'default' ? 'Fijar la meta del equipo' : 'Cambiar las metas del equipo'}</Link></> : null}</p>
     </CardContent>
   </Card>;
 }

@@ -88,7 +88,7 @@ test('«Tu semana» says its week once, has no tiles of zeros and does not send 
   assert.match(report, /\(embedded \? report\.week\.label : `\$\{report\.week\.which === 'current' \? 'Esta semana' : 'La semana pasada'\} · \$\{report\.week\.label\}`\)/);
   assert.match(readFileSync('src/lib/weekly-report.ts', 'utf8'), /\{ id: 'personal', label: 'Personal' \}/);
   assert.match(report, /\{quietWeek \? null : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">/);
-  assert.match(report, /const quietWeek = Boolean\(report\) && \[report!\.personal\.sent, report!\.personal\.contacted, report!\.personal\.replies\]\.every\(count => count\.now === 0 && count\.before === 0\) && report!\.personal\.meetings === 0;/);
+  assert.match(report, /const quietWeek = Boolean\(report\) && \[report!\.personal\.sent, report!\.personal\.contacted, report!\.personal\.replies\]\.every\(count => count\.now === 0 && count\.before === 0\) && report!\.personal\.meetings === 0 && !report!\.personal\.callMeetings;/);
   assert.match(report, /\{data\.yago\s*\? 'A las 8:00, con la semana anterior, a tu correo\.'/);
   assert.match(route, /sender: canEmailEveryone\(\), yago: Boolean\(resendSender\(\)\),/);
 });

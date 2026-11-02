@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useState } from 'react';
 import Link from 'next/link';
-import { BellRing, ChevronRight, Loader2, Mail, RefreshCw, Target, Users } from 'lucide-react';
+import { BellRing, CheckCircle2, ChevronRight, Loader2, Mail, RefreshCw, Target, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useSlow } from '@/hooks/use-slow';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { MonthSummary } from './MonthSummary';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import { goalSentence, paceSentence } from '@/lib/weekly-goals';
-import { FUNNEL_STEPS, REPORT_ROLES, activeGoal, deltaText, funnelStall, nextActions, personalHeadline, rate, teamActivity, teamHeadline, touchesSentence, type ReportRole, type TeamMember, type WeekFunnel, type WeeklyReport as Report } from '@/lib/weekly-report';
+import { FUNNEL_STEPS, REPORT_ROLES, achieversSentence, activeGoal, deltaText, funnelStall, nextActions, personalHeadline, rate, teamActivity, teamHeadline, touchesSentence, type ReportRole, type TeamMember, type WeekFunnel, type WeeklyReport as Report } from '@/lib/weekly-report';
 import { chipClass } from '@/components/ui/chip';
 
 type Response = { report: Report; email: boolean; alerts?: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; yago?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
@@ -27,6 +27,8 @@ const fromUrl = (key: string) => typeof window !== 'undefined' ? new URLSearchPa
 const MAILBOX: Record<string, string> = { google: 'Gmail', outlook: 'Outlook' };
 const dateLabel = (at: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('es-CL', { ...options, timeZone: 'America/Santiago' }).format(new Date(at)).replace(/\./g, '');
 const money = (amount: number | null, currency: string | null) => amount ? `${currency === 'USD' ? 'US$' : '$'}${Math.round(amount).toLocaleString('es-CL')}` : null;
+/** The meetings asked for in a reply and the ones booked by phone, in one figure; the note splits them when there are both. */
+const meetingNote = (asked: number, booked = 0) => !booked ? null : asked ? `${asked.toLocaleString('es-CL')} pedidas · ${booked.toLocaleString('es-CL')} por teléfono` : 'Agendadas por teléfono';
 
 function Stat({ label, value, note }: { label: string; value: string; note?: string | null }) {
   return <div className="min-w-0 rounded-2xl bg-muted/40 p-4">
@@ -116,12 +118,12 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
   const shown: ReportRole = roles.includes(role) ? role : 'personal';
   const team = report?.team ? teamActivity(report.team) : null;
   const weekWord = report?.week.which === 'current' ? 'esta semana' : 'la semana pasada';
-  const quietWeek = Boolean(report) && [report!.personal.sent, report!.personal.contacted, report!.personal.replies].every(count => count.now === 0 && count.before === 0) && report!.personal.meetings === 0;
+  const quietWeek = Boolean(report) && [report!.personal.sent, report!.personal.contacted, report!.personal.replies].every(count => count.now === 0 && count.before === 0) && report!.personal.meetings === 0 && !report!.personal.callMeetings;
   const memberRow = (member: TeamMember, idle = false) => <tr key={member.userId} className={cn('border-b last:border-0', idle && 'text-muted-foreground')}>
     <th scope="row" className="max-w-[14rem] px-4 py-2.5 text-left font-normal"><span className="block truncate">{member.name}</span>{member.detail ? <span className="block truncate text-xs text-muted-foreground">{member.detail}</span> : null}</th>
     <td className={cn('px-3 py-2.5 text-right tabular-nums', !member.sent && 'text-muted-foreground')}>{member.sent}</td>
     <td className="px-3 py-2.5 text-right tabular-nums">{member.replies}</td>
-    <td className="px-3 py-2.5 text-right tabular-nums">{member.meetings}</td>
+    <td className="px-3 py-2.5 text-right tabular-nums">{member.meetings + (member.callMeetings || 0)}</td>
     <td className={cn('px-3 py-2.5 text-right tabular-nums', member.pending ? 'font-medium' : 'text-muted-foreground')}>{member.pending}</td>
     <td className="px-4 py-2.5 text-right tabular-nums">{goalCell(member)}</td>
   </tr>;
@@ -176,7 +178,7 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         <Stat label="Correos enviados" value={report.personal.sent.now.toLocaleString('es-CL')} note={deltaText(report.personal.sent)} />
         <Stat label="Personas contactadas" value={report.personal.contacted.now.toLocaleString('es-CL')} note={deltaText(report.personal.contacted)} />
         <Stat label="Respuestas" value={report.personal.replies.now.toLocaleString('es-CL')} note={rate(report.personal.replies.now, report.personal.contacted.now) !== null ? `${rate(report.personal.replies.now, report.personal.contacted.now)} % de quienes escribiste` : deltaText(report.personal.replies)} />
-        <Stat label="Reuniones pedidas" value={report.personal.meetings.toLocaleString('es-CL')} />
+        <Stat label="Reuniones" value={(report.personal.meetings + (report.personal.callMeetings || 0)).toLocaleString('es-CL')} note={meetingNote(report.personal.meetings, report.personal.callMeetings)} />
       </div>}
       {quietWeek || !report.personal.funnel ? null : <WeekFunnelRow funnel={report.personal.funnel} />}
       {nextActions(report).length ? <Section title="Para esta semana">
@@ -217,8 +219,10 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Stat label="Correos enviados" value={report.team.totals.sent.now.toLocaleString('es-CL')} note={deltaText(report.team.totals.sent)} />
           <Stat label="Respuestas" value={report.team.totals.replies.now.toLocaleString('es-CL')} note={deltaText(report.team.totals.replies)} />
-          <Stat label="Reuniones pedidas" value={report.team.totals.meetings.toLocaleString('es-CL')} />
+          <Stat label="Reuniones" value={(report.team.totals.meetings + (report.team.totals.callMeetings || 0)).toLocaleString('es-CL')} note={meetingNote(report.team.totals.meetings, report.team.totals.callMeetings)} />
         </div>
+        {achieversSentence(report.team, report.week.which) ? <p className="flex items-start gap-2 text-sm leading-5">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><span>{achieversSentence(report.team, report.week.which)}</span></p> : null}
         <Section title="Por persona">
           <div className="overflow-x-auto rounded-2xl border">
             <table className="w-full text-sm">
