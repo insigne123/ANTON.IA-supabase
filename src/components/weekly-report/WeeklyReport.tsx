@@ -279,7 +279,7 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         <div className="flex items-start justify-between gap-4 border-t pt-4">
           <div className="min-w-0 space-y-1">
             <Label htmlFor="daily-alerts" className="flex items-center gap-1.5 text-sm font-medium"><BellRing className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Avisos por correo</Label>
-            <p className="text-xs leading-5 text-muted-foreground">De martes a viernes en la mañana, solo cuando hay algo que hacer: alguien te respondió, vence un compromiso, cierra una oportunidad o tu meta va atrasada.{!data.mailbox && !data.sender ? ' Conecta Gmail u Outlook en «Conexiones» para recibirlos.' : ''}</p>
+            <p className="text-xs leading-5 text-muted-foreground">De martes a viernes en la mañana, solo cuando hay algo que hacer: alguien te respondió, vence un compromiso, tienes contactos con móvil para llamar, cierra una oportunidad o tu meta va atrasada.{!data.mailbox && !data.sender ? ' Conecta Gmail u Outlook en «Conexiones» para recibirlos.' : ''}</p>
           </div>
           <Switch id="daily-alerts" checked={data.alerts !== false} disabled={(!data.mailbox && !data.sender) || saving === 'alerts'}
             onCheckedChange={on => { void post('alerts', { action: 'alerts', on }).then(result => { if (result) setData(current => current && { ...current, alerts: result.alerts }); }); }} />

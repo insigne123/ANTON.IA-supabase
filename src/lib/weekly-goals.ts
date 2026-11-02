@@ -80,11 +80,13 @@ export function paceSentence(progress: GoalProgress, now: Date) {
  * The one thing to do next for the goal: write to the contacts already ready, or find new ones when there are none ready
  * or the contacts are what is missing.
  */
-export function goalNextStep(progress: GoalProgress, ready: number): { text: string; href: string } | null {
+export function goalNextStep(progress: GoalProgress, ready: number, toCall = 0): { text: string; href: string } | null {
   const contactedLeft = Math.max(0, progress.targets.contacted - progress.counts.contacted);
   const foundLeft = Math.max(0, progress.targets.found - progress.counts.found);
   if (!contactedLeft && !foundLeft) return null;
   if (contactedLeft && ready > 0) return { text: ready === 1 ? 'Escribe a tu contacto listo' : 'Escribe a tus contactos listos', href: '/saved/leads/enriched' };
+  // A call with its result counts as a person contacted (server/weekly-goals.ts): with no email ready, the mobiles are the next step.
+  if (contactedLeft && toCall > 0) return { text: toCall === 1 ? 'Llama a tu contacto con móvil' : 'Llama a tus contactos con móvil', href: '/saved/leads/enriched?etapa=to_call' };
   return { text: 'Busca contactos nuevos', href: '/search' };
 }
 
