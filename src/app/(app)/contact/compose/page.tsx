@@ -56,6 +56,7 @@ import {
 } from '@/lib/campaigns-v2-client';
 import type { CampaignV2RecipientStepSendContextResponse } from '@/lib/campaigns-v2/contracts';
 import type { DurableSendReceipt } from '@/lib/outbound-send-receipt';
+import { DRAFTS_STAGE_HREF, clearDraftQueue, composeDraftHref, queueLabel, queuePlace, readDraftQueue, type DraftQueuePlace } from '@/lib/draft-queue';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ArrowLeft, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, SendHorizontal, Sparkles } from 'lucide-react';
 import { SenderLine, type SenderState } from '@/components/compose/SenderLine';
@@ -115,6 +116,9 @@ function ComposeInner() {
   const nativeDraftId = sp.get('draftId') || '';
   const campaignStepId = sp.get('campaignStepId') || '';
   const isCanonicalDraft = Boolean(nativeDraftId);
+  // «Revisar y enviar en serie» (plan de uso A1): where this draft is in the pass started in «Por escribir». Read in the browser.
+  const [seriesPlace, setSeriesPlace] = useState<DraftQueuePlace | null>(null);
+  useEffect(() => { setSeriesPlace(campaignStepId ? null : queuePlace(readDraftQueue(), nativeDraftId)); }, [nativeDraftId, campaignStepId]);
   const [lead, setLead] = useState<AnyLead | null>(null);
   const [leadLoading, setLeadLoading] = useState(Boolean(id) && !isCanonicalDraft);
   const [leadLoadError, setLeadLoadError] = useState<string | null>(null);
@@ -1162,12 +1166,25 @@ function ComposeInner() {
               </div>
             ) : null}
 
-            <div className="mt-7 flex justify-end">
-              <Button asChild className="min-h-11 w-full sm:w-auto">
-                <Link href={hasFollowUpContext ? '/campaigns' : '/saved/leads/enriched'}>
+            {/* In a series (plan de uso A1) the next draft is the main step; the usual way out stays beside it. */}
+            {seriesPlace ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                {seriesPlace.nextId
+                  ? `${queueLabel(seriesPlace)} de tu revisión en serie. Te ${seriesPlace.total - seriesPlace.position === 1 ? 'queda 1' : `quedan ${(seriesPlace.total - seriesPlace.position).toLocaleString('es-CL')}`}.`
+                  : 'Era el último borrador de tu revisión en serie.'}
+              </p>
+            ) : null}
+            <div className="mt-7 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button asChild variant={seriesPlace?.nextId ? 'outline' : 'default'} className="min-h-11 w-full sm:w-auto">
+                <Link href={hasFollowUpContext ? '/campaigns' : '/saved/leads/enriched'} onClick={() => { if (seriesPlace && !seriesPlace.nextId) clearDraftQueue(); }}>
                   {hasFollowUpContext ? 'Ver seguimiento' : 'Volver a leads'}
                 </Link>
               </Button>
+              {seriesPlace?.nextId ? (
+                <Button asChild className="min-h-11 w-full sm:w-auto">
+                  <Link href={composeDraftHref(seriesPlace.nextId)}>Abrir el siguiente</Link>
+                </Button>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -1192,6 +1209,15 @@ function ComposeInner() {
     }
     if (window.history.state?.composeUnsavedGuard === window.location.href) window.history.go(-2);
     else router.back();
+  };
+  // Within a series: skip to the next draft, or end the pass back in «Borrador listo»; with the same care as leaving.
+  const leaveSeriesTo = (href: string, end = false) => {
+    if (hasNativeEdits || proposal || followUpDirty || followUpBusy || rewriteInstruction.trim() || draftOperationRef.current || isLoading) {
+      toast({ title: 'Hay cambios sin guardar', description: 'Guarda tus cambios y aplica o descarta las propuestas antes de seguir.' });
+      return;
+    }
+    if (end) clearDraftQueue();
+    router.push(href);
   };
   const isSafeRequestRetry = Boolean(sendError && sendOperation && !sendReceipt);
   // «Confirmar y enviar» (Plan 9, PR-17): one click confirms the review and, once the approved version is in state, sends
@@ -1344,6 +1370,15 @@ function ComposeInner() {
       </header>
 
       <section aria-label="Estado del correo" className="grid gap-2">
+        {seriesPlace && !sendReceipt ? (
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-xl border border-border/60 bg-muted/20 px-4 py-2.5 text-sm">
+            <p><span className="font-medium">Revisión en serie</span><span className="text-muted-foreground"> · {queueLabel(seriesPlace)}</span></p>
+            <div className="flex items-center gap-3">
+              {seriesPlace.nextId ? <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => leaveSeriesTo(composeDraftHref(seriesPlace.nextId!))}>Saltar este</Button> : null}
+              <Button type="button" variant="link" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => leaveSeriesTo(DRAFTS_STAGE_HREF, true)}>Terminar la serie</Button>
+            </div>
+          </div>
+        ) : null}
         {sender.state === 'not_connected' ? null : <SenderLine name={currentProfile?.full_name || ''} provider={sendProvider} sender={sender} />}
         {saveError ? <Alert variant="destructive"><AlertTitle>No se guardaron los cambios</AlertTitle><AlertDescription>{saveError}</AlertDescription></Alert> : null}
         {sendReceipt ? (
