@@ -233,7 +233,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     <dl className="mt-2 grid gap-x-6 gap-y-3 sm:grid-cols-2">
       {item.fit.map(entry => <div key={entry.criterion} className="min-w-0">
         <dt className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">{entry.criterion}
-          <span className={cn('rounded-full px-1.5 py-px', entry.match === 'yes' ? 'bg-primary/10 text-primary' : 'bg-muted')}>{FIT[entry.match]}</span></dt>
+          <span className={cn('rounded-full px-1.5 py-px', entry.match === 'yes' ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground/80')}>{FIT[entry.match]}</span></dt>
         <dd className="mt-0.5 text-sm">{entry.theirs}<span className="block text-xs text-muted-foreground">Buscas: {entry.wanted}</span></dd>
       </div>)}
     </dl>
@@ -335,7 +335,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   </section> : null;
   return <div className="mx-auto w-full max-w-3xl">
     <PageHeader title={drop && !one ? 'Tus contactos del día' : 'Tu contacto del día'} back={{ href: '/search', label: 'Búsqueda normal' }}
-      description={drop ? (lookup ? `${one ? 'Encontrado' : 'Encontrados'} el ${dayLabel(drop.date)} para ti. ${dropCostNote(drop.items)}`
+      description={drop ? (lookup ? `${one ? 'Encontrado' : 'Encontrados'} el ${dayLabel(drop.date)} para ti. ${left.length ? dropCostNote(left)
+        : one ? 'Ya está en «Por escribir», con su correo.' : 'Ya están en «Por escribir», con su correo.'}`
         : one ? `Encontrado el ${dayLabel(drop.date)} para ti. Ya tiene su correo verificado: guardarlo no gasta créditos.`
         : `Encontrados el ${dayLabel(drop.date)} para ti. Ya tienen su correo verificado: guardarlos no gasta créditos.`)
         : making ? 'Elegimos un contacto nuevo para ti, con una breve investigación y un primer correo.' : 'Tu contacto nuevo, con su correo verificado.'} />

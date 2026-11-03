@@ -239,6 +239,7 @@ test('a contact found with Apollo: one credit said before the click, «Enriquece
     assert.deepEqual(lookups.map(entry => [entry.leads.map(lead => lead.id), entry.lookups]), [[['saved-1'], { 'saved-1': 'email' }]], 'one lookup, of the email only');
     assert.match(page.text(), /Listo: ya tienes su correo y quedó en «Por escribir»\. Se descontó 1 crédito/);
     assert.equal(document.querySelector('#drop-results')?.textContent, 'Daniel Nieto', 'the real name, once looked up');
+    assert.match(document.querySelector('header')?.textContent || '', /Ya está en «Por escribir», con su correo\./, 'no credit left to spend');
     assert.equal(document.querySelector('a[href="/saved/leads/enriched?investigar=e-9&empezar=1"]')?.textContent, 'Investigar y escribirle');
   } finally { await close(page); }
   // No email found: it says so, and the contact stays to try again.
