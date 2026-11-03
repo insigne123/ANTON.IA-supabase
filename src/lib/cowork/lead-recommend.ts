@@ -16,6 +16,8 @@ export type RecommendLead = {
 export type RecommendCriteria = { terms: string[]; locations: string[]; source: 'pedido' | 'perfil' | 'ninguno' };
 
 export const RECOMMEND_SHOWN = 20;
+/** How many emails one «Buscar correos» looks up at once in Inicio, one credit each. */
+export const RECOMMEND_LOOKUP_BATCH = 10;
 const LEVEL_POINTS: Record<string, number> = { 'Dirección': 15, 'Jefatura': 10, 'Profesional': 3 };
 /** Areas too broad to say a title fits: «otra área» or no title. */
 const NO_AREA = new Set(['Otra área', 'Sin cargo']);
@@ -91,6 +93,8 @@ export function recommendLeads(input: { leads: RecommendLead[]; contacted: Set<s
     excludedByTeam,
     readyToWrite: pool.filter(item => item.lead.email).length,
     needEmail: pool.filter(item => !item.lead.email).length,
+    // The saved contacts whose email nobody looked up yet, best first: «Buscar correos» in Inicio takes them, not only those shown.
+    lookupIds: pool.filter(item => !item.lead.email && item.lead.list !== 'por_escribir').slice(0, RECOMMEND_LOOKUP_BATCH).map(item => item.lead.id),
     byArea: [...byArea].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([area, people]) => ({ area, people })),
     top: pool.slice(0, RECOMMEND_SHOWN).map(item => ({
       leadId: item.lead.id, name: item.lead.name, title: item.lead.title, company: item.lead.company,

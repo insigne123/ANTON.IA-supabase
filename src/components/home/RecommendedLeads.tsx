@@ -2,11 +2,15 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, RefreshCw, Target, Users } from 'lucide-react';
+import { ArrowRight, Loader2, Mail, RefreshCw, Target, Users } from 'lucide-react';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { recommendationLink } from '@/lib/icp/view';
+import { useToast } from '@/hooks/use-toast';
+import { canLookUpEmail, emailLookupBatch, emailLookupLabel, recommendationLink } from '@/lib/icp/view';
+import { completeSavedContacts, completionSummary } from '@/lib/leads-workspace/complete-contacts';
+import { supabaseService } from '@/lib/supabase-service';
 import { cn } from '@/lib/utils';
 import {usePersonalHome} from './usePersonalHome';
 import {displayLeadName} from '@/lib/lead-name';
@@ -18,6 +22,8 @@ type Recommended = {
 type Recommendations = {
   criteria: { terms: string[]; source: 'pedido' | 'perfil' | 'ninguno' };
   savedContacts: number; notContacted: number; fitting: number | null; excludedByTeam: number; readyToWrite: number; needEmail: number;
+  /** The saved contacts without email, best first, beyond those shown (RECOMMEND_LOOKUP_BATCH). */
+  lookupIds?: string[];
   top: Recommended[]; partial?: string;
 };
 
@@ -26,12 +32,40 @@ const MISSING_LABELS: Record<string, string> = { 'buscar su correo': 'Sin correo
 
 /**
  * «Recomendados para ti» in Inicio (plan 8, phase 2): the contacts nobody has written to, best first for the customer of
- * «Perfil», with why each one fits and what is missing. Each row goes where the person acts on it.
+ * «Perfil», with why each one fits and what is missing. A saved contact without email gets it looked up right there, one or
+ * the best of the list at once (completeSavedContacts, one credit each); the rest go where the person acts on them.
  */
 export function RecommendedLeads() {
   const {data,error,loading,load}=usePersonalHome<Recommendations>('/api/leads/recommendations');
   const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const confirm = useConfirm();
+  const { toast } = useToast();
 
+  const batch = data ? (data.lookupIds ?? emailLookupBatch(data.top)) : [];
+  async function lookUp(ids: string[], key: string) {
+    if (busy || !ids.length) return;
+    if (key === 'batch' && !(await confirm({
+      title: ids.length === 1 ? '¿Buscar el correo de 1 contacto?' : `¿Buscar el correo de ${ids.length} contactos?`,
+      description: `Son tus ${ids.length === 1 ? 'recomendado sin correo que mejor calza' : `${ids.length} recomendados sin correo que mejor calzan`}. Usa hasta ${ids.length === 1 ? '1 crédito' : `${ids.length} créditos`} de ANTON.IA, uno por contacto, y quien tenga correo pasa a «Por escribir».`,
+      confirmLabel: 'Buscar correos',
+    }))) return;
+    setBusy(key);
+    try {
+      const saved = await supabaseService.getLeads();
+      const chosen = saved.filter(lead => ids.includes(lead.id) && !String(lead.email || '').includes('@'));
+      if (!chosen.length) {
+        toast({ title: 'Ya tenían correo o no están guardados', description: 'Actualizamos tus recomendados.' });
+      } else {
+        toast(completionSummary(await completeSavedContacts(chosen, Object.fromEntries(chosen.map(lead => [lead.id, 'email' as const])))));
+      }
+    } catch (failure) {
+      toast({ variant: 'destructive', title: 'No pudimos buscar el correo', description: failure instanceof Error ? failure.message : 'Intenta de nuevo en unos minutos.' });
+    } finally {
+      setBusy(null);
+      void load();
+    }
+  }
 
   const visible = data ? data.top.slice(0, expanded ? data.top.length : SHOWN) : [];
   return (
@@ -68,11 +102,19 @@ export function RecommendedLeads() {
               href="/search" cta="Buscar prospectos" />
           ) : (
             <>
-              <p className="mb-3 text-sm text-foreground">
-                {data.fitting !== null ? <><strong className="font-semibold">{data.fitting}</strong> calzan · </> : null}
-                <strong className="font-semibold">{data.readyToWrite}</strong> con correo · <strong className="font-semibold">{data.needEmail}</strong> sin correo
-                {data.excludedByTeam ? <span className="text-muted-foreground"> · {data.excludedByTeam} los trabaja otro miembro</span> : null}
-              </p>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-foreground">
+                  {data.fitting !== null ? <><strong className="font-semibold">{data.fitting}</strong> calzan · </> : null}
+                  <strong className="font-semibold">{data.readyToWrite}</strong> con correo · <strong className="font-semibold">{data.needEmail}</strong> sin correo
+                  {data.excludedByTeam ? <span className="text-muted-foreground"> · {data.excludedByTeam} los trabaja otro miembro</span> : null}
+                </p>
+                {batch.length > 0 ? (
+                  <Button size="sm" className="h-8 shrink-0 self-start sm:self-auto" disabled={busy !== null} onClick={() => void lookUp(batch, 'batch')}>
+                    {busy === 'batch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Mail className="h-3.5 w-3.5" aria-hidden="true" />}
+                    {busy === 'batch' ? 'Buscando correos…' : emailLookupLabel(batch.length)}
+                  </Button>
+                ) : null}
+              </div>
               {data.criteria.source === 'ninguno' ? (
                 <p className="mb-3 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                   Define los cargos e industrias de tu cliente ideal en <Link href="/profile#icp-heading" className="font-medium text-primary underline-offset-4 hover:underline">Perfil</Link> para ordenarlos por calce.
@@ -101,9 +143,17 @@ export function RecommendedLeads() {
                               {MISSING_LABELS[missing] || missing}
                             </span>
                           ))}
-                          <Button asChild size="sm" variant="outline" className="h-8">
-                            <Link href={link.href}>{link.label}<ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
-                          </Button>
+                          {canLookUpEmail(item) ? (
+                            <Button size="sm" variant="outline" className="h-8" disabled={busy !== null} onClick={() => void lookUp([item.leadId], item.leadId)}
+                              aria-label={`Buscar el correo de ${displayLeadName(item.name).text || 'este contacto'}, 1 crédito`}>
+                              {busy === item.leadId ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Mail className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {busy === item.leadId ? 'Buscando…' : 'Buscar correo · 1 crédito'}
+                            </Button>
+                          ) : (
+                            <Button asChild size="sm" variant="outline" className="h-8">
+                              <Link href={link.href}>{link.label}<ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
+                            </Button>
+                          )}
                         </div>
                       </div>
                     </li>

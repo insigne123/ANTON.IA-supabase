@@ -44,8 +44,30 @@ export function appendTerm(list: string, term: string) {
   return [...items, term.trim()].join(', ');
 }
 
-/** Where to act on a recommended contact: «Por escribir», to write or to find what is missing. */
-export function recommendationLink(item: { list?: 'por_escribir' | 'por_completar'; missing: string[] }) {
-  if (item.list === 'por_escribir') return { href: '/saved/leads/enriched', label: item.missing.includes('buscar su correo') ? 'Buscar correo' : 'Escribir' };
-  return { href: '/saved/leads/enriched', label: item.missing.includes('buscar su correo') ? 'Buscar correo' : 'Abrir' };
+type RecommendedItem = { list?: 'por_escribir' | 'por_completar'; missing: string[] };
+
+/**
+ * Whether «Recomendados para ti» finds this contact's email right there: saved («Por completar») and still without one. Before
+ * (3 Nov 2026) its «Buscar correo» only opened «Por escribir», where the person had to find the contact again: GrupoExpro had
+ * 414 saved contacts whose email nobody ever looked up.
+ */
+export const canLookUpEmail = (item: RecommendedItem) => item.list !== 'por_escribir' && item.missing.includes('buscar su correo');
+
+/** How many emails «Buscar correos» looks up at once: one credit each (RECOMMEND_LOOKUP_BATCH on the server). */
+export const EMAIL_LOOKUP_BATCH = 10;
+
+/** The best recommended contacts whose email can be found right there, in their order, up to one batch. */
+export function emailLookupBatch<T extends RecommendedItem & { leadId: string }>(items: T[], size = EMAIL_LOOKUP_BATCH) {
+  return items.filter(canLookUpEmail).slice(0, size).map(item => item.leadId);
+}
+
+/** «Buscar 4 correos · 4 créditos»: what the button does and what it costs. */
+export function emailLookupLabel(count: number) {
+  return count === 1 ? 'Buscar 1 correo · 1 crédito' : `Buscar ${count.toLocaleString('es-CL')} correos · ${count.toLocaleString('es-CL')} créditos`;
+}
+
+/** Where to act on a recommended contact that is not looked up right there: «Por escribir», to write or to open it. */
+export function recommendationLink(item: RecommendedItem) {
+  if (item.list === 'por_escribir') return { href: '/saved/leads/enriched', label: item.missing.includes('buscar su correo') ? 'Abrir' : 'Escribir' };
+  return { href: '/saved/leads/enriched', label: 'Abrir' };
 }
