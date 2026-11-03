@@ -56,3 +56,20 @@ test('a role fits by its area and an industry by its usual synonyms', () => {
   assert.equal(scoreRecommendLead(lead('c', 'Arquitecta', 'Software'), criteria).fits, false);
 });
 
+
+test('the saved contacts without email, best first and beyond those shown, are the ones «Buscar correos» looks up', () => {
+  const leads = [
+    lead('a', 'Gerente de RR. HH.', 'Retail', { email: 'a@acme.cl' }),
+    lead('b', 'Jefa de Selección', 'Retail'),
+    lead('c', 'Analista de RR. HH.', 'Retail', { list: 'por_escribir' }),
+    lead('d', 'Gerenta de Personas', 'Minería'),
+    lead('e', 'Gerente de Finanzas', 'Minería'),
+    ...Array.from({ length: 12 }, (_, index) => lead(`x${index}`, 'Analista de RR. HH.', 'Minería')),
+  ];
+  const result = recommendLeads({ leads, contacted: new Set(), lockedByOthers: new Map(),
+    criteria: { terms: ['RR. HH.', 'selección', 'retail'], locations: [], source: 'perfil' } });
+  // c was searched before (it is in «Por escribir»): it is retried there. e does not fit. Ten at most.
+  assert.deepEqual(result.lookupIds.slice(0, 2), ['b', 'd']);
+  assert.equal(result.lookupIds.length, 10);
+  assert.ok(!result.lookupIds.includes('c') && !result.lookupIds.includes('e') && !result.lookupIds.includes('a'));
+});
