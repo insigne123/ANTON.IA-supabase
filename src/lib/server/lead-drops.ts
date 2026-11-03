@@ -8,23 +8,31 @@ import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/li
 import { renderPdf } from '@/lib/documents/render-pdf';
 import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
-  DROP_SIZE, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropDay, dropFit, groupDropPeople, nextDropDay, personDropCriteria, placeLabel,
-  researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropItem, type IcpDeclared, type KnownPeople,
+  DROP_SIZE, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, groupDropPeople, needsLookup, nextDropDay,
+  personDropCriteria, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropFollowUp, type DropItem,
+  type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
+import { isMaskedName } from '@/lib/lead-name';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { readCompanyFields } from '@/lib/server/company-profile';
+import { resolveApolloIndustryFilters } from '@/lib/server/apollo-provider/apollo';
+import { getGatewayConfig } from '@/lib/server/apollo-provider/gateway';
+import { executeProviderLeadSearch } from '@/lib/server/apollo-provider/lead-provider';
 import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
+import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
+import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
 import { leadsFinderMaxRunUsd, leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
 import { LEADS_FINDER_MAX_PER_RUN, leadsFinderIndustry } from '@/lib/server/leads-finder/input';
 import { enrichedLeadRow } from '@/lib/server/leads-finder/reveal';
-import { forgetInVault, readFromVault, storeInVault, type VaultEntry } from '@/lib/server/leads-finder/vault';
+import { forgetInVault, isLeadsFinderId, readFromVault, storeInVault, type VaultEntry } from '@/lib/server/leads-finder/vault';
 
 /** The reads, the preparation and the save of «Contacto del día» (src/lib/lead-drops.ts). Server only. */
 type Client = SupabaseClient;
 export type DropScope = { organizationId: string; userId: string };
-type Search = typeof searchLeadsFinder;
+/** A search for the drops: Leads Finder's, or Apollo's free one (searchApolloDrops), both as the vault keeps a person. */
+type Search = (input: LeadSearchInput, deps: Parameters<typeof searchLeadsFinder>[1]) => Promise<{ results: VaultEntry[]; costUsd: number }>;
 type Generate = (options: { schema: z.ZodTypeAny; systemPrompt: string; prompt: string; openAiModel?: string; reasoningEffort?: any;
   maxOutputTokens: number; timeoutMs: number }) => Promise<any>;
 
@@ -40,6 +48,16 @@ export const dropsMonthlyUsd = (env: Record<string, string | undefined> = proces
   return Number.isFinite(value) && value >= 0 ? value : 3;
 };
 export const dropsEnabled = (env: Record<string, string | undefined> = process.env) => env.LEAD_DROPS_ENABLED !== 'off';
+/**
+ * Where the drops search (src/lib/lead-drops.ts): Apollo's free people search since 3 Nov 2026, so a search costs nothing and the
+ * email is looked up when the person saves the contact (1 credit); LEAD_DROPS_PROVIDER=apify goes back to Leads Finder, which
+ * brings the email with the search and spends the month's budget (LEAD_DROPS_MONTHLY_USD).
+ */
+export const dropsProvider = (env: Record<string, string | undefined> = process.env): 'apollo' | 'apify' => env.LEAD_DROPS_PROVIDER === 'apify' ? 'apify' : 'apollo';
+/** What one person found costs the month's budget: nothing with Apollo's free search. */
+const dropUsdPerLead = () => dropsProvider() === 'apollo' ? 0 : leadsFinderUsdPerLead();
+/** Whether a search of `count` would go past the month's budget: never a free one, whatever Leads Finder spent before. */
+const overBudget = (spent: number, count: number, usdPerLead: number, budget: number) => count * usdPerLead > 0 && spent + count * usdPerLead > budget;
 /** LEAD_DROPS_MAX_GROUPS: how many searches one organization's drops may take a day (5 by default, 1 to 20); past that, groups join. */
 export const dropsMaxGroups = (env: Record<string, string | undefined> = process.env) => {
   const value = Number(env.LEAD_DROPS_MAX_GROUPS);
@@ -103,6 +121,8 @@ function webUrl(value: unknown) {
 function candidateOf(entry: VaultEntry): DropCandidate {
   const { lead, contact } = entry;
   const domain = text(lead.organization_domain, 253) || null;
+  // Apollo's free search says whether it has the email, without it: it is looked up on saving (1 credit), and the phone is not offered.
+  const apollo = !isLeadsFinderId(lead.id);
   return {
     leadId: lead.id, name: text(contact.fullName, 200) || text(lead.name, 200), title: tidyTitle(text(lead.title, 160)),
     company: tidyCompany(text(lead.organization_name, 200)), domain,
@@ -110,11 +130,47 @@ function candidateOf(entry: VaultEntry): DropCandidate {
     city: text(lead.city, 160) || null, state: text(lead.state, 160) || null, country: text(lead.country, 160) || null,
     seniority: seniorityLabel(text(lead.seniority, 60)), department: departmentLabel(text(Array.isArray(lead.departments) ? lead.departments[0] : '', 60)),
     website: webUrl(lead.organization?.website_url) || webUrl(domain), companyLinkedin: webUrl(lead.organization?.linkedin_url),
-    hasEmail: Boolean(contact.email), hasPhone: Boolean(contact.mobileNumber),
+    hasEmail: Boolean(contact.email) || (apollo && (lead as { has_email?: unknown }).has_email === true), hasPhone: !apollo && Boolean(contact.mobileNumber),
     emailKey: contact.email ? contact.email.toLowerCase() : null, linkedinKey: contact.linkedinUrl ? contact.linkedinUrl.toLowerCase().replace(/\/$/, '') : null,
     about: text(lead.organization?.short_description, 600) || null,
+    ...(apollo ? { provider: 'apollo' as const } : {}),
   };
 }
+
+/**
+ * Apollo's people as the vault keeps a person, so the drops treat both searches alike: the person as the search shows them
+ * (the surname hidden, «Ni***o»), no email nor phone (Apollo gives them on enrichment), and the LinkedIn only as a key to
+ * skip known people.
+ */
+export function apolloDropEntries(people: unknown[]): VaultEntry[] {
+  return people.flatMap(value => {
+    const person = (value && typeof value === 'object' ? value : {}) as Record<string, any>;
+    const id = text(person.id || person.apollo_id, 64);
+    if (!/^[0-9a-f]{24}$/i.test(id)) return [];
+    const firstName = text(person.first_name, 100);
+    const lastName = text(person.last_name || person.last_name_obfuscated, 100);
+    const fullName = text(person.name, 200) || [firstName, lastName].filter(Boolean).join(' ');
+    const organization = (person.organization && typeof person.organization === 'object' ? person.organization : {}) as Record<string, any>;
+    const lead = {
+      id, name: fullName, title: text(person.title, 160), organization_name: text(person.organization_name || organization.name, 200),
+      organization_domain: text(person.organization_domain || organization.domain || organization.primary_domain, 253),
+      organization_industry: text(person.organization_industry || organization.industry, 160),
+      organization_size: typeof person.organization_size === 'number' ? person.organization_size : typeof organization.estimated_num_employees === 'number' ? organization.estimated_num_employees : null,
+      city: text(person.city, 160), state: text(person.state, 160), country: text(person.country, 160), seniority: text(person.seniority, 60),
+      departments: Array.isArray(person.departments) ? person.departments.filter((item: unknown) => typeof item === 'string').slice(0, 5) : [],
+      organization: { website_url: text(organization.website_url, 500), linkedin_url: text(organization.linkedin_url, 500), short_description: text(organization.short_description, 1000) },
+      has_email: person.has_email === true,
+    };
+    const contact = { fullName, firstName, lastName, email: null, personalEmail: null, mobileNumber: null, linkedinUrl: text(person.linkedin_url, 500) || null, emailStatus: null };
+    return [{ lead: lead as unknown as VaultEntry['lead'], contact: contact as VaultEntry['contact'] }];
+  });
+}
+
+/** Apollo's free people search, for a drop: up to 100 people, at no cost. */
+export const searchApolloDrops: Search = async input => {
+  const found: any = await executeProviderLeadSearch({ ...input, provider: 'apollo' as LeadSearchInput['provider'], maxResults: Math.min(100, input.maxResults) }, getGatewayConfig());
+  return { results: apolloDropEntries(Array.isArray(found?.leads) ? found.leads : []), costUsd: 0 };
+};
 
 /**
  * The search for a customer. Its industries go as the actor names them; one it does not know is left out, because as a
@@ -185,6 +241,23 @@ export async function restingPeople(client: Client, people: string[], now: Date)
   return resting;
 }
 
+const fold = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const sameValues = (a: string[], b: string[]) => a.length === b.length && a.map(fold).sort().join('|') === b.map(fold).sort().join('|');
+const capitalize = (value: string) => value ? value[0].toUpperCase() + value.slice(1) : value;
+/**
+ * What the search that found a contact kept to, for the person's own customer (a group shares the group's): the industries
+ * only when Apollo knows each one by its tag (a keyword is looser), the sizes, and the places, which every search keeps to.
+ */
+function keptBySearch(searched: DropCriteria, mine: DropCriteria, narrow: boolean) {
+  const industries = [...new Set(searched.industries.map(leadsFinderIndustry).filter((value): value is string => Boolean(value)))];
+  return {
+    industry: narrow && industries.length > 0 && sameValues(searched.industries, mine.industries)
+      && industries.length === searched.industries.length && industries.every(name => resolveApolloIndustryFilters([name]).tagIds.length > 0),
+    size: narrow && searched.sizes.length > 0 && sameValues(searched.sizes, mine.sizes),
+    place: searched.locations.length > 0 && sameValues(searched.locations, mine.locations),
+  };
+}
+
 /** Why a drop came empty, as it is kept; `emptyReason` says it to the person. */
 const NO_CUSTOMER = 'Sin cliente ideal en «Perfil» ni contactos guardados para inferirlo.';
 const NO_BUDGET = 'Se acabó el presupuesto del mes para el contacto del día.';
@@ -201,13 +274,14 @@ const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.s
  * later runs do not try again.
  */
 export async function planOrganizationDrops(client: Client, organizationId: string, people: string[], deps: {
-  now: Date; search?: Search; budgetUsd: number; spentUsd: number; usdPerLead?: number;
+  now: Date; search?: Search; budgetUsd: number; spentUsd: number; usdPerLead?: number; provider?: 'apollo' | 'apify';
   /** Today's rows exist already, «pending» and empty, taken by `pullDrop` before searching: they are completed, not added. */
   claimed?: boolean;
 }) {
   const today = dayInZone(deps.now);
-  const search = deps.search ?? searchLeadsFinder;
-  const usdPerLead = deps.usdPerLead ?? leadsFinderUsdPerLead();
+  const apollo = (deps.provider ?? dropsProvider()) === 'apollo';
+  const search = deps.search ?? (apollo ? searchApolloDrops : searchLeadsFinder);
+  const usdPerLead = deps.usdPerLead ?? (apollo ? 0 : leadsFinderUsdPerLead());
   const team = await teamOf(client, organizationId);
 
   // One search per group of people with similar customers.
@@ -220,18 +294,22 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
   let spent = deps.spentUsd;
   for (const { criteria, people: members } of groups) {
-    const count = searchCount(members.length);
-    if (spent + count * usdPerLead > deps.budgetUsd) {
+    // Apollo's search is free: as many as one page brings, so the days ahead still find people the team does not have.
+    const count = apollo ? 100 : searchCount(members.length);
+    if (overBudget(spent, count, usdPerLead, deps.budgetUsd)) {
       for (const userId of members) results.push({ userId, status: 'empty', error: NO_BUDGET, criteria: own.get(userId)! });
       continue;
     }
     let found: Awaited<ReturnType<Search>>;
+    // Who came from the search with the industries and sizes: they are within them, though Apollo may not say their industry or size.
+    let narrowIds = new Set<string>();
     // The run's cap, not its cost (that comes from what it returns): one person's search is too small for a cap of its
     // own, which Apify refuses under its minimum, so never below an ordinary search's (leadsFinderMaxRunUsd).
     const searchDeps = (wanted: number) => ({ fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: Math.max(leadsFinderMaxRunUsd(), Math.min(1, wanted * usdPerLead * 1.5)) });
     try {
       const narrow = searchInput(criteria, count);
       found = await search(narrow, searchDeps(count));
+      narrowIds = new Set(found.results.map(entry => entry.lead.id));
       // Nobody with those industries or sizes: once more with the titles and places only.
       if (!found.results.length && (narrow.industryKeywords.length || narrow.employeeRanges.length)) {
         const broad = await search(searchInput(criteria, count, true), searchDeps(count));
@@ -249,7 +327,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     // many). Each contact's fit (dropFit) shows what no longer matches, the industry or the size. A failure leaves it as before.
     const waiting = members.filter(userId => !(assigned.get(userId) || []).length);
     const deeper = Math.min(LEADS_FINDER_MAX_PER_RUN, count * 3);
-    if (waiting.length && found.results.length && deeper > count && spent + deeper * usdPerLead <= deps.budgetUsd) {
+    if (waiting.length && found.results.length && deeper > count && !overBudget(spent, deeper, usdPerLead, deps.budgetUsd)) {
       try {
         const wider = await search(searchInput(criteria, deeper, true), searchDeps(deeper));
         spent += wider.costUsd;
@@ -269,13 +347,18 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       const picks = assigned.get(userId) || [];
       if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria: mine }); continue; }
       for (const pick of picks) { known.leadIds.add(pick.leadId); if (pick.emailKey) known.emails.add(pick.emailKey); }
-      await storeInVault(client, { organizationId, userId, entries: picks.map(pick => entries.get(pick.leadId)!).filter(Boolean), now: deps.now.getTime() });
+      // Leads Finder's people wait in the vault with their email; Apollo's have none to keep yet.
+      const vaulted = picks.map(pick => entries.get(pick.leadId)).filter((entry): entry is VaultEntry => Boolean(entry) && isLeadsFinderId(entry!.lead.id));
+      if (vaulted.length) await storeInVault(client, { organizationId, userId, entries: vaulted, now: deps.now.getTime() });
       results.push({ userId, status: 'pending', cost: share, criteria: mine, items: picks.map(pick => {
         // The industry as the actor names it: «servicios transitorios» searched as «staffing & recruiting» fits «Reclutamiento y personal».
         const actorIndustry = text(entries.get(pick.leadId)?.lead.organization_industry, 160).toLowerCase();
         const { emailKey: _email, linkedinKey: _linkedin, about, ...shown } = pick;
-        return { ...shown, why: whyText(pick, mine), research: researchFacts({ ...pick, about: null }), draft: null,
-          fit: dropFit(pick, mine, wanted => Boolean(actorIndustry) && leadsFinderIndustry(wanted) === actorIndustry), description: about };
+        const kept = keptBySearch(criteria, mine, narrowIds.has(pick.leadId));
+        // One industry searched by its tag and none said: it is that one.
+        const person = !shown.industry && kept.industry && mine.industries.length === 1 ? { ...shown, industry: capitalize(mine.industries[0]) } : shown;
+        const fit = searchedFit(dropFit(person, mine, wanted => Boolean(actorIndustry) && leadsFinderIndustry(wanted) === actorIndustry), kept);
+        return { ...person, why: whyText(person, mine, fit), research: researchFacts({ ...person, about: null }), draft: null, fit, description: about };
       }) });
     }
   }
@@ -352,33 +435,55 @@ async function adviseOn(items: PendingItem[], userContext: CoworkUserContext | n
   }]));
 }
 
-/** The first email for one contact, by Cowork's Writer with its checks and its Reviewer, as Cowork would write it. */
+/** How many emails the Writer writes for a contact: the first and three follow-ups (idea del dueño, 3 Nov 2026). */
+export const DROP_SEQUENCE_STEPS = 4;
+/** The name the Writer addresses: the first name alone while the search hides the surname («Daniel Ni***o»). */
+const addressed = (name: string) => isMaskedName(name) ? name.split(' ')[0] : name;
+
+/**
+ * The first email and three follow-ups for one contact, by Cowork's Writer with its checks and its Reviewer, as Cowork writes a
+ * sequence: each email with its own role and the day it goes (the first is day 1). When the Writer answers with one email
+ * only, that one is the first and there are no follow-ups.
+ */
 async function draftFor(item: DropItem, userContext: Record<string, unknown> | null, generate: Generate, now: Date) {
+  const name = addressed(item.name);
+  const who = `${name}${item.title ? `, ${item.title}` : ''}${item.company ? ` en ${item.company}` : ''}`;
   const brief: CoworkWriteBrief = {
-    kind: 'email', recipients: [item.name], objective: `Primer correo de prospección para ${item.name}${item.title ? `, ${item.title}` : ''}${item.company ? ` en ${item.company}` : ''}.`,
-    angle: null, tone: null, steps: null, notes: null, findings: null,
+    kind: 'sequence', recipients: [name], objective: `Primer correo de prospección para ${who}, y tres seguimientos si no responde.`,
+    angle: null, tone: null, steps: DROP_SEQUENCE_STEPS, notes: null, findings: null,
   };
-  const observations = [{ action: 'leads.recommend', input: '', result: { leads: [{ name: item.name, company: item.company || '', title: item.title, industry: item.industry,
+  const observations = [{ action: 'leads.recommend', input: '', result: { leads: [{ name, company: item.company || '', title: item.title, industry: item.industry,
     companySize: item.size, city: item.city, companyFacts: item.research } ] } }];
   const models = coworkWriterModels();
   const efforts = coworkWriterEfforts();
   const output = await runCoworkWriter({
-    request: `Escríbele un primer correo a ${item.name}${item.title ? `, ${item.title}` : ''}${item.company ? ` en ${item.company}` : ''}.`,
+    request: `Escríbele a ${who} un primer correo y tres seguimientos.`,
     brief, userContext, observations, now,
     generate: async ({ role, schema, systemPrompt, prompt, fix }) => {
-      const chosen = coworkWriterCallModel('email', role, fix, models, efforts);
+      const chosen = coworkWriterCallModel('sequence', role, fix, models, efforts);
       return generate({ schema, systemPrompt, prompt, openAiModel: chosen.model, reasoningEffort: chosen.effort,
-        maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: role === 'writer' ? 40_000 : 20_000 });
+        maxOutputTokens: role === 'writer' ? 9000 : 2000, timeoutMs: role === 'writer' ? 70_000 : 25_000 });
     },
     step: async () => {},
   });
-  const block = coworkWriterBlocks(output).find(entry => entry.type === 'email_draft') as { subject?: string; body?: string } | undefined;
-  return block?.subject && block.body ? { subject: text(block.subject, 200), body: String(block.body).trim().slice(0, 4000) } : null;
+  const blocks = coworkWriterBlocks(output) as Array<{ type: string; subject?: string; body?: string; steps?: Array<{ day?: number; subject?: string; body?: string }> }>;
+  const clean = (step: { subject?: string; body?: string } | undefined) => step?.subject && step.body
+    ? { subject: text(step.subject, 200), body: String(step.body).trim().slice(0, 4000) } : null;
+  const sequence = blocks.find(block => block.type === 'sequence' && Array.isArray(block.steps) && block.steps.length);
+  if (sequence?.steps) {
+    const [first, ...rest] = sequence.steps;
+    const followUps: DropFollowUp[] = rest.slice(0, DROP_SEQUENCE_STEPS - 1).flatMap(step => {
+      const email = clean(step);
+      return email ? [{ day: Math.max(2, Math.min(60, Math.round(Number(step.day) || 0))), ...email }] : [];
+    });
+    return { draft: clean(first), followUps };
+  }
+  return { draft: clean(blocks.find(block => block.type === 'email_draft')), followUps: [] as DropFollowUp[] };
 }
 
 /**
  * Completes a pending drop: what each company does, why each contact is worth it for what the person sells (adviseOn) and a
- * first email for each. A draft or advice that fails leaves the contact without it.
+ * first email with three follow-ups for each. A draft or advice that fails leaves the contact without it.
  */
 export async function writeDrop(client: Client, drop: { id: string; organization_id: string; user_id: string; items: PendingItem[] }, deps: {
   generate: Generate; now: Date; parallel?: number;
@@ -396,7 +501,9 @@ export async function writeDrop(client: Client, drop: { id: string; organization
   const [advice] = await Promise.all([adviseOn(drop.items, userContext, deps.generate), (async () => {
     for (let start = 0; start < items.length; start += parallel) {
       await Promise.all(items.slice(start, start + parallel).map(async item => {
-        item.draft = await draftFor(item, userContext as Record<string, unknown> | null, deps.generate, deps.now).catch(() => null);
+        const written = await draftFor(item, userContext as Record<string, unknown> | null, deps.generate, deps.now).catch(() => null);
+        item.draft = written?.draft ?? null;
+        if (written?.followUps.length) item.followUps = written.followUps;
       }));
     }
   })()]);
@@ -429,8 +536,11 @@ export async function latestDrop(client: Client, scope: DropScope, now: Date) {
   const items = (result.data?.items || []) as DropItem[];
   const unsaved = items.filter(item => !item.savedLeadId);
   if (!result.data || !unsaved.length) return null;
-  const { name, company, why } = unsaved[0];
-  return { id: String(result.data.id), dropDate: String(result.data.drop_date), total: items.length, left: unsaved.length, next: { name, company, why } };
+  const { company, why } = unsaved[0];
+  const name = dropName(unsaved[0]);
+  // «Hoy» says what saving it costs: nothing when the email came with the search, a credit when it is looked up (Apollo).
+  return { id: String(result.data.id), dropDate: String(result.data.drop_date), total: items.length, left: unsaved.length,
+    next: { name, company, why, ...(needsLookup(unsaved[0]) ? { lookup: true } : {}) } };
 }
 
 /**
@@ -451,7 +561,8 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
   const fresh = !last || withoutCustomer(last);
   if (!fresh && (today || !dropDay(now))) return null;
   if (!customerFor(await teamOf(client, scope.organizationId), scope.userId)) return 'profile';
-  if ((await monthSpend(client, now)) + searchCount(1) * leadsFinderUsdPerLead() > dropsMonthlyUsd()) return null;
+  const usdPerLead = dropUsdPerLead();
+  if (usdPerLead > 0 && overBudget(await monthSpend(client, now), searchCount(1), usdPerLead, dropsMonthlyUsd())) return null;
   return fresh ? 'first' : 'today';
 }
 
@@ -472,7 +583,7 @@ export function emptyReason(error: string | null, now: Date): { title: string; t
   if (error === NO_CUSTOMER) return { title: 'Falta tu cliente ideal', text: 'Con él elegimos tu contacto: a quién le vendes, en qué rubro y dónde. Toma un minuto en «Perfil».', profile: 'Completar mi cliente ideal' };
   if (error === NO_BUDGET) return { title: 'Por este mes no quedan contactos', text: 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes. Mientras, puedes buscar con tus filtros.', profile: null };
   if (error === TOO_FEW) return { title: 'Esta vez no hubo un contacto nuevo', text: 'Tu equipo ya tiene a muchos de los que calzan con tu cliente ideal. Sumar cargos, rubros o lugares trae contactos nuevos.', profile: 'Ampliar mi cliente ideal' };
-  if (error === NOBODY) return { title: 'Esta vez no encontramos a nadie', text: 'Con tu cliente ideal no encontramos personas con correo verificado. Sumar cargos o lugares en «Perfil» ayuda.', profile: 'Ampliar mi cliente ideal' };
+  if (error === NOBODY) return { title: 'Esta vez no encontramos a nadie', text: 'Con tu cliente ideal no encontramos personas con correo. Sumar cargos o lugares en «Perfil» ayuda.', profile: 'Ampliar mi cliente ideal' };
   return { title: 'La búsqueda no respondió', text: `Esta vez no pudimos traer tu contacto. El próximo llega ${nextDropDay(now)}; mientras, puedes buscar con tus filtros.`, profile: null };
 }
 
@@ -511,7 +622,8 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
     const offer = await pullStatus(client, scope, deps.now);
     if (offer === 'profile') return { id: null, status: 'empty', reason: emptyReason(NO_CUSTOMER, deps.now) };
     if (offer !== 'first' && offer !== 'today') {
-      const broke = dropsEnabled() && (await monthSpend(client, deps.now)) + searchCount(1) * leadsFinderUsdPerLead() > dropsMonthlyUsd();
+      const usdPerLead = dropUsdPerLead();
+      const broke = dropsEnabled() && usdPerLead > 0 && overBudget(await monthSpend(client, deps.now), searchCount(1), usdPerLead, dropsMonthlyUsd());
       throw new LeadDropsError(!dropsEnabled() ? 'El contacto del día está en pausa.'
         : broke ? 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes.' : `Tu próximo contacto llega ${nextDropDay(deps.now)}.`, 409);
     }
@@ -547,7 +659,8 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
  */
 export async function saveDropLeads(client: Client, scope: DropScope, dropId: string, leadIds?: string[], options: { now?: Date } = {}) {
   const drop = await readDrop(client, scope, dropId);
-  const wanted = drop.items.filter(item => !item.savedLeadId && (!leadIds || leadIds.includes(item.leadId)));
+  // Apollo's contacts have no email in the vault: they are saved with «Enriquecer y guardar» (keepDropLead, then linkDropLead).
+  const wanted = drop.items.filter(item => !item.savedLeadId && item.provider !== 'apollo' && (!leadIds || leadIds.includes(item.leadId)));
   if (!wanted.length) return { saved: [], expired: [], items: drop.items };
   // The vault forgets a contact after LEADS_FINDER_VAULT_DAYS: the hour that decides whether it is still there is the one the caller gives.
   const clock = options.now ?? new Date();
@@ -562,7 +675,7 @@ export async function saveDropLeads(client: Client, scope: DropScope, dropId: st
     const existing: any = email ? await client.from('enriched_leads').select('id').eq('organization_id', scope.organizationId).eq('user_id', scope.userId).eq('email', email).limit(1).maybeSingle() : { data: null };
     if (existing.data?.id) { saved.push({ leadId: item.leadId, savedLeadId: String(existing.data.id) }); continue; }
     const row = enrichedLeadRow(entry, { id: randomUUID(), userId: scope.userId, organizationId: scope.organizationId, revealEmail: true, revealPhone: true, now });
-    const leadDrop = { dropId, why: item.why, research: item.research, draft: item.draft, ...(item.reasons?.length ? { reasons: item.reasons, approach: item.approach ?? null } : {}) };
+    const leadDrop = leadDropData(dropId, item);
     const inserted: any = await client.from('enriched_leads').insert({ ...row, data: { ...row.data, leadDrop } })
       .select('id').maybeSingle();
     if (inserted.error || !inserted.data) continue;
@@ -575,12 +688,78 @@ export async function saveDropLeads(client: Client, scope: DropScope, dropId: st
   return { saved, expired, items };
 }
 
+/** What a saved contact keeps of its drop (`data.leadDrop`): why we recommended it, the research, the first email and its follow-ups. */
+const leadDropData = (dropId: string, item: DropItem) => ({ dropId, why: item.why, research: item.research, draft: item.draft,
+  ...(item.followUps?.length ? { followUps: item.followUps } : {}), ...(item.reasons?.length ? { reasons: item.reasons, approach: item.approach ?? null } : {}) });
+
+/** An Apollo contact of the person's drop, or why not. */
+async function apolloItem(client: Client, scope: DropScope, dropId: string, leadId: string) {
+  const drop = await readDrop(client, scope, dropId);
+  const item = drop.items.find(entry => entry.leadId === leadId);
+  if (!item || item.provider !== 'apollo') throw new LeadDropsError('No encontramos ese contacto en tu contacto del día.', 404);
+  return { drop, item };
+}
+
+/**
+ * «Enriquecer y guardar», first half: an Apollo contact of the drop becomes one of the person's saved contacts, as Cowork saves a
+ * search result (insertCoworkContact: insert only, and refused when another member holds that person), so its email is looked
+ * up the way every saved contact is completed (completeSavedContacts, 1 credit, with its quota and the organization's share).
+ * The browser does that lookup and then calls linkDropLead. Saving it again returns the same saved contact.
+ */
+export async function keepDropLead(auth: Pick<AuthContext, 'supabase' | 'user' | 'organizationId'>, client: Client, dropId: string, leadId: string, now = new Date()) {
+  const scope = { organizationId: auth.organizationId, userId: String(auth.user.id) };
+  const { drop, item } = await apolloItem(client, scope, dropId, leadId);
+  if (item.savedLeadId) return { keptLeadId: item.keptLeadId ?? null, savedLeadId: item.savedLeadId, items: drop.items };
+  let kept: Awaited<ReturnType<typeof insertCoworkContact>>;
+  try {
+    kept = await insertCoworkContact({ ...auth, organizationIds: [auth.organizationId] } as AuthContext, `apollo:${leadId}`, {
+      name: item.name, company: item.company, title: item.title, industry: item.industry, location: placeLabel(item) || null,
+      company_website: item.website || (item.domain ? `https://${item.domain}` : null), company_linkedin: item.companyLinkedin || null,
+    });
+  } catch (error) {
+    // Another member holds them (lead-claim.ts): said as the database says it.
+    if (error instanceof Error && error.name === 'LeadClaimedError') throw new LeadDropsError(error.message, 409);
+    throw new LeadDropsError('No pudimos guardar este contacto. Inténtalo de nuevo.', 503);
+  }
+  const keptLeadId = String(kept.lead.id);
+  const items = drop.items.map(entry => entry.leadId === leadId ? { ...entry, keptLeadId } : entry);
+  const written = await client.from('lead_drops').update({ items, updated_at: now.toISOString() }).eq('id', dropId);
+  if (written.error) throw new LeadDropsError('No pudimos guardar este contacto. Inténtalo de nuevo.', 503);
+  return { keptLeadId, savedLeadId: null, items };
+}
+
+/**
+ * «Enriquecer y guardar», second half, after the lookup: the contact in «Por escribir» that Apollo's person became gets the drop's
+ * reasons, first email and follow-ups (`data.leadDrop`), and the drop shows it saved. Without one (no email found) nothing changes.
+ */
+export async function linkDropLead(client: Client, scope: DropScope, dropId: string, leadId: string, now = new Date()) {
+  const { drop, item } = await apolloItem(client, scope, dropId, leadId);
+  if (item.savedLeadId) return { linked: true, savedLeadId: item.savedLeadId, items: drop.items };
+  const found: any = await client.from('enriched_leads').select('id,data,full_name').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+    .eq('source_provider_id', leadId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (found.error) throw new LeadDropsError('No pudimos revisar el contacto.', 503);
+  if (!found.data) return { linked: false, savedLeadId: null, items: drop.items };
+  const savedLeadId = String(found.data.id);
+  const data = found.data.data && typeof found.data.data === 'object' ? found.data.data : {};
+  await client.from('enriched_leads').update({ data: { ...data, leadDrop: leadDropData(dropId, item) } }).eq('id', savedLeadId)
+    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
+  // The lookup brings the surname the search hid: the drop shows it from now on.
+  const fullName = typeof found.data.full_name === 'string' && found.data.full_name.trim() && !isMaskedName(found.data.full_name) ? found.data.full_name.trim() : null;
+  const items = drop.items.map(entry => entry.leadId === leadId ? { ...entry, savedLeadId, ...(fullName ? { name: fullName } : {}) } : entry);
+  const stamp = now.toISOString();
+  const written = await client.from('lead_drops').update({ items, saved_at: stamp, updated_at: stamp }).eq('id', dropId);
+  if (written.error) throw new LeadDropsError('No pudimos guardar este contacto. Inténtalo de nuevo.', 503);
+  return { linked: true, savedLeadId, items };
+}
+
 /** «28 de octubre de 2026»: the drop's day as the PDF says it. */
 export function dropDateLabel(day: string) {
   const date = new Date(`${day}T12:00:00.000Z`);
   return Number.isNaN(date.getTime()) ? day : date.toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
+/** A body with its own line breaks, without the spaces and the empty lines a model leaves. */
+const tidyBody = (body: string) => body.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 /** «Ripley S.A.» without its legal form, as a heading says it. */
 const shortCompany = (name: string) => name.replace(/,?\s+(S\.A\.|SpA|Ltda\.|EIRL)$/, '');
 const labelled = (label: string, value: Run[] | string | null | undefined) =>
@@ -591,7 +770,8 @@ const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^w
 /**
  * One contact in the document: why we recommend them (what matched, and why it is worth it for what the person sells), how
  * they fit the customer criterion by criterion, who they are, their company, how to open, and the first email in its own
- * box. A drop from before 29 Oct 2026, without those parts, shows what it has: the why, the research and the email.
+ * box, then its follow-ups (since 3 Nov 2026). A drop from before 29 Oct 2026, without those parts, shows what it has: the
+ * why, the research and the email.
  */
 function dropItemBlocks(item: DropItem): DocBlock[] {
   const blocks: DocBlock[] = [];
@@ -607,7 +787,8 @@ function dropItemBlocks(item: DropItem): DocBlock[] {
     const shown = new Set(item.fit.map(entry => entry.criterion));
     const person = present([
       labelled('Nivel', item.seniority), labelled('Área', item.department), shown.has('Lugar') ? null : labelled('Ubicación', placeLabel(item)),
-      labelled('Datos de contacto', `${item.hasPhone ? 'correo verificado y teléfono móvil' : 'correo verificado'}, que ves al guardarlo`),
+      labelled('Datos de contacto', item.provider === 'apollo' ? 'tiene correo, que ves al enriquecerlo y guardarlo (1 crédito)'
+        : `${item.hasPhone ? 'correo verificado y teléfono móvil' : 'correo verificado'}, que ves al guardarlo`),
     ]);
     blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Sobre la persona' }] });
     blocks.push({ type: 'list', ordered: false, items: person });
@@ -634,8 +815,16 @@ function dropItemBlocks(item: DropItem): DocBlock[] {
     // The subject as its first line, in its own case (a callout title would be in capitals), and the body with its own line breaks.
     blocks.push({ type: 'callout', tone: 'neutral', runs: [
       { text: 'Asunto: ', bold: true }, { text: item.draft.subject, bold: true },
-      { text: `\n\n${item.draft.body.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()}` },
+      { text: `\n\n${tidyBody(item.draft.body)}` },
     ] });
+  }
+  if (item.followUps?.length) {
+    blocks.push({ type: 'heading', level: 2, runs: [{ text: `Si no responde: ${item.followUps.length === 1 ? 'un seguimiento' : `${item.followUps.length} seguimientos`}` }] });
+    for (const step of item.followUps) {
+      blocks.push({ type: 'callout', tone: 'neutral', runs: [
+        { text: `Día ${step.day} · `, bold: true }, { text: 'Asunto: ', bold: true }, { text: step.subject, bold: true }, { text: `\n\n${tidyBody(step.body)}` },
+      ] });
+    }
   }
   return blocks;
 }
@@ -649,18 +838,19 @@ export function dropDocument(items: DropItem[], meta: { name: string; date: stri
   const role = (item: DropItem) => [item.title, item.company].filter(Boolean).join(' · ');
   const blocks: DocBlock[] = [{ type: 'paragraph', runs: [
     { text: one ? 'Ver y guardar en ANTON.IA' : `Ver y guardar los ${items.length} en ANTON.IA`, href: meta.link, bold: true },
-    { text: one ? '   Su correo ya está listo. Guardarlo no gasta créditos.' : '   Sus correos ya están listos. Guardarlos no gasta créditos.' },
+    { text: items.some(item => item.provider === 'apollo') ? `   ${dropCostNote(items)}`
+      : one ? '   Su correo ya está listo. Guardarlo no gasta créditos.' : '   Sus correos ya están listos. Guardarlos no gasta créditos.' },
   ] }];
   items.forEach((item, index) => {
     if (!one) {
       if (index) blocks.push({ type: 'pageBreak' });
-      blocks.push({ type: 'heading', level: 1, runs: [{ text: item.name }] });
+      blocks.push({ type: 'heading', level: 1, runs: [{ text: dropName(item) }] });
       if (role(item)) blocks.push({ type: 'paragraph', runs: [{ text: role(item) }] });
     }
     blocks.push(...dropItemBlocks(item));
   });
   return {
-    title: one ? items[0].name : `${items.length} contactos para hoy`,
+    title: one ? dropName(items[0]) : `${items.length} contactos para hoy`,
     subtitle: one ? role(items[0]) || undefined : undefined,
     meta: [...(meta.name ? [{ label: 'Para', value: meta.name }] : []), { label: 'Fecha', value: dropDateLabel(meta.date) }],
     runningTitle: `Contacto del día · ${dropDateLabel(meta.date)}`,

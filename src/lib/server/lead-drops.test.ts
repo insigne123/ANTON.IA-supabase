@@ -6,6 +6,9 @@ import { memory } from './goals-alerts-test-fixtures';
 import { dropDocument, dropPdf, homeDrop, latestDrop, planOrganizationDrops, pullDrop, pullStatus, saveDropLeads, writeDrop } from './lead-drops';
 import { splitLeadsFinderItems } from './leads-finder/client';
 
+// These tests are of the drops as Leads Finder brings them (the email with the search); Apollo's are in lead-drops-apollo.test.ts.
+process.env.LEAD_DROPS_PROVIDER = 'apify';
+
 const ORG = 'org-1';
 const TUESDAY = new Date('2026-10-20T10:00:00.000Z'); // 07:00 in Chile
 const WEDNESDAY_MORNING = new Date('2026-10-21T10:00:00.000Z');
@@ -122,7 +125,9 @@ test('the title, the company and the industry as people say them: linking words 
   await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: search as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
   const [item] = tables.lead_drops[0].items;
   assert.deepEqual([item.title, item.company, item.industry], ['Jefe de Reclutamiento y Selección', 'Rutas S.A.', 'Logística']);
-  assert.equal(item.why, 'Calza con tu cliente ideal por su cargo y su rubro (logística), en Santiago.', 'what matched, with the industry in Spanish, not the role again');
+  // Logística for a customer in retail does not fit (the table says «No calza»): the why says what does, not the role again.
+  assert.equal(item.why, 'Calza con tu cliente ideal por su cargo, en Santiago.');
+  assert.equal(item.fit.find((entry: any) => entry.criterion === 'Rubro').match, 'no');
   assert.deepEqual(item.research, ['Logística · 500 personas · Santiago']);
 });
 

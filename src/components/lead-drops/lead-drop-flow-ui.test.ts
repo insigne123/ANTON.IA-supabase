@@ -36,8 +36,18 @@ const { LeadDropBanner } = await component('../home/LeadDropBanner.tsx', { ...sh
 let answers: Array<{ status: number; body: unknown }> = [];
 let gate: Promise<void> | null = null;
 const calls: string[] = [];
+// «Enriquecer y guardar» of an Apollo contact: the saved contact it became and what the lookup found, as the browser sees them.
+let savedLeads: any[] = [];
+let lookups: Array<{ leads: any[]; lookups: Record<string, string> }> = [];
+let completion: any = { moved: [], notFound: [], expired: 0, failures: [], consumed: 0, markedNotFound: true };
 const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
   ...shared,
+  '@/lib/supabase-service': { supabaseService: { getLeads: async () => savedLeads } },
+  '@/lib/leads-workspace/complete-contacts': {
+    completeSavedContacts: async (leads: any[], chosen: Record<string, string>) => { lookups.push({ leads, lookups: chosen }); return completion; },
+    completionSummary: () => ({ title: 'No encontramos correos', description: 'El proveedor no devolvió resultados para estos contactos.' }),
+  },
+  '@/lib/leads-workspace/enrichment-provider': { enrichmentCreditReceipt: (consumed: number) => consumed ? `Se descontó ${consumed} crédito de ANTON.IA.` : '' },
   '@/context/AuthContext': { useAuth: () => ({ organizationId: 'org-1' }) },
   '@/components/page-header': { PageHeader: ({ title, description }: any) => React.createElement('header', null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
   '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
@@ -198,4 +208,49 @@ test('«Hoy» does not offer to fill in the ideal customer when the next step al
   assert.match(render({ drop: null, pull: 'profile' }, false), /Completar mi cliente ideal/);
   assert.match(render({ drop: null, pull: 'first' }, true), /Ver mi primer contacto/, 'the other offers stay');
   assert.match(render({ drop: { id: 'd-1', dropDate: '2026-10-20', total: 1, left: 1, next: { name: 'Ana Pérez', company: 'Ripley', why: 'Calza.' } }, pull: null }, true), /Ver y guardar/, 'and so does a contact that is ready');
+});
+
+test('a contact found with Apollo: one credit said before the click, «Enriquecer y guardar» finds its email, and its three follow-ups', async () => {
+  const followUps = [{ day: 3, subject: 'Re: ingresos', body: 'Hola Daniel, ¿quién revisa hoy los ingresos?' },
+    { day: 7, subject: 'Temporada alta', body: 'Hola Daniel, cuando la nómina llega encima…' }, { day: 11, subject: 'Cierro aquí', body: 'Hola Daniel, es mi último correo.' }];
+  const apollo = { ...drop, items: [{ ...drop.items[0], leadId: '6accdbfcd5f5d80001cf6959', name: 'Daniel Ni***o', provider: 'apollo', followUps }] };
+  answers = [{ status: 200, body: apollo }];
+  calls.length = 0; lookups = [];
+  savedLeads = [{ id: 'saved-1', name: 'Daniel Ni***o', email: null, sourceProvider: 'apollo', sourceProviderId: '6accdbfcd5f5d80001cf6959' }];
+  completion = { moved: [{ id: 'e-9', email: 'daniel@webclass.cl' }], notFound: [], expired: 0, failures: [], consumed: 1, markedNotFound: true };
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    const document = page.dom.window.document;
+    assert.equal(document.querySelector('#drop-results')?.textContent, 'Daniel N.', 'the surname the search hides is not shown with asterisks');
+    assert.match(document.querySelector('header')?.textContent || '', /Ver su correo y guardarlo usa 1 crédito\./);
+    assert.match(page.text(), /Tiene correo/);
+    assert.doesNotMatch(page.text(), /Correo verificado|no gasta créditos/);
+    // The follow-ups wait folded under the first email.
+    assert.doesNotMatch(page.text(), /Seguimiento 1 · día 3/);
+    await click(page, /Si no responde: 3 seguimientos/);
+    assert.match(page.text(), /Seguimiento 1 · día 3[\s\S]*Re: ingresos[\s\S]*Seguimiento 3 · día 11[\s\S]*Cierro aquí/);
+    // Kept as a saved contact, its email looked up as any saved contact's, then tied to the drop.
+    answers = [{ status: 200, body: { keptLeadId: 'saved-1', savedLeadId: null, items: apollo.items.map(item => ({ ...item, keptLeadId: 'saved-1' })) } },
+      { status: 200, body: { linked: true, savedLeadId: 'e-9', items: apollo.items.map(item => ({ ...item, keptLeadId: 'saved-1', savedLeadId: 'e-9', name: 'Daniel Nieto' })) } }];
+    await click(page, 'Enriquecer y guardar · 1 crédito');
+    await page.settle();
+    assert.deepEqual(calls.slice(-2), ['POST /api/lead-drops/drop-1', 'POST /api/lead-drops/drop-1']);
+    assert.deepEqual(lookups.map(entry => [entry.leads.map(lead => lead.id), entry.lookups]), [[['saved-1'], { 'saved-1': 'email' }]], 'one lookup, of the email only');
+    assert.match(page.text(), /Listo: ya tienes su correo y quedó en «Por escribir»\. Se descontó 1 crédito/);
+    assert.equal(document.querySelector('#drop-results')?.textContent, 'Daniel Nieto', 'the real name, once looked up');
+    assert.equal(document.querySelector('a[href="/saved/leads/enriched?investigar=e-9&empezar=1"]')?.textContent, 'Investigar y escribirle');
+  } finally { await close(page); }
+  // No email found: it says so, and the contact stays to try again.
+  answers = [{ status: 200, body: { ...drop, items: [{ ...drop.items[0], leadId: '6accdbfcd5f5d80001cf6959', name: 'Daniel Ni***o', provider: 'apollo' }] } }];
+  completion = { moved: [], notFound: ['saved-1'], expired: 0, failures: [], consumed: 0, markedNotFound: true };
+  const missing = await open('drop-1');
+  try {
+    await missing.settle();
+    answers = [{ status: 200, body: { keptLeadId: 'saved-1', savedLeadId: null, items: [] } }, { status: 200, body: { linked: false, savedLeadId: null, items: [{ ...drop.items[0], leadId: '6accdbfcd5f5d80001cf6959', name: 'Daniel Ni***o', provider: 'apollo', keptLeadId: 'saved-1' }] } }];
+    await click(missing, 'Enriquecer y guardar · 1 crédito');
+    await missing.settle();
+    assert.match(missing.text(), /El proveedor no devolvió resultados/);
+    assert.ok([...missing.dom.window.document.querySelectorAll('button')].some(button => button.textContent === 'Enriquecer y guardar · 1 crédito'), 'it can be tried again');
+  } finally { await close(missing); }
 });

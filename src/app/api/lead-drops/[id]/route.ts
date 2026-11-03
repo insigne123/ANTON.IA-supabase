@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { requireHomeAuth } from '@/lib/server/home-auth';
-import { LeadDropsError, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
+import { LeadDropsError, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
 import { requestAuthErrorResponse } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
@@ -26,17 +26,34 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
 }
 
-const BodySchema = z.object({ action: z.literal('save'), leadIds: z.array(z.string().regex(/^lf_[0-9a-f]{24}$/)).max(10).optional() }).strict();
+const LeadId = z.string().regex(/^(?:lf_)?[0-9a-f]{24}$/i);
+const BodySchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('save'), leadIds: z.array(LeadId).max(10).optional() }).strict(),
+  // «Enriquecer y guardar» of an Apollo contact: kept as a saved contact, its email looked up from the browser, then linked.
+  z.object({ action: z.literal('keep'), leadId: LeadId }).strict(),
+  z.object({ action: z.literal('link'), leadId: LeadId }).strict(),
+]);
 
-/** Saves contacts of the drop in «Por escribir», with their email, without credits. */
+/**
+ * Saves contacts of the drop: with `save`, those whose email came with the search, in «Por escribir», without credits; with
+ * `keep` and `link`, an Apollo contact, before and after its email is looked up (src/lib/server/lead-drops.ts, keepDropLead).
+ */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const { organizationId, user } = await requireHomeAuth(request);
+    const auth = await requireHomeAuth(request);
+    const scope = { organizationId: auth.organizationId, userId: auth.user.id };
     const id = Id.safeParse((await context.params).id);
     if (!id.success) throw new AuthError('No encontramos esos contactos.', 404);
     const body = BodySchema.safeParse(await request.json().catch(() => null));
     if (!body.success) throw new AuthError('Solicitud no válida.', 400);
-    const result = await saveDropLeads(getSupabaseAdminClient(), { organizationId, userId: user.id }, id.data, body.data.leadIds);
+    const admin = getSupabaseAdminClient();
+    if (body.data.action === 'keep') {
+      return NextResponse.json(await keepDropLead(auth, admin, id.data, body.data.leadId), { headers: noStore });
+    }
+    if (body.data.action === 'link') {
+      return NextResponse.json(await linkDropLead(admin, scope, id.data, body.data.leadId), { headers: noStore });
+    }
+    const result = await saveDropLeads(admin, scope, id.data, body.data.leadIds);
     return NextResponse.json({ saved: result.saved.length, expired: result.expired.length, items: result.items }, { headers: noStore });
   } catch (error) {
     return failure(error);

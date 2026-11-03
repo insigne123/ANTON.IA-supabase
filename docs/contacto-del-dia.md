@@ -16,6 +16,29 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 - **Guardarlo no gasta créditos:** ya viene con correo.
 - **Sin correo, desde «Hoy»:** quien no lo recibe por correo lo abre en «Hoy», y se prepara en ese momento.
 
+## Desde el 3 de noviembre: con Apollo, sin costo de búsqueda, y con tres seguimientos
+
+Idea del dueño: «que se use Apollo para esto, buscar un lead no nos tiene costo». La idea es que el usuario vea lo fácil y directo que es buscar un lead y contactarlo.
+
+- **La búsqueda es la gratuita de Apollo** (`searchApolloDrops`, `/mixed_people/api_search`), con el cliente ideal de cada persona: cargos, rubros, lugares y tamaño.
+  - Trae hasta 100 personas, no gasta créditos ni el presupuesto del mes de Apify, y no deja nada en la bóveda: Apollo no da el correo en la búsqueda.
+  - Solo quedan las personas que Apollo dice que tienen correo (`has_email`).
+  - Apollo muestra el apellido oculto («Ni***o»). La pantalla, el correo y el PDF muestran «Daniel N.» hasta que se busca su correo.
+- **Calce sin dato que la búsqueda sí filtró** (`searchedFit`): Apollo suele no decir el rubro, el tamaño ni el lugar de la empresa. Si la búsqueda filtró por ellos, el contacto está dentro y la tabla dice «Dentro de lo que buscas».
+  - El rubro cuenta solo si Apollo lo reconoce por su etiqueta («Retail», «Construcción»). Un rubro que pasa como palabra clave («servicios transitorios») sigue diciendo «Sin dato».
+  - «Por qué calza» ya no nombra un rubro o lugar que la tabla dice que no calza.
+- **Un correo y tres seguimientos:** la Redactora escribe una secuencia de 4 correos (`DROP_SEQUENCE_STEPS`), con la misma revisión que en Cowork: el primero el día 1 y los seguimientos los días 3, 7 y 11. Se ven plegados bajo el primer correo («Si no responde: 3 seguimientos»), cada uno con «Copiar», y van en el PDF.
+- **«Enriquecer y guardar · 1 crédito»:**
+  1. El contacto se guarda como contacto guardado (`keepDropLead`, igual que Cowork guarda un resultado). El bloqueo del equipo sigue aplicando.
+  2. Se busca su correo como el de cualquier contacto guardado (`completeSavedContacts`), con el cupo diario y la cuota de Apollo de la organización.
+  3. Queda en «Por escribir» con su nombre real. El porqué, el correo y los seguimientos quedan en `data.leadDrop` (`linkDropLead`).
+  4. Desde ahí, «Investigar y escribirle» lleva al envío revisado desde ANTON.IA, donde se programan los seguimientos.
+  - Si Apollo no encuentra el correo, lo dice y se puede intentar de nuevo.
+- **Escribir tarda más:** son 4 correos por contacto. La corrida de la mañana escribe 4 a la vez y empieza una ronda solo si quedan 2 minutos, lo que da unos 48 por mañana para unos 38 contactos.
+- **Para volver a Leads Finder:** `LEAD_DROPS_PROVIDER=apify`. Vuelven el correo en la búsqueda, el guardado sin créditos y el presupuesto `LEAD_DROPS_MONTHLY_USD`.
+
+Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el calce, la redacción y el envío de la mañana son iguales con Apollo.
+
 **Por qué martes, miércoles y viernes:** son días de aviso. Los avisos van de martes a viernes porque el lunes es del informe semanal, y la regla es un correo por día. Cambiar los días es cambiar `DROP_WEEKDAYS` (`src/lib/lead-drops.ts`) y el horario de `leadDropsTick` (`functions/index.ts`).
 
 ## Cómo funciona
