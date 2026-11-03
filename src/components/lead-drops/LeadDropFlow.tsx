@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Check, ChevronDown, Copy, Download, ExternalLink, Loader2, MailCheck, Phone, RefreshCw, Search } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, Copy, Download, ExternalLink, Loader2, Mail, MailCheck, Phone, RefreshCw, Search } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
-import { dropHref, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
+import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
+import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
+import { completeSavedContacts, completionSummary } from '@/lib/leads-workspace/complete-contacts';
+import { supabaseService } from '@/lib/supabase-service';
 import { cn } from '@/lib/utils';
 
 type Drop = { id: string; date: string; criteria: DropCriteria; items: DropItem[] };
@@ -16,7 +19,7 @@ type Drop = { id: string; date: string; criteria: DropCriteria; items: DropItem[
 type Empty = { title: string; text: string; profile: string | null };
 
 /** The steps a search goes through, shown in order while the drop opens: the person sees how the contact was found. */
-const STEPS = ['Buscando personas con tus filtros', 'Revisando que tengan correo verificado', 'Quitando a quienes tu equipo ya tiene', 'Escribiendo un primer correo'];
+const STEPS = ['Buscando personas con tus filtros', 'Revisando que tengan correo', 'Quitando a quienes tu equipo ya tiene', 'Escribiendo un correo y sus seguimientos'];
 const STEP_MS = 550;
 /** While today's drop is made (`nuevo`, a minute or two), the steps advance at the pace of the real work, short of the last. */
 const MAKING_STEP_MS = 9000;
@@ -65,10 +68,12 @@ function Steps({ step }: { step: number }) {
  * «Contacto del día» in «Buscar prospectos» (src/lib/lead-drops.ts), opened from the morning email or from «Hoy»: the
  * search that found it, played back in a moment (or at once with reduced motion, or with «Ver ahora»), then the contact
  * with why we recommend it (what matched and, since 29 Oct 2026, why it is worth it for what the person sells), how it fits
- * criterion by criterion, its company, how to open and a first email. Saving it puts it in «Por escribir» with its email, without
- * credits; then «Investigar y escribirle» starts its full research there, the way to an email that is reviewed and sent
- * from ANTON.IA (the suggested one stays here, with «Copiar»). With `nuevo` (from «Hoy», for whoever gets no email) today's
- * drop is made first, for real. A drop with more than one contact (DROP_SIZE) shows them as a list.
+ * criterion by criterion, its company, how to open and a first email with, since 3 Nov 2026, three follow-ups. A contact found
+ * with Apollo's free search is saved with «Enriquecer y guardar» (1 credit): it becomes a saved contact, its email is looked
+ * up as any saved contact's (completeSavedContacts) and it lands in «Por escribir» with its emails; one whose email came with
+ * the search (Leads Finder) is saved without credits. Then «Investigar y escribirle» starts its full research there, the way
+ * to an email that is reviewed and sent from ANTON.IA (the suggested ones stay here, with «Copiar»). With `nuevo` (from «Hoy»,
+ * for whoever gets no email) today's drop is made first, for real. A drop with more than one contact (DROP_SIZE) shows them as a list.
  */
 export function LeadDropFlow({ dropId }: { dropId: string }) {
   const { organizationId } = useAuth();
@@ -83,6 +88,9 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [howOpen, setHowOpen] = useState(false);
+  /** The contact whose email is being looked up, and the one whose follow-ups are open. */
+  const [enriching, setEnriching] = useState<string | null>(null);
+  const [followOpen, setFollowOpen] = useState<string | null>(null);
   const started = useRef(false);
   const listId = useId();
   const howId = useId();
@@ -144,6 +152,35 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
 
   const left = drop?.items.filter(item => !item.savedLeadId) ?? [];
   const one = drop?.items.length === 1 ? drop.items[0] : null;
+  // Found with Apollo: the email is looked up on saving (1 credit), and the screen says so before the click.
+  const lookup = Boolean(drop?.items.some(item => item.provider === 'apollo'));
+  const post = async (body: Record<string, unknown>) => {
+    const response = await call(`/api/lead-drops/${encodeURIComponent(id || '')}`, { method: 'POST', body: JSON.stringify(body) });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'No pudimos guardarlo.');
+    return payload;
+  };
+  // «Enriquecer y guardar»: kept as a saved contact, its email looked up as any saved contact's (1 credit), then tied to this drop.
+  const enrich = async (item: DropItem) => {
+    if (!id || saving || enriching) return;
+    setEnriching(item.leadId); setNotice(null);
+    try {
+      const kept = await post({ action: 'keep', leadId: item.leadId });
+      setDrop(current => current && { ...current, items: kept.items });
+      if (kept.savedLeadId) return;
+      const saved = (await supabaseService.getLeads()).find(lead => lead.id === kept.keptLeadId);
+      if (!saved) throw new Error('Quedó guardado, pero no pudimos buscar su correo. Búscalo desde «Por escribir».');
+      const completion = await completeSavedContacts([saved], { [saved.id]: 'email' });
+      const linked = await post({ action: 'link', leadId: item.leadId });
+      setDrop(current => current && { ...current, items: linked.items });
+      const found = completion.moved.some(lead => lead.email);
+      setNotice(linked.linked && found
+        ? { ok: true, text: `Listo: ya tienes su correo y quedó en «Por escribir». ${enrichmentCreditReceipt(completion.consumed)}`.trim() }
+        : linked.linked ? { ok: true, text: 'Quedó en «Por escribir»: su correo sigue en búsqueda y aparecerá allí en unos minutos.' }
+        : { ok: false, text: completionSummary(completion).description });
+    } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
+    finally { setEnriching(null); }
+  };
   const save = async (leadIds?: string[]) => {
     if (!id) return;
     setSaving(true); setNotice(null);
@@ -159,12 +196,15 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
     finally { setSaving(false); }
   };
-  const copy = async (item: DropItem) => {
-    if (!item.draft) return;
-    const textValue = `Asunto: ${item.draft.subject}\n\n${item.draft.body}`;
-    try { await navigator.clipboard.writeText(textValue); setCopied(item.leadId); setTimeout(() => setCopied(null), 1800); }
+  const copy = async (key: string, email: { subject: string; body: string } | null | undefined) => {
+    if (!email) return;
+    const textValue = `Asunto: ${email.subject}\n\n${email.body}`;
+    try { await navigator.clipboard.writeText(textValue); setCopied(key); setTimeout(() => setCopied(null), 1800); }
     catch { setNotice({ ok: false, text: 'No pudimos copiar. Selecciona el texto y cópialo.' }); }
   };
+  const copyButton = (key: string, email: { subject: string; body: string }) => <Button variant="ghost" size="sm" className="h-7" onClick={() => void copy(key, email)}>
+    {copied === key ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}
+    {copied === key ? 'Copiado' : 'Copiar'}</Button>;
   const downloadPdf = async () => {
     if (!id) return;
     try {
@@ -179,7 +219,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   // What ANTON.IA sends goes out from a full research, reviewed: «Por escribir» opens it and starts it (empezar=1).
   const writeHref = (item: DropItem) => `/saved/leads/enriched?investigar=${encodeURIComponent(item.savedLeadId || '')}&empezar=1`;
   const badges = (item: DropItem) => <div className="flex flex-wrap gap-1.5 pt-1">
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />Correo verificado</span>
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />{item.provider === 'apollo' ? 'Tiene correo' : 'Correo verificado'}</span>
     {item.hasPhone ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Phone className="h-3 w-3" aria-hidden="true" />Teléfono</span> : null}
     {item.savedLeadId ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
   </div>;
@@ -193,14 +233,14 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     <dl className="mt-2 grid gap-x-6 gap-y-3 sm:grid-cols-2">
       {item.fit.map(entry => <div key={entry.criterion} className="min-w-0">
         <dt className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">{entry.criterion}
-          <span className={cn('rounded-full px-1.5 py-px', entry.match === 'yes' ? 'bg-primary/10 text-primary' : 'bg-muted')}>{FIT[entry.match]}</span></dt>
+          <span className={cn('rounded-full px-1.5 py-px', entry.match === 'yes' ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground/80')}>{FIT[entry.match]}</span></dt>
         <dd className="mt-0.5 text-sm">{entry.theirs}<span className="block text-xs text-muted-foreground">Buscas: {entry.wanted}</span></dd>
       </div>)}
     </dl>
   </div> : null;
   // What we know of the company, how to open, and the first email, with «Copiar». A drop from before 29 Oct 2026 has its research only.
   const companyFacts = (item: DropItem) => [item.industry, item.size ? `${item.size.toLocaleString('es-CL')} personas` : null].filter(Boolean).join(' · ');
-  const hasDetails = (item: DropItem) => Boolean(item.research.length || item.summary || item.approach || item.draft);
+  const hasDetails = (item: DropItem) => Boolean(item.research.length || item.summary || item.approach || item.draft || item.followUps?.length);
   const details = (item: DropItem, panel?: string) => <div id={panel} className="space-y-4 rounded-xl bg-muted/40 p-4">
     {item.fit ? <div>
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{item.company ? `Sobre ${item.company}` : 'Sobre la empresa'}</p>
@@ -219,15 +259,40 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     {item.draft ? <div>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Primer correo sugerido</p>
-        <Button variant="ghost" size="sm" className="h-7" onClick={() => void copy(item)}>
-          {copied === item.leadId ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}
-          {copied === item.leadId ? 'Copiado' : 'Copiar'}</Button>
+        {copyButton(item.leadId, item.draft)}
       </div>
       <p className="mt-1.5 text-sm"><span className="text-muted-foreground">Asunto: </span><span className="font-medium">{item.draft.subject}</span></p>
       <p className="mt-2 whitespace-pre-line text-sm leading-6">{item.draft.body}</p>
     </div> : null}
+    {item.followUps?.length ? followUps(item) : null}
   </div>;
+  // The follow-ups, folded under the first email: what goes if they do not answer, and on which day.
+  const followUps = (item: DropItem) => {
+    const steps = item.followUps || [];
+    const expanded = followOpen === item.leadId;
+    const panel = `${listId}-follow-${item.leadId}`;
+    return <div>
+      <Button variant="ghost" size="sm" className="-ml-2 h-8 text-muted-foreground" aria-expanded={expanded} aria-controls={panel}
+        onClick={() => setFollowOpen(expanded ? null : item.leadId)}>
+        <ChevronDown className={cn('mr-1 h-4 w-4 transition-transform motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden="true" />
+        {`Si no responde: ${steps.length === 1 ? 'un seguimiento' : `${steps.length} seguimientos`}`}</Button>
+      {expanded ? <ol id={panel} className="mt-2 space-y-3">
+        {steps.map((step, index) => <li key={`${step.day}-${index}`} className="rounded-xl border bg-background p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">{`Seguimiento ${index + 1} · día ${step.day}`}</p>
+            {copyButton(`${item.leadId}:${index}`, step)}
+          </div>
+          <p className="mt-1 text-sm"><span className="text-muted-foreground">Asunto: </span><span className="font-medium">{step.subject}</span></p>
+          <p className="mt-1.5 whitespace-pre-line text-sm leading-6">{step.body}</p>
+        </li>)}
+      </ol> : null}
+    </div>;
+  };
 
+  const enrichButton = (item: DropItem, size: 'lg' | 'sm') => <Button size={size} variant={size === 'sm' ? 'outline' : 'default'} disabled={saving || enriching !== null}
+    onClick={() => void enrich(item)} aria-label={size === 'sm' && enriching !== item.leadId ? `Enriquecer y guardar · 1 crédito: ${dropName(item)}` : undefined}>
+    {enriching === item.leadId ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
+    {enriching === item.leadId ? 'Buscando su correo…' : 'Enriquecer y guardar · 1 crédito'}</Button>;
   const playing = Boolean(drop) && step < STEPS.length;
   const searched = one || making ? 'Así lo buscamos' : 'Así los buscamos';
   // While the search plays, «Así lo buscamos» is the story: the filters and the steps. Once it ends it is one collapsed row below
@@ -262,13 +327,17 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           <Filter label="Rubro" values={drop.criteria.industries || []} />
           <Filter label="Lugar" values={drop.criteria.locations || []} />
         </dl>
-        <p className="text-xs text-muted-foreground">{SOURCE[drop.criteria.source] || 'Tu cliente ideal'}. Revisamos que tengan correo verificado, quitamos a quienes tu equipo ya tiene y escribimos un primer correo.</p>
+        <p className="text-xs text-muted-foreground">{SOURCE[drop.criteria.source] || 'Tu cliente ideal'}. {lookup
+          ? 'Revisamos que tengan correo, quitamos a quienes tu equipo ya tiene y escribimos un primer correo con tres seguimientos.'
+          : 'Revisamos que tengan correo verificado, quitamos a quienes tu equipo ya tiene y escribimos un primer correo.'}</p>
       </div> : null}
     </>}
   </section> : null;
   return <div className="mx-auto w-full max-w-3xl">
     <PageHeader title={drop && !one ? 'Tus contactos del día' : 'Tu contacto del día'} back={{ href: '/search', label: 'Búsqueda normal' }}
-      description={drop ? (one ? `Encontrado el ${dayLabel(drop.date)} para ti. Ya tiene su correo verificado: guardarlo no gasta créditos.`
+      description={drop ? (lookup ? `${one ? 'Encontrado' : 'Encontrados'} el ${dayLabel(drop.date)} para ti. ${left.length ? dropCostNote(left)
+        : one ? 'Ya está en «Por escribir», con su correo.' : 'Ya están en «Por escribir», con su correo.'}`
+        : one ? `Encontrado el ${dayLabel(drop.date)} para ti. Ya tiene su correo verificado: guardarlo no gasta créditos.`
         : `Encontrados el ${dayLabel(drop.date)} para ti. Ya tienen su correo verificado: guardarlos no gasta créditos.`)
         : making ? 'Elegimos un contacto nuevo para ti, con una breve investigación y un primer correo.' : 'Tu contacto nuevo, con su correo verificado.'} />
 
@@ -301,11 +370,12 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
       {!playing && one ? <section aria-labelledby="drop-results" className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1">
-            <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{one.name}</h2>
+            <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{dropName(one)}</h2>
             <p className="text-sm text-muted-foreground">{[one.title, one.company].filter(Boolean).join(' · ')}</p>
             {personLine(one) ? <p className="text-xs text-muted-foreground">{personLine(one)}</p> : null}
           </div>
           {one.savedLeadId ? <Button asChild size="lg"><Link href={writeHref(one)}>Investigar y escribirle<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
+            : needsLookup(one) ? enrichButton(one, 'lg')
             : <Button size="lg" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}
         </div>
@@ -332,10 +402,10 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
             <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{`${drop.items.length} contactos nuevos`}</h2>
             <p className="text-sm text-muted-foreground">{left.length ? 'Cada uno trae por qué te lo recomendamos, cómo calza, su empresa y un primer correo.' : 'Ya están todos en «Por escribir».'}</p>
           </div>
-          {left.length ? <Button size="lg" disabled={saving} onClick={() => void save()}>
+          {left.length && !lookup ? <Button size="lg" disabled={saving} onClick={() => void save()}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
             {left.length === drop.items.length ? `Guardar los ${left.length} en «Por escribir»` : left.length === 1 ? 'Guardar el que falta' : `Guardar los ${left.length} que faltan`}</Button>
-            : <Button asChild size="lg"><Link href="/saved/leads/enriched">Ir a «Por escribir»<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>}
+            : left.length ? null : <Button asChild size="lg"><Link href="/saved/leads/enriched">Ir a «Por escribir»<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>}
         </div>
         {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
 
@@ -346,7 +416,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
             return <li key={item.leadId} className="p-4 sm:p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 space-y-1">
-                  <p className="font-medium">{item.name}</p>
+                  <p className="font-medium">{dropName(item)}</p>
                   <p className="text-sm text-muted-foreground">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
                   {personLine(item) ? <p className="text-xs text-muted-foreground">{personLine(item)}</p> : null}
                   {why(item)}
@@ -354,13 +424,14 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   {item.savedLeadId ? <Button asChild size="sm" variant="outline"><Link href={writeHref(item)}>Investigar y escribirle</Link></Button>
+                    : needsLookup(item) ? enrichButton(item, 'sm')
                     : <Button size="sm" variant="outline" disabled={saving} onClick={() => void save([item.leadId])}>Guardar</Button>}
                 </div>
               </div>
               {hasDetails(item) || item.fit?.length ? <Button variant="ghost" size="sm" className="-ml-2 mt-2 text-muted-foreground" aria-expanded={expanded} aria-controls={panel}
                 onClick={() => setOpen(expanded ? null : item.leadId)}>
                 <ChevronDown className={cn('mr-1 h-4 w-4 transition-transform motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden="true" />
-                {item.fit ? 'Cómo calza, su empresa y primer correo' : 'Investigación y primer correo'}</Button> : null}
+                {item.followUps?.length ? 'Cómo calza, su empresa, el correo y sus seguimientos' : item.fit ? 'Cómo calza, su empresa y primer correo' : 'Investigación y primer correo'}</Button> : null}
               {expanded ? <div id={panel} className="mt-2 space-y-4">{fit(item)}{details(item)}</div> : null}
             </li>;
           })}

@@ -1,3 +1,4 @@
+import { AUDIT_DROP_ID } from './fixtures/lead-drops.mjs';
 import { AUDIT_INVITE_TOKEN } from './fixtures/people.mjs';
 
 // Every page of the app, with who may see it. `gate` names the allowlist a page sits behind: the owner is on every list and
@@ -9,6 +10,8 @@ export function routeList(ctx) {
   return [
     app('/', 'Inicio'),
     app('/search', 'Búsqueda'),
+    // Today's «Contacto del día», found with Apollo (fixtures/lead-drops.mjs): «Enriquecer y guardar» and its follow-ups.
+    app(`/search/contactos/${AUDIT_DROP_ID}`, 'Contacto del día'),
     app('/saved/leads', 'Por completar'),
     app('/saved/leads/enriched', 'Por escribir'),
     app('/leads/import', 'Importar contactos'),

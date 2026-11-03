@@ -13,14 +13,20 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 /** What a run may use before it stops taking work: the scheduler's timeout is 300 s. */
 const WORK_MS = 240_000;
-const PARALLEL = 3;
+/**
+ * Since 3 Nov 2026 each contact gets a first email and three follow-ups (writeDrop), a minute or a minute and a half: four at a
+ * time, and a new round only with two minutes left, so a round never outlasts the run. Six runs a morning write ~48, for ~38 drops.
+ */
+const PARALLEL = 4;
+const ROUND_MS = 120_000;
 
 /**
  * «Contacto del día» (functions/index.ts, leadDropsTick, Tuesdays, Wednesdays and Fridays from 6:00 to 7:40 in Chile):
  * first finishes the drops an earlier run planned, then plans the missing ones, organization by organization, and writes
  * them while there is time. Only for whoever will get them by email (the alerts on, an address, and their own mailbox or the
  * reports mailbox), one drop per person in their team's workspace. The morning alert (8:00) carries what is ready.
- * LEAD_DROPS_ENABLED=off stops it; LEAD_DROPS_MONTHLY_USD caps what Apify may spend in the month.
+ * LEAD_DROPS_ENABLED=off stops it. The search is Apollo's free one (LEAD_DROPS_PROVIDER=apify goes back to Leads Finder,
+ * whose spend LEAD_DROPS_MONTHLY_USD caps in the month).
  * A manual run (same secret) may name `userIds` in its body: only they are prepared, whether or not they get emails, so
  * a drop can be tried with a test account before anyone receives one. With `organizationId` too, their drop is made in
  * that workspace (only for its members), so a test account that also belongs to a customer's never writes there.
@@ -47,7 +53,7 @@ export async function POST(request: Request) {
     if (pending.error) throw new Error('pending');
     // A row without contacts is being searched from «Hoy» (pullDrop): that request completes it.
     const rows = ((pending.data || []) as any[]).filter(row => Array.isArray(row.items) && row.items.length);
-    for (let start = 0; start < rows.length && timeLeft() > 60_000; start += PARALLEL) {
+    for (let start = 0; start < rows.length && timeLeft() > ROUND_MS; start += PARALLEL) {
       await Promise.all(rows.slice(start, start + PARALLEL).map(async row => {
         try { await writeDrop(admin, row, { generate, now }); result.written++; }
         catch { result.failed++; }

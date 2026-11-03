@@ -10,16 +10,16 @@ import { usePersonalHome } from './usePersonalHome';
 
 type Pull = 'first' | 'today' | 'preparing' | 'profile';
 type Response = {
-  drop: { id: string; dropDate: string; total: number; left: number; next?: { name: string; company: string | null; why: string } } | null;
+  drop: { id: string; dropDate: string; total: number; left: number; next?: { name: string; company: string | null; why: string; lookup?: boolean } } | null;
   pull?: Pull | null;
 };
 
 /** What «Hoy» offers when there is no contact to save (src/lib/server/lead-drops.ts, pullStatus). */
 const OFFER: Record<Pull, { text: string; action: string; href: string }> = {
-  first: { text: 'Un contacto nuevo con correo verificado, elegido con tu cliente ideal, con una breve investigación y un primer correo. Guardarlo no gasta créditos.', action: 'Ver mi primer contacto', href: dropHref('nuevo') },
-  today: { text: 'Hoy te toca un contacto nuevo con correo verificado, con una breve investigación y un primer correo. Guardarlo no gasta créditos.', action: 'Ver mi contacto de hoy', href: dropHref('nuevo') },
-  preparing: { text: 'Estamos preparando tu contacto de hoy, con su investigación y un primer correo.', action: 'Ver cómo va', href: dropHref('nuevo') },
-  profile: { text: 'Cuéntanos a quién le vendes y tres días a la semana te elegimos un contacto nuevo con correo verificado.', action: 'Completar mi cliente ideal', href: '/profile#icp-heading' },
+  first: { text: 'Un contacto nuevo elegido con tu cliente ideal, con por qué te lo recomendamos, un primer correo y tres seguimientos.', action: 'Ver mi primer contacto', href: dropHref('nuevo') },
+  today: { text: 'Hoy te toca un contacto nuevo, con por qué te lo recomendamos, un primer correo y tres seguimientos.', action: 'Ver mi contacto de hoy', href: dropHref('nuevo') },
+  preparing: { text: 'Estamos preparando tu contacto de hoy, con su investigación, un primer correo y sus seguimientos.', action: 'Ver cómo va', href: dropHref('nuevo') },
+  profile: { text: 'Cuéntanos a quién le vendes y tres días a la semana te elegimos un contacto nuevo.', action: 'Completar mi cliente ideal', href: '/profile#icp-heading' },
 };
 
 function Banner({ text, children, accent }: { text: ReactNode; children: ReactNode; accent?: boolean }) {
@@ -54,8 +54,10 @@ export function LeadDropBanner({ quietProfile = false }: { quietProfile?: boolea
     </Banner>;
   }
   const next = drop.next;
+  // Found with Apollo (since 3 Nov 2026), its email is looked up on saving: one credit, said before the click.
   const text = drop.total === 1 && next
-    ? <><p className="font-medium text-foreground">{next.name}{next.company ? `, ${next.company}` : ''}</p><p>{next.why} Ya tiene su correo verificado: guardarlo no gasta créditos.</p></>
+    ? <><p className="font-medium text-foreground">{next.name}{next.company ? `, ${next.company}` : ''}</p>
+      <p>{next.why} {next.lookup ? 'Trae un primer correo y tres seguimientos; ver su correo y guardarlo usa 1 crédito.' : 'Ya tiene su correo verificado: guardarlo no gasta créditos.'}</p></>
     : <p>{drop.left === drop.total
       ? `${drop.total === 1 ? 'Un contacto nuevo' : `${drop.total} contactos nuevos`} para ti, con correo verificado. Guardarlos no gasta créditos.`
       : `Te ${drop.left === 1 ? 'falta guardar 1' : `faltan guardar ${drop.left}`} de ${drop.total}.`}</p>;

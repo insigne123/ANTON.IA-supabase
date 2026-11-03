@@ -1,12 +1,18 @@
 import { dayInZone } from '@/lib/admin/chile-time';
+import { displayLeadName } from '@/lib/lead-name';
 
 /**
  * «Contacto del día» (idea del dueño, 20 oct 2026): on Tuesdays, Wednesdays and Fridays each person gets one new contact
- * that fits their customer, found with Apify (Leads Finder), not with Apollo's credits, with a brief research and a first
- * email by Cowork's Writer. The morning alert carries it: a table in its body, a PDF with the research and the draft, and
- * a link to «Buscar prospectos» in a mode that shows it as a search that already found it (dropHref), with its email ready:
- * saving it to «Por escribir» costs nothing. Whoever gets no email opens it in «Hoy». Pure: the server prepares and saves
- * them (server/lead-drops.ts). The code calls each day's contacts a drop.
+ * that fits their customer, with why we recommend it, a brief research and a first email by Cowork's Writer. The morning
+ * alert carries it: a table in its body, a PDF with the research and the draft, and a link to «Buscar prospectos» in a mode
+ * that shows it as a search that already found it (dropHref). Whoever gets no email opens it in «Hoy». Pure: the server
+ * prepares and saves them (server/lead-drops.ts). The code calls each day's contacts a drop.
+ *
+ * Until 3 Nov 2026 the contact came from Apify (Leads Finder), with its email ready, so saving it cost nothing. Since then
+ * (idea del dueño: «que se use Apollo para esto, buscar un lead no nos tiene costo») it comes from Apollo's free search, with
+ * a first email and three follow-ups (`followUps`): «Enriquecer y guardar» looks its email up (1 credit) and keeps it in
+ * «Por escribir», so the person sees how short the way is from finding someone to writing to them. LEAD_DROPS_PROVIDER=apify
+ * goes back to Leads Finder.
  */
 
 export const DROP_SIZE = 1;
@@ -64,7 +70,26 @@ export type DropItem = {
   /** Why it is worth it for what the person sells, and how to open, by a model with the data given only (writeDrop). */
   reasons?: string[];
   approach?: string | null;
+  // Since 3 Nov 2026: found with Apollo's free search (see the top of this file); drops from before have neither.
+  /** Found with Apollo: its email is looked up when the person saves it («Enriquecer y guardar», 1 credit). */
+  provider?: 'apollo';
+  /** The saved contact it became while its email was looked up: `savedLeadId` comes once it is in «Por escribir». */
+  keptLeadId?: string | null;
+  /** Three follow-ups after the first email, by the same Writer, with the day each one goes (the first email is day 1). */
+  followUps?: DropFollowUp[];
 };
+export type DropFollowUp = { day: number; subject: string; body: string };
+
+/** The name a screen, the email and the PDF show: «Daniel N.» while Apollo's search hides the surname («Daniel Ni***o»). */
+export const dropName = (item: Pick<DropItem, 'name'>) => displayLeadName(item.name).text || item.name;
+/** A contact whose email is still to look up: «Enriquecer y guardar» (1 credit) instead of «Guardar» (free, the email came with the search). */
+export const needsLookup = (item: Pick<DropItem, 'provider' | 'savedLeadId'>) => item.provider === 'apollo' && !item.savedLeadId;
+/** What saving them costs, said where they are offered: the email, the PDF, «Hoy». */
+export function dropCostNote(items: Array<Pick<DropItem, 'provider'>>) {
+  const one = items.length === 1;
+  if (items.some(item => item.provider === 'apollo')) return one ? 'Ver su correo y guardarlo usa 1 crédito.' : 'Ver el correo de cada uno y guardarlo usa 1 crédito por contacto.';
+  return one ? 'Guardarlo no gasta créditos.' : 'Guardarlos no gasta créditos.';
+}
 
 /** How a contact fits one part of the customer: what they have, what the customer asks for, and whether it matches. */
 export type DropFit = { criterion: 'Cargo' | 'Rubro' | 'Lugar' | 'Tamaño'; theirs: string; wanted: string; match: 'yes' | 'partial' | 'no' | 'unknown' };
@@ -308,12 +333,21 @@ export function tidyCompany(name: string | null | undefined) {
   return value.replace(/\bS\.\s?A\.?$/i, 'S.A.').replace(/\bSpa$/i, 'SpA').replace(/\bLtda\.?$/i, 'Ltda.').replace(/\bE\.?I\.?R\.?L\.?$/i, 'EIRL') || null;
 }
 
-/** «Calza con tu cliente ideal por su cargo y su rubro (retail), en Santiago»: why the contact fits, from what matched, without repeating the role the screen shows beside it. */
-export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city'>, criteria: DropCriteria) {
+/**
+ * «Calza con tu cliente ideal por su cargo y su rubro (retail), en Santiago»: why the contact fits, from what matched, without
+ * repeating the role the screen shows beside it. With the fit (dropFit), only the industry and the place that do match: a
+ * company in «sector público» for a customer in retail is not a reason (it said so until 3 Nov 2026, next to a table that said «No calza»).
+ */
+export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city'>, criteria: DropCriteria, fit?: DropFit[]) {
   const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo'
     : criteria.source === 'empresa' ? 'el cliente ideal de tu empresa' : 'los contactos que guarda tu equipo';
-  const matched = [item.title ? 'su cargo' : null, item.industry ? `su rubro (${item.industry.toLowerCase()})` : null].filter(Boolean).join(' y ');
-  return `Calza con ${source}${matched ? ` por ${matched}` : ''}${item.city ? `, en ${item.city}` : ''}.`;
+  const fits = (criterion: DropFit['criterion']) => {
+    const entry = fit?.find(candidate => candidate.criterion === criterion);
+    return !entry || entry.match === 'yes' || entry.match === 'partial';
+  };
+  // The title is what the search asked for, similar titles included: our word match is no reason to doubt it.
+  const matched = [item.title ? 'su cargo' : null, item.industry && fits('Rubro') ? `su rubro (${item.industry.toLowerCase()})` : null].filter(Boolean).join(' y ');
+  return `Calza con ${source}${matched ? ` por ${matched}` : ''}${item.city && fits('Lugar') ? `, en ${item.city}` : ''}.`;
 }
 
 /** The facts the research starts from: what the company does (the actor's description, summarized when there is one), size and place. */
@@ -403,6 +437,15 @@ export function dropFit(item: Pick<DropItem, 'title' | 'industry' | 'size' | 'ci
   return fit;
 }
 
+/**
+ * Apollo's free search often brings a contact without its company's industry, size or place: when the search kept to them (an
+ * industry it knows by its tag, the sizes, the places), the contact is within them, and the fit says so instead of «Sin dato».
+ */
+export function searchedFit(fit: DropFit[], kept: { industry: boolean; size: boolean; place: boolean }): DropFit[] {
+  const within: Partial<Record<DropFit['criterion'], boolean>> = { Rubro: kept.industry, Tamaño: kept.size, Lugar: kept.place };
+  return fit.map(entry => entry.match === 'unknown' && within[entry.criterion] ? { ...entry, theirs: 'Dentro de lo que buscas', match: 'yes' } : entry);
+}
+
 // ─── In the morning alert: a table, the link and the PDF ────────────────────────────────────────────────────────────
 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
@@ -417,17 +460,21 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
   const link = `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
   const one = items.length === 1;
   const heading = options.heading !== false;
-  const lead = one ? 'Tu contacto de hoy, con su correo listo' : `${items.length} contactos nuevos para ti, con su correo listo`;
-  const research = one ? 'En el PDF adjunto va por qué te lo recomendamos, quién es, su empresa y un primer correo sugerido.'
-    : 'En el PDF adjunto va por qué te recomendamos a cada uno, quiénes son, sus empresas y un primer correo sugerido.';
+  // Found with Apollo (since 3 Nov 2026), the email is looked up on saving: the email does not promise it is ready.
+  const lookup = items.some(item => item.provider === 'apollo');
+  const lead = lookup ? (one ? 'Tu contacto de hoy, elegido para ti' : `${items.length} contactos nuevos para ti`)
+    : one ? 'Tu contacto de hoy, con su correo listo' : `${items.length} contactos nuevos para ti, con su correo listo`;
+  const email = items.some(item => item.followUps?.length) ? 'un primer correo y tres seguimientos' : 'un primer correo sugerido';
+  const research = one ? `En el PDF adjunto va por qué te lo recomendamos, quién es, su empresa y ${email}.`
+    : `En el PDF adjunto va por qué te recomendamos a cada uno, quiénes son, sus empresas y ${email}.`;
   const text = [
     ...(heading ? [`${lead}:`] : []),
-    ...items.map(item => `- ${item.name}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${[item.why, item.reasons?.[0]].filter(Boolean).join(' ')}`),
-    `${one ? 'Míralo y guárdalo' : 'Míralos y guárdalos'} sin costo: ${link}`,
-    research,
+    ...items.map(item => `- ${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${[item.why, item.reasons?.[0]].filter(Boolean).join(' ')}`),
+    lookup ? `${one ? 'Míralo' : 'Míralos'}: ${link}` : `${one ? 'Míralo y guárdalo' : 'Míralos y guárdalos'} sin costo: ${link}`,
+    lookup ? `${dropCostNote(items)} ${research}` : research,
   ].join('\n');
   const block = (item: DropItem, index: number) => `<div style="padding:12px 0;${index ? 'border-top:1px solid #e5e7eb;' : ''}">`
-    + `<p style="margin:0;font-size:17px;line-height:24px;font-weight:600;color:#111827">${escape(item.name)}</p>`
+    + `<p style="margin:0;font-size:17px;line-height:24px;font-weight:600;color:#111827">${escape(dropName(item))}</p>`
     + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</p>`
     + `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:#6b7280">${escape(item.why)}</p>`
     // The first reason it is worth it for what the person sells (writeDrop): the rest, with the fit criterion by criterion, in the PDF.
@@ -436,7 +483,7 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
       + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
     + `<div style="margin:0 0 16px;padding:4px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb">${items.map(block).join('')}</div>`
     + `<p style="margin:0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`}</a></p>`
-    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${one ? 'Guardarlo' : 'Guardarlos'} no gasta créditos. ${research}</p>`;
+    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(dropCostNote(items))} ${research}</p>`;
   return { text, html, link };
 }
 
