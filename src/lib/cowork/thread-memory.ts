@@ -47,7 +47,8 @@ export function readCoworkThreadMemory(value: unknown): CoworkThreadMemory | nul
 
 const MEMORY_INSTRUCTION = 'threadMemory resume toda la conversación, más allá de los últimos turnos de history: firstRequest es el primer pedido del usuario, '
   + 'y memory (si existe) trae la oferta en juego, a quién se busca, las personas de este trabajo con su estado, las decisiones y lo pendiente. '
-  + 'Úsalo para no perder lo pedido al comienzo. Si el usuario dijo en esta conversación qué producto promociona, esa oferta manda sobre userContext.offer.';
+  + 'Úsalo para no perder lo pedido al comienzo; el detalle de los turnos anteriores, las búsquedas con sus personas y los correos anteriores están en threadRecall. '
+  + 'Si el usuario dijo en esta conversación qué producto promociona, esa oferta manda sobre userContext.offer.';
 
 /** What the decision context carries about the whole conversation: its first request and the latest memory. */
 export function coworkThreadMemoryContext(input: { firstRequest: string | null; memory: CoworkThreadMemory | null }) {

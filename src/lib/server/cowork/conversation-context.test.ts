@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { loadCoworkHistory } from './conversation-context';
+import { COWORK_HISTORY_CHARS, loadCoworkHistory } from './conversation-context';
 
 function fixture(rows: Record<string, { parent: string | null; owner?: string }>) {
   const filters: Array<Record<string, string>> = [];
@@ -125,7 +125,7 @@ test('history tells the model which approved actions already ran and how they en
 
 test('a parent turn with a long list keeps its first rows and says how many it left out instead of failing the next turn', async () => {
   const items = Array.from({ length: 100 }, (_, index) => ({ id: `apollo:person-${index}`, name: 'Persona', title: 'Gerente de Personas',
-    company: `Empresa ${index}`, fit: 'Posible comprador: cargo con «gerente de personas» · outsourcing, 120 empleados', notes: 'x'.repeat(600) }));
+    company: `Empresa ${index}`, fit: 'Posible comprador: cargo con «gerente de personas» · outsourcing, 120 empleados', notes: 'x'.repeat(1000) }));
   const client = { from(table: string) {
     const where: Record<string, string> = {};
     const chain = {
@@ -144,7 +144,7 @@ test('a parent turn with a long list keeps its first rows and says how many it l
   assert.ok(result.items.length > 0 && result.items.length < 100);
   assert.equal(result.items.length + result.itemsOmitted, 100);
   assert.deepEqual(result.next, { page: 1, offset: 25 });
-  assert.ok(JSON.stringify(history.turns[0]).length <= 60000);
+  assert.ok(JSON.stringify(history.turns[0]).length <= COWORK_HISTORY_CHARS);
 });
 
 test('each turn of the history carries what the person said about its answer', async () => {

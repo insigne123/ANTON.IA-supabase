@@ -13,6 +13,7 @@ import {
 import { requireCoworkWorkerAccess } from './access';
 import { observedCoworkLeadIds } from './observed-leads';
 import { coworkSavedContactId } from './save-contact';
+import { coworkBranchRunIds, coworkEventsIn } from './thread-recall';
 
 /**
  * «Preparar contactos» with one approval, behind the cowork_prepare_batch migration (docs/cowork-preparar-contactos.md). Staging
@@ -45,8 +46,8 @@ type LeadRow = {
 export type Staged = { kind: string; items: CoworkPrepareItem[]; deferred?: CoworkPrepareReady[]; excluded: string[]; patch_hash: string };
 
 const LEAD_FIELDS = 'id,name,company,title,email,apollo_id,source_provider_id,linkedin_url';
-/** How far back a batch looks for the people the conversation saw: this turn and the ones it continues. */
-const THREAD_RUNS = 12;
+/** The reads where a conversation sees people: search results, saved contacts, recommendations and list reviews. */
+const PEOPLE_READS = ['prospecting.search', 'leads.search', 'leads.get', 'leads.recommend', 'lists.review_batch', 'lists.review_contact'];
 /** A lookup that is done or under way: the email is not looked up again. A failed one can be tried again. */
 const LOOKUP_DONE = new Set(['completed', 'pending']);
 /** A research that failed or found too little can be asked again; any other is done or under way. */
@@ -55,31 +56,19 @@ const RESEARCH_RETRY = new Set(['failed', 'insufficient_data']);
 const apolloKey = (providerId: string) => providerId.slice(7);
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() || null : null);
 
-/** The runs of this conversation, newest first: this one and the ones it continues. */
-async function threadRunIds(client: Client, scope: Scope, runId: string) {
-  const ids: string[] = [];
-  let cursor: string | null = runId;
-  while (cursor && ids.length < THREAD_RUNS && !ids.includes(cursor)) {
-    ids.push(cursor);
-    const row: { data: { parent_run_id?: string | null } | null; error: unknown } = await client.from('cowork_runs').select('parent_run_id').eq('id', cursor)
-      .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
-    if (row.error) throw new Error('No se pudo leer esta conversación.');
-    cursor = row.data?.parent_run_id ?? null;
-  }
-  return ids;
-}
-
-/** Who this conversation saw: the search results and saved contacts its reads returned, and the contacts it saved (by an approved
- * action or from the panel). A batch only takes people from here, so nobody enters one that nobody saw. */
+/** Who this conversation saw, from its first message (Memoria larga, 5 nov 2026: «las 5 personas de la segunda búsqueda» ten turns
+ * later): the search results and saved contacts its reads returned, and the contacts it saved (by an approved action or from the
+ * panel). A batch only takes people from here, so nobody enters one that nobody saw. */
 async function threadPeople(client: Client, scope: Scope, runId: string) {
-  const runs = await threadRunIds(client, scope, runId);
-  const events = await client.from('cowork_run_events').select('kind,payload').in('run_id', runs)
-    .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).in('kind', ['tool.completed', 'effect.completed', 'contact.saved']);
-  if (events.error) throw new Error('No se pudo comprobar lo consultado en esta conversación.');
-  const rows = (events.data || []) as Array<{ kind: string; payload: unknown }>;
-  const results = new Map(collectCoworkLeadRows(rows.filter(row => row.kind === 'tool.completed').map(row => row.payload)).map(row => [row.id, row]));
+  const runs = await coworkBranchRunIds(client, scope, runId).catch(() => { throw new Error('No se pudo leer esta conversación.'); });
+  const [reads, done] = await Promise.all([
+    coworkEventsIn<{ kind: string; payload: unknown }>(client, scope, runs, 'kind,payload', query => query.eq('kind', 'tool.completed').in('payload->>action', PEOPLE_READS)),
+    coworkEventsIn<{ kind: string; payload: unknown }>(client, scope, runs, 'kind,payload', query => query.in('kind', ['effect.completed', 'contact.saved'])),
+  ]).catch(() => { throw new Error('No se pudo comprobar lo consultado en esta conversación.'); });
+  const rows = [...reads, ...done];
+  const results = new Map(collectCoworkLeadRows(reads.map(row => row.payload)).map(row => [row.id, row]));
   const saved = observedCoworkLeadIds(rows);
-  for (const row of rows) {
+  for (const row of done) {
     const payload = (row.payload || {}) as { kind?: string; leadId?: unknown; result?: { leadId?: unknown; items?: Array<{ id?: unknown }> } | null };
     if (row.kind === 'contact.saved' && typeof payload.leadId === 'string') saved.add(payload.leadId);
     if (row.kind !== 'effect.completed') continue;

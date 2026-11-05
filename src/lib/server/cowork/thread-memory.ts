@@ -27,7 +27,7 @@ export async function loadCoworkThreadMemory(client: SupabaseClient, scope: Scop
   const source = typeof row?.source_run_id === 'string' ? row.source_run_id : null;
   let offBranch = Boolean(branch && source && source !== run.id && !branch.runIds.includes(source));
   if (offBranch && branch && !branch.complete) {
-    // Prove ancestry beyond the prompt's eight-turn window instead of accepting a summary from an unknown sibling version.
+    // Prove ancestry beyond the prompt's window of recent turns instead of accepting a summary from an unknown sibling version.
     const seen = new Set<string>();
     let cursor: string | null = branch.runIds[branch.runIds.length - 1] ?? run.parent_run_id ?? null;
     for (let steps = 0; steps < 100 && cursor && !seen.has(cursor); steps++) {
