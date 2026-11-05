@@ -13,6 +13,8 @@ import { coworkImageBlock } from './image-view';
 import { coworkOpportunitiesSection } from './opportunities-section';
 import { coworkWorkerConfigured } from './runs';
 import { loadCoworkHistory } from './conversation-context';
+import { loadCoworkThreadRecall } from './thread-recall';
+import { coworkWithRecallArchive } from '@/lib/cowork/thread-recall';
 import { loadCoworkThreadMemory, saveCoworkThreadMemory } from './thread-memory';
 import { coworkThreadMemoryContext, coworkPendingProposalMemory, type CoworkThreadMemory } from '@/lib/cowork/thread-memory';
 import { processCoworkSearchQueue } from './external-search';
@@ -167,10 +169,19 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     if (question.error) throw new Error('No se pudo verificar el alcance de la pregunta.');
     const clarificationOnly = Boolean(question.data);
     const history = await loadCoworkHistory(client, scope, run.parent_run_id || null);
+    // Everything of the conversation before those turns (Memoria larga, 5 nov 2026): the earlier turns condensed, every external
+    // search with its people and their ids, and the emails written before. Best effort: without it the turn reads its history as before.
+    const recall = await loadCoworkThreadRecall(client, scope, run, {
+      runIds: history.turns.map(turn => turn.runId),
+      emailTitles: history.turns.flatMap(turn => (turn.blocks || []).flatMap(block => (block.type === 'email_draft' || block.type === 'sequence') && block.title ? [block.title] : [])),
+    }).catch(error => { console.warn('[cowork] thread recall unavailable:', error instanceof Error ? error.message : error); return null; });
     // The whole conversation beyond the last turns: its first request and the memory the previous turns kept.
     const threadMemory = coworkThreadMemoryContext(await loadCoworkThreadMemory(client, scope, run,
-      { runIds: history.turns.map(turn => turn.runId), complete: !history.olderTurnsOmitted })
+      recall ? recall.branch : { runIds: history.turns.map(turn => turn.runId), complete: !history.olderTurnsOmitted })
       .catch(() => ({ firstRequest: null, memory: null })));
+    // What the checks of a proposal read: the searches of the whole conversation first, then the turns of history, so a person of an
+    // old search can be saved or prepared anchored to the run that found them (the last turn stays the last one).
+    const checkedHistory = coworkWithRecallArchive(recall?.archive ?? [], history.turns);
     // Name, company and offer once per run: drafts get signed and pitched without spending reads.
     // With the account's state (Plan 13, COWORK_WORKSPACE_ENABLED): counts and today's agenda, read in parallel and never waited on long.
     // «Otra versión» (Plan 13): the answers already given to this same message, with the 👎 and why, so this one is different and better.
@@ -297,7 +308,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const replyLanguage = coworkReplyLanguage(run.message);
     const decisionPrompt = (observations: CoworkObservation[], mustAnswer: boolean, rejections: CoworkRejection[], turnBudget?: CoworkTurnBudget) =>
       JSON.stringify(coworkDecisionContext(instructions, {
-        history, request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
+        history, ...(recall?.context ? { threadRecall: recall.context } : {}), request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
         ...(replyLanguage ? { replyLanguage } : {}),
         ...(threadMemory ? { threadMemory } : {}),
         ...(previousVersions.length ? { previousVersions } : {}),
@@ -349,7 +360,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           telemetry.push({ model: call.modelName, durationMs });
         },
       } : undefined,
-      message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
+      message: run.message, runId: run.id, history: checkedHistory, signal: controller.signal, authorize, ceiling: turnCeiling,
       metricPeriods: !clarificationOnly,
       clarification: clarificationOnly,
       // Where a search looks when nobody said where (Plan 14, 1): «Perfil», or COWORK_DEFAULT_SEARCH_LOCATION (Chile).

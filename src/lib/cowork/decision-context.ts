@@ -169,6 +169,9 @@ export function coworkDecisionContext(
     turnBudget?: CoworkTurnBudget;
     /** The whole conversation beyond the last turns of history: its first request and its memory (thread-memory.ts). */
     threadMemory?: unknown;
+    /** The rest of the conversation before history, read from the database: earlier turns, every search with its people, earlier
+     * emails (thread-recall.ts, Memoria larga). */
+    threadRecall?: unknown;
     /** «Otra versión» (Plan 13): the answers already given to this same message, with what the person said about them. */
     previousVersions?: CoworkPreviousVersion[];
     /** The approved long task this turn continues (task-plan.ts, Plan 13, 4c): its plan, what it spent and how to go on. */
@@ -198,6 +201,7 @@ export function coworkDecisionContext(
         + (input.userContext.memories?.length ? MEMORIES_INSTRUCTION : '')
         + (input.userContext.workspace ? ` ${COWORK_WORKSPACE_INSTRUCTION}` : '') } : null,
     history: coworkWithLocalTimes(input.history, timeZone) as typeof input.history,
+    ...(input.threadRecall ? { threadRecall: coworkWithLocalTimes(input.threadRecall, timeZone) } : {}),
     // What the person said about the answers of the conversation (👍/👎, Plan 13) shapes this one.
     ...(historyHasFeedback(input.history) ? { historyFeedbackInstruction: COWORK_HISTORY_FEEDBACK_INSTRUCTION } : {}),
     ...(input.previousVersions?.length ? { previousVersions: input.previousVersions, previousVersionsInstruction: COWORK_PREVIOUS_VERSIONS_INSTRUCTION } : {}),

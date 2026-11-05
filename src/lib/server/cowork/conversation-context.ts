@@ -33,6 +33,11 @@ function trimTurnLists(turn: HistoryTurn, budget: number): HistoryTurn | null {
   return best;
 }
 
+/** The last turns a turn reads whole (Memoria larga, 5 nov 2026: were 8 and 60 000 characters). Everything before them goes condensed in
+ * threadRecall (thread-recall.ts), so these only need to hold the recent detail: the cards, the reads and what was done. */
+export const COWORK_HISTORY_TURNS = 12;
+export const COWORK_HISTORY_CHARS = 90_000;
+
 export async function loadCoworkHistory(
   client: SupabaseClient,
   scope: { userId: string; organizationId: string },
@@ -40,9 +45,9 @@ export async function loadCoworkHistory(
 ) {
   const history: HistoryTurn[] = [];
   const visited = new Set<string>();
-  let remaining = 60000;
+  let remaining = COWORK_HISTORY_CHARS;
   let cursor = parentId;
-  while (cursor && history.length < 8 && remaining > 0) {
+  while (cursor && history.length < COWORK_HISTORY_TURNS && remaining > 0) {
     if (visited.has(cursor)) throw new Error('Invalid conversation ancestry');
     visited.add(cursor);
     const { data: run, error } = await client.from('cowork_runs')
@@ -52,22 +57,26 @@ export async function loadCoworkHistory(
     // immediate parent may be waiting, and what it said so far is its note.
     const waiting = run?.status === 'waiting_approval' && history.length === 0;
     if (error || !run || (run.status !== 'completed' && !waiting)) throw new Error('Conversation context unavailable');
-    const event = waiting ? null : await client.from('cowork_run_events').select('payload')
-      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .eq('kind', 'run.completed').order('sequence', { ascending: false }).limit(1).maybeSingle();
+    const events = () => client.from('cowork_run_events').select('payload')
+      .eq('run_id', cursor!).eq('user_id', scope.userId).eq('organization_id', scope.organizationId);
+    // The reads of a turn go at the same time: a longer history costs no more waiting per turn than before.
+    const [event, approval, observed, acted, panel, made] = await Promise.all([
+      waiting ? null : events().eq('kind', 'run.completed').order('sequence', { ascending: false }).limit(1).maybeSingle(),
+      waiting ? events().eq('kind', 'approval.requested').order('sequence', { ascending: false }).limit(1).maybeSingle() : null,
+      // Most recent observations first for the query cap, then back to
+      // chronological order: a resumed run must see the latest tool result
+      // (for example a completed external search), not only the oldest reads.
+      events().eq('kind', 'tool.completed').order('sequence', { ascending: false }).limit(12),
+      client.from('cowork_run_events').select('kind,payload')
+        .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
+        .in('kind', ['effect.completed', 'effect.failed']).order('sequence', { ascending: false }).limit(2),
+      events().eq('kind', 'contact.saved').order('sequence', { ascending: true }).limit(25),
+      events().eq('kind', 'artifact.created').order('sequence', { ascending: true }).limit(5),
+    ]);
     if (event && (event.error || !event.data)) throw new Error('Conversation result unavailable');
-    const approval = waiting ? await client.from('cowork_run_events').select('payload')
-      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .eq('kind', 'approval.requested').order('sequence', { ascending: false }).limit(1).maybeSingle() : null;
     if (approval && (approval.error || !approval.data)) throw new Error('Conversation result unavailable');
     // The cards of that answer (emails, sequences, tables): «usa el segundo correo» refers to them.
     const blocks = coworkStoredBlocks(event?.data?.payload.blocks);
-    // Most recent observations first for the query cap, then back to
-    // chronological order: a resumed run must see the latest tool result
-    // (for example a completed external search), not only the oldest reads.
-    const observed = await client.from('cowork_run_events').select('payload')
-      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .eq('kind', 'tool.completed').order('sequence', { ascending: false }).limit(12);
     if (observed.error) throw new Error('Conversation observations unavailable');
     // Up to three data reads plus the assistant's note that accompanied a proposal.
     // The plan and what the Writer and the Reviewer did are not context: the reply already
@@ -83,18 +92,12 @@ export async function loadCoworkHistory(
       : { reply: typeof note === 'string' ? note : '', document: null };
     // Actions approved in that turn and how they ended, so the model never
     // re-proposes something that already ran (for example a failed email lookup).
-    const acted = await client.from('cowork_run_events').select('kind,payload')
-      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .in('kind', ['effect.completed', 'effect.failed']).order('sequence', { ascending: false }).limit(2);
     const effects = acted.error ? [] : ((acted.data || []) as Array<{ kind: string; payload: Record<string, unknown> | null }>).map(row => ({
       kind: String(row.payload?.kind || ''), label: String(row.payload?.label || '').slice(0, 200),
       outcome: row.kind === 'effect.completed' ? 'ejecutada' : 'falló',
       ...(row.payload?.result === undefined ? {} : { result: row.payload.result }),
     })).reverse();
     // Contacts the person saved from the panel of that turn: done, so they are never proposed for saving again.
-    const panel = await client.from('cowork_run_events').select('payload')
-      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .eq('kind', 'contact.saved').order('sequence', { ascending: true }).limit(25);
     const saved = panel.error ? [] : ((panel.data || []) as Array<{ payload: Record<string, unknown> | null }>)
       .filter(row => typeof row.payload?.leadId === 'string' && row.payload.leadId).map(row => {
       const who = [row.payload?.name, row.payload?.company].filter(value => typeof value === 'string' && value).join(' · ');
@@ -104,9 +107,6 @@ export async function loadCoworkHistory(
     const proposal = approval?.data?.payload as Record<string, unknown> | undefined;
     const open = proposal ? [{ kind: String(proposal.kind || ''), label: String(proposal.label || '').slice(0, 200), outcome: 'esperando tu aprobación' }] : [];
     const actions = [...effects, ...saved, ...open];
-    const made = await client.from('cowork_run_events').select('payload')
-      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .eq('kind', 'artifact.created').order('sequence', { ascending: true }).limit(5);
     const artifacts = made.error ? [] : ((made.data || []) as Array<{ payload: Record<string, unknown> | null }>)
       .filter(row => row.payload?.kind === 'code' && typeof row.payload.name === 'string')
       .map(row => ({ name: String(row.payload!.name), title: String(row.payload!.title || row.payload!.name).slice(0, 120) }));
