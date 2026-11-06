@@ -112,8 +112,12 @@ export type EnrichedCandidate = {
   mine?: boolean;
 };
 
-/** Why someone cannot receive this campaign: decided before the model ranks, so it never proposes people who cannot be written to. */
-export type AudienceExclusionKind = 'blocked' | 'team' | 'contacted' | 'not_contacted' | 'replied' | 'recent';
+/**
+ * Why someone cannot receive this campaign: decided before the model ranks, so it never proposes people who cannot be written to.
+ * «own_company» and «competitor»: someone of the seller's own company or of a company that sells the same
+ * (src/lib/server/company-relations.ts).
+ */
+export type AudienceExclusionKind = 'blocked' | 'team' | 'contacted' | 'not_contacted' | 'replied' | 'recent' | 'own_company' | 'competitor';
 export type AudienceExclusions = Partial<Record<AudienceExclusionKind, number>>;
 
 export function candidateExclusion(candidate: EnrichedCandidate,
@@ -137,6 +141,8 @@ const EXCLUSION_LABELS: Record<AudienceExclusionKind, [string, string]> = {
   not_contacted: ['no tiene envíos previos', 'no tienen envíos previos'],
   replied: ['ya respondió', 'ya respondieron'],
   recent: ['recibió un correo hace poco', 'recibieron un correo hace poco'],
+  own_company: ['es de tu propia empresa', 'son de tu propia empresa'],
+  competitor: ['es de la competencia', 'son de la competencia'],
 };
 
 /** «Quedaron fuera 126: 121 son de otros integrantes del equipo y 5 ya fueron contactados.», or '' when nobody was left out. */
