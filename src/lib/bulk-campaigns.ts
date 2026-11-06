@@ -102,7 +102,53 @@ export type EnrichedCandidate = {
   departments: string[]; industry: string; size: string; country: string; city: string;
   headline: string; emailStatus: string; leadRef: string;
   contacted: boolean; replied: boolean; blockedReason: string | null; lastSentAt: string | null;
+  /** The state or region («Biobío»): a description that names a zone needs it. */
+  region?: string;
+  /** What the company does, in a line (Apollo's short description). */
+  about?: string;
+  /** Another member of the team holds this person («Adjudicado a Ana: le quedan 12 días»): nobody else writes to them. */
+  teamHold?: string | null;
 };
+
+/** Why someone cannot receive this campaign: decided before the model ranks, so it never proposes people who cannot be written to. */
+export type AudienceExclusionKind = 'blocked' | 'team' | 'contacted' | 'not_contacted' | 'replied' | 'recent';
+export type AudienceExclusions = Partial<Record<AudienceExclusionKind, number>>;
+
+export function candidateExclusion(candidate: EnrichedCandidate,
+  request: Pick<AudienceRankRequest, 'relationship' | 'minimumDaysSinceSent' | 'excludeReplied'>, now = Date.now()): AudienceExclusionKind | null {
+  if (candidate.blockedReason) return 'blocked';
+  if (candidate.teamHold) return 'team';
+  if (request.relationship === 'never_contacted' && candidate.contacted) return 'contacted';
+  if (request.relationship === 'previously_contacted' && !candidate.contacted) return 'not_contacted';
+  if (request.excludeReplied && candidate.replied) return 'replied';
+  if (request.relationship === 'previously_contacted' && request.minimumDaysSinceSent > 0) {
+    const sent = candidate.lastSentAt ? Date.parse(candidate.lastSentAt) : NaN;
+    if (!Number.isFinite(sent) || now - sent < request.minimumDaysSinceSent * 86400000) return 'recent';
+  }
+  return null;
+}
+
+const EXCLUSION_LABELS: Record<AudienceExclusionKind, [string, string]> = {
+  team: ['es de otro integrante del equipo', 'son de otros integrantes del equipo'],
+  contacted: ['ya fue contactado', 'ya fueron contactados'],
+  blocked: ['está bloqueado o tiene un envío pendiente', 'están bloqueados o tienen un envío pendiente'],
+  not_contacted: ['no tiene envíos previos', 'no tienen envíos previos'],
+  replied: ['ya respondió', 'ya respondieron'],
+  recent: ['recibió un correo hace poco', 'recibieron un correo hace poco'],
+};
+
+/** «Quedaron fuera 126: 121 son de otros integrantes del equipo y 5 ya fueron contactados.», or '' when nobody was left out. */
+export function audienceExclusionSummary(excluded: AudienceExclusions | null | undefined): string {
+  const parts = (Object.keys(EXCLUSION_LABELS) as AudienceExclusionKind[])
+    .map(kind => [kind, Math.max(0, Math.floor(Number(excluded?.[kind]) || 0))] as const)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (!parts.length) return '';
+  const total = parts.reduce((sum, [, count]) => sum + count, 0);
+  const phrases = parts.map(([kind, count]) => `${count} ${EXCLUSION_LABELS[kind][count === 1 ? 0 : 1]}`);
+  const list = phrases.length > 1 ? `${phrases.slice(0, -1).join(', ')} y ${phrases[phrases.length - 1]}` : phrases[0];
+  return `Quedaron fuera ${total}: ${list}.`;
+}
 
 export const AudienceRankItemSchema = z.object({
   email: z.string().trim().email().transform(value => value.toLowerCase()),
@@ -125,6 +171,8 @@ export type RankedAudiencePerson = AudiencePerson & { score: number };
 export const AI_RANK_CANDIDATE_LIMIT = 300;
 export const AI_RANK_RESULT_LIMIT = 100;
 const AI_RANK_CSV_CHAR_LIMIT = 120_000;
+/** A line of what the company does is enough to tell a hotel from a caterer; the whole description would crowd out people. */
+const ABOUT_CSV_CHARS = 160;
 export type CampaignRecipient = AudiencePerson & {
   messages: Array<CampaignMessage & { draftId: string; versionId: string }>;
 };
@@ -196,16 +244,15 @@ function csvCell(value: string): string {
 
 /** Compact CSV of enriched candidates for the ranking model. Pure and bounded. */
 export function buildCandidatesCsv(candidates: EnrichedCandidate[]): { csv: string; included: number; total: number } {
-  const header = 'email,name,title,seniority,departments,company,industry,size,country,city,headline,email_status,contacted,replied,blocked';
+  // Only people who can receive the campaign get here (candidateExclusion): their history is not a column to weigh.
+  const header = 'email,name,title,seniority,departments,company,industry,size,country,region,city,headline,company_about,email_status';
   const lines = [header];
   let included = 0;
   for (const person of candidates.slice(0, AI_RANK_CANDIDATE_LIMIT)) {
     const line = [
       person.email, person.name, person.title, person.seniority, person.departments.join(';'),
-      person.company, person.industry, person.size, person.country, person.city,
-      person.headline, person.emailStatus,
-      person.contacted ? 'yes' : 'no', person.replied ? 'yes' : 'no',
-      person.blockedReason || '',
+      person.company, person.industry, person.size, person.country, person.region || '', person.city,
+      person.headline, (person.about || '').slice(0, ABOUT_CSV_CHARS), person.emailStatus,
     ].map(csvCell).join(',');
     if (lines.join('\n').length + line.length + 1 > AI_RANK_CSV_CHAR_LIMIT) break;
     lines.push(line);

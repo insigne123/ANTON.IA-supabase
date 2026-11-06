@@ -32,6 +32,7 @@ function chain(result: any) {
 }
 
 const ORG = '11111111-1111-4111-8111-111111111111';
+const noLocks = async () => ({ enabled: false, byEmail: {}, byProviderId: {}, byLinkedin: {} });
 const OWNER = '22222222-2222-4222-8222-222222222222';
 const campaign = {
   id: 'campaign', organization_id: ORG, user_id: OWNER, revision: 1, status: 'approved',
@@ -54,6 +55,8 @@ test('search attaches deterministic reasons and drops rows outside the criteria'
         { email: 'bad-email', name: 'Bad', contacted: false, replied: false, blockedReason: null, lastSentAt: null, leadRef: 'l3' },
       ] }, error: null }) }) },
     '@/lib/bulk-campaigns': await import('../bulk-campaigns'),
+    '@/lib/server/team-locks': { readTeamLocks: noLocks },
+    '@/lib/team-lock': await import('../team-lock'),
   });
   const result = await searchAudiencePage({ organizationId: ORG, user: { id: OWNER } }, { criteria: defaultAudience, search: '', page: 0, pageSize: 25 });
   assert.equal(result.total, 3);
@@ -77,6 +80,8 @@ test('AI ranking returns only known enriched candidates with deterministic eligi
     ], explanation: 'ok' }) },
     '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: () => chain({ data: [], error: null }) }) },
     '@/lib/bulk-campaigns': await import('../bulk-campaigns'),
+    '@/lib/server/team-locks': { readTeamLocks: noLocks },
+    '@/lib/team-lock': await import('../team-lock'),
   });
   const auth: any = { organizationId: ORG, user: { id: OWNER }, supabase: { from: () => chain({ data: enrichedRows, error: null }) } };
   const result = await rankAudience(auth, { description: 'Reclutadores con poder de compra en retail', relationship: 'never_contacted', maxResults: 10 });
@@ -86,6 +91,112 @@ test('AI ranking returns only known enriched candidates with deterministic eligi
   assert.equal(result.candidateCount, 2);
   assert.equal(result.rankedCount, 2);
   assert.equal(result.ineligibleCount, 0);
+});
+
+test('manual search shows the people another member holds as blocked, with the reason', async () => {
+  const { searchAudiencePage } = loadModule('src/lib/server/bulk-campaign-audience.ts', {
+    zod: await import('zod'),
+    '@/lib/server/auth-utils': {},
+    '@/ai/openai-json': { generateStructured: async () => { throw new Error('AI not used in this test'); } },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ rpc: async () => ({ data: { total: 2, people: [
+      { email: 'libre@example.com', name: 'Libre', contacted: false, replied: false, blockedReason: null, lastSentAt: null, leadRef: 'l1' },
+      { email: 'de-ana@example.com', name: 'De Ana', contacted: false, replied: false, blockedReason: null, lastSentAt: null, leadRef: 'l2' },
+    ] }, error: null }) }) },
+    '@/lib/bulk-campaigns': await import('../bulk-campaigns'),
+    '@/lib/server/team-locks': { readTeamLocks: async () => ({ enabled: true, byProviderId: {}, byLinkedin: {}, byEmail: {
+      'de-ana@example.com': { status: 'claimed', ownerName: 'Ana', mine: false, replied: false, lastContactedAt: null, claimedUntil: '2099-01-01T00:00:00Z' },
+    } }) },
+    '@/lib/team-lock': await import('../team-lock'),
+  });
+  const result = await searchAudiencePage({ organizationId: ORG, user: { id: OWNER } }, { criteria: defaultAudience, search: '', page: 0, pageSize: 25 });
+  assert.equal(result.people.find((person: any) => person.email === 'libre@example.com').blockedReason, null);
+  assert.match(result.people.find((person: any) => person.email === 'de-ana@example.com').blockedReason, /Adjudicado a Ana/);
+});
+
+// The shape of the 6 Nov 2026 report (fictional people): the model proposed people it then could not show.
+async function rankWith(options: { rows: any[]; history?: any[]; dispatches?: any[]; locks?: Record<string, any>; ranking?: any[] }) {
+  const prompts: any[] = [];
+  const { rankAudience } = loadModule('src/lib/server/bulk-campaign-audience.ts', {
+    zod: await import('zod'),
+    '@/lib/server/auth-utils': {},
+    '@/ai/openai-json': { generateStructured: async (call: any) => { prompts.push(JSON.parse(call.prompt)); return { ranking: options.ranking ?? [], explanation: '' }; } },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: (table: string) => chain({
+      data: table === 'contacted_leads' ? options.history ?? [] : table === 'outbound_dispatches' ? options.dispatches ?? [] : [], error: null }) }) },
+    '@/lib/bulk-campaigns': await import('../bulk-campaigns'),
+    '@/lib/server/team-locks': { readTeamLocks: async (_client: unknown, _scope: unknown, input: { emails: string[] }) => ({
+      enabled: true, byProviderId: {}, byLinkedin: {},
+      byEmail: Object.fromEntries(Object.entries(options.locks ?? {}).filter(([email]) => input.emails.includes(email))),
+    }) },
+    '@/lib/team-lock': await import('../team-lock'),
+  });
+  const auth: any = { organizationId: ORG, user: { id: OWNER }, supabase: { from: () => chain({ data: options.rows, error: null }) } };
+  const result = await rankAudience(auth, { description: 'Hoteles en Concepción con gerente de operaciones', relationship: 'never_contacted', maxResults: 25 });
+  return { result, prompts };
+}
+
+const hotelRows = [
+  { id: 'e1', email: 'gerencia@hotel-ejemplo.cl', full_name: 'Gerente Hotel', title: 'Gerente de Operaciones', company_name: '—', organization_name: 'Hotel Ejemplo',
+    organization_industry: null, data_industry: 'hospitality', state: 'Biobío', city: null, about: 'Hotel  de negocios en el centro', updated_at: '2026-11-06T00:00:00Z' },
+  { id: 'e2', email: 'ya-escrito@hotel-dos.cl', full_name: 'Ya Escrito', title: 'Gerente General', company_name: 'Hotel Dos', updated_at: '2026-11-05T00:00:00Z' },
+  { id: 'e3', email: 'de-ana@hotel-tres.cl', full_name: 'De Ana', title: 'Jefa de Operaciones', company_name: 'Hotel Tres', updated_at: '2026-11-04T00:00:00Z' },
+  { id: 'e4', email: 'pendiente@hotel-cuatro.cl', full_name: 'Pendiente', title: 'Gerente', company_name: 'Hotel Cuatro', updated_at: '2026-11-03T00:00:00Z' },
+];
+const hotelState = {
+  history: [{ email: 'ya-escrito@hotel-dos.cl', status: 'sent', sent_at: '2026-10-20T10:00:00Z' }],
+  dispatches: [{ status: 'unknown', metadata: { recipient: { email: 'pendiente@hotel-cuatro.cl' } } }],
+  locks: { 'de-ana@hotel-tres.cl': { status: 'claimed', ownerName: 'Ana', mine: false, replied: false, lastContactedAt: null, claimedUntil: '2026-11-30T00:00:00Z' } },
+};
+
+test('AI ranking only shows the model people who can receive the campaign, and says who was left out', async () => {
+  const { result, prompts } = await rankWith({ rows: hotelRows, ...hotelState, ranking: [
+    { email: 'gerencia@hotel-ejemplo.cl', score: 92, reason: 'Hotel en el Biobío con gerente de operaciones' },
+    { email: 'de-ana@hotel-tres.cl', score: 90, reason: 'Inventado: no estaba en el CSV' },
+  ] });
+  assert.equal(prompts.length, 1);
+  const csv: string = prompts[0].csv;
+  assert.ok(csv.includes('gerencia@hotel-ejemplo.cl'));
+  for (const email of ['ya-escrito@hotel-dos.cl', 'de-ana@hotel-tres.cl', 'pendiente@hotel-cuatro.cl']) assert.ok(!csv.includes(email), `${email} must not reach the model`);
+  // The industry kept only in data, the region, the company behind a «—» and what it does reach the model.
+  assert.ok(csv.includes('hospitality') && csv.includes('Biobío') && csv.includes('Hotel Ejemplo') && csv.includes('Hotel de negocios'));
+  assert.equal(prompts[0].totalCandidates, 1);
+  assert.deepEqual(result.people.map((person: any) => person.email), ['gerencia@hotel-ejemplo.cl']);
+  assert.equal(result.people[0].company, 'Hotel Ejemplo');
+  assert.equal(result.people[0].industry, 'hospitality');
+  assert.equal(result.candidateCount, 1);
+  assert.equal(result.poolCount, 4);
+  assert.equal(result.rankedCount, 1);
+  assert.equal(result.ineligibleCount, 0);
+  assert.deepEqual(result.excluded, { contacted: 1, team: 1, blocked: 1 });
+});
+
+test('AI ranking does not call the model when nobody can receive the campaign', async () => {
+  const { result, prompts } = await rankWith({ rows: hotelRows.slice(1), ...hotelState });
+  assert.equal(prompts.length, 0);
+  assert.deepEqual(result.people, []);
+  assert.equal(result.candidateCount, 0);
+  assert.equal(result.poolCount, 3);
+  assert.deepEqual(result.excluded, { contacted: 1, team: 1, blocked: 1 });
+});
+
+test('AI ranking keeps working when the team holds cannot be read', async () => {
+  const { rankAudience } = loadModule('src/lib/server/bulk-campaign-audience.ts', {
+    zod: await import('zod'),
+    '@/lib/server/auth-utils': {},
+    '@/ai/openai-json': { generateStructured: async () => ({ ranking: [{ email: 'gerencia@hotel-ejemplo.cl', score: 80, reason: 'Hotel' }], explanation: '' }) },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: () => chain({ data: [], error: null }) }) },
+    '@/lib/bulk-campaigns': await import('../bulk-campaigns'),
+    '@/lib/server/team-locks': { readTeamLocks: async () => { throw new Error('locks down'); } },
+    '@/lib/team-lock': await import('../team-lock'),
+  });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const auth: any = { organizationId: ORG, user: { id: OWNER }, supabase: { from: () => chain({ data: hotelRows.slice(0, 1), error: null }) } };
+    const result = await rankAudience(auth, { description: 'Hoteles en Concepción con gerente', relationship: 'never_contacted', maxResults: 25 });
+    assert.deepEqual(result.people.map((person: any) => person.email), ['gerencia@hotel-ejemplo.cl']);
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test('recipient history is scoped to the campaign member and merges sources', async () => {

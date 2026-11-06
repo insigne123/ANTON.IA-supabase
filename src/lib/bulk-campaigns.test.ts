@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AI_RANK_CANDIDATE_LIMIT, SENIORITY_LEVELS, audiencePersonStatus, campaignListStats, seniorityLabel, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
+import { AI_RANK_CANDIDATE_LIMIT, SENIORITY_LEVELS, audienceExclusionSummary, audiencePersonStatus, candidateExclusion, campaignListStats, seniorityLabel, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
 
 const person: AudiencePerson = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', title: 'Operaciones', country: 'Chile', industry: '', size: '11-50', seniority: 'Manager', leadRef: 'lead', contacted: false, lastSentAt: null, replied: false, blockedReason: null, reasons: [], enriched: true };
 test('audience excludes prior contacts and missing industry evidence', () => {
@@ -96,6 +96,34 @@ test('candidates CSV is compact, escaped and bounded', () => {
   const capped = buildCandidatesCsv(many);
   assert.equal(capped.included, AI_RANK_CANDIDATE_LIMIT);
   assert.equal(capped.total, many.length);
+});
+test('candidates CSV carries region and what the company does, not the contact history', () => {
+  const { csv } = buildCandidatesCsv([{ ...candidate, region: 'Biobío', about: 'Hotel de negocios '.repeat(30) }]);
+  const [header, line] = csv.split('\n');
+  assert.ok(header.includes(',region,') && header.includes(',company_about,'));
+  assert.ok(!header.includes('contacted') && !header.includes('blocked'));
+  assert.ok(line.includes('Biobío'));
+  assert.ok(line.length < 400, 'the description is cut to a line');
+});
+test('eligibility before ranking: blocks, the team, history and replies', () => {
+  const never = { relationship: 'never_contacted' as const, minimumDaysSinceSent: 0, excludeReplied: true };
+  const again = { relationship: 'previously_contacted' as const, minimumDaysSinceSent: 30, excludeReplied: true };
+  const now = Date.parse('2026-11-06T12:00:00Z');
+  assert.equal(candidateExclusion(candidate, never, now), null);
+  assert.equal(candidateExclusion({ ...candidate, blockedReason: 'Hay un envío pendiente de confirmación' }, never, now), 'blocked');
+  assert.equal(candidateExclusion({ ...candidate, teamHold: 'Adjudicado a Ana: le quedan 12 días.' }, never, now), 'team');
+  assert.equal(candidateExclusion({ ...candidate, contacted: true }, never, now), 'contacted');
+  assert.equal(candidateExclusion(candidate, again, now), 'not_contacted');
+  assert.equal(candidateExclusion({ ...candidate, contacted: true, replied: true }, again, now), 'replied');
+  assert.equal(candidateExclusion({ ...candidate, contacted: true, lastSentAt: '2026-10-29T00:00:00Z' }, again, now), 'recent');
+  assert.equal(candidateExclusion({ ...candidate, contacted: true, lastSentAt: '2026-09-01T00:00:00Z' }, again, now), null);
+});
+test('the summary of who was left out reads as a sentence', () => {
+  assert.equal(audienceExclusionSummary({}), '');
+  assert.equal(audienceExclusionSummary(undefined), '');
+  assert.equal(audienceExclusionSummary({ contacted: 1 }), 'Quedaron fuera 1: 1 ya fue contactado.');
+  assert.equal(audienceExclusionSummary({ contacted: 5, team: 121, blocked: 1 }),
+    'Quedaron fuera 127: 121 son de otros integrantes del equipo, 5 ya fueron contactados y 1 está bloqueado o tiene un envío pendiente.');
 });
 test('ranking validation only accepts known emails, dedupes, sorts and caps', () => {
   const others = { ...candidate, email: 'beto@example.com' };
