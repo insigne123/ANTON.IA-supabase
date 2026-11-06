@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { call, reply, ScriptedModel } from '@/lib/agent-harness/scripted';
+
+import { forgetEmailDomains } from './company-domain';
 import { runEmailFinderTick } from './run';
 
 const ENV = { EMAIL_FINDER_ENABLED: 'true', REOON_API_KEY: 'test-reoon-key' };
@@ -78,6 +81,22 @@ function reoon(answers: Record<string, string | number>) {
   return { asked, fetchImpl };
 }
 
+/** The lead table read by id, for the company of the lead (select(...).in('id', ...)), and nothing else. */
+function factsTable(rows: Record<string, Record<string, unknown>>) {
+  const chain: any = {
+    select: () => chain, eq: () => chain, ilike: () => chain, in: () => chain, gte: () => chain,
+    limit: async () => ({ data: [], error: null }),
+    then: (resolve: (value: unknown) => unknown) => resolve({ data: Object.values(rows), error: null }),
+  };
+  return chain;
+}
+const quiet = async <T>(work: () => Promise<T>) => {
+  const info = console.info;
+  console.info = () => {};
+  try { return await work(); } finally { console.info = info; }
+};
+test.beforeEach(() => forgetEmailDomains());
+
 const hasMx = async () => true;
 const completion = (calls: Array<{ name: string; params: Record<string, any> }>) =>
   calls.filter(call => call.name === 'complete_email_finder_attempt_v1').map(call => call.params);
@@ -153,6 +172,41 @@ test('the website or another lead of the same company gives the domain when the 
   await runEmailFinderTick({ client, environment: ENV, fetchImpl, lookupMx: hasMx });
   assert.deepEqual(asked, ['paula.soto@beta.test']);
   assert.equal(completion(rpcCalls)[0].p_domain, 'beta.test');
+});
+
+test('a lead whose domain receives no mail takes the one of its colleagues\u2019 verified emails, and only companies reach Claude', async () => {
+  // 6 Nov 2026: 36 people of one company whose site is a .com and whose mail is a .cl, with 6 verified addresses at the .cl.
+  const known = [
+    { id: 'k1', organization_domain: 'beta.com', email: 'acastro@beta.test', full_name: 'Alex Castro Diaz', email_status: 'verified' },
+    { id: 'k2', organization_domain: 'beta.com', email: 'acid@beta.test', full_name: 'Andrea Cid Moreno', email_status: 'verified' },
+  ];
+  const { client, rpcCalls } = fakeClient({ leads: [lead({ lead_domain: 'beta.com' })], known });
+  const { asked, fetchImpl } = reoon({ 'psoto@beta.test': 'safe' });
+  const summary = await runEmailFinderTick({ client, environment: ENV, fetchImpl, lookupMx: async domain => domain !== 'beta.com' });
+  assert.deepEqual(asked, ['psoto@beta.test'], 'the company format of the colleagues goes first');
+  const [saved] = completion(rpcCalls);
+  assert.deepEqual([saved.p_status, saved.p_domain, saved.p_email], ['found', 'beta.test', 'psoto@beta.test']);
+  assert.deepEqual(summary.enabled && summary.domainsFound, { colegas: 1, ia: 0 });
+
+  // Nobody of the company in the base: Claude is asked, with the company and never the person.
+  const alone = fakeClient({ leads: [lead({ lead_domain: null })] });
+  const model = new ScriptedModel([reply([call('entregar_dominios', { empresas: [{ id: 'e1', dominio: 'gamma.test', certeza: 'alta' }] })])]);
+  const second = reoon({ 'paula.soto@gamma.test': 'safe' });
+  const facts = { 'lead-1': { id: 'lead-1', organization_name: 'Gamma Servicios', country: 'Chile' } };
+  const withFacts = { ...alone.client, from: (table: string) => table === 'enriched_leads' ? factsTable(facts) : alone.client.from(table) };
+  const run = await quiet(() => runEmailFinderTick({ client: withFacts, environment: { ...ENV, EMAIL_FINDER_DOMAIN_AI_ENABLED: 'true', ANTHROPIC_API_KEY: 'k' },
+    fetchImpl: second.fetchImpl, lookupMx: async domain => domain === 'gamma.test', model }));
+  assert.equal(model.calls, 1);
+  const sent = String(model.requests[0].messages[0].content);
+  assert.match(sent, /Gamma Servicios/);
+  assert.ok(!/Paula|Soto|@/.test(sent), 'no name or email of the person');
+  assert.deepEqual(completion(alone.rpcCalls).map(params => [params.p_status, params.p_domain]), [['found', 'gamma.test']]);
+  assert.deepEqual(run.enabled && run.domainsFound, { colegas: 0, ia: 1 });
+
+  // Not found either way: the lead closes as before.
+  const nowhere = fakeClient({ leads: [lead({ lead_domain: 'sin-correo.test' })] });
+  await quiet(() => runEmailFinderTick({ client: nowhere.client, environment: ENV, fetchImpl: second.fetchImpl, lookupMx: async () => false }));
+  assert.equal(completion(nowhere.rpcCalls)[0].p_status, 'no_mx');
 });
 
 test('when Reoon refuses the account the run stops and gives every lead back for later', async () => {

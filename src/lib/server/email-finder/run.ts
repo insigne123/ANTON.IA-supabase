@@ -1,11 +1,14 @@
 // When Apollo identifies a person but has no email for them, find it ourselves: build the probable addresses from the
 // name and the company's domain (patterns.ts) and keep the first one Reoon confirms exists (reoon.ts). Runs on the
 // Apollo reconciliation tick, a few leads at a time; claim_email_finder_candidates_v1 picks the leads and
-// complete_email_finder_attempt_v1 saves the address on the lead only if it still has none.
+// complete_email_finder_attempt_v1 saves the address on the lead only if it still has none. A lead without a domain
+// that receives mail gets its company's from its colleagues or from Claude (company-domain.ts).
 import { resolveMx } from 'node:dns/promises';
 
+import type { ModelClient } from '@/lib/agent-harness/index';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
+import { emailDomainSettings, locateEmailDomains, type EmailDomainSettings, type LocatedDomain } from './company-domain';
 import {
   confidentPattern,
   domainEvidence,
@@ -50,6 +53,8 @@ type Dependencies = {
   now: Date;
   fetchImpl?: typeof fetch;
   lookupMx: (domain: string) => Promise<boolean>;
+  /** The domain of the company's mail, for a lead none of whose domains receives it; null when it is not found. */
+  locate?: (lead: Lead) => Promise<LocatedDomain | null>;
 };
 
 const CATCH_ALL_MEMORY_DAYS = 30;
@@ -154,6 +159,7 @@ async function findEmail(lead: Lead, deps: Dependencies): Promise<Outcome> {
       break;
     }
   }
+  if (!domain && deps.locate) domain = (await deps.locate(lead))?.domain || '';
   if (!domain) return { status: lead.domains.length ? 'no_mx' : 'no_domain', domain: lead.domains[0], verifications: 0 };
 
   const evidence = await loadEvidence(deps.client, domain, lead);
@@ -207,6 +213,80 @@ async function findEmail(lead: Lead, deps: Dependencies): Promise<Outcome> {
   return { status: 'not_found', domain, verifications, lastResult: 'invalid' };
 }
 
+/** The company of each lead, by attempt id: its name, country and industry, which the claim does not bring. */
+async function companyFacts(client: ServiceClient, leads: Lead[]) {
+  const facts = new Map<string, { name: string | null; country: string | null; industry: string | null }>();
+  const ids = (table: Lead['targetTable']) => leads.filter(lead => lead.targetTable === table && lead.targetLeadId).map(lead => lead.targetLeadId);
+  const read = async (table: Lead['targetTable'], columns: string) => {
+    if (!ids(table).length) return [];
+    const { data, error } = await client.from(table).select(columns).in('id', ids(table));
+    return error ? [] : (data || []) as Array<Record<string, unknown>>;
+  };
+  const [enriched, people] = await Promise.all([
+    read('enriched_leads', 'id,organization_name,company_name,country,organization_industry'),
+    read('people_search_leads', 'id,organization_name,org_name,country,organization_industry,industry'),
+  ]);
+  const first = (...values: unknown[]) => values.map(value => text(value, 200)).find(Boolean) || null;
+  const rows = new Map<string, Record<string, unknown>>();
+  for (const row of enriched) rows.set(`enriched_leads:${row.id}`, row);
+  for (const row of people) rows.set(`people_search_leads:${row.id}`, row);
+  for (const lead of leads) {
+    const row = rows.get(`${lead.targetTable}:${lead.targetLeadId}`);
+    if (!row) continue;
+    facts.set(lead.attemptId, {
+      name: first(row.organization_name, row.company_name, row.org_name),
+      country: first(row.country),
+      industry: first(row.organization_industry, row.industry),
+    });
+  }
+  return facts;
+}
+
+/**
+ * Finds the company domains of a run at once, the first time a lead needs one: for that lead and the ones after it that have a
+ * name and no domain that receives mail. Claude is asked only with time left in the run.
+ */
+function domainLocator(leads: Lead[], deps: Dependencies, options: {
+  settings: EmailDomainSettings | null; model?: ModelClient; skip: (lead: Lead) => boolean; found: Record<LocatedDomain['via'], number>;
+}) {
+  let located: Promise<Map<string, LocatedDomain>> | null = null;
+  return async (lead: Lead) => {
+    located ??= (async () => {
+      const waiting: Lead[] = [];
+      for (const next of leads.slice(Math.max(0, leads.indexOf(lead)))) {
+        if (options.skip(next) || !parseName({ fullName: next.fullName, firstName: next.firstName, lastName: next.lastName })) continue;
+        let receives = false;
+        for (const option of next.domains) {
+          if (await deps.lookupMx(option).catch(() => false)) { receives = true; break; }
+        }
+        if (!receives) waiting.push(next);
+      }
+      if (!waiting.length) return new Map<string, LocatedDomain>();
+      const facts = await companyFacts(deps.client, waiting);
+      // Claude gets what is left of the run but the time to verify what it finds.
+      const timeLeft = deps.deadline - Date.now() - 45_000;
+      const settings = options.settings && timeLeft > 5_000 ? { ...options.settings, deadlineMs: Math.min(options.settings.deadlineMs, timeLeft) } : null;
+      const run = await locateEmailDomains(waiting.map(next => ({
+        key: next.attemptId, name: facts.get(next.attemptId)?.name ?? null, country: facts.get(next.attemptId)?.country ?? null,
+        industry: facts.get(next.attemptId)?.industry ?? null, domains: next.domains,
+      })), { client: deps.client, lookupMx: deps.lookupMx, settings, model: options.model });
+      for (const value of run.domains.values()) options.found[value.via] += 1;
+      return run.domains;
+    })().catch(() => new Map<string, LocatedDomain>());
+    return (await located).get(lead.attemptId) ?? null;
+  };
+}
+
+/** The mail servers of a domain are looked up once per run. */
+function onceEach(lookup: (domain: string) => Promise<boolean>) {
+  const seen = new Map<string, Promise<boolean>>();
+  return (domain: string) => {
+    let answer = seen.get(domain);
+    if (!answer) { answer = lookup(domain); seen.set(domain, answer); }
+    return answer;
+  };
+}
+
 /** What each claimed person already spent, by attempt id; a failed read counts as nothing spent. */
 async function spentVerifications(client: ServiceClient, attemptIds: string[]) {
   const spent = new Map<string, number>();
@@ -241,6 +321,8 @@ export async function runEmailFinderTick(input: {
   budgetMs?: number;
   fetchImpl?: typeof fetch;
   lookupMx?: (domain: string) => Promise<boolean>;
+  /** The Claude that finds a company's domain (tests). */
+  model?: ModelClient;
 } = {}) {
   const environment = input.environment || process.env;
   const apiKey = String(environment.REOON_API_KEY || '').trim();
@@ -264,12 +346,16 @@ export async function runEmailFinderTick(input: {
     deadline: Date.now() + (input.budgetMs ?? 120_000),
     now,
     fetchImpl: input.fetchImpl,
-    lookupMx: input.lookupMx || defaultLookupMx,
+    lookupMx: onceEach(input.lookupMx || defaultLookupMx),
   };
   const summary = { enabled: true as const, claimed: leads.length, verifications: 0, stoppedBy: '' as string,
-    outcomes: {} as Record<string, number> };
+    outcomes: {} as Record<string, number>, domainsFound: { colegas: 0, ia: 0 } as Record<LocatedDomain['via'], number> };
   const spentAlready = await spentVerifications(client, leads.map(lead => lead.attemptId));
   const perLead = deps.maxCandidates * VERIFICATIONS_PER_LEAD_FACTOR;
+  deps.locate = domainLocator(leads, deps, {
+    settings: emailDomainSettings(environment), model: input.model, found: summary.domainsFound,
+    skip: lead => Boolean(summary.stoppedBy) || (spentAlready.get(lead.attemptId) ?? 0) >= perLead,
+  });
   for (const lead of leads) {
     let outcome: Outcome;
     if (summary.stoppedBy) {
