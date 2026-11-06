@@ -1,3 +1,4 @@
+import { coworkRequestApprovesEffect } from './execution-policy';
 import { z } from 'zod';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, coworkSameLine, type CoworkBlock, type CoworkPlanStep, type CoworkWebAction } from './contracts';
 import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText, withoutRepeatedAside, withoutTrailingQuestions } from './answer-quality';
@@ -743,6 +744,17 @@ function offerDone(said: string, offer: string, previous: CoworkHistoryTurn | un
     : `${said} La campaña necesita su primer correo a la vista: usa draft.write con kind email y campaign true para esos contactos (un primer correo; los seguimientos, después y si los pide); cuando la Redactora termine, propones la campaña con ese correo. ${extra}`;
   if (OFFERS_APPROVAL.test(offer)) return `${said} Hazlo ahora: propón ese efecto con su tarjeta de aprobación, con los contactos que ya leíste en la conversación (si te faltan sus identificadores, consúltalos primero). ${extra}`;
   return null;
+}
+
+/**
+ * «Sí, investiga a Cristian Heyden antes de escribirle» answered with «¿Investigo a Cristian Heyden…?» (6 Nov 2026): the person had
+ * already asked, and the research started only after a second answer. The feedback that sends the turn to propose it (its message
+ * approves it, execution-policy.ts), or null.
+ */
+export function coworkOrderedResearchFeedback(message: string, answer: { reply?: string } | null | undefined): string | null {
+  if (!coworkRequestApprovesEffect('start_research', message)) return null;
+  if (!/¿[^?]*invest[ií]g[^?]*\?/iu.test(String(answer?.reply || ''))) return null;
+  return `El usuario ya pidió la investigación en este mensaje («${message.slice(0, 160)}»): no le preguntes de nuevo. Propón ahora research.start con el leadId del contacto que pidió (si no lo tienes a la vista, búscalo primero con leads.search); su mensaje la aprueba y parte sola. Si además pregunta algo, respóndelo en esa misma answer.reply, en una o dos frases.`;
 }
 
 // An answer that closes asking whether to look for emails («¿Busco el correo de los 3 contactos que no lo tienen?»).
@@ -1746,7 +1758,7 @@ async function runCoworkLoop(input: {
         // A «sí» to what the previous answer offered is done, not answered again: once per turn, with a decision to spare.
         const accepted = !offerTaken && !input.clarification && !closingFallback && !judgedFallback && !written && !informationOnly && turn < last && !late()
           ? coworkAcceptedOfferFeedback(input.message, input.history) ?? coworkRepeatedOfferFeedback(decision.answer, input.history)
-            ?? (input.proposeEffect ? coworkOfferedLookupFeedback(decision.answer) : null) : null;
+            ?? (input.proposeEffect ? coworkOfferedLookupFeedback(decision.answer) ?? coworkOrderedResearchFeedback(input.message, decision.answer) : null) : null;
         if (accepted) {
           offerTaken = true;
           closingFallback = decision.answer;

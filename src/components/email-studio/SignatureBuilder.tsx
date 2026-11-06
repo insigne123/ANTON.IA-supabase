@@ -79,6 +79,8 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
   const [separator, setSeparator] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [readingMailbox, setReadingMailbox] = useState(false);
+  const triedMailbox = useRef(false);
   const [notes, setNotes] = useState<string[]>([]);
   const [codeOpen, setCodeOpen] = useState(false);
   const [code, setCode] = useState('');
@@ -196,6 +198,40 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
     }
   }
 
+  /**
+   * «Traer mi firma de mi correo» (6 Nov 2026): the signature the person already sends with, read from their Gmail settings or
+   * from the emails they sent from Outlook, photo included; it goes through the same cleaning and upload as a pasted one.
+   * `automatic`: tried once on arrival when there is no signature yet, and silent when nothing is found.
+   */
+  async function importFromMailbox(automatic = false) {
+    if (!automatic) { setProblem(null); setStatus(null); }
+    setReadingMailbox(true);
+    let found: { html: string | null; provider?: string; reason?: string } | null = null;
+    try {
+      const response = await fetch('/api/email-studio/mailbox-signature', { cache: 'no-store' });
+      found = response.ok ? await response.json() : null;
+    } catch { found = null; } finally { setReadingMailbox(false); }
+    if (!found?.html) {
+      if (!automatic) setProblem(found?.reason === 'not_connected' ? 'Conecta tu Outlook o Gmail para traer tu firma.'
+        : found?.reason === 'not_found' ? 'No encontramos una firma en tus últimos correos. Pégala abajo o sube su archivo.'
+          : 'No pudimos leer tu correo ahora. Pega tu firma abajo o inténtalo de nuevo.');
+      return;
+    }
+    setDesign('propia');
+    await importSignature(found.html, 'paste');
+    const account = found.provider === 'gmail' ? 'Gmail' : 'Outlook';
+    setNotes(current => [`Trajimos la firma que usas en ${account}. Revísala en la vista previa y guárdala.`, ...current]);
+  }
+
+  // No signature yet: the one the person already uses is brought once, so there is nothing to paste (only to save).
+  useEffect(() => {
+    if (loading || triedMailbox.current || configs.gmail?.html || configs.outlook?.html) return;
+    triedMailbox.current = true;
+    void importFromMailbox(true);
+    // importFromMailbox reads the state it needs when it runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, configs]);
+
   async function readSignatureFile(file: File) {
     if (!/\.(?:html?|txt)$/i.test(file.name) && !/^text\/(?:html|plain)$/i.test(file.type)) {
       setProblem('Sube el archivo .htm o .html de tu firma.');
@@ -284,7 +320,8 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
         </fieldset>
 
         {design === 'propia' ? (
-          <OwnSignature baseId={baseId} hasSignature={Boolean(fields.customHtml)} importing={importing} notes={notes}
+          <OwnSignature baseId={baseId} hasSignature={Boolean(fields.customHtml)} importing={importing || readingMailbox} notes={notes}
+            onFromMailbox={() => void importFromMailbox()}
             codeOpen={codeOpen} code={code} onCode={setCode} onToggleCode={() => setCodeOpen(open => !open)}
             onImport={(raw, from) => void importSignature(raw, from)} onPickFile={() => htmlFileRef.current?.click()}
             onClear={() => { update({ customHtml: '' }); setNotes([]); }} />
@@ -408,8 +445,9 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
  * «Tu firma actual»: a box that only takes a paste (typing in it does nothing), the .htm file Outlook keeps, or the HTML code
  * for whoever has it. What comes in is shown in the preview, as the email will carry it.
  */
-function OwnSignature({ baseId, hasSignature, importing, notes, codeOpen, code, onCode, onToggleCode, onImport, onPickFile, onClear }: {
+function OwnSignature({ baseId, hasSignature, importing, notes, codeOpen, code, onCode, onToggleCode, onImport, onPickFile, onClear, onFromMailbox }: {
   baseId: string; hasSignature: boolean; importing: boolean; notes: string[]; codeOpen: boolean; code: string;
+  onFromMailbox: () => void;
   onCode: (value: string) => void; onToggleCode: () => void; onImport: (raw: string, from: 'paste' | 'code' | 'file') => void;
   onPickFile: () => void; onClear: () => void;
 }) {
@@ -425,7 +463,7 @@ function OwnSignature({ baseId, hasSignature, importing, notes, codeOpen, code, 
         <h3 id={`${baseId}-own`} className="text-sm font-medium text-foreground">{hasSignature ? 'Tu firma está lista' : 'Trae la firma que ya usas'}</h3>
         <p className="text-xs leading-5 text-muted-foreground">
           {hasSignature ? 'Revísala en la vista previa y guárdala. Para cambiarla, pega otra encima.'
-            : 'Cópiala desde Gmail u Outlook y pégala abajo: se conservan el formato, los enlaces y las imágenes.'}
+            : 'La traemos de tu Gmail u Outlook con su foto, o la pegas abajo: se conservan el formato, los enlaces y las imágenes.'}
         </p>
       </div>
       <div
@@ -445,6 +483,9 @@ function OwnSignature({ baseId, hasSignature, importing, notes, codeOpen, code, 
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" onClick={onFromMailbox} disabled={importing}>
+          <Mail className="h-4 w-4" aria-hidden="true" />Traer mi firma de mi correo
+        </Button>
         <Button type="button" variant="outline" size="sm" onClick={onPickFile} disabled={importing}>
           <FileUp className="h-4 w-4" aria-hidden="true" />Subir archivo .htm
         </Button>
