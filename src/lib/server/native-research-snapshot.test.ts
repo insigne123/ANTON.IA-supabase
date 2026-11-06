@@ -185,4 +185,11 @@ test('optional sources never leave a research with a sound company profile parti
   const withoutCompany = build(null, ['official_site_fetch_failed', 'company_news_unavailable']);
   assert.notEqual(withoutCompany.snapshot.lifecycle.status, 'completed');
   assert.ok(withoutCompany.result.warnings.includes('company_context_missing'));
+
+  // A source that answered with an HTTP error leaves it partial, report and all: as «completed» it failed at the parse
+  // («Completed research is not ready for automatic use: http_error», 3 of 56 on 5 and 6 Nov 2026).
+  const withHttpError = build({ ...page, pages: [page] }, ['company_news_http_error', 'person_public_evidence_missing']);
+  assert.equal(withHttpError.snapshot.lifecycle.status, 'partial');
+  assert.ok(withHttpError.snapshot.claims.length > 0, 'the company profile stays');
+  assert.ok(withHttpError.result.warnings.includes('company_news_http_error'));
 });

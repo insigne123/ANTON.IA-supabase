@@ -42,6 +42,14 @@ function normalizedResearchMarker(value: unknown): string {
   return researchFailureMarkers.has(normalized) ? normalized : '';
 }
 
+/**
+ * The failure marker of a code, message or warning («http_error», «fallback», «invalid_response»), or ''. Research with one is
+ * never «completed» (ResearchSnapshotV1Schema): whoever builds it decides the status with this, instead of failing at the parse.
+ */
+export function researchFailureMarker(value: unknown): string {
+  return normalizedResearchMarker(value);
+}
+
 function hasHttpUrl(value: unknown): boolean {
   try {
     const protocol = new URL(String(value || '')).protocol;
