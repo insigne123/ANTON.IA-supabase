@@ -443,7 +443,8 @@ try {
     provider: 'google', firstEmails,
   });
   approvals.push(`Crear la campaña «AXIS · RR. HH. retail y construcción» sin enviar, para ${campaign.recipients} personas`);
-  assert.deepEqual(campaign, { recipients: 2, provider: 'google' });
+  // The proposal already brings its follow-up: Cowork adds none (it writes three only when a campaign comes with its first email alone).
+  assert.deepEqual(campaign, { recipients: 2, provider: 'google', messages: 2, followUpsAdded: 0 });
   const definition = tables.cowork_campaign_definitions.find(row => row.run_id === CAMPAIGN_RUN).definition;
   assert.deepEqual(definition.overrides.map(item => [item.email, item.messageIndex, item.body.split('\n')[0]]), [
     ['vfuentes@tiendasandinas.cl', 0, 'Hola Valentina,'],
