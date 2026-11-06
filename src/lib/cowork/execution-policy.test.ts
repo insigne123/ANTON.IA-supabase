@@ -26,6 +26,9 @@ test('the person\'s own words approve a research, and only an order or a yes to 
   assert.equal(coworkRequestApprovesEffect('start_research', 'no lo investigues todavía'), false);
   assert.equal(coworkRequestApprovesEffect('start_research', 'si te parece, investígalo'), false, 'a condition waits for the card');
   assert.equal(coworkRequestApprovesEffect('start_research', 'mejor espera, investiga después'), false);
+  assert.equal(coworkRequestApprovesEffect('start_research', 'quiero investigar a Cristian más tarde'), false, 'put off: the card waits');
+  assert.equal(coworkRequestApprovesEffect('start_research', 'investígalo mañana'), false);
+  assert.equal(coworkRequestApprovesEffect('start_research', 'investígala otro día'), false);
   assert.equal(coworkRequestApprovesEffect('send_email', 'investiga y envíale el correo'), false, 'only the effects listed');
   assert.equal(coworkRequestApprovesEffect('enrich_contact', 'investígalo'), false);
 });

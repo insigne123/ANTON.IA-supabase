@@ -20,7 +20,8 @@ const REQUESTABLE_EFFECTS: Record<string, { orders: RegExp; offered: RegExp }> =
     offered: /^¿\s*(?:lo\s+|la\s+|los\s+|las\s+|te\s+|le\s+)?invest[ií]g(?:o|amos)(?!\p{L})/iu,
   },
 };
-const DECLINES = /(?<!\p{L})(?:no|nunca|todav[íi]a no|a[úu]n no|sin|espera|mejor no)(?!\p{L})/iu;
+// «Más tarde», «después», «mañana» or «otro día» put it off: the card waits, it is not done now.
+const DECLINES = /(?<!\p{L})(?:no|nunca|todav[íi]a no|a[úu]n no|sin|espera|mejor no|m[áa]s tarde|despu[ée]s|ma[ñn]ana|otro d[íi]a)(?!\p{L})/iu;
 const CONDITION = /^\s*(?:si|cuando|en caso)(?!\p{L})(?!\s*[,.!]|\s*$)/iu;
 const ACCEPTS = /^\s*(?:s[íi]|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|por favor|porfa)(?!\p{L})/iu;
 
