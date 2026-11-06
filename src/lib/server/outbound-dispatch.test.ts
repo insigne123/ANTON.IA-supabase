@@ -1099,3 +1099,51 @@ test('failed reconciliation releases quota only after guarded persistence succee
   assert.equal(result.dispatch.status, 'failed');
   assert.deepEqual(rpcCalls, ['release_outbound_contact_quota_v1']);
 });
+
+test('a dispatch never handed to the provider closes as not sent, at attempt 0 and without a start', async () => {
+  const repository = new MemoryDispatchRepository();
+  const draft = readyDraft();
+  const metadata = metadataFor(draft, 'key:reconcile-never-claimed');
+  const dispatch = await repository.seed(metadata, 'unknown');
+  dispatch.reconciliationClaimedAt = now();
+  let saved: any = null;
+  const client = {
+    from() {
+      return {
+        update(patch: any) {
+          saved = patch;
+          return {
+            eq() { return this; },
+            select() { return this; },
+            async maybeSingle() {
+              return { data: {
+                id: dispatch.id, organization_id: dispatch.organizationId, user_id: dispatch.userId, draft_id: dispatch.draftId,
+                version_id: dispatch.versionId, idempotency_key: dispatch.idempotencyKey, content_hash: dispatch.contentHash,
+                channel: dispatch.channel, provider: dispatch.provider, status: patch.status, metadata: dispatch.metadata,
+                provider_message_id: null, provider_response: patch.provider_response, error_code: patch.error_code,
+                error_message: patch.error_message, created_at: dispatch.createdAt, updated_at: patch.updated_at,
+                started_at: patch.started_at ?? null, completed_at: patch.completed_at, attempt_count: 0,
+                reconciliation_attempt_count: patch.reconciliation_attempt_count, last_reconciliation_at: patch.last_reconciliation_at,
+                reconciliation_claimed_at: patch.reconciliation_claimed_at, reconciled_at: patch.reconciled_at,
+                reconciliation_details: patch.reconciliation_details,
+              }, error: null };
+            },
+          };
+        },
+      };
+    },
+    async rpc() { return { data: true, error: null }; },
+  } as any;
+
+  const result = await reconcileUnknownOutboundDispatch(dispatch, {
+    async reconcile() { return { outcome: 'failed', preProvider: true, message: 'No salió.' }; },
+  }, { client, now });
+
+  assert.equal(result.reconciled, true);
+  assert.equal(saved.status, 'failed');
+  assert.equal(saved.error_code, 'pre_provider_rejected', 'the state check for attempt 0 asks for this code');
+  assert.equal(saved.provider_response.providerInvoked, false);
+  assert.equal('started_at' in saved, false, 'a dispatch that never started keeps no start');
+  assert.equal('attempt_count' in saved, false, 'and no attempt');
+  assert.ok(saved.reconciled_at && saved.completed_at);
+});
