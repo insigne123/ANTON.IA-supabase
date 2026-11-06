@@ -9,6 +9,8 @@ const rowSchema = z.object({ id: z.string().min(1).max(215), name: cell, title: 
   fit: cell,
   // A person of an external search who is already among the user's contacts (external-search.ts): «En tus contactos», never exported.
   savedLeadId: z.string().max(64).optional(),
+  // The sector was estimated by an AI from the company's site or the web (src/lib/server/company-sectors.ts), not given by Apollo.
+  industryEstimated: z.boolean().optional(),
 }).strip();
 export const COWORK_OBSERVED_CONTACT_MAX = 500;
 const resultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().uuid() })).max(COWORK_OBSERVED_CONTACT_MAX), scope: z.literal('own_saved_contacts') });

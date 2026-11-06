@@ -769,6 +769,23 @@ export async function fetchOfficialSite(input: {
 }
 
 /**
+ * The home page of a company and nothing else: its title, its description and the start of its text, to tell what the company
+ * does (src/lib/server/company-sectors.ts). Same safety as fetchOfficialSite (public DNS only, redirects within the company, a
+ * fixed time budget); nothing is cached or written. Null when the site cannot be read or says nothing.
+ */
+export async function fetchCompanyHomePage(domain: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<OfficialSitePage | null> {
+  const host = domain.trim().toLowerCase().replace(/^www\./, '');
+  if (!isSafePublicDomain(host)) return null;
+  const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? 5_000), ...(options.signal ? [options.signal] : [])]);
+  try {
+    const { page } = await fetchOfficialPage({ url: new URL(`https://${host}`), domain: host, signal, maxRedirects: 3 });
+    return page && (page.title || page.description || page.text) ? page : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The pages of a company site that describe it, for «Perfil» (src/ai/flows/generate-company-profile.ts). Same safety as
  * fetchOfficialSite (public DNS only, redirects within the company, a fixed time budget). A home page that only asks for the
  * country is followed into the country page, and the offer, company and proof pages are read from both

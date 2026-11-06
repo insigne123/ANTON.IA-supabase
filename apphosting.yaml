@@ -243,6 +243,12 @@ env:
   - variable: RESEARCH_CLAUDE_WEB_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # El rubro de las empresas que Apollo entrega sin él (todas las de sus búsquedas): se lee la portada de cada sitio y un Claude (Haiku) nombra el
+  # rubro de todas en una llamada; las que no puede, las busca en la web (hasta COMPANY_SECTOR_AI_SEARCHES por búsqueda, 6; US$0,01 cada una). Con un
+  # tope de 15 s (COMPANY_SECTOR_AI_DEADLINE_MS): la que no se sabe a tiempo queda sin rubro, como antes (src/lib/server/company-sectors.ts).
+  - variable: COMPANY_SECTOR_AI_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Para limitar los borradores o el harness a unas pocas personas se agregan DRAFT_PILOT_USER_IDS y COWORK_HARNESS_USER_IDS (ids de usuario separados por
   # coma; la prueba exige que sean las mismas). Para volver atrás se quita la variable de la mejora y se despliega: el siguiente borrador y el siguiente
   # turno ya corren como antes.
