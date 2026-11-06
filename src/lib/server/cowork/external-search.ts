@@ -19,6 +19,7 @@ import { normalizeLockLinkedin, teamLockNotice } from '@/lib/team-lock';
 import type { AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
 import { linkedinProfilesMatch } from '@/lib/linkedin-url';
 import { sectorFromIndustryCodes } from '@/lib/industry-codes';
+import { companySectorClassifier, searchCountry, type CompanySector, type CompanySectorClassifier } from '@/lib/server/company-sectors';
 import { COWORK_CONTINUE_AFTER_SEARCH } from '@/lib/cowork/continuation-messages';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
@@ -32,7 +33,9 @@ function count(value: unknown) { return typeof value === 'number' && Number.isFi
 function record(value: unknown) { return value && typeof value === 'object' ? value as Record<string, unknown> : {}; }
 
 type ProviderRecord = z.infer<typeof providerLead>;
-type Company = { id: string; name: string | null; website: string | null; linkedin: string | null; industry: string | null; employees: number | null };
+type Company = { id: string; name: string | null; website: string | null; linkedin: string | null; industry: string | null; employees: number | null;
+  /** The sector was estimated by an AI from its site or the web (src/lib/server/company-sectors.ts), not given by Apollo. */
+  industryEstimated?: boolean };
 
 /** The sector Apollo gives, else the one its NAICS or SIC codes say: the company search brings no industry (src/lib/industry-codes.ts). */
 function companyIndustry(org: ProviderRecord) {
@@ -45,8 +48,11 @@ function companyOf(org: ProviderRecord): Company {
 }
 
 /** One person as Cowork shows and saves it; the company found first fills what the people search leaves out. */
-function personRow(lead: ProviderRecord, company?: Company) {
+function personRow(lead: ProviderRecord, company?: Company, estimated?: CompanySector) {
   const organization = record(lead.organization);
+  const given = text(organization.industry || lead.industry);
+  const industry = given || company?.industry || estimated?.sector || null;
+  const industryEstimated = !given && Boolean(company?.industry ? company.industryEstimated : estimated);
   return {
     id: `apollo:${lead.id}`, name: text(lead.name || lead.full_name), title: text(lead.title),
     company: text(organization.name || lead.org_name || lead.organization_name) || company?.name || null,
@@ -54,9 +60,10 @@ function personRow(lead: ProviderRecord, company?: Company) {
     company_website: webUrl(organization.website_url || lead.organization_website) || company?.website || null,
     company_linkedin: webUrl(organization.linkedin_url) || company?.linkedin || null,
     // Search does not reveal or verify mailbox addresses.
-    email: null, status: 'No guardado', industry: text(organization.industry || lead.industry) || company?.industry || null,
+    email: null, status: 'No guardado', industry,
     employees: count(lead.organization_size) ?? company?.employees ?? null,
     location: [lead.city, lead.country].filter(item => typeof item === 'string').join(', ').slice(0, 500),
+    ...(industryEstimated ? { industryEstimated: true } : {}),
   };
 }
 
@@ -79,23 +86,36 @@ function rankedRows(rows: Array<ReturnType<typeof personRow> & { companyKey: str
  * What a company search can say. Apollo's company search returns neither the industry nor the headcount nor the city of each
  * company (docs.apollo.io, Organization Search, 6 Nov 2026): the companies match the industries and places searched, by keyword.
  */
-export const COMPANY_SEARCH_NOTICE = 'Apollo no entrega el rubro, la dotación ni la ciudad de cada empresa en esta búsqueda: las empresas calzan con los rubros y la sede buscados, por palabras clave. Cuando el rubro aparece, viene de su código de actividad (NAICS o SIC). Confirma el encaje antes de buscar personas. Son empresas, no contactos guardables como personas.';
+export const COMPANY_SEARCH_NOTICE = 'Apollo no entrega el rubro, la dotación ni la ciudad de cada empresa en esta búsqueda: las empresas calzan con los rubros y la sede buscados, por palabras clave. El rubro que aparece viene de su código de actividad (NAICS o SIC) o, con industryEstimated, lo estimó una IA con su sitio web. Confirma el encaje antes de buscar personas. Son empresas, no contactos guardables como personas.';
 
-export function normalizeCoworkSearchResult(value: unknown, limit: number, target: 'people' | 'companies' = 'people', rolePolicy?: AudienceRolePolicy | null, page = 1) {
+/**
+ * A provider answer as Cowork shows it. `sectors` are the sectors an AI estimated for the companies Apollo gave none
+ * (estimateSectors): by provider id for a company search, by companyKey for a people search.
+ */
+export function normalizeCoworkSearchResult(value: unknown, limit: number, target: 'people' | 'companies' = 'people', rolePolicy?: AudienceRolePolicy | null, page = 1,
+  sectors?: Map<string, CompanySector>) {
   if (target === 'companies') {
     const payload = z.object({ organizations: z.array(providerLead).max(1000) }).parse(value);
     const next = payload.organizations.length >= limit && page < COWORK_SEARCH_MAX_PAGE ? { page: page + 1 } : null;
     return { scope: 'external_company_search', provider: 'apollo', limit, page,
       returned: Math.min(payload.organizations.length, limit), truncated: Boolean(next), hasMore: Boolean(next), next,
-      items: payload.organizations.slice(0, limit).map(org => ({
-        id: `apollo-company:${org.id}`, name: text(org.name), domain: text(org.primary_domain),
-        website: webUrl(org.website_url), linkedin_url: webUrl(org.linkedin_url),
-        industry: companyIndustry(org), employees: typeof org.estimated_num_employees === 'number' ? org.estimated_num_employees : null,
-        location: [org.city, org.country].filter(item => typeof item === 'string').join(', ').slice(0, 500),
-      })), notice: COMPANY_SEARCH_NOTICE };
+      items: payload.organizations.slice(0, limit).map(org => {
+        const given = companyIndustry(org);
+        const estimated = given ? undefined : sectors?.get(org.id);
+        return {
+          id: `apollo-company:${org.id}`, name: text(org.name), domain: text(org.primary_domain),
+          website: webUrl(org.website_url), linkedin_url: webUrl(org.linkedin_url),
+          industry: given || estimated?.sector || null, employees: typeof org.estimated_num_employees === 'number' ? org.estimated_num_employees : null,
+          location: [org.city, org.country].filter(item => typeof item === 'string').join(', ').slice(0, 500),
+          ...(estimated ? { industryEstimated: true } : {}),
+        };
+      }), notice: COMPANY_SEARCH_NOTICE };
   }
   const payload = z.object({ leads: z.array(providerLead).max(1000) }).parse(value);
-  const ranked = rankedRows(payload.leads.map(lead => ({ ...personRow(lead), companyKey: companyKey(lead) })), { rolePolicy, limit });
+  const ranked = rankedRows(payload.leads.map(lead => {
+    const key = companyKey(lead);
+    return { ...personRow(lead, undefined, key ? sectors?.get(key) : undefined), companyKey: key };
+  }), { rolePolicy, limit });
   const next = payload.leads.length >= limit && page < COWORK_SEARCH_MAX_PAGE ? { page: page + 1 } : null;
   return {
     scope: 'external_search', provider: 'apollo', strategy: 'people', limit, page,
@@ -106,12 +126,34 @@ export function normalizeCoworkSearchResult(value: unknown, limit: number, targe
 
 type SearchRequest = (payload: Record<string, unknown>) => Promise<unknown>;
 
+/** The website's host, for reading its home page. */
+function domainOf(value: unknown) {
+  const url = webUrl(value);
+  if (!url) return typeof value === 'string' && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(value.trim()) ? value.trim().toLowerCase() : null;
+  return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+}
+
+/**
+ * The sectors of the companies Apollo gave none, estimated by an AI (src/lib/server/company-sectors.ts). Best effort: without
+ * the classifier, or if it fails, the companies go without a sector as before.
+ */
+async function estimateSectors(classify: CompanySectorClassifier | null, criteria: CoworkSearchCriteria,
+  companies: Array<{ key: string; name: string | null; domain: string | null; location?: string | null }>) {
+  const missing = companies.flatMap(company => (company.name ? [{ key: company.key, name: company.name, domain: company.domain, location: company.location ?? null }] : []));
+  if (!classify || !missing.length) return new Map<string, CompanySector>();
+  try {
+    return await classify(missing, { country: searchCountry(criteria.companyLocations?.length ? criteria.companyLocations : criteria.locations) });
+  } catch {
+    return new Map<string, CompanySector>();
+  }
+}
+
 /**
  * «Empresas primero»: the companies of the criteria (one provider search), then the people with those roles inside
  * them, 50 companies per call, ranked by who may decide the purchase. The page moves through companies; offset
  * through the people of those same companies, so «Traer más» brings new people before new companies.
  */
-async function searchCompaniesFirst(criteria: CoworkSearchCriteria, userId: string, request: SearchRequest) {
+async function searchCompaniesFirst(criteria: CoworkSearchCriteria, userId: string, request: SearchRequest, classify: CompanySectorClassifier | null) {
   const page = criteria.page || 1;
   const offset = criteria.offset || 0;
   const found = z.object({ organizations: z.array(providerLead).max(1000), total_pages: z.number().nullish() }).passthrough()
@@ -141,6 +183,14 @@ async function searchCompaniesFirst(criteria: CoworkSearchCriteria, userId: stri
   }
   // Without any answer the search failed; with some, it says which part is missing.
   if (!answered) throw failure;
+  // The sector of the companies that have people and no sector from Apollo, before ranking: the reason of fit says it.
+  const companyOfLead = (lead: ProviderRecord) => { const key = companyKey(lead); return key ? byId.get(key) || byName.get(key) : undefined; };
+  const withPeople = new Map([...leads.values()].flatMap(lead => { const company = companyOfLead(lead); return company && !company.industry ? [[company.id, company] as const] : []; }));
+  const estimated = await estimateSectors(classify, criteria, [...withPeople.values()].map(company => ({ key: company.id, name: company.name, domain: domainOf(company.website) })));
+  for (const [id, sector] of estimated) {
+    const company = withPeople.get(id);
+    if (company) { company.industry = sector.sector; company.industryEstimated = true; }
+  }
   const rows = [...leads.values()].map(lead => {
     const key = companyKey(lead);
     const company = key ? byId.get(key) || byName.get(key) : undefined;
@@ -162,8 +212,12 @@ async function searchCompaniesFirst(criteria: CoworkSearchCriteria, userId: stri
   };
 }
 
-/** Runs an approved search with the strategy its criteria resolve to (search-proposal.ts). */
-export async function runCoworkSearch(criteria: CoworkSearchCriteria, userId: string, request: SearchRequest = requestApolloSearch) {
+/**
+ * Runs an approved search with the strategy its criteria resolve to (search-proposal.ts). The companies Apollo gives no sector
+ * get one estimated by an AI when it is on (COMPANY_SECTOR_AI_ENABLED, src/lib/server/company-sectors.ts).
+ */
+export async function runCoworkSearch(criteria: CoworkSearchCriteria, userId: string, request: SearchRequest = requestApolloSearch,
+  classify: CompanySectorClassifier | null = companySectorClassifier()) {
   const strategy = coworkSearchStrategy(criteria);
   if (strategy === 'profile') {
     const valid = coworkSearchCriteriaSchema.parse(criteria);
@@ -177,9 +231,32 @@ export async function runCoworkSearch(criteria: CoworkSearchCriteria, userId: st
         ? 'Encontré a la persona del perfil compartido. Puedes guardarla y después preparar la invitación; todavía no se guardó ni se envió nada.'
         : 'El proveedor no encontró a la persona de este perfil. Puedes abrir su perfil y guardarla desde la extensión de ANTON.IA.' };
   }
-  if (strategy === 'companies_first') return searchCompaniesFirst(criteria, userId, request);
-  return normalizeCoworkSearchResult(await request(coworkApolloPayload(criteria, userId)), criteria.limit, strategy === 'companies' ? 'companies' : 'people',
-    criteria.rolePolicy, criteria.page || 1);
+  if (strategy === 'companies_first') return searchCompaniesFirst(criteria, userId, request, classify);
+  const answer = await request(coworkApolloPayload(criteria, userId));
+  const target = strategy === 'companies' ? 'companies' : 'people';
+  return normalizeCoworkSearchResult(answer, criteria.limit, target, criteria.rolePolicy, criteria.page || 1,
+    await estimateSectors(classify, criteria, companiesWithoutSector(answer, target, criteria.limit)));
+}
+
+/** The companies of a provider answer that came without a sector: the ones a company search shows, or the companies of the people found. */
+function companiesWithoutSector(answer: unknown, target: 'people' | 'companies', limit: number) {
+  if (target === 'companies') {
+    const parsed = z.object({ organizations: z.array(providerLead).max(1000) }).safeParse(answer);
+    return (parsed.success ? parsed.data.organizations.slice(0, limit) : []).filter(org => !companyIndustry(org)).map(org => ({
+      key: org.id, name: text(org.name), domain: domainOf(org.primary_domain) || domainOf(org.website_url),
+      location: [org.city, org.country].filter(item => typeof item === 'string').join(', ') || null,
+    }));
+  }
+  const parsed = z.object({ leads: z.array(providerLead).max(1000) }).safeParse(answer);
+  const companies = new Map<string, { key: string; name: string | null; domain: string | null }>();
+  for (const lead of parsed.success ? parsed.data.leads : []) {
+    const organization = record(lead.organization);
+    const key = companyKey(lead);
+    if (!key || companies.has(key) || text(organization.industry || lead.industry)) continue;
+    companies.set(key, { key, name: text(organization.name || lead.organization_name || lead.org_name),
+      domain: domainOf(organization.primary_domain) || domainOf(organization.website_url || lead.organization_website) });
+  }
+  return [...companies.values()];
 }
 
 export async function resolveCoworkSearch(auth: AuthContext, runId: string, approve: boolean) {

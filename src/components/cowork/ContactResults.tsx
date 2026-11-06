@@ -89,6 +89,8 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
     return { industries: list(input.industries), places: list(input.companyLocations) };
   }, [observations]);
   const unknownSector = rows.some(row => row.id.startsWith('apollo-company:') && !row.industry);
+  // Apollo gives no sector in a search: the one shown was estimated by an AI from the company's site (company-sectors.ts).
+  const estimatedSector = rows.some(row => row.industryEstimated);
   const askedLine = [asked.industries.length ? `Rubros buscados: ${asked.industries.join(', ')}.` : '',
     asked.places.length ? `Sede: ${asked.places.join(' o ')}.` : ''].filter(Boolean).join(' ');
   const term = search.trim().toLocaleLowerCase('es');
@@ -139,7 +141,9 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
         {!showHeader && <ExportMenu runId={runId} kind="contacts" read={full?.sequence ?? null} onError={onError} onAccessDenied={onAccessDenied} />}
       </div>
       <p className="text-[12px] text-cw-muted">La descarga incluye {rows.length} {noun(rows.length)}, sin aplicar este filtro.</p>
-      {unknownSector && <p className="text-[12px] text-cw-muted">{askedLine ? `${askedLine} ` : ''}Apollo no entrega el rubro ni la dotación de cada empresa en la búsqueda.</p>}
+      {(unknownSector || estimatedSector) && <p className="text-[12px] text-cw-muted">{askedLine ? `${askedLine} ` : ''}{estimatedSector
+        ? 'Apollo no entrega el rubro en la búsqueda: el que ves lo estimó una IA con el sitio web de cada empresa.'
+        : 'Apollo no entrega el rubro ni la dotación de cada empresa en la búsqueda.'}</p>}
       {cutSearch && !full && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
         <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Cowork revisó los primeros {rows.length}. Hay más contactos tuyos que calzan con esta búsqueda.</p>
         <CwButton size="sm" variant="secondary" disabled={loadingFull} onClick={() => void loadFull()}>
@@ -178,11 +182,12 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
           // Under a company header the company part of «fit» (industry, size) is said once, in the header.
           const fit = row.fit ? (groups.size ? String(row.fit).split(' · ')[0] : String(row.fit)) : '';
           const companyFacts = [row.industry, typeof row.employees === 'number' ? `${row.employees.toLocaleString('es-CL')} empleados` : null].filter(Boolean).join(' · ');
+          const sectorHint = row.industryEstimated ? 'Rubro estimado con IA a partir de su sitio web' : undefined;
           return <Fragment key={row.id}>
             {groupSize !== undefined && <li className="flex min-w-0 items-center gap-2 bg-cw-panel px-4 py-1.5 text-[12px] text-cw-muted">
               <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span className="min-w-0 truncate"><span className="font-medium text-cw-text">{String(row.company)}</span>
-                {companyFacts && <span className="max-sm:hidden"> · {companyFacts}</span>}</span>
+                {companyFacts && <span className="max-sm:hidden" title={sectorHint}> · {companyFacts}</span>}</span>
               <span className="shrink-0">· {groupSize} {groupSize === 1 ? 'persona' : 'personas'}</span>
             </li>}
           <li className="group px-4 py-3 transition-colors hover:bg-cw-panel">
@@ -196,7 +201,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
                   {shown.masked && <span className="shrink-0 text-[11.5px] font-normal text-cw-muted">apellido al buscar el correo</span>}
                   {profile && <a href={profile} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded text-cw-faint hover:text-cw-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]" aria-label={`Abrir perfil de ${name}`}><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>}
                 </p>
-                {subtitle && <p className="truncate text-[12.5px] text-cw-muted">{subtitle}</p>}
+                {subtitle && <p className="truncate text-[12.5px] text-cw-muted" title={company ? sectorHint : undefined}>{subtitle}</p>}
                 {!company && fit && <p className="line-clamp-2 text-[12px] leading-4 text-cw-muted" title={String(row.fit)}>{fit}</p>}
               </div>
               <div className="col-start-2 min-w-0 sm:col-start-3 sm:row-start-1 sm:text-right">

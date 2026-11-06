@@ -59,3 +59,12 @@ export function sectorFromIndustryCodes(input: { naics?: unknown; sic?: unknown 
   }
   return null;
 }
+
+/**
+ * The sectors the app names, once each: what NAICS and SIC say, plus software, which the codes scatter among media and
+ * professional services. The AI that estimates a sector picks from these when one fits (src/lib/server/company-sectors.ts),
+ * so the same company reads the same whichever way its sector was found.
+ */
+export const SECTOR_LABELS: readonly string[] = [...new Set([
+  ...NAICS.map(([, label]) => label), ...SIC.map(([, , label]) => label), 'Tecnología y software',
+])];
