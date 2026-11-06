@@ -80,6 +80,17 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
   };
   const rows = useMemo(() => collectCoworkLeadRows(observations), [observations]);
   const { title: heading, noun, companies: companiesOnly, external } = coworkContactsTitle(rows);
+  // What the last external search asked for: Apollo's company search brings no industry, headcount or city of each company,
+  // so the list says once what the companies matched instead of «Sector no informado» on every row.
+  const asked = useMemo(() => {
+    const input = (observations.filter(observation => observation.action === 'prospecting.search').at(-1)?.input ?? {}) as Record<string, unknown>;
+    const list = (value: unknown) => (Array.isArray(value) ? value : [])
+      .flatMap(item => (typeof item === 'string' && item.trim() ? [item.trim()] : [])).slice(0, 8);
+    return { industries: list(input.industries), places: list(input.companyLocations) };
+  }, [observations]);
+  const unknownSector = rows.some(row => row.id.startsWith('apollo-company:') && !row.industry);
+  const askedLine = [asked.industries.length ? `Rubros buscados: ${asked.industries.join(', ')}.` : '',
+    asked.places.length ? `Sede: ${asked.places.join(' o ')}.` : ''].filter(Boolean).join(' ');
   const term = search.trim().toLocaleLowerCase('es');
   const filtered = rows.filter(row => [row.name, row.company, row.title, row.email, row.domain, row.location]
     .some(value => String(value || '').toLocaleLowerCase('es').includes(term)));
@@ -128,6 +139,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
         {!showHeader && <ExportMenu runId={runId} kind="contacts" read={full?.sequence ?? null} onError={onError} onAccessDenied={onAccessDenied} />}
       </div>
       <p className="text-[12px] text-cw-muted">La descarga incluye {rows.length} {noun(rows.length)}, sin aplicar este filtro.</p>
+      {unknownSector && <p className="text-[12px] text-cw-muted">{askedLine ? `${askedLine} ` : ''}Apollo no entrega el rubro ni la dotación de cada empresa en la búsqueda.</p>}
       {cutSearch && !full && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
         <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Cowork revisó los primeros {rows.length}. Hay más contactos tuyos que calzan con esta búsqueda.</p>
         <CwButton size="sm" variant="secondary" disabled={loadingFull} onClick={() => void loadFull()}>
@@ -155,8 +167,10 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
           // The search hides surnames («Du***n»): show «Rafael D.» and say when the full name arrives.
           const shown = company ? { text: name, masked: false } : displayLeadName(name);
           const profile = safeUrl(row.linkedin_url) || safeUrl(row.company_website) || safeUrl(row.company_linkedin);
-          const subtitle = company ? String(row.industry || 'Sector no informado')
+          // A single industry searched is what the company matched; several, and the line above the list says them.
+          const subtitle = company ? String(row.industry || (asked.industries.length === 1 ? `${asked.industries[0]} · según la búsqueda` : ''))
             : [row.title, row.company].filter(Boolean).join(' · ') || 'Cargo y empresa no disponibles';
+          const place = String(row.location || (company && asked.places.length === 1 ? asked.places[0] : ''));
           const contact = company ? String(row.domain || 'Dominio no disponible')
             : String(row.email || enriched[row.id] || 'Correo no disponible');
           const hasContact = company ? Boolean(row.domain) : Boolean(row.email || enriched[row.id]);
@@ -182,14 +196,14 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
                   {shown.masked && <span className="shrink-0 text-[11.5px] font-normal text-cw-muted">apellido al buscar el correo</span>}
                   {profile && <a href={profile} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded text-cw-faint hover:text-cw-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]" aria-label={`Abrir perfil de ${name}`}><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>}
                 </p>
-                <p className="truncate text-[12.5px] text-cw-muted">{subtitle}</p>
+                {subtitle && <p className="truncate text-[12.5px] text-cw-muted">{subtitle}</p>}
                 {!company && fit && <p className="line-clamp-2 text-[12px] leading-4 text-cw-muted" title={String(row.fit)}>{fit}</p>}
               </div>
               <div className="col-start-2 min-w-0 sm:col-start-3 sm:row-start-1 sm:text-right">
                 {row.id.startsWith('apollo:') && !hasContact
                   ? <p><span className="inline-flex rounded-md bg-cw-hover px-1.5 py-0.5 text-[11.5px] font-medium text-cw-muted">{row.savedLeadId ? 'En tus contactos' : 'No guardado · sin correo'}</span></p>
                   : <p className={hasContact ? 'truncate text-[13px] text-cw-text' : 'truncate text-[13px] text-cw-faint'}>{contact}</p>}
-                <p className="truncate text-[12px] text-cw-muted">{String(row.location || '')}{company ? `${row.location ? ' · ' : ''}${row.employees == null ? 'Dotación no informada' : `${row.employees} empleados`}` : ''}</p>
+                <p className="truncate text-[12px] text-cw-muted">{[place, company && row.employees != null ? `${row.employees} empleados` : ''].filter(Boolean).join(' · ')}</p>
               </div>
             </div>
             {(row.id.startsWith('apollo:') ? !row.savedLeadId : canResearch && !company) && <div className="mt-2 pl-11">

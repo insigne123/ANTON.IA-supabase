@@ -1,4 +1,5 @@
 import type { GatewayConfig, GatewayEnvironment } from './gateway';
+import { industryCodes } from '@/lib/industry-codes';
 import type {
   EnrichmentInput,
   LeadSearchInput,
@@ -180,6 +181,9 @@ function mapOrganization(value: unknown) {
     country: firstText(organization.country),
     short_description: firstText(organization.short_description),
     founded_year: asNumber(organization.founded_year),
+    // The company search brings no industry any more, only these codes when Apollo has them (src/lib/industry-codes.ts).
+    naics_codes: industryCodes(organization.naics_codes),
+    sic_codes: industryCodes(organization.sic_codes),
   };
 }
 
