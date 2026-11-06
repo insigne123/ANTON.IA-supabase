@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { COWORK_SEARCH_MAX, coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from '@/lib/cowork/search-proposal';
+import { COWORK_COMPANY_SEARCH_MAX, coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from '@/lib/cowork/search-proposal';
 import { requireCoworkWorkerAccess } from './access';
 
 /**
@@ -15,7 +15,8 @@ export const coworkSearchEditSchema = z.object({
   industries: list.optional(),
   locations: list.optional(),
   companyLocations: list.optional(),
-  limit: z.number().int().min(1).max(COWORK_SEARCH_MAX).optional(),
+  // Up to 1000 for a company search; the criteria say 100 for people (search-proposal.ts).
+  limit: z.number().int().min(1).max(COWORK_COMPANY_SEARCH_MAX).optional(),
 }).strict();
 export type CoworkSearchEdit = z.input<typeof coworkSearchEditSchema>;
 
@@ -46,7 +47,8 @@ export function coworkEditedSearchCriteria(current: unknown, input: CoworkSearch
     const message = /al menos un criterio/i.test(issue?.message || '') ? 'Deja al menos un cargo, un sector o una ubicación.'
       : /cargos \(titles\) o niveles/.test(issue?.message || '') ? 'Para buscar personas dentro de esas empresas, deja al menos un cargo.'
         : /rubros \(industries\)/.test(issue?.message || '') ? 'Para buscar empresas primero, deja al menos un sector.'
-          : 'Revisa los criterios: alguno no es válido.';
+          : /personas por búsqueda/.test(issue?.message || '') ? 'Se buscan hasta 100 personas a la vez; para más, usa «Traer más».'
+            : 'Revisa los criterios: alguno no es válido.';
     throw new CoworkSearchEditRefused(message, 400);
   }
   return checked.data;
