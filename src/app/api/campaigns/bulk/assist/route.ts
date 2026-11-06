@@ -6,6 +6,7 @@ import { requireBulkCampaignAuth as requireAuth } from '@/lib/server/bulk-campai
 import { bulkCampaignError } from '@/lib/server/bulk-campaigns';
 import { consumeAssistBudget } from '@/lib/server/bulk-ai-budget';
 import { BulkAssistInputSchema, validateSequenceProposal } from '@/lib/bulk-campaign-assist';
+import { reviseCampaignSequence, writeCampaignFollowUps } from '@/lib/server/campaign-follow-ups';
 
 export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
@@ -28,6 +29,16 @@ export async function POST(req: NextRequest) {
         prompt: JSON.stringify(input),
       });
       return NextResponse.json({ messages: validateSequenceProposal(proposal, input.followUpDelays) }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (input.mode === 'follow_ups') {
+      const messages = await writeCampaignFollowUps({ first: input.first, objective: input.objective, audience: input.audience,
+        relationship: input.relationship, followUpDelays: input.followUpDelays, recipients: input.recipients ?? 2 });
+      return NextResponse.json({ messages }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (input.mode === 'sequence_instruction') {
+      const messages = await reviseCampaignSequence({ instruction: input.instruction, objective: input.objective, audience: input.audience,
+        relationship: input.relationship, messages: input.messages, locked: input.locked ?? [], recipients: input.recipients ?? 2 });
+      return NextResponse.json({ messages }, { headers: { 'Cache-Control': 'no-store' } });
     }
     const proposal = await generateStructured({
       schema: CampaignMessageSchema,

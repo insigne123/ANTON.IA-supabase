@@ -22,7 +22,27 @@ export const BulkAssistInputSchema = z.discriminatedUnion('mode', [
     relationship: z.enum(['never_contacted', 'previously_contacted']),
     followUpDelays: z.array(z.number().int().min(1).max(90)).max(6),
   }).strict(),
+  // The follow-ups of a first email already written (src/lib/server/campaign-follow-ups.ts).
+  z.object({
+    mode: z.literal('follow_ups'), objective: z.string().trim().max(2000), audience: z.string().trim().max(2000).optional(),
+    relationship: z.enum(['never_contacted', 'previously_contacted']),
+    first: z.object({ subject: z.string().trim().min(1, 'Escribe el asunto del primer correo.').max(300), body: z.string().trim().min(1, 'Escribe el primer correo.').max(12000) }).strict(),
+    followUpDelays: z.array(z.number().int().min(1).max(90)).min(1).max(6),
+    recipients: z.number().int().min(1).max(100_000).optional(),
+  }).strict(),
+  // One instruction for every email of the sequence at once.
+  z.object({
+    mode: z.literal('sequence_instruction'), instruction: z.string().trim().min(5).max(2000),
+    objective: z.string().trim().max(2000), audience: z.string().trim().max(2000).optional(),
+    relationship: z.enum(['never_contacted', 'previously_contacted']),
+    messages: z.array(DraftMessageSchema).min(1).max(7),
+    locked: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+    recipients: z.number().int().min(1).max(100_000).optional(),
+  }).strict(),
 ]);
+
+/** Days after the previous email: a first email and three follow-ups, on days 0, 3, 7 and 14 (Cowork and Campañas alike). */
+export const DEFAULT_FOLLOW_UP_DELAYS: readonly number[] = [3, 4, 7];
 
 export const CampaignSequenceProposalSchema = z.object({
   messages: z.array(CampaignMessageSchema).min(1).max(7),

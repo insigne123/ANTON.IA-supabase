@@ -13,10 +13,17 @@ export const COWORK_CONTINUE_AFTER_BATCH = 'Continúa a partir del lote recién 
 /** After any other approved effect. */
 export const COWORK_CONTINUE_AFTER_EFFECT = 'Continúa a partir del efecto recién ejecutado, dentro del mismo encargo. Resume qué quedó hecho y propón el siguiente paso concreto sin repetir el efecto.';
 
+/**
+ * After a campaign was created (paused): its activation is proposed right here, so the person approves it in the same conversation
+ * (6 Nov 2026: the reply sent the salesperson to Campañas, where he wrote each follow-up and set everything up by hand).
+ */
+export const COWORK_CONTINUE_AFTER_CAMPAIGN = 'La campaña recién creada quedó en pausa (result.campaignId, result.messages y result.recipients del efecto en history.actions). Di en una o dos frases qué lleva: cuántos correos (el primero y sus seguimientos, según result.messages) y para cuántas personas; y propone ahora activarla aquí: lee campaigns.list y propone campaign.activate de esa misma campaña. No le digas que vaya a Campañas a escribir o configurar seguimientos: los escribe Cowork, y si lleva un solo correo es porque así se pidió.';
+
 /** The request that resumes the conversation after an effect of this kind finished. */
 export function coworkContinuationAfter(kind: string) {
   if (kind === 'task_plan') return COWORK_CONTINUE_AFTER_PLAN;
   if (kind === 'lead_prepare_batch') return COWORK_CONTINUE_AFTER_BATCH;
+  if (kind === 'campaign_create') return COWORK_CONTINUE_AFTER_CAMPAIGN;
   return COWORK_CONTINUE_AFTER_EFFECT;
 }
 

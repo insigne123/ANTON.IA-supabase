@@ -185,8 +185,11 @@ async function executeEffect(
   }
   if (proposal.kind === 'campaign_create') {
     const created = await createCoworkCampaign(auth, proposal.run_id);
-    return { reply: `La campaña «${created.name}» quedó creada como borrador pausado. Actívala cuando quieras desde Campañas o pídeme revisarla.`,
-      result: { campaignId: created.id, status: created.status } };
+    // Activating it is the next card of this same conversation (COWORK_CONTINUE_AFTER_CAMPAIGN): nobody is sent to Campañas.
+    const followUps = created.messages - 1;
+    const what = followUps > 0 ? `el primer correo y ${followUps} ${followUps === 1 ? 'seguimiento' : 'seguimientos'}` : 'un correo';
+    return { reply: `La campaña «${created.name}» quedó lista y en pausa: ${what} para ${created.recipients === 1 ? '1 persona' : `${created.recipients} personas`}. Nada sale hasta que la actives.`,
+      result: { campaignId: created.id, status: created.status, messages: created.messages, recipients: created.recipients } };
   }
   if (proposal.kind === 'campaign_activate' || proposal.kind === 'campaign_pause') {    const reviewed = await reviewCoworkCampaign(auth, proposal.origin_run_id, proposal.target_id,
       proposal.kind === 'campaign_activate' ? 'approve' : 'pause');
