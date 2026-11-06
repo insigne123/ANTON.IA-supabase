@@ -16,7 +16,8 @@ export const COWORK_OBSERVED_CONTACT_MAX = 500;
 const resultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().uuid() })).max(COWORK_OBSERVED_CONTACT_MAX), scope: z.literal('own_saved_contacts') });
 // Up to 100 per search (COWORK_SEARCH_MAX); older results had up to 25.
 const externalResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo:').max(207) })).max(100), scope: z.literal('external_search') });
-const companyResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo-company:').max(215), website: optionalUrl })).max(100), scope: z.literal('external_company_search') });
+// A company search brings up to 1000 (COWORK_COMPANY_SEARCH_MAX, search-proposal.ts).
+const companyResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo-company:').max(215), website: optionalUrl })).max(1000), scope: z.literal('external_company_search') });
 export const coworkLeadColumns = ['id', 'name', 'title', 'company', 'email', 'status', 'industry', 'location', 'domain', 'employees', 'company_website', 'fit'] as const;
 
 export function csvCell(value: unknown) {

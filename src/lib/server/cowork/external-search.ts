@@ -6,7 +6,7 @@ import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/s
 import { requestApolloSearch } from '@/lib/server/apollo-search-client';
 import { requireCoworkWorkerAccess } from './access';
 import {
-  COWORK_SEARCH_COMPANIES, COWORK_SEARCH_COMPANY_GROUP, COWORK_SEARCH_MAX_OFFSET, COWORK_SEARCH_MAX_PAGE,
+  COWORK_SEARCH_COMPANIES, COWORK_SEARCH_COMPANY_GROUP, COWORK_SEARCH_MAX, COWORK_SEARCH_MAX_OFFSET, COWORK_SEARCH_MAX_PAGE,
   coworkApolloPayload, coworkCompanyStepPayload, coworkPeopleStepPayload, coworkSearchCriteriaSchema, coworkSearchStrategy,
   type CoworkSearchCriteria,
 } from '@/lib/cowork/search-proposal';
@@ -232,10 +232,51 @@ export async function runCoworkSearch(criteria: CoworkSearchCriteria, userId: st
         : 'El proveedor no encontró a la persona de este perfil. Puedes abrir su perfil y guardarla desde la extensión de ANTON.IA.' };
   }
   if (strategy === 'companies_first') return searchCompaniesFirst(criteria, userId, request, classify);
+  if (strategy === 'companies') return searchCompanies(criteria, userId, request, classify);
   const answer = await request(coworkApolloPayload(criteria, userId));
-  const target = strategy === 'companies' ? 'companies' : 'people';
-  return normalizeCoworkSearchResult(answer, criteria.limit, target, criteria.rolePolicy, criteria.page || 1,
-    await estimateSectors(classify, criteria, companiesWithoutSector(answer, target, criteria.limit)));
+  return normalizeCoworkSearchResult(answer, criteria.limit, 'people', criteria.rolePolicy, criteria.page || 1,
+    await estimateSectors(classify, criteria, companiesWithoutSector(answer, 'people', criteria.limit)));
+}
+
+/**
+ * A company search in pages of the provider (100 each, one Apollo credit each): the number asked for or «todas las que calcen»,
+ * up to COWORK_COMPANY_SEARCH_MAX, page after page until there are no more. A number between hundreds brings the whole last page.
+ * Apollo says how many companies match in all (total_entries), and the result says it too: «Traer más» continues from the next page.
+ */
+async function searchCompanies(criteria: CoworkSearchCriteria, userId: string, request: SearchRequest, classify: CompanySectorClassifier | null) {
+  const first = criteria.page || 1;
+  const perPage = Math.min(criteria.limit, COWORK_SEARCH_MAX);
+  const pages = Math.ceil(criteria.limit / perPage);
+  const pageSchema = z.object({ organizations: z.array(providerLead).max(1000), total_entries: z.number().nullish(), total_pages: z.number().nullish() }).passthrough();
+  const organizations: ProviderRecord[] = [];
+  const seen = new Set<string>();
+  let total: number | null = null;
+  let lastPage = first - 1;
+  let more = true;
+  let failed = false;
+  while (more && lastPage - first + 1 < pages && lastPage < COWORK_SEARCH_MAX_PAGE) {
+    const page = lastPage + 1;
+    let found: z.infer<typeof pageSchema>;
+    try {
+      found = pageSchema.parse(await request(coworkApolloPayload({ ...criteria, page, limit: perPage }, userId)));
+    } catch (error) {
+      // The first page failing is the search failing; a later one leaves the list incomplete, and «Traer más» retries it.
+      if (page === first) throw error;
+      failed = true;
+      break;
+    }
+    lastPage = page;
+    if (typeof found.total_entries === 'number') total = found.total_entries;
+    for (const org of found.organizations) if (!seen.has(org.id)) { seen.add(org.id); organizations.push(org); }
+    more = found.organizations.length >= perPage && (typeof found.total_pages === 'number' ? found.total_pages > page : true);
+  }
+  const answer = { organizations };
+  const result = normalizeCoworkSearchResult(answer, Math.max(1, organizations.length), 'companies', criteria.rolePolicy, first,
+    await estimateSectors(classify, criteria, companiesWithoutSector(answer, 'companies', organizations.length)));
+  const next = more && lastPage < COWORK_SEARCH_MAX_PAGE ? { page: lastPage + 1 } : null;
+  return { ...result, limit: criteria.limit, returned: organizations.length, pages: Math.max(0, lastPage - first + 1), total,
+    truncated: Boolean(next), hasMore: Boolean(next), next,
+    ...(failed ? { notice: `${COMPANY_SEARCH_NOTICE} Una parte de las páginas no respondió: la lista puede estar incompleta y «Traer más» sigue desde ahí.` } : {}) };
 }
 
 /** The companies of a provider answer that came without a sector: the ones a company search shows, or the companies of the people found. */

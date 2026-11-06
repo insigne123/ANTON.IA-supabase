@@ -86,3 +86,46 @@ test('without the classifier, or if it fails, the search goes as before', async 
     async () => { throw new Error('down'); }) as any;
   assert.equal(failing.items[0].industry, null);
 });
+
+// «Búscame 250 empresas» / «todas las que calcen»: the pages of the provider, 100 each, until there are no more.
+const pageOf = (page: number, count: number, total: number, perPage = 100) => ({ organizations: Array.from({ length: count }, (_, index) => ({
+  id: `p${page}-${index}`, name: `Empresa ${page}-${index}`, naics_codes: ['236220'] })), total_entries: total, total_pages: Math.ceil(total / perPage) });
+
+test('a company search for more than 100 asks for the pages one by one and says how many match in all', async () => {
+  const asked: Array<Record<string, unknown>> = [];
+  const result = await runCoworkSearch({ target: 'companies', titles: [], industries: ['Construcción'], locations: [], companyLocations: ['Chile'], limit: 250 },
+    'user-1', async payload => { asked.push(payload); return pageOf(Number(payload.page), 100, 1240); }, null) as any;
+  assert.deepEqual(asked.map(payload => [payload.page, payload.per_page]), [[1, 100], [2, 100], [3, 100]], 'a number between hundreds brings the whole last page');
+  assert.equal(result.returned, 300);
+  assert.equal(result.items.length, 300);
+  assert.equal(result.total, 1240);
+  assert.equal(result.pages, 3);
+  assert.deepEqual(result.next, { page: 4 }, '«Traer más» continues from the next page');
+  assert.equal(result.items[0].industry, 'Construcción');
+});
+
+test('«todas las que calcen» stops at the last page, and a later page that fails leaves the list incomplete but usable', async () => {
+  const all = await runCoworkSearch({ target: 'companies', titles: [], industries: ['Construcción'], locations: [], limit: 1000 },
+    'user-1', async payload => pageOf(Number(payload.page), Number(payload.page) === 3 ? 40 : 100, 240), null) as any;
+  assert.equal(all.returned, 240);
+  assert.equal(all.next, null);
+  assert.equal(all.hasMore, false);
+
+  const partial = await runCoworkSearch({ target: 'companies', titles: [], industries: ['Construcción'], locations: [], limit: 500 },
+    'user-1', async payload => { if (Number(payload.page) === 2) throw new Error('timeout'); return pageOf(Number(payload.page), 100, 900); }, null) as any;
+  assert.equal(partial.returned, 100);
+  assert.deepEqual(partial.next, { page: 2 }, 'the page that failed is the next one to bring');
+  assert.match(partial.notice, /Una parte de las páginas no respondió/);
+
+  await assert.rejects(runCoworkSearch({ target: 'companies', titles: [], industries: ['Construcción'], locations: [], limit: 500 },
+    'user-1', async () => { throw new Error('down'); }, null), /down/, 'the first page failing is the search failing');
+});
+
+test('a company search of up to 100 is one page, as before', async () => {
+  const asked: number[] = [];
+  const result = await runCoworkSearch({ target: 'companies', titles: [], industries: ['Construcción'], locations: [], limit: 25 },
+    'user-1', async payload => { asked.push(Number(payload.per_page)); return pageOf(1, 25, 80, 25); }, null) as any;
+  assert.deepEqual(asked, [25]);
+  assert.equal(result.returned, 25);
+  assert.deepEqual(result.next, { page: 2 });
+});

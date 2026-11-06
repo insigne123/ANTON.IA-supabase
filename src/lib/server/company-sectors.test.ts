@@ -119,3 +119,18 @@ test('the country of the web search comes from the places searched', () => {
   assert.equal(searchCountry([]), 'CL');
   assert.equal(searchCountry(null), 'CL');
 });
+
+test('hundreds of companies go in calls of 100, and only the first 100 have their home page read', async () => {
+  forgetCompanySectors();
+  const many = Array.from({ length: 250 }, (_, index) => ({ key: `c${index}`, name: `Constructora ${index}`, domain: `constructora${index}.cl` }));
+  const read: string[] = [];
+  const model = new ScriptedModel([0, 1, 2].map(() => (request: { messages: Array<{ content: unknown }> }) => {
+    const ids = JSON.parse(String(request.messages[0].content)).empresas.map((item: { id: string }) => item.id);
+    return reply([deliver(ids.map((id: string) => ({ id, rubro: 'Construcción', certeza: 'media', fuente: 'nombre' })))]);
+  }));
+  const run = await classifyCompanySectors(many, { ...settings, searches: 0 }, {}, { model, readHomePage: async domain => { read.push(domain); return null; } });
+  assert.equal(model.calls, 3);
+  assert.deepEqual(model.requests.map(request => JSON.parse(String(request.messages[0].content)).empresas.length).sort((a: number, b: number) => b - a), [100, 100, 50]);
+  assert.equal(read.length, 100);
+  assert.equal(run.sectors.size, 250);
+});

@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { COWORK_SEARCH_MAX, coworkSearchStrategy, type CoworkSearchCriteria } from '@/lib/cowork/search-proposal';
+import { COWORK_COMPANY_SEARCH_MAX, COWORK_SEARCH_MAX, coworkSearchStrategy, type CoworkSearchCriteria } from '@/lib/cowork/search-proposal';
 import { cn } from '@/lib/utils';
 import { ReviewError } from './ReviewParts';
 import { CwButton } from './ui';
@@ -33,7 +33,9 @@ export function SearchCriteriaEditor({ runId, criteria, onSaved, onCancel }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const limit = Number(draft.limit);
-  const limitOk = Number.isInteger(limit) && limit >= 1 && limit <= COWORK_SEARCH_MAX;
+  // A company search brings up to 1000; people, up to 100 a search.
+  const maxLimit = companies ? COWORK_COMPANY_SEARCH_MAX : COWORK_SEARCH_MAX;
+  const limitOk = Number.isInteger(limit) && limit >= 1 && limit <= maxLimit;
 
   const save = async () => {
     setSaving(true); setError('');
@@ -68,9 +70,9 @@ export function SearchCriteriaEditor({ runId, criteria, onSaved, onCancel }: {
     {companies ? input('companyLocations', 'Ubicación de las empresas', 'Chile') : input('locations', 'Ubicación de la persona', 'Santiago, Chile')}
     <div>
       <label htmlFor={`${ids}-limit`} className="mb-1 block text-[12.5px] font-medium text-cw-text">Cantidad</label>
-      <input id={`${ids}-limit`} type="number" inputMode="numeric" min={1} max={COWORK_SEARCH_MAX} className={cn(field, 'h-9 w-28 tabular-nums')}
+      <input id={`${ids}-limit`} type="number" inputMode="numeric" min={1} max={maxLimit} className={cn(field, 'h-9 w-28 tabular-nums')}
         value={draft.limit} disabled={saving} aria-invalid={!limitOk} onChange={event => setDraft({ ...draft, limit: event.target.value })} />
-      {!limitOk && <p role="alert" className="mt-1 text-[12.5px] text-cw-danger">{`Elige entre 1 y ${COWORK_SEARCH_MAX}.`}</p>}
+      {!limitOk && <p role="alert" className="mt-1 text-[12.5px] text-cw-danger">{`Elige entre 1 y ${maxLimit.toLocaleString('es-CL')}.`}</p>}
     </div>
     {error && <ReviewError message={error} />}
     <div className="flex flex-wrap justify-end gap-2">

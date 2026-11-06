@@ -2,8 +2,13 @@ import { z } from 'zod';
 import { audienceRolePolicySchema } from './audience-analysis';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
-/** Up to 100 people or companies per search; the instructions ask for 25 when the person does not say how many. */
+/** Up to 100 people per search (and per page of the provider); the instructions ask for 25 when the person does not say how many. */
 export const COWORK_SEARCH_MAX = 100;
+/**
+ * A company search brings more at once: the number asked for, or «todas las que calcen», up to 1000 (ten pages of the provider,
+ * one Apollo credit each). The instructions ask for 100 when the person does not say how many; «Traer más» brings the next ones.
+ */
+export const COWORK_COMPANY_SEARCH_MAX = 1000;
 /** «Empresas primero» brings this many companies, then looks for people in them in groups the provider takes in one call. */
 export const COWORK_SEARCH_COMPANIES = 100;
 export const COWORK_SEARCH_COMPANY_GROUP = 50;
@@ -58,7 +63,7 @@ export const coworkSearchCriteriaSchema = z.object({
     return min <= max && max <= 10000000;
   }, 'Rango de empleados inválido')).max(5).nullish(),
   companyDomains: z.array(z.string().trim().toLowerCase().max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/)).max(5).nullish(),
-  limit: z.number().int().min(1).max(COWORK_SEARCH_MAX),
+  limit: z.number().int().min(1).max(COWORK_COMPANY_SEARCH_MAX),
   page: z.number().int().min(1).max(COWORK_SEARCH_MAX_PAGE).nullish(),
   offset: z.number().int().min(0).max(COWORK_SEARCH_MAX_OFFSET).nullish(),
 }).strict().superRefine((value, context) => {
@@ -79,6 +84,9 @@ export const coworkSearchCriteriaSchema = z.object({
   }
   if (value.strategy === 'companies_first' && !value.titles.length && !value.seniorities?.length) {
     context.addIssue({ code: 'custom', message: 'Para buscar personas dentro de esas empresas indica cargos (titles) o niveles (seniorities).' });
+  }
+  if (value.limit > COWORK_SEARCH_MAX && value.target !== 'companies') {
+    context.addIssue({ code: 'custom', message: `Hasta ${COWORK_SEARCH_MAX} personas por búsqueda; para más, «Traer más». Una búsqueda de empresas (target companies) trae hasta ${COWORK_COMPANY_SEARCH_MAX}.` });
   }
   if (value.offset && coworkSearchStrategy(value) !== 'companies_first') {
     context.addIssue({ code: 'custom', message: 'offset solo sirve al buscar empresas primero; para traer más usa page.' });
@@ -114,7 +122,8 @@ export function coworkApolloPayload(criteria: CoworkSearchCriteria, userId: stri
   return {
     search_mode: valid.linkedinUrl ? 'profile' : valid.target === 'companies' ? 'organization_search' : 'batch', user_id: userId, titles: valid.titles,
     industry_keywords: valid.industries, person_locations: valid.locations,
-    max_results: valid.limit, per_page: valid.limit, page: valid.page || 1,
+    // A company search asks for its pages one at a time (external-search.ts): never more than 100 a page.
+    max_results: Math.min(valid.limit, COWORK_SEARCH_MAX), per_page: Math.min(valid.limit, COWORK_SEARCH_MAX), page: valid.page || 1,
     reveal_email: false, reveal_phone: false, include_similar_titles: true,
     ...(valid.linkedinUrl ? { linkedin_url: valid.linkedinUrl } : {}),
     ...(valid.target === 'companies' ? { company_keywords: valid.industries } : {}),
