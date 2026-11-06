@@ -54,8 +54,11 @@ export type ResearchReportWorkerDependencies = {
   enqueueV1Fallback?: (candidate: WorkerCandidate) => Promise<void>;
 };
 
-/** V2 reports written together in one tick: each spends one to two minutes waiting on the model, so three take the time of one. */
-const V2_REPORTS_PER_TICK = 3;
+/**
+ * V2 reports written together in one tick: each spends one to two minutes waiting on the model, so several take the time of one.
+ * Five, not three: with three a batch of 46 researches (5 Nov 2026) took about an hour to get its reports.
+ */
+const V2_REPORTS_PER_TICK = 5;
 
 function terminal(status: string | undefined, retryable: boolean | undefined) {
   return status === 'completed' || status === 'partial' && retryable !== true;

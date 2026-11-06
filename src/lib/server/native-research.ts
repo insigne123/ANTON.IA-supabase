@@ -2635,6 +2635,32 @@ async function processJob(job: NativeResearchJob) {
   }
 }
 
+/** Research jobs a tick works on at the same time. */
+const NATIVE_RESEARCH_JOBS_AT_ONCE = 3;
+
+/**
+ * `work` over the jobs, `atOnce` at a time; returns how many it completed. After a throw no job is started (they stay
+ * queued for the next tick, as when they ran one after another), the ones running finish, and then the error is raised:
+ * the tick never answers while research it started is still running.
+ */
+async function processJobsAtOnce<T>(jobs: readonly T[], atOnce: number, work: (job: T) => Promise<boolean>) {
+  const queue = [...jobs];
+  let completed = 0;
+  let failure: { error: unknown } | null = null;
+  await Promise.all(Array.from({ length: Math.min(atOnce, queue.length) }, async () => {
+    while (!failure && queue.length) {
+      const job = queue.shift() as T;
+      try {
+        if (await work(job)) completed += 1;
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+  }));
+  if (failure) throw (failure as { error: unknown }).error;
+  return completed;
+}
+
 export async function processNativeResearchQueue(input: {
   limit?: number;
   organizationId?: string;
@@ -2704,10 +2730,8 @@ export async function processNativeResearchQueue(input: {
     .filter((job): job is NativeResearchJob => Boolean(job))
     .filter((job) => !seen.has(job.id) && Boolean(seen.add(job.id)))
     .slice(0, limit);
-  let completed = 0;
-  for (const job of jobs) {
-    if (await processJob(job)) completed += 1;
-  }
+  // A few at a time, each with its own claim: one after another, a batch of 46 waited up to 19 minutes for its turn (5 Nov 2026).
+  const completed = await processJobsAtOnce(jobs, NATIVE_RESEARCH_JOBS_AT_ONCE, processJob);
   await processResearchReportSynthesisQueue({
     limit,
     organizationId: input.organizationId,
@@ -2753,6 +2777,7 @@ export const nativeResearchInternals = {
   isSafeOfficialSiteUrl,
   officialPageFromHtml,
   pinnedOfficialSiteLookup,
+  processJobsAtOnce,
   selectBalancedSearchSignals,
   usefulOfficialPageContent,
   usefulOfficialPageContents,

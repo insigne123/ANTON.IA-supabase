@@ -35,9 +35,11 @@ test('real research stage limits requests, extracts fetched sources, and isolate
     },
   });
   assert.ok(requests <= 18);
-  assert.ok(peak <= 3);
+  assert.ok(peak > 3 && peak <= 6, `pages are read six at a time at most (peak ${peak})`);
   assert.ok(result.researchMetrics.pages <= 18);
   assert.equal(result.researchMetrics.queries, 6);
+  assert.equal(typeof result.researchMetrics.timings?.pagesMs, 'number', 'the time of each stage is kept');
+  assert.equal(typeof result.researchMetrics.timings?.extractionMs, 'number');
   assert.ok(extractionCalls > 0);
   assert.deepEqual(result.claims, []);
 });
