@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { CampaignMessageSchema, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
-import { validateSequenceProposal } from '@/lib/bulk-campaign-assist';
+import { DEFAULT_FOLLOW_UP_DELAYS, validateSequenceProposal } from '@/lib/bulk-campaign-assist';
 import { chipClass } from '@/components/ui/chip';
 
 type Props = {
@@ -26,8 +26,15 @@ type Props = {
   objectiveFromProfile?: string;
 };
 const label = (index: number) => index === 0 ? 'Primer correo' : `Seguimiento ${index}`;
-/** Follow-ups the AI writes when the person did not choose how many. */
-const DEFAULT_FOLLOW_UPS = 1;
+/** Follow-ups the AI writes when the person did not choose how many: three, on days 3, 7 and 14. */
+const DEFAULT_FOLLOW_UPS = DEFAULT_FOLLOW_UP_DELAYS.length;
+const defaultDelay = (index: number) => DEFAULT_FOLLOW_UP_DELAYS[index - 1] ?? 7;
+const hasText = (value: CampaignMessage) => Boolean(value.subject.trim() || value.body.trim());
+function errorText(caught: unknown) {
+  return caught instanceof Error && ['TimeoutError', 'AbortError'].includes(caught.name)
+    ? 'La IA tardó más de lo esperado. Tus correos se conservan; vuelve a intentarlo.'
+    : caught instanceof Error ? caught.message : 'No se pudo completar la propuesta. Vuelve a intentarlo.';
+}
 
 export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseMode, isLocked, onSelect, onChange, onBusyChange, onAssist, onBack, onSave, objectiveFromProfile = '' }: Props) {
   const confirm = useConfirm();
@@ -37,7 +44,9 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
   const [instruction, setInstruction] = useState('');
   const [proposal, setProposal] = useState<CampaignMessage | null>(null);
   const [sequenceProposal, setSequenceProposal] = useState<CampaignMessage[] | null>(null);
-  const [job, setJob] = useState<'sequence' | 'message' | null>(null);
+  const [job, setJob] = useState<'sequence' | 'message' | 'follow_ups' | 'instruction' | null>(null);
+  // One instruction for every email at once («más breves, tutea»), instead of editing them one by one.
+  const [general, setGeneral] = useState('');
   const [sequenceError, setSequenceError] = useState('');
   const [messageError, setMessageError] = useState('');
   const [sequenceFeedback, setSequenceFeedback] = useState('');
@@ -51,6 +60,10 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
   const effectiveCount = followUpCount ?? (hasContent ? definition.messages.length - 1 : null);
   const fromProfile = !reviseMode && Boolean(objectiveFromProfile) && definition.objective === objectiveFromProfile;
   const canSave = effectiveCount !== null && scheduleValid && definition.messages.every(value => CampaignMessageSchema.safeParse(value).success);
+  const complete = definition.messages.every(value => value.subject.trim() && value.body.trim());
+  const firstWritten = Boolean(definition.messages[0]?.subject.trim() && definition.messages[0]?.body.trim());
+  const emptyFollowUps = definition.messages.filter((value, index) => index > 0 && !hasText(value) && !isLocked(index)).length;
+  const recipients = definition.emails.length === 1 ? 1 : 2;
 
   useEffect(() => { setInstruction(''); setProposal(null); setMessageError(''); setMessageFeedback(''); }, [messageIndex]);
   useEffect(() => { if (sequenceError || sequenceFeedback || sequenceProposal) sequenceResultRef.current?.focus(); }, [sequenceError, sequenceFeedback, sequenceProposal]);
@@ -69,10 +82,50 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
       description: 'Al reducir los seguimientos se borran sus correos de esta campaña.',
       confirmLabel: 'Quitar', tone: 'danger',
     }))) return;
-    const messages = Array.from({ length: count + 1 }, (_, index) => definition.messages[index] || { subject: '', body: '', delayDays: 3 });
+    const messages = Array.from({ length: count + 1 }, (_, index) => definition.messages[index] || { subject: '', body: '', delayDays: defaultDelay(index) });
     setFollowUpCount(count); onChange({ messages });
     if (messageIndex >= messages.length) onSelect(0);
     setProposal(null); invalidateSequence();
+    // With the first email written, the new follow-ups are written from it: nobody writes them one by one.
+    if (count > 0 && messages[0].subject.trim() && messages[0].body.trim() && messages.slice(1).every(value => !hasText(value))) void writeFollowUps(messages);
+  }
+  /** The empty follow-ups, written from the first email; the ones already written stay as they are. */
+  async function writeFollowUps(messages: CampaignMessage[]) {
+    const first = messages[0];
+    const empty = messages.map((value, index) => ({ value, index })).filter(item => item.index > 0 && !hasText(item.value) && !isLocked(item.index));
+    if (busy || !first?.subject.trim() || !first.body.trim() || !empty.length) return;
+    setJob('follow_ups'); onBusyChange(true); invalidateSequence(); setProposal(null);
+    try {
+      const result = await onAssist({ mode: 'follow_ups', objective: definition.objective, audience: definition.description || undefined,
+        relationship: definition.criteria.relationship, first: { subject: first.subject, body: first.body },
+        followUpDelays: empty.map(item => item.value.delayDays || defaultDelay(item.index)), recipients });
+      const followUps = Array.isArray(result?.messages) ? result.messages as CampaignMessage[] : [];
+      if (followUps.length !== empty.length || !followUps.every(value => CampaignMessageSchema.safeParse(value).success)) {
+        throw new Error('La IA no devolvió todos los seguimientos. Vuelve a intentarlo.');
+      }
+      onChange({ messages: messages.map((value, index) => {
+        const at = empty.findIndex(item => item.index === index);
+        return at < 0 ? value : { subject: followUps[at].subject, body: followUps[at].body, delayDays: value.delayDays || defaultDelay(index) };
+      }) });
+      setSequenceFeedback(`Escribimos ${followUps.length} ${followUps.length === 1 ? 'seguimiento' : 'seguimientos'} a partir del primer correo. Revísalos antes de continuar.`);
+    } catch (caught) {
+      setSequenceError(errorText(caught));
+    } finally { setJob(null); onBusyChange(false); }
+  }
+  /** The instruction applied to every email of the sequence at once; the ones already sent stay untouched. */
+  async function applyToAll() {
+    if (busy || general.trim().length < 5 || !complete) return;
+    setJob('instruction'); onBusyChange(true); invalidateSequence(); setProposal(null);
+    try {
+      const locked = definition.messages.map((_, index) => index).filter(index => isLocked(index));
+      const result = await onAssist({ mode: 'sequence_instruction', instruction: general, objective: definition.objective, audience: definition.description || undefined,
+        relationship: definition.criteria.relationship, messages: definition.messages, locked, recipients });
+      const messages = Array.isArray(result?.messages) ? result.messages as CampaignMessage[] : null;
+      if (!messages || messages.length !== definition.messages.length) throw new Error('La IA no devolvió la secuencia completa. Vuelve a intentarlo.');
+      setSequenceProposal(messages.map((value, index) => ({ subject: value.subject, body: value.body, delayDays: definition.messages[index].delayDays })));
+    } catch (caught) {
+      setSequenceError(errorText(caught));
+    } finally { setJob(null); onBusyChange(false); }
   }
   async function generate(kind: 'sequence' | 'message') {
     if (busy || (kind === 'sequence' && (reviseMode || !scheduleValid)) || (kind === 'message' && isLocked(messageIndex))) return;
@@ -81,9 +134,9 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
     else { setMessageError(''); setMessageFeedback(''); setProposal(null); }
     try {
       if (kind === 'sequence') {
-        // Without a chosen count the AI writes the initial email and one follow-up 3 days later (the usual sequence).
+        // Without a chosen count the AI writes the initial email and three follow-ups, on days 3, 7 and 14 (the usual sequence).
         if (followUpCount === null) setFollowUpCount(DEFAULT_FOLLOW_UPS);
-        const followUpDelays = followUpCount === null ? Array.from({ length: DEFAULT_FOLLOW_UPS }, () => 3) : definition.messages.slice(1).map(value => value.delayDays);
+        const followUpDelays = followUpCount === null ? [...DEFAULT_FOLLOW_UP_DELAYS] : definition.messages.slice(1).map(value => value.delayDays);
         const result = await onAssist({ mode: 'sequence', objective: definition.objective, audience: definition.description,
           relationship: definition.criteria.relationship, followUpDelays });
         const messages = validateSequenceProposal(result, followUpDelays);
@@ -101,9 +154,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
         setProposal({ ...parsed.data, delayDays: message.delayDays });
       }
     } catch (caught) {
-      const error = caught instanceof Error && ['TimeoutError', 'AbortError'].includes(caught.name)
-        ? 'La IA tardó más de lo esperado. Tus correos se conservan; vuelve a intentarlo.'
-        : caught instanceof Error ? caught.message : 'No se pudo completar la propuesta. Vuelve a intentarlo.';
+      const error = errorText(caught);
       if (kind === 'sequence') setSequenceError(error); else setMessageError(error);
     } finally { setJob(null); onBusyChange(false); }
   }
@@ -121,15 +172,28 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
         <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-2"><Label htmlFor="follow-up-count">¿Cuántos seguimientos quieres?</Label>
             <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={effectiveCount ?? ''} onChange={event => void chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
-              <option value="" disabled>Sin elegir: correo inicial + 1 seguimiento</option>
+              <option value="" disabled>{`Sin elegir: correo inicial + ${DEFAULT_FOLLOW_UPS} seguimientos`}</option>
               {[0, 1, 2, 3, 4].map(count => <option key={count} value={count}>{count === 0 ? 'Solo el correo inicial' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'} + correo inicial`}</option>)}
             </select>
           </div>
           <Button disabled={busy || definition.objective.trim().length < 5 || !scheduleValid} onClick={() => void generate('sequence')}>{job === 'sequence' ? 'Generando secuencia…' : hasContent ? 'Proponer nueva secuencia' : 'Generar secuencia con IA'}</Button>
         </div>
-        <p id="sequence-help" className="text-sm text-muted-foreground">{followUpCount === null ? 'Si no eliges, la IA escribe el correo inicial y 1 seguimiento a los 3 días; puedes cambiarlo después.' : `La secuencia tendrá ${followUpCount + 1} ${followUpCount === 0 ? 'correo' : 'correos'}. Puedes ajustar los días de espera al seleccionar cada seguimiento.`}</p>
+        <p id="sequence-help" className="text-sm text-muted-foreground">{followUpCount === null ? 'Si no eliges, la IA escribe el correo inicial y 3 seguimientos (días 3, 7 y 14); puedes cambiarlo después.' : `La secuencia tendrá ${followUpCount + 1} ${followUpCount === 0 ? 'correo' : 'correos'}. Puedes ajustar los días de espera al seleccionar cada seguimiento.`}</p>
+        {firstWritten && effectiveCount === 0 && <Button variant="outline" disabled={busy} onClick={() => void chooseCount(DEFAULT_FOLLOW_UPS)}>{`Agregar ${DEFAULT_FOLLOW_UPS} seguimientos escritos desde el primer correo`}</Button>}
+        {firstWritten && emptyFollowUps > 0 && <Button variant="outline" disabled={busy} onClick={() => void writeFollowUps(definition.messages)}>{job === 'follow_ups' ? 'Escribiendo seguimientos…' : emptyFollowUps === 1 ? 'Escribir el seguimiento desde el primer correo' : `Escribir los ${emptyFollowUps} seguimientos desde el primer correo`}</Button>}
+      </>}
+      {complete && definition.messages.length > 1 && <div className="space-y-2">
+        <Label htmlFor="sequence-instruction">Instrucción para toda la secuencia</Label>
+        <Textarea id="sequence-instruction" className="min-h-20" maxLength={2000} disabled={busy} value={general} onChange={event => { setGeneral(event.target.value); invalidateSequence(); }}
+          placeholder="Hazlos más breves, tutea y en cada seguimiento propone una llamada de 15 minutos." aria-describedby="sequence-instruction-help" />
+        <p id="sequence-instruction-help" className="text-sm text-muted-foreground">{reviseMode ? 'Se aplica a los correos pendientes; los enviados no cambian.' : 'Se aplica a todos los correos a la vez; revisas la propuesta antes de aplicarla.'}</p>
+        <Button variant="outline" disabled={busy || general.trim().length < 5} onClick={() => void applyToAll()}>{job === 'instruction' ? 'Aplicando a todos los correos…' : 'Aplicar a todos los correos'}</Button>
+      </div>}
+      <>
         <div ref={sequenceResultRef} tabIndex={-1} className="space-y-3 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
           {job === 'sequence' && <p role="status" className="text-sm text-muted-foreground">Preparando el correo inicial y los seguimientos de tu secuencia…</p>}
+          {job === 'follow_ups' && <p role="status" className="text-sm text-muted-foreground">Escribiendo los seguimientos a partir del primer correo…</p>}
+          {job === 'instruction' && <p role="status" className="text-sm text-muted-foreground">Aplicando tu instrucción a toda la secuencia…</p>}
           {sequenceError && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm">{sequenceError}</p>}
           {sequenceFeedback && <p role="status" className="text-sm text-muted-foreground">{sequenceFeedback}</p>}
           {sequenceProposal && <div className="space-y-3 rounded-xl border bg-muted/40 p-4"><h3 className="font-medium">Nueva secuencia propuesta</h3><p className="text-sm text-muted-foreground">Tus correos actuales se conservan hasta que apliques esta secuencia.</p>
@@ -137,7 +201,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
             <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => { onChange({ messages: sequenceProposal }); setSequenceProposal(null); onSelect(0); setSequenceFeedback('Secuencia aplicada. Revisa cada correo antes de continuar.'); }}>Aplicar secuencia</Button><Button variant="ghost" disabled={busy} onClick={() => setSequenceProposal(null)}>Descartar secuencia</Button></div>
           </div>}
         </div>
-      </>}
+      </>
     </div>
 
     <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">

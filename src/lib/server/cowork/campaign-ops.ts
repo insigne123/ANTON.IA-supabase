@@ -17,6 +17,57 @@ import { coworkCampaignProvider } from '@/lib/mail-sender';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import type { CampaignInput } from '@/lib/bulk-campaigns';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
+import { DEFAULT_FOLLOW_UP_DELAYS, writeCampaignFollowUps } from '@/lib/server/campaign-follow-ups';
+import { readCoworkResearch } from './research-read';
+
+/** The person asked for a single email: the campaign goes without follow-ups. */
+export const COWORK_SINGLE_EMAIL = /\b(?:s[oó]lo|[uú]nicamente)\s+(?:el\s+|un\s+)?(?:primer\s+)?correo\b|\bsin\s+seguimientos?\b|\bun\s+(?:s[oó]lo|[uú]nico)\s+correo\b|\bnada\s+de\s+seguimientos?\b/i;
+
+type StageDependencies = {
+  writeFollowUps?: typeof writeCampaignFollowUps;
+  readResearch?: (client: ReturnType<typeof getSupabaseAdminClient>, scope: { userId: string; organizationId: string }, leadId: string) => Promise<string | null>;
+};
+
+/** What the research says about one person's company, for their follow-ups: its written report, or nothing. Never throws. */
+async function researchFor(client: ReturnType<typeof getSupabaseAdminClient>, scope: { userId: string; organizationId: string }, leadId: string) {
+  try {
+    const found = await readCoworkResearch(client as never, scope, leadId) as { availability?: string; report?: { sections?: Array<{ title: string; text: string }> } | null };
+    const text = (found.report?.sections || []).map(section => `${section.title}: ${section.text}`).join('\n\n').trim();
+    return found.availability === 'available' && text ? text.slice(0, 4000) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The follow-ups of a campaign Cowork proposes with only its first email (6 Nov 2026: the four it created in ten days had none, and the
+ * salesperson wrote them by hand in Campañas). Three, on days 3, 7 and 14, written from the first email, and for one person from their
+ * research too; unless the person asked for a single email. Best effort: if they cannot be written well, the campaign goes as it came.
+ */
+async function withCoworkFollowUps(parsed: CoworkCampaignDraft, request: string, context: {
+  client: ReturnType<typeof getSupabaseAdminClient>; scope: { userId: string; organizationId: string }; leadRef: string | null;
+}, dependencies: StageDependencies): Promise<{ draft: CoworkCampaignDraft; added: number }> {
+  if (parsed.messages.length !== 1 || COWORK_SINGLE_EMAIL.test(request)) return { draft: parsed, added: 0 };
+  const one = parsed.emails.length === 1;
+  const first = one && parsed.firstEmails.length === 1 ? parsed.firstEmails[0] : parsed.messages[0];
+  try {
+    const research = one && context.leadRef ? await (dependencies.readResearch ?? researchFor)(context.client, context.scope, context.leadRef) : null;
+    const followUps = await (dependencies.writeFollowUps ?? writeCampaignFollowUps)({
+      first: { subject: first.subject, body: first.body }, objective: parsed.objective || parsed.name,
+      relationship: parsed.criteria.relationship ?? 'never_contacted', followUpDelays: [...DEFAULT_FOLLOW_UP_DELAYS],
+      research, recipients: parsed.emails.length,
+    });
+    const checked = coworkCampaignDraftSchema.safeParse({ ...parsed, messages: [parsed.messages[0], ...followUps] });
+    if (!checked.success) {
+      console.warn('[cowork-campaign] follow-ups rejected', { issue: checked.error.issues[0]?.message?.slice(0, 160) });
+      return { draft: parsed, added: 0 };
+    }
+    return { draft: checked.data, added: followUps.length };
+  } catch (error) {
+    console.warn('[cowork-campaign] follow-ups not written', { reason: error instanceof Error ? error.message.slice(0, 160) : 'unknown' });
+    return { draft: parsed, added: 0 };
+  }
+}
 
 /** Fase 2D: campaign effects on bulk campaigns. Creation stages the reviewed
  * definition and always lands paused as a draft; activation revalidates the
@@ -33,17 +84,18 @@ export async function stageCoworkCampaignDefinition(
   definition: CoworkCampaignDraft,
   /** The person's request: a mailbox they name («desde Outlook») wins over the default one. */
   request = '',
-): Promise<{ recipients: number; provider: 'google' | 'outlook' }> {
+  dependencies: StageDependencies = {},
+): Promise<{ recipients: number; provider: 'google' | 'outlook'; messages: number; followUpsAdded: number }> {
   requireBulkEnabled();
-  const parsed = coworkCampaignDraftSchema.parse(definition);
+  const proposed = coworkCampaignDraftSchema.parse(definition);
   const client = getSupabaseAdminClient();
   await requireCoworkWorkerAccess(client, scope);
   const audience = await loadAudience(
     { user: { id: scope.userId }, organizationId: scope.organizationId, organizationIds: [scope.organizationId], supabase: client } as AuthContext,
-    parsed.criteria,
+    proposed.criteria,
   );
   const matched = new Map(audience.map(person => [person.email.toLowerCase(), person]));
-  for (const email of parsed.emails) {
+  for (const email of proposed.emails) {
     const person = matched.get(email.toLowerCase());
     if (!person || person.blockedReason) {
       throw new Error(`El destinatario ${email} ya no está disponible para esta audiencia.`);
@@ -51,17 +103,41 @@ export async function stageCoworkCampaignDefinition(
   }
   // The mailbox that sends: the one named in the request if connected, else the default one (Conexiones), else the model's.
   const mailbox = await readMailSenderPreference(client, scope.userId);
-  const provider = coworkCampaignProvider({ message: request, connected: mailbox.connected, preferred: mailbox.preferred, proposed: parsed.provider });
-  // The first email written for a person replaces the template's first email for them only.
-  const full = CampaignInputSchema.parse({
-    name: parsed.name, description: parsed.objective, objective: parsed.objective,
-    criteria: parsed.criteria, emails: parsed.emails, messages: parsed.messages,
+  const provider = coworkCampaignProvider({ message: request, connected: mailbox.connected, preferred: mailbox.preferred, proposed: proposed.provider });
+  const build = (draft: CoworkCampaignDraft) => CampaignInputSchema.parse({
+    name: draft.name, description: draft.objective, objective: draft.objective,
+    criteria: draft.criteria, emails: draft.emails, messages: draft.messages,
     provider,
-    overrides: parsed.firstEmails.map(item => ({ email: item.email, messageIndex: 0, subject: item.subject, body: item.body })),
+    overrides: draft.firstEmails.map(item => ({ email: item.email, messageIndex: 0, subject: item.subject, body: item.body })),
   });
+  // A retried turn finds its campaign already staged: what was staged stands, follow-ups included, and nothing is written again.
+  const already = await client.from('cowork_campaign_definitions').select('definition')
+    .eq('run_id', runId).eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
+  if (already.error) throw new Error('No se pudo preparar la propuesta de campaña.');
+  if (already.data) {
+    const stored = CampaignInputSchema.safeParse(already.data.definition);
+    const comparable = (value: CampaignInput) => (proposed.messages.length === 1 ? { ...value, messages: value.messages.slice(0, 1) } : value);
+    if (!stored.success || canonicalSha256(comparable(stored.data)) !== canonicalSha256(comparable(build(proposed)))) {
+      throw new Error('Este trabajo ya tiene otra definición de campaña.');
+    }
+    return { recipients: proposed.emails.length, provider: stored.data.provider, messages: stored.data.messages.length,
+      followUpsAdded: stored.data.messages.length - proposed.messages.length };
+  }
+  const withFollowUps = await withCoworkFollowUps(proposed, request, {
+    client, scope, leadRef: proposed.emails.length === 1 ? matched.get(proposed.emails[0].toLowerCase())?.leadRef ?? null : null,
+  }, dependencies);
+  // The first email written for a person replaces the template's first email for them only.
+  let parsed = withFollowUps.draft;
+  let added = withFollowUps.added;
+  let full = build(parsed);
   // Every email of every person is built here, with their data, before the card exists: a missing first name or
-  // an unknown variable goes back to the model instead of failing when the campaign is created.
-  const problem = coworkCampaignRenderProblem(full, audience);
+  // an unknown variable goes back to the model instead of failing when the campaign is created. Follow-ups the app
+  // wrote that do not build for someone are dropped: the campaign goes with its first email, as it came.
+  let problem = coworkCampaignRenderProblem(full, audience);
+  if (problem && added) {
+    parsed = proposed; added = 0; full = build(proposed);
+    problem = coworkCampaignRenderProblem(full, audience);
+  }
   if (problem) throw new Error(problem);
   const staged = await client.from('cowork_campaign_definitions').upsert(
     { run_id: runId, user_id: scope.userId, organization_id: scope.organizationId, definition: full },
@@ -74,7 +150,7 @@ export async function stageCoworkCampaignDefinition(
       throw new Error('Este trabajo ya tiene otra definición de campaña.');
     }
   }
-  return { recipients: parsed.emails.length, provider };
+  return { recipients: parsed.emails.length, provider, messages: full.messages.length, followUpsAdded: added };
 }
 
 /**
@@ -163,7 +239,8 @@ export async function createCoworkCampaign(auth: AuthContext, runId: string) {
   await requireCoworkWorkerAccess(getSupabaseAdminClient(), { userId: auth.user.id, organizationId: auth.organizationId });
   const campaign = await saveBulkCampaign(auth, row.data.definition, undefined, 0,
     deterministicMessagingUuid(`cowork:${auth.organizationId}:${auth.user.id}:${runId}:campaign`));
-  return { id: campaign.id, name: campaign.definition.name, status: campaign.status };
+  return { id: campaign.id, name: campaign.definition.name, status: campaign.status,
+    messages: campaign.definition.messages.length, recipients: campaign.definition.emails.length };
 }
 
 const campaignTargetSchema = z.object({

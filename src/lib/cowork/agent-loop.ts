@@ -1969,7 +1969,7 @@ async function runCoworkLoop(input: {
           && /campa[ñn]a/i.test(coworkClosingQuestionOf(input.history?.at(-1)?.reply) || '') && TAKES_OFFER.test(input.message) && !CHANGES_OFFER.test(input.message)
           && !(input.history?.at(-1)?.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence')) {
           campaignRedirected = true;
-          throw rejected('Campaign without its email', 'La campaña necesita su primer correo a la vista: usa draft.write con kind email y campaign true para los contactos con correo que leíste (recipients con sus nombres; un primer correo, los seguimientos después y si los pide); cuando la Redactora termine, propones campaign.create con ese correo.');
+          throw rejected('Campaign without its email', 'La campaña necesita su primer correo a la vista: usa draft.write con kind email y campaign true para los contactos con correo que leíste (recipients con sus nombres; un primer correo: la app escribe sus seguimientos desde él); cuando la Redactora termine, propones campaign.create con ese correo.');
         }
         const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
         if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));
