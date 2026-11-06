@@ -265,3 +265,30 @@ test('only an unknown dispatch never claimed for sending is known not to have go
   assert.equal(neverHandedToProvider({ ...base, providerMessageId: 'abc' }), false);
   assert.equal(neverHandedToProvider({ ...base, status: 'sending' } as any), false);
 });
+
+test('the window to look for a message covers its last attempt, not only the moment it was asked for', async () => {
+  const { requestedWindow } = await import('./outbound-reconciliation');
+  const minute = 60 * 1000;
+  // Asked for at 18:00, sent on its second attempt at 19:02 (the 26 Oct 2026 shape, with fictional times).
+  const retried = requestedWindow({ metadata: { requestedAt: '2026-10-26T18:00:00.000Z' } as any, createdAt: '2026-10-26T18:00:01.000Z',
+    startedAt: '2026-10-26T19:02:10.000Z', completedAt: '2026-10-26T19:02:38.000Z' });
+  assert.equal(retried.fromMs, Date.parse('2026-10-26T18:00:00.000Z') - 5 * minute);
+  assert.equal(retried.toMs, Date.parse('2026-10-26T19:02:38.000Z') + 30 * minute);
+  assert.ok(Date.parse('2026-10-26T19:02:30.000Z') <= retried.toMs, 'the message sent at 19:02 is inside');
+  // A first attempt keeps the window it had: 5 minutes before the request to 30 after.
+  const first = requestedWindow({ metadata: { requestedAt: '2026-10-26T18:00:00.000Z' } as any, createdAt: '2026-10-26T18:00:01.000Z', startedAt: null, completedAt: null });
+  assert.deepEqual(first, { fromMs: Date.parse('2026-10-26T17:55:00.000Z'), toMs: Date.parse('2026-10-26T18:30:00.000Z') });
+});
+
+test('a dispatch that cannot be found is looked for less and less often', async () => {
+  const { reconciliationDue } = await import('./outbound-reconciliation');
+  const now = Date.parse('2026-11-06T18:00:00.000Z');
+  const ago = (minutes: number) => new Date(now - minutes * 60 * 1000).toISOString();
+  assert.equal(reconciliationDue({ status: 'unknown', reconciliationAttemptCount: 99, lastReconciliationAt: ago(1) }, now), true);
+  assert.equal(reconciliationDue({ status: 'unknown', reconciliationAttemptCount: 100, lastReconciliationAt: ago(5) }, now), false);
+  assert.equal(reconciliationDue({ status: 'unknown', reconciliationAttemptCount: 100, lastReconciliationAt: ago(61) }, now), true);
+  assert.equal(reconciliationDue({ status: 'unknown', reconciliationAttemptCount: 3_160, lastReconciliationAt: ago(61) }, now), false);
+  assert.equal(reconciliationDue({ status: 'unknown', reconciliationAttemptCount: 3_160, lastReconciliationAt: ago(6 * 60 + 1) }, now), true);
+  assert.equal(reconciliationDue({ status: 'unknown', reconciliationAttemptCount: 3_160, lastReconciliationAt: null }, now), true);
+  assert.equal(reconciliationDue({ status: 'sending', reconciliationAttemptCount: 3_160, lastReconciliationAt: ago(1) } as any, now), true, 'a stale «sending» is checked as before');
+});

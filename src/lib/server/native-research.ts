@@ -7,6 +7,7 @@ import { isIP } from 'node:net';
 import {
   ResearchClaimV1Schema,
   ResearchSnapshotV1Schema,
+  researchFailureMarker,
   type ContractErrorV1,
   type ResearchClaimV1,
   type ResearchEvidenceV1,
@@ -1680,18 +1681,21 @@ function buildSnapshot(input: {
   }
 
   const hasUsefulClaim = claims.length > 0;
-  // Only missing company context leaves the research partial. News, hiring, mentions, digital presence and the person's
-  // public trail add color: when one is missing the report says so (the warnings below), but the research is complete.
-  // Before 20 oct 2026 any warning made it partial: 47 of 73 in 45 days, most with a sound company profile.
-  const status: NativeResearchStatus = companyFactEvidence.length > 0
-    ? 'completed'
-    : hasUsefulClaim ? 'partial' : 'insufficient_data';
   const lifecycleErrors = reportWarnings.map((warning) => createError({
     code: warning.includes('http') ? 'provider_http_error' : warning.includes('timeout') ? 'provider_timeout' : 'insufficient_evidence',
     stage: warning.includes('official') ? 'fetch' : 'validate',
     message: warning.replace(/_/g, ' '),
     retryable: !input.publicCompany || !publicCompanyCoverageWarnings(input.publicCompany.graph).includes(warning),
   }));
+  // Only missing company context leaves the research partial. News, hiring, mentions, digital presence and the person's
+  // public trail add color: when one is missing the report says so (the warnings below), but the research is complete.
+  // Before 20 oct 2026 any warning made it partial: 47 of 73 in 45 days, most with a sound company profile.
+  // A provider that answered with an error (HTTP, fallback) is the exception: the contract never lets that research be
+  // «completed», and built as completed it failed whole at the parse, report and all (3 of 56 on 5 and 6 Nov 2026).
+  const failedProvider = lifecycleErrors.some((error) => researchFailureMarker(error.code) || researchFailureMarker(error.message));
+  const status: NativeResearchStatus = companyFactEvidence.length > 0 && !failedProvider
+    ? 'completed'
+    : hasUsefulClaim ? 'partial' : 'insufficient_data';
   if (status === 'insufficient_data') lifecycleErrors.push(createError({ code: 'insufficient_evidence', stage: 'validate', message: 'No se obtuvo contexto público suficiente para explicar esta empresa.', retryable: true }));
 
   const qualifiedEvidence = [...companyFactEvidence, ...personFactEvidence, ...qualifiedSignals.map((item) => item.evidence)];

@@ -54,13 +54,33 @@ function mapRow(row: any): RepairableOutboundDispatch {
   };
 }
 
-function requestedWindow(dispatch: OutboundDispatch) {
-  const requestedAt = Date.parse(dispatch.metadata.requestedAt || dispatch.createdAt);
-  const base = Number.isFinite(requestedAt) ? requestedAt : Date.parse(dispatch.createdAt);
+/**
+ * When the message may have gone out: from a little before it was asked for to a while after its last attempt. A message sent on a
+ * retry goes out later than asked: one asked for at 18:00 went out at 19:02 on its second attempt (26 Oct 2026), and a window of the
+ * request alone never found it in «Enviados»; it was looked for 3,160 times. The match still needs the dispatch's own header.
+ */
+export function requestedWindow(dispatch: Pick<OutboundDispatch, 'metadata' | 'createdAt' | 'startedAt' | 'completedAt'>) {
+  const at = (value: string | null | undefined) => Date.parse(String(value || ''));
+  const requestedAt = at(dispatch.metadata.requestedAt || dispatch.createdAt);
+  const base = Number.isFinite(requestedAt) ? requestedAt : at(dispatch.createdAt);
+  const attempts = [dispatch.startedAt, dispatch.completedAt].map(at).filter(Number.isFinite);
   return {
-    fromMs: base - 5 * 60 * 1000,
-    toMs: base + 30 * 60 * 1000,
+    fromMs: Math.min(base, ...attempts) - 5 * 60 * 1000,
+    toMs: Math.max(base, ...attempts) + 30 * 60 * 1000,
   };
+}
+
+/**
+ * Whether to look for a dispatch again now: every run at first, then less often. One that cannot be found does not search the
+ * mailbox every few minutes for days; after 100 searches, once an hour, and after 1,000, every six hours.
+ */
+export function reconciliationDue(dispatch: Pick<RepairableOutboundDispatch, 'status' | 'reconciliationAttemptCount' | 'lastReconciliationAt'>, now = Date.now()) {
+  if (dispatch.status !== 'unknown') return true;
+  const attempts = dispatch.reconciliationAttemptCount ?? 0;
+  if (attempts < 100) return true;
+  const last = Date.parse(String(dispatch.lastReconciliationAt || ''));
+  if (!Number.isFinite(last)) return true;
+  return now - last >= (attempts < 1_000 ? 60 : 6 * 60) * 60 * 1000;
 }
 
 function headerValue(headers: any[], name: string) {
@@ -357,6 +377,7 @@ export async function reconcileUnknownOutboundDispatches(input?: { limit?: numbe
   const results: Array<{ id: string; status: string; reconciled: boolean; error?: string }> = [];
   for (const row of data || []) {
     const candidate = mapRow(row);
+    if (!reconciliationDue(candidate)) continue;
     const claimedAt = new Date().toISOString();
     try {
       const { data: claimedRow, error: claimError } = await admin.rpc('claim_outbound_dispatch_reconciliation_v1', {
