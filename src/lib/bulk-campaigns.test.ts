@@ -124,6 +124,8 @@ test('the summary of who was left out reads as a sentence', () => {
   assert.equal(audienceExclusionSummary({ contacted: 1 }), 'Quedaron fuera 1: 1 ya fue contactado.');
   assert.equal(audienceExclusionSummary({ contacted: 5, team: 121, blocked: 1 }),
     'Quedaron fuera 127: 121 son de otros integrantes del equipo, 5 ya fueron contactados y 1 está bloqueado o tiene un envío pendiente.');
+  assert.equal(audienceExclusionSummary({ competitor: 24, own_company: 1 }),
+    'Quedaron fuera 25: 24 son de la competencia y 1 es de tu propia empresa.');
 });
 test('ranking validation only accepts known emails, dedupes, sorts and caps', () => {
   const others = { ...candidate, email: 'beto@example.com' };

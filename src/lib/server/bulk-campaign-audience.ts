@@ -3,12 +3,13 @@ import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { generateStructured } from '@/ai/openai-json';
 import {
-  AudienceRankItemSchema, AudienceRankRequestSchema,
+  AI_RANK_CANDIDATE_LIMIT, AudienceRankItemSchema, AudienceRankRequestSchema,
   AudienceSearchSchema, buildCandidatesCsv, candidateExclusion, defaultAudience, matchAudience, validateRanking,
   type AudienceCriteria, type AudienceExclusions, type AudiencePerson, type AudienceSearch, type EnrichedCandidate, type RankedAudiencePerson,
 } from '@/lib/bulk-campaigns';
 import { readTeamLocks } from '@/lib/server/team-locks';
 import { teamLockNotice } from '@/lib/team-lock';
+import { companyRelator, readSellerCompany, type CompanyRelation, type CompanyRelator, type SellerCompany } from '@/lib/server/company-relations';
 
 /** Explicit pagination: never classify an incomplete contact history as never contacted. */
 export async function readAudienceRows(query: () => any): Promise<any[]> {
@@ -237,7 +238,12 @@ export async function getEnrichedCandidates(auth: AuthContext, limit = ENRICHED_
  * receive the campaign, so it never spends its picks on someone it then cannot propose.
  */
 export async function rankAudience(auth: AuthContext, input: unknown,
-  dependencies: { readTeamLocks: typeof readTeamLocks } = { readTeamLocks }): Promise<{
+  dependencies: {
+    readTeamLocks: typeof readTeamLocks;
+    /** For tests: who the seller is and how its companies are told apart. */
+    seller?: () => Promise<SellerCompany | null>;
+    relate?: CompanyRelator;
+  } = { readTeamLocks }): Promise<{
   people: RankedAudiencePerson[]; rankedCount: number; candidateCount: number; truncated: boolean; ineligibleCount: number;
   /** Saved contacts read, before eligibility. */
   poolCount: number;
@@ -249,10 +255,26 @@ export async function rankAudience(auth: AuthContext, input: unknown,
   const request = AudienceRankRequestSchema.parse(input);
   const { candidates, total } = await getEnrichedCandidates(auth, ENRICHED_READ_LIMIT, dependencies);
   const excluded: AudienceExclusions = {};
-  const eligible = candidates.filter(candidate => {
+  const contactable = candidates.filter(candidate => {
     const kind = candidateExclusion(candidate, request);
     if (kind) excluded[kind] = (excluded[kind] ?? 0) + 1;
     return !kind;
+  });
+  // Nobody of the seller's own company or of a competitor goes to the model: it would rank a recruiter of another staffing
+  // company high for a staffing company, because the title is the one asked for. Only the ones the model would see are checked.
+  const checked = contactable.slice(0, AI_RANK_CANDIDATE_LIMIT);
+  const seller = checked.length
+    ? await (dependencies.seller ? dependencies.seller() : readSellerCompany(auth.supabase as never, { userId: auth.user.id, organizationId: auth.organizationId }))
+    : null;
+  const relations = seller ? await (dependencies.relate ?? companyRelator())(seller, checked.map(candidate => ({
+    key: candidate.email, name: candidate.company, industry: candidate.industry, email: candidate.email,
+  }))) : new Map<string, CompanyRelation>();
+  const eligible = contactable.filter(candidate => {
+    const relation = relations.get(candidate.email);
+    if (!relation) return true;
+    const kind = relation.relation === 'propia' ? 'own_company' : 'competitor';
+    excluded[kind] = (excluded[kind] ?? 0) + 1;
+    return false;
   });
   const ownCount = candidates.filter(candidate => candidate.mine).length;
   if (!eligible.length) {

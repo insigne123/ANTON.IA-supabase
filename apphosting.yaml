@@ -249,6 +249,12 @@ env:
   - variable: COMPANY_SECTOR_AI_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # La competencia fuera de «Recomendados para ti», de la audiencia de campañas con IA y de las búsquedas de Cowork: un Claude (Haiku) lee lo que vende
+  # la empresa («Ficha de la empresa») y dice cuáles de las empresas venden lo mismo, una llamada por hasta 100 empresas, con tope de 9 s
+  # (COMPANY_RELATIONS_AI_DEADLINE_MS). La propia empresa (nombre o dominio) queda fuera siempre, sin IA (src/lib/server/company-relations.ts).
+  - variable: COMPANY_RELATIONS_AI_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Para limitar los borradores o el harness a unas pocas personas se agregan DRAFT_PILOT_USER_IDS y COWORK_HARNESS_USER_IDS (ids de usuario separados por
   # coma; la prueba exige que sean las mismas). Para volver atrás se quita la variable de la mejora y se despliega: el siguiente borrador y el siguiente
   # turno ya corren como antes.

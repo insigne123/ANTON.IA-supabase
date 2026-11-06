@@ -113,6 +113,11 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
     const total = (observations.filter(observation => observation.action === 'prospecting.search').at(-1)?.result as { total?: unknown } | null)?.total;
     return typeof total === 'number' && Number.isFinite(total) ? total : null;
   }, [observations]);
+  // The search left out the seller's own company and its competitors, and says so once (company-relations.ts).
+  const omittedNote = useMemo(() => {
+    const note = (observations.filter(observation => observation.action === 'prospecting.search').at(-1)?.result as { omittedNote?: unknown } | null)?.omittedNote;
+    return typeof note === 'string' && note.trim() ? note.trim() : null;
+  }, [observations]);
   const visible = term || showAll ? filtered : filtered.slice(0, FIRST_ROWS);
   // People of the same company read together, under its name, when the list has more than one company.
   const groups = useMemo(() => {
@@ -153,6 +158,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
       {(unknownSector || estimatedSector) && <p className="text-[12px] text-cw-muted">{askedLine ? `${askedLine} ` : ''}{estimatedSector
         ? 'Apollo no entrega el rubro en la búsqueda: el que ves lo estimó una IA con el sitio web de cada empresa.'
         : 'Apollo no entrega el rubro ni la dotación de cada empresa en la búsqueda.'}</p>}
+      {omittedNote && <p className="text-[12px] text-cw-muted">{omittedNote}</p>}
       {cutSearch && !full && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
         <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Cowork revisó los primeros {rows.length}. Hay más contactos tuyos que calzan con esta búsqueda.</p>
         <CwButton size="sm" variant="secondary" disabled={loadingFull} onClick={() => void loadFull()}>

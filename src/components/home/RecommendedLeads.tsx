@@ -22,12 +22,23 @@ type Recommended = {
 type Recommendations = {
   criteria: { terms: string[]; source: 'pedido' | 'perfil' | 'ninguno' };
   savedContacts: number; notContacted: number; fitting: number | null; excludedByTeam: number; readyToWrite: number; needEmail: number;
+  /** Left out: people of your own company and of competitors (src/lib/server/company-relations.ts). */
+  excludedOwnCompany?: number; excludedCompetitors?: number; competitorCompanies?: string[];
   /** The saved contacts without email, best first, beyond those shown (RECOMMEND_LOOKUP_BATCH). */
   lookupIds?: string[];
   top: Recommended[]; partial?: string;
 };
 
 const SHOWN = 5;
+
+/** «3 de tu empresa y 24 de la competencia»: who is never recommended, so the count adds up. */
+function excludedLine(data: Pick<Recommendations, 'excludedOwnCompany' | 'excludedCompetitors'>) {
+  const parts = [
+    data.excludedOwnCompany ? `${data.excludedOwnCompany} de tu empresa` : '',
+    data.excludedCompetitors ? `${data.excludedCompetitors} de la competencia` : '',
+  ].filter(Boolean);
+  return parts.join(' y ');
+}
 const MISSING_LABELS: Record<string, string> = { 'buscar su correo': 'Sin correo', investigarla: 'Sin investigar' };
 
 /**
@@ -96,9 +107,11 @@ export function RecommendedLeads() {
             <Empty text="Aún no tienes contactos guardados. Guarda los primeros desde «Buscar prospectos» y aquí verás a quién escribir primero."
               href="/search" cta="Buscar prospectos" />
           ) : !data.top.length ? (
-            <Empty text={data.criteria.source === 'perfil'
-              ? 'Ninguno de tus contactos sin escribir calza con los cargos e industrias de tu cliente ideal. Busca nuevos o ajusta «Perfil».'
-              : 'Todos tus contactos ya recibieron algo o los trabaja otro miembro del equipo.'}
+            <Empty text={excludedLine(data)
+              ? `Los que calzan son de tu empresa o de la competencia: ${excludedLine(data)}. Busca empresas que puedan comprarte.`
+              : data.criteria.source === 'perfil'
+                ? 'Ninguno de tus contactos sin escribir calza con los cargos e industrias de tu cliente ideal. Busca nuevos o ajusta «Perfil».'
+                : 'Todos tus contactos ya recibieron algo o los trabaja otro miembro del equipo.'}
               href="/search" cta="Buscar prospectos" />
           ) : (
             <>
@@ -107,6 +120,7 @@ export function RecommendedLeads() {
                   {data.fitting !== null ? <><strong className="font-semibold">{data.fitting}</strong> calzan · </> : null}
                   <strong className="font-semibold">{data.readyToWrite}</strong> con correo · <strong className="font-semibold">{data.needEmail}</strong> sin correo
                   {data.excludedByTeam ? <span className="text-muted-foreground"> · {data.excludedByTeam} los trabaja otro miembro</span> : null}
+                  {excludedLine(data) ? <span className="text-muted-foreground" title={data.competitorCompanies?.length ? `Competencia: ${data.competitorCompanies.join(', ')}` : undefined}> · se omiten {excludedLine(data)}</span> : null}
                 </p>
                 {batch.length > 0 ? (
                   <Button size="sm" className="h-8 shrink-0 self-start sm:self-auto" disabled={busy !== null} onClick={() => void lookUp(batch, 'batch')}>

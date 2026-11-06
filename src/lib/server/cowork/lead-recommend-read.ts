@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { recommendLeads, recommendTerms, type RecommendCriteria, type RecommendLead } from '@/lib/cowork/lead-recommend';
+import { recommendCandidates, recommendLeads, recommendTerms, type RecommendCriteria, type RecommendLead, type RecommendRelated } from '@/lib/cowork/lead-recommend';
 import { readTeamLocks } from '@/lib/server/team-locks';
+import { companyRelator, readSellerCompany, type CompanyRelator, type SellerCompany } from '@/lib/server/company-relations';
 import { icpDeclaredFromProfile } from './icp-read';
 
 type Scope = { userId: string; organizationId: string };
@@ -11,14 +12,23 @@ const PAGES = 10;
 const LOCKED = new Set(['reserved', 'active', 'closed', 'suppressed']);
 const lower = (value: unknown) => String(value || '').trim().toLowerCase();
 
+/** The contacts whose companies are checked before the first ones are shown: the best of them, not every saved contact. */
+const RELATED_CHECKED = 300;
+
 /**
  * leads.recommend (plan 8, phase 2): the organization's own contacts nobody wrote to yet, best first. Both lists count:
  * «Por escribir» (enriched_leads, usually with an email) and «Por completar» (leads); a person in both is one, the enriched
  * copy. `value` lists the roles and industries of the offer asked about («RR. HH., selección, retail»); empty, the customer
- * declared in «Perfil».
+ * declared in «Perfil». People of the seller's own company and of its competitors are never recommended
+ * (src/lib/server/company-relations.ts): a recruiter of another staffing company has the title a staffing company looks for, and is no customer.
  */
 export async function readCoworkLeadRecommendations(client: SupabaseClient, scope: Scope, value: string,
-  dependencies: { locks: typeof readTeamLocks; personal?:boolean } = { locks: readTeamLocks }) {
+  dependencies: {
+    locks: typeof readTeamLocks; personal?: boolean;
+    /** For tests: who the seller is and how its companies are told apart. */
+    seller?: (profile: Record<string, unknown> | null) => Promise<SellerCompany | null>;
+    relate?: CompanyRelator;
+  } = { locks: readTeamLocks }) {
   const requested = recommendTerms(z.string().max(300).parse(value));
   const userId = z.string().uuid().parse(scope.userId);
   const organizationId = z.string().uuid().parse(scope.organizationId);
@@ -39,7 +49,7 @@ export async function readCoworkLeadRecommendations(client: SupabaseClient, scop
   type SavedRow = Record<string, string | null>;
   type EnrichedRow = SavedRow & { contacted_count: number | null };
   const [profile, leads, enriched, touches, research] = await Promise.all([
-    client.from('profiles').select('company_name,signatures').eq('id', userId).maybeSingle(),
+    client.from('profiles').select('company_name,email,signatures').eq('id', userId).maybeSingle(),
     scan<SavedRow>('leads', 'id,name,title,company,industry,email,linkedin_url,last_investigated_at,last_contacted_at,city,country'),
     scan<EnrichedRow>('enriched_leads', 'id,full_name,title,company_name,organization_name,organization_industry,email,linkedin_url,city,country,contacted_count,source_saved_lead_id:data->>sourceSavedLeadId'),
     scan<{ lead_id: string | null; email: string | null }>('contacted_leads', 'lead_id,email', 'sent'),
@@ -89,8 +99,22 @@ export async function readCoworkLeadRecommendations(client: SupabaseClient, scop
     if (contactedIds.has(id) || row.last_contacted_at || (row.email && contactedEmails.has(lower(row.email)))) contacted.add(id);
   }
 
+  // The companies of the best candidates: the seller's own and its competitors' people are left out before anyone is shown.
+  const related = new Map<string, RecommendRelated>();
+  const candidates = recommendCandidates({ leads: rows, contacted, lockedByOthers: new Map(), criteria }, RELATED_CHECKED);
+  if (candidates.length) {
+    const profileRow = (profile.data ?? null) as Record<string, unknown> | null;
+    const seller = await (dependencies.seller ? dependencies.seller(profileRow) : readSellerCompany(client, { userId, organizationId }, profileRow));
+    const relations = await (dependencies.relate ?? companyRelator())(seller, candidates.map(lead => ({
+      key: lead.id, name: lead.company, industry: lead.industry, email: lead.email,
+    })));
+    for (const lead of candidates) {
+      const relation = relations.get(lead.id);
+      if (relation) related.set(lead.id, { relation: relation.relation, company: lead.company });
+    }
+  }
   // Team locks are read for the best candidates with an address (the reader takes up to 200 at a time).
-  const first = recommendLeads({ leads: rows, contacted, lockedByOthers: new Map(), criteria });
+  const first = recommendLeads({ leads: rows, contacted, lockedByOthers: new Map(), criteria, related });
   const emails = rows.filter(lead => lead.email && first.top.some(item => item.leadId === lead.id)).map(lead => lead.email!.trim().toLowerCase());
   const lockedByOthers = new Map<string, string>();
   if (emails.length) {
@@ -99,7 +123,7 @@ export async function readCoworkLeadRecommendations(client: SupabaseClient, scop
       if (LOCKED.has(lock.status) && !lock.mine) lockedByOthers.set(email, lock.ownerName || 'Miembro del equipo');
     }
   }
-  const result = lockedByOthers.size ? recommendLeads({ leads: rows, contacted, lockedByOthers, criteria }) : first;
+  const result = lockedByOthers.size ? recommendLeads({ leads: rows, contacted, lockedByOthers, criteria, related }) : first;
   const complete = leads.complete && enriched.complete && touches.complete;
   return {
     scope: dependencies.personal?'personal_lead_recommendations':'organization_lead_recommendations', ...result,

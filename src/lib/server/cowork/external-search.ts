@@ -20,6 +20,7 @@ import type { AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
 import { linkedinProfilesMatch } from '@/lib/linkedin-url';
 import { sectorFromIndustryCodes } from '@/lib/industry-codes';
 import { companySectorClassifier, searchCountry, type CompanySector, type CompanySectorClassifier } from '@/lib/server/company-sectors';
+import { companyRelator, readSellerCompany, relatedCompanyNames, type CompanyRelator, type SellerCompany } from '@/lib/server/company-relations';
 import { COWORK_CONTINUE_AFTER_SEARCH } from '@/lib/cowork/continuation-messages';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
@@ -346,7 +347,8 @@ export async function processCoworkSearchQueue() {
     await requireCoworkWorkerAccess(client, scope);
     const current = await client.from('cowork_runs').select('status').eq('id', runId).single();
     if (current.error || current.data.status !== 'waiting_approval') throw new Error('Search cancelled');
-    const result = await withOwnSavedContacts(client, scope, await withSearchTeamLocks(client, scope, await runCoworkSearch(criteria, scope.userId)));
+    const found = await withoutOwnCompanyAndCompetitors(client, scope, await runCoworkSearch(criteria, scope.userId));
+    const result = await withOwnSavedContacts(client, scope, await withSearchTeamLocks(client, scope, found));
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_search', { ...args, p_success: true,
       p_payload: { action: 'prospecting.search', input: criteria, result } });
@@ -359,6 +361,61 @@ export async function processCoworkSearchQueue() {
     const failed = await client.rpc('cowork_finish_search', { ...args, p_success: false, p_payload: { reason } });
     if (failed.error) throw failed.error;
     return { processed: 0, claimed: true };
+  }
+}
+
+/** «Dejé fuera 4 personas de la competencia (Talento Austral Outsourcing y Personal Andes) y 2 de tu propia empresa.» */
+export function omittedSearchNote(omitted: { ownCompany: number; competitors: number; companies: string[] }, companiesOnly: boolean) {
+  const unit = (count: number) => (companiesOnly ? (count === 1 ? 'empresa' : 'empresas') : (count === 1 ? 'persona' : 'personas'));
+  const parts = [
+    omitted.competitors ? `${omitted.competitors} ${unit(omitted.competitors)} de la competencia${omitted.companies.length ? ` (${relatedCompanyNames(omitted.companies)})` : ''}` : '',
+    omitted.ownCompany ? `${omitted.ownCompany} ${omitted.competitors ? '' : `${unit(omitted.ownCompany)} `}de tu propia empresa` : '',
+  ].filter(Boolean);
+  return parts.length ? `Dejé fuera ${parts.join(' y ')}: no son clientes para lo que vendes.` : '';
+}
+
+/**
+ * What a search found, without the seller's own company and its competitors (src/lib/server/company-relations.ts): a staffing
+ * company that searches «Gerente de Personas» finds the HR managers of other staffing companies too, and saving them costs credits for nothing. The
+ * result says how many were left out and which companies. Best effort: if it fails, the result goes as it is.
+ */
+export async function withoutOwnCompanyAndCompetitors<Result extends { items?: unknown[]; returned?: number }>(
+  client: ReturnType<typeof getSupabaseAdminClient>, scope: { userId: string; organizationId: string }, result: Result,
+  dependencies: { seller?: () => Promise<SellerCompany | null>; relate?: CompanyRelator } = {},
+): Promise<Result & { omitted?: { ownCompany: number; competitors: number; companies: string[] }; omittedNote?: string }> {
+  const items = (result.items || []) as Array<Record<string, unknown>>;
+  if (!items.length) return result;
+  try {
+    const seller = await (dependencies.seller ? dependencies.seller() : readSellerCompany(client as never, scope));
+    if (!seller) return result;
+    const string = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+    const isCompany = (item: Record<string, unknown>) => String(item.id || '').startsWith('apollo-company:');
+    const companyOf = (item: Record<string, unknown>) => (isCompany(item) ? string(item.name) : string(item.company));
+    const relations = await (dependencies.relate ?? companyRelator())(seller, items.map((item, index) => ({
+      key: String(item.id || `row-${index}`), name: companyOf(item), industry: string(item.industry),
+      domain: string(item.company_website) ?? string(item.domain) ?? string(item.website),
+    })));
+    if (!relations.size) return result;
+    const omitted = { ownCompany: 0, competitors: 0, companies: [] as string[] };
+    const kept = items.filter((item, index) => {
+      const relation = relations.get(String(item.id || `row-${index}`));
+      if (!relation) return true;
+      if (relation.relation === 'propia') omitted.ownCompany += 1;
+      else {
+        omitted.competitors += 1;
+        const company = companyOf(item);
+        if (company && !omitted.companies.includes(company)) omitted.companies.push(company);
+      }
+      return false;
+    });
+    omitted.companies = omitted.companies.slice(0, 8);
+    return {
+      ...result, items: kept, ...(typeof result.returned === 'number' ? { returned: kept.length } : {}),
+      omitted, omittedNote: omittedSearchNote(omitted, items.every(isCompany)),
+    };
+  } catch (error) {
+    console.warn('[cowork-search] own company and competitors not checked', error instanceof Error ? error.name : error);
+    return result;
   }
 }
 

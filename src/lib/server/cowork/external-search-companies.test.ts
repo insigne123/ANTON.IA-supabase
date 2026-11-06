@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPANY_SEARCH_NOTICE, normalizeCoworkSearchResult, runCoworkSearch } from './external-search';
+import { COMPANY_SEARCH_NOTICE, normalizeCoworkSearchResult, omittedSearchNote, runCoworkSearch, withoutOwnCompanyAndCompetitors } from './external-search';
+import { companyRelator } from '@/lib/server/company-relations';
 
 // Apollo's company search on 6 Nov 2026 (fictional companies): no industry, headcount or city, sometimes the activity codes.
 test('company results take the sector from the activity codes and say what Apollo does not bring', () => {
@@ -128,4 +129,52 @@ test('a company search of up to 100 is one page, as before', async () => {
   assert.deepEqual(asked, [25]);
   assert.equal(result.returned, 25);
   assert.deepEqual(result.next, { page: 2 });
+});
+
+// A staffing company that searches «Gerente de Personas» finds the HR managers of its competitors and its own (fictional companies).
+test('a search leaves out the seller’s own company and its competitors, and says how many and which', async () => {
+  const result = {
+    scope: 'external_search', returned: 4, items: [
+      { id: 'apollo:p1', name: 'Ana', title: 'Gerente de Personas', company: 'Retail Andino', company_website: 'https://retailandino.cl', industry: 'retail' },
+      { id: 'apollo:p2', name: 'Beto', title: 'Gerente de Personas', company: 'Talento Austral Outsourcing', company_website: null, industry: null },
+      { id: 'apollo:p3', name: 'Carla', title: 'Jefa de Selección', company: 'Talento Austral Outsourcing', company_website: null, industry: null },
+      { id: 'apollo:p4', name: 'Dani', title: 'Gerente de Personas', company: 'Otra razón', company_website: 'https://www.personalboreal.cl', industry: 'human resources' },
+    ],
+  };
+  const seller = { organizationId: 'org', names: ['PersonalBoreal'], domains: ['personalboreal.com'], sector: 'Outsourcing', description: 'Personal transitorio', services: 'EST' };
+  const asked: Array<{ key: string; name: string | null; domain?: string | null }> = [];
+  const filtered = await withoutOwnCompanyAndCompetitors({} as never, { userId: 'u', organizationId: 'org' }, result, {
+    seller: async () => seller,
+    relate: async (sellerSeen, companies) => {
+      asked.push(...companies);
+      const relations = await companyRelator({})(sellerSeen, companies);
+      for (const company of companies) if (company.name === 'Talento Austral Outsourcing') relations.set(company.key, { relation: 'competencia', reason: 'Outsourcing', via: 'ia' });
+      return relations;
+    },
+  });
+  assert.deepEqual(asked.map(company => [company.key, company.name, company.domain]), [
+    ['apollo:p1', 'Retail Andino', 'https://retailandino.cl'], ['apollo:p2', 'Talento Austral Outsourcing', null],
+    ['apollo:p3', 'Talento Austral Outsourcing', null], ['apollo:p4', 'Otra razón', 'https://www.personalboreal.cl'],
+  ]);
+  assert.deepEqual(filtered.items.map(item => item.id), ['apollo:p1']);
+  assert.equal(filtered.returned, 1);
+  assert.deepEqual(filtered.omitted, { ownCompany: 1, competitors: 2, companies: ['Talento Austral Outsourcing'] });
+  assert.equal(filtered.omittedNote, 'Dejé fuera 2 personas de la competencia (Talento Austral Outsourcing) y 1 de tu propia empresa: no son clientes para lo que vendes.');
+  // Nothing to leave out, no seller or a failure: the result goes as it came.
+  const same = await withoutOwnCompanyAndCompetitors({} as never, { userId: 'u', organizationId: 'org' }, result, { seller: async () => null });
+  assert.equal(same, result);
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const failed = await withoutOwnCompanyAndCompetitors({} as never, { userId: 'u', organizationId: 'org' }, result, { seller: async () => seller, relate: async () => { throw new Error('down'); } });
+    assert.equal(failed, result);
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test('the note of what a search left out reads well for people and for companies', () => {
+  assert.equal(omittedSearchNote({ ownCompany: 0, competitors: 0, companies: [] }, false), '');
+  assert.equal(omittedSearchNote({ ownCompany: 3, competitors: 0, companies: [] }, false), 'Dejé fuera 3 personas de tu propia empresa: no son clientes para lo que vendes.');
+  assert.equal(omittedSearchNote({ ownCompany: 0, competitors: 1, companies: ['Talento Austral'] }, true), 'Dejé fuera 1 empresa de la competencia (Talento Austral): no son clientes para lo que vendes.');
 });

@@ -78,3 +78,41 @@ test('«Por escribir» counts: the enriched copy stands for the saved contact, a
   assert.ok(result.top[0].reasons.includes('ya está investigada'));
   assert.equal(result.notContacted, 2);
 });
+
+test('people of the seller’s own company and of its competitors are never recommended, and the answer says how many and which', async () => {
+  // The shape of the 6 Nov 2026 report, with fictional companies: recruiters of the own company and of a competitor had the title asked for.
+  const { companyRelator } = await import('@/lib/server/company-relations');
+  const client = fakeClient({
+    leads: [
+      row('c1', 'Jefa de Reclutamiento y Selección', 'Retail', 'c1@retailandino.cl', { company: 'Retail Andino' }),
+      row('o1', 'Coordinadora de Reclutamiento y Selección', 'human resources', 'o1@personalboreal.cl', { company: 'Personal Boreal Perú' }),
+      row('o2', 'Reclutador Senior', 'human resources', 'o2@personalboreal.com', { company: 'Otra razón social' }),
+      row('k1', 'Jefe de Reclutamiento y Selección', '—', null, { company: 'Talento Austral Outsourcing' }),
+      row('k2', 'Coordinador de Reclutamiento y Selección', '—', null, { company: 'Talento Austral Outsourcing' }),
+    ],
+  }, { company_name: 'PersonalBoreal', email: 'ana@personalboreal.com', signatures: { profile_extended: { targetRoles: ['Reclutamiento y Selección', 'Reclutador'] } } });
+  const locks = async () => ({ enabled: false, byEmail: {}, byProviderId: {}, byLinkedin: {} });
+  let profileSeen: Record<string, unknown> | null = null;
+  const asked: string[] = [];
+  const result = await readCoworkLeadRecommendations(client as never, { userId: USER, organizationId: ORG }, '', {
+    locks: locks as never,
+    seller: async profile => {
+      profileSeen = profile;
+      return { organizationId: ORG, names: ['PersonalBoreal'], domains: ['personalboreal.com'], sector: 'Outsourcing de personal', description: 'Personal transitorio', services: 'EST' };
+    },
+    // The own company as the app finds it (no AI); the competitor as Claude would answer.
+    relate: async (seller, companies) => {
+      asked.push(...companies.map(company => company.key));
+      const relations = await companyRelator({})(seller, companies);
+      for (const company of companies) if (company.name === 'Talento Austral Outsourcing') relations.set(company.key, { relation: 'competencia', reason: 'Outsourcing de personal', via: 'ia' });
+      return relations;
+    },
+  });
+  assert.equal((profileSeen as { email?: string } | null)?.email, 'ana@personalboreal.com', 'the profile row read is the one the seller is built from');
+  assert.deepEqual(asked.sort(), ['c1', 'k1', 'k2', 'o1', 'o2']);
+  assert.deepEqual(result.top.map(item => item.leadId), ['c1'], 'only the possible customer is recommended');
+  assert.equal(result.excludedOwnCompany, 2, 'by its name (Personal Boreal Perú) and by its email (personalboreal.com)');
+  assert.equal(result.excludedCompetitors, 2);
+  assert.deepEqual(result.competitorCompanies, ['Talento Austral Outsourcing']);
+  assert.equal(result.fitting, 1);
+});

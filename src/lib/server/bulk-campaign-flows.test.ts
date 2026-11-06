@@ -9,14 +9,18 @@ class AuthError extends Error {
   constructor(message: string, status: number) { super(message); this.status = status; }
 }
 
+/** Nobody is of the seller's own company or a competitor unless a test says so (src/lib/server/company-relations.ts). */
+const noRelations = { readSellerCompany: async () => null, companyRelator: () => async () => new Map() };
+
 function loadModule(file: string, modules: Record<string, any>) {
   const compiled = ts.transpileModule(readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   const exports: any = {};
+  const known: Record<string, any> = { '@/lib/server/company-relations': noRelations, ...modules };
   new Function('require', 'exports', compiled)((name: string) => {
-    if (!(name in modules)) throw new Error(`Unmocked dependency ${name}`);
-    return modules[name];
+    if (!(name in known)) throw new Error(`Unmocked dependency ${name}`);
+    return known[name];
   }, exports);
   return exports;
 }
@@ -114,8 +118,11 @@ test('manual search shows the people another member holds as blocked, with the r
 });
 
 // The shape of the 6 Nov 2026 report (fictional people): the model proposed people it then could not show.
-async function rankWith(options: { rows: any[]; history?: any[]; dispatches?: any[]; locks?: Record<string, any>; ranking?: any[] }) {
+async function rankWith(options: { rows: any[]; history?: any[]; dispatches?: any[]; locks?: Record<string, any>; ranking?: any[];
+  /** By email: the people of the seller's own company («propia») or of a competitor («competencia»). */
+  relations?: Record<string, 'propia' | 'competencia'> }) {
   const prompts: any[] = [];
+  const asked: any[] = [];
   const { rankAudience } = loadModule('src/lib/server/bulk-campaign-audience.ts', {
     zod: await import('zod'),
     '@/lib/server/auth-utils': {},
@@ -128,10 +135,18 @@ async function rankWith(options: { rows: any[]; history?: any[]; dispatches?: an
       byEmail: Object.fromEntries(Object.entries(options.locks ?? {}).filter(([email]) => input.emails.includes(email))),
     }) },
     '@/lib/team-lock': await import('../team-lock'),
+    '@/lib/server/company-relations': options.relations ? {
+      readSellerCompany: async () => ({ organizationId: ORG, names: ['Hoteles Sur'], domains: ['hotelessur.cl'], sector: 'Hotelería', description: null, services: null }),
+      companyRelator: () => async (_seller: unknown, companies: any[]) => {
+        asked.push(...companies);
+        return new Map(companies.filter(company => options.relations![company.key])
+          .map(company => [company.key, { relation: options.relations![company.key], reason: 'prueba', via: 'ia' }]));
+      },
+    } : noRelations,
   });
   const auth: any = { organizationId: ORG, user: { id: OWNER }, supabase: { from: () => chain({ data: options.rows, error: null }) } };
   const result = await rankAudience(auth, { description: 'Hoteles en Concepción con gerente de operaciones', relationship: 'never_contacted', maxResults: 25 });
-  return { result, prompts };
+  return { result, prompts, asked };
 }
 
 const hotelRows = [
@@ -168,6 +183,25 @@ test('AI ranking only shows the model people who can receive the campaign, and s
   assert.equal(result.ineligibleCount, 0);
   assert.deepEqual(result.excluded, { contacted: 1, team: 1, blocked: 1 });
   assert.equal(result.ownCount, 1, 'only the contact this person saved is theirs');
+});
+
+test('AI ranking never shows the model people of the seller’s own company or of a competitor, and says how many were left out', async () => {
+  const rows = [
+    hotelRows[0],
+    { id: 'e5', email: 'colega@hotelessur.cl', full_name: 'Colega', title: 'Gerente de Operaciones', company_name: 'Hoteles Sur', updated_at: '2026-11-02T00:00:00Z' },
+    { id: 'e6', email: 'gerente@otra-cadena.cl', full_name: 'Competidor', title: 'Gerente de Operaciones', company_name: 'Otra Cadena Hotelera', updated_at: '2026-11-01T00:00:00Z' },
+  ];
+  const { result, prompts, asked } = await rankWith({ rows, relations: { 'colega@hotelessur.cl': 'propia', 'gerente@otra-cadena.cl': 'competencia' },
+    ranking: [{ email: 'gerencia@hotel-ejemplo.cl', score: 90, reason: 'Hotel en el Biobío' }] });
+  assert.deepEqual(asked.map(company => [company.key, company.name]), [
+    ['gerencia@hotel-ejemplo.cl', 'Hotel Ejemplo'], ['colega@hotelessur.cl', 'Hoteles Sur'], ['gerente@otra-cadena.cl', 'Otra Cadena Hotelera'],
+  ], 'each person who could receive the campaign is checked by their company');
+  const csv: string = prompts[0].csv;
+  assert.ok(csv.includes('gerencia@hotel-ejemplo.cl'));
+  assert.ok(!csv.includes('colega@hotelessur.cl') && !csv.includes('gerente@otra-cadena.cl'), 'neither reaches the model');
+  assert.deepEqual(result.people.map((person: any) => person.email), ['gerencia@hotel-ejemplo.cl']);
+  assert.deepEqual(result.excluded, { own_company: 1, competitor: 1 });
+  assert.equal(result.candidateCount, 1);
 });
 
 test('AI ranking does not call the model when nobody can receive the campaign', async () => {

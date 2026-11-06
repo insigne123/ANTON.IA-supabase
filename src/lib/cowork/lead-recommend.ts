@@ -69,20 +69,50 @@ export function scoreRecommendLead(lead: RecommendLead, criteria: RecommendCrite
   return { score: Math.min(100, score), reasons, missing, area: leadArea, fits: Boolean(titleHit || areaHit || industryHit) };
 }
 
-/**
- * The ranking. `contacted` are the contacts that already got something; `lockedByOthers` the addresses another member is
- * working (team locks). Without terms the order is readiness and level only, and the answer says what is missing.
- */
-export function recommendLeads(input: { leads: RecommendLead[]; contacted: Set<string>; lockedByOthers: Map<string, string>; criteria: RecommendCriteria }) {
+/** A contact of the seller's own company or of a competitor (src/lib/server/company-relations.ts): never recommended. */
+export type RecommendRelated = { relation: 'propia' | 'competencia'; company: string | null };
+export type RecommendInput = {
+  leads: RecommendLead[]; contacted: Set<string>; lockedByOthers: Map<string, string>; criteria: RecommendCriteria;
+  /** By lead id. */
+  related?: Map<string, RecommendRelated>;
+};
+
+/** The people that can be recommended, best first, and who was left out on the way. */
+function recommendPool(input: RecommendInput) {
   let excludedByTeam = 0;
+  let excludedOwnCompany = 0;
+  let excludedCompetitors = 0;
+  const competitorCompanies: string[] = [];
   const notContacted = input.leads.filter(lead => !input.contacted.has(lead.id));
   const scored = notContacted.flatMap(lead => {
+    const related = input.related?.get(lead.id);
+    if (related?.relation === 'propia') { excludedOwnCompany++; return []; }
+    if (related?.relation === 'competencia') {
+      excludedCompetitors++;
+      if (related.company && !competitorCompanies.includes(related.company)) competitorCompanies.push(related.company);
+      return [];
+    }
     const owner = lead.email ? input.lockedByOthers.get(lead.email.trim().toLowerCase()) : undefined;
     if (owner) { excludedByTeam++; return []; }
     return [{ lead, ...scoreRecommendLead(lead, input.criteria) }];
   }).sort((a, b) => b.score - a.score || (a.lead.name || '').localeCompare(b.lead.name || ''));
   const withTerms = input.criteria.terms.length > 0;
   const pool = withTerms ? scored.filter(item => item.fits) : scored;
+  return { notContacted, pool, withTerms, excludedByTeam, excludedOwnCompany, excludedCompetitors, competitorCompanies };
+}
+
+/** The contacts that would be recommended, best first, up to `limit`: whose companies to check before showing the first ones. */
+export function recommendCandidates(input: RecommendInput, limit = 300) {
+  return recommendPool(input).pool.slice(0, limit).map(item => item.lead);
+}
+
+/**
+ * The ranking. `contacted` are the contacts that already got something; `lockedByOthers` the addresses another member is
+ * working (team locks); `related` the contacts of the seller's own company or of a competitor, which never come back. Without
+ * terms the order is readiness and level only, and the answer says what is missing.
+ */
+export function recommendLeads(input: RecommendInput) {
+  const { notContacted, pool, withTerms, excludedByTeam, excludedOwnCompany, excludedCompetitors, competitorCompanies } = recommendPool(input);
   const byArea = new Map<string, number>();
   for (const item of pool) byArea.set(item.area, (byArea.get(item.area) || 0) + 1);
   return {
@@ -91,6 +121,10 @@ export function recommendLeads(input: { leads: RecommendLead[]; contacted: Set<s
     notContacted: notContacted.length,
     fitting: withTerms ? pool.length : null,
     excludedByTeam,
+    /** Not recommended: people of the seller's own company (or group) and of competitors, with the competitors' names. */
+    excludedOwnCompany,
+    excludedCompetitors,
+    competitorCompanies: competitorCompanies.slice(0, 8),
     readyToWrite: pool.filter(item => item.lead.email).length,
     needEmail: pool.filter(item => !item.lead.email).length,
     // The saved contacts whose email nobody looked up yet, best first: «Buscar correos» in Inicio takes them, not only those shown.
