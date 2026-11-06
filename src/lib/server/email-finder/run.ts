@@ -53,6 +53,14 @@ type Dependencies = {
 };
 
 const CATCH_ALL_MEMORY_DAYS = 30;
+/**
+ * Verifications one person may spend in all, as a multiple of the addresses tried per run. A lead cut short by the time of the run
+ * was taken again from its first address: 7 leads spent from 41 to 200 verifications each (2 Nov 2026), about 765 of the 1,191
+ * the account had, and it ran dry. Past this the person is closed as not found.
+ */
+const VERIFICATIONS_PER_LEAD_FACTOR = 2;
+/** A person cut short by the time of the run waits this long before it is taken again, instead of the next run. */
+const CUT_SHORT_RETRY_SECONDS = 3600;
 
 function text(value: unknown, maxLength: number) {
   if (typeof value !== 'string') return '';
@@ -168,12 +176,19 @@ async function findEmail(lead: Lead, deps: Dependencies): Promise<Outcome> {
   let verifications = 0;
   let unknown = 0;
   for (const candidate of candidates) {
-    if (Date.now() >= deps.deadline) return { status: 'release', domain, verifications };
+    // Out of time before its first address: nothing was spent, it goes back to the queue as it was. Once started, it counts
+    // as an attempt and waits an hour, so a slow server is not verified again from the first address every few minutes.
+    if (Date.now() >= deps.deadline) {
+      return verifications
+        ? { status: 'retry', domain, verifications, lastResult: 'cut_short', retryAfterSeconds: CUT_SHORT_RETRY_SECONDS }
+        : { status: 'release', domain, verifications, retryAfterSeconds: CUT_SHORT_RETRY_SECONDS };
+    }
     let result: ReoonStatus;
     try {
       result = await verifyEmailWithReoon(candidate.email, { apiKey: deps.apiKey, fetchImpl: deps.fetchImpl });
     } catch (error) {
-      if (error instanceof ReoonError) Object.assign(error, { verifications });
+      // A verification that timed out reached Reoon and is charged all the same: it counts.
+      if (error instanceof ReoonError) Object.assign(error, { verifications: verifications + (error.code === 'reoon_unreachable' ? 1 : 0) });
       throw error;
     }
     verifications += 1;
@@ -190,6 +205,16 @@ async function findEmail(lead: Lead, deps: Dependencies): Promise<Outcome> {
   // Every answer was "unknown" (the server did not answer): try again later rather than give up.
   if (unknown && unknown === verifications) return { status: 'retry', domain, verifications, lastResult: 'unknown', retryAfterSeconds: 6 * 3600 };
   return { status: 'not_found', domain, verifications, lastResult: 'invalid' };
+}
+
+/** What each claimed person already spent, by attempt id; a failed read counts as nothing spent. */
+async function spentVerifications(client: ServiceClient, attemptIds: string[]) {
+  const spent = new Map<string, number>();
+  if (!attemptIds.length) return spent;
+  const { data, error } = await client.from('email_finder_attempts').select('id,verifications').in('id', attemptIds);
+  if (error) return spent;
+  for (const row of (data || []) as Array<{ id: string; verifications: number | null }>) spent.set(row.id, Number(row.verifications) || 0);
+  return spent;
 }
 
 async function complete(client: ServiceClient, lead: Lead, outcome: Outcome) {
@@ -243,10 +268,15 @@ export async function runEmailFinderTick(input: {
   };
   const summary = { enabled: true as const, claimed: leads.length, verifications: 0, stoppedBy: '' as string,
     outcomes: {} as Record<string, number> };
+  const spentAlready = await spentVerifications(client, leads.map(lead => lead.attemptId));
+  const perLead = deps.maxCandidates * VERIFICATIONS_PER_LEAD_FACTOR;
   for (const lead of leads) {
     let outcome: Outcome;
     if (summary.stoppedBy) {
       outcome = { status: 'release', verifications: 0, retryAfterSeconds: 3600 };
+    } else if ((spentAlready.get(lead.attemptId) ?? 0) >= perLead) {
+      // It already spent what one person may: closed without asking Reoon again.
+      outcome = { status: 'not_found', verifications: 0, lastResult: 'verification_cap' };
     } else {
       try {
         outcome = await findEmail(lead, deps);
