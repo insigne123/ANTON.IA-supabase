@@ -2418,3 +2418,14 @@ test('a lookup proposed in the reply itself, with no closing question, also beco
   assert.equal(coworkProfileLookupProposal({ reply: profiles }, '¿a quién invito por LinkedIn?', [], [read])?.goal, 'linkedin');
   assert.equal(coworkLookupProposal({ reply: profiles }, '¿a quién invito por LinkedIn?', [], [read]), null);
 });
+
+test('an order to research answered with the same question goes back to propose it', async () => {
+  const { coworkOrderedResearchFeedback } = await import('./agent-loop');
+  const asked = 'Sí, investiga a Cristian Heyden de Emporio Alemán antes de escribirle';
+  // 6 Nov 2026: the answer that asked again.
+  const answer = { reply: 'Cristian Heyden ya está en tus contactos.\n\n¿Investigo a Cristian Heyden para preparar su correo?' };
+  const feedback = coworkOrderedResearchFeedback(asked, answer);
+  assert.ok(feedback && /research\.start/.test(feedback) && /no le preguntes de nuevo/.test(feedback));
+  assert.equal(coworkOrderedResearchFeedback(asked, { reply: 'Listo: lo estoy investigando.' }), null, 'an answer that does not ask back');
+  assert.equal(coworkOrderedResearchFeedback('¿qué sabes de Cristian?', answer), null, 'no order to research');
+});
