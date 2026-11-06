@@ -7,7 +7,9 @@ export async function GET(req: NextRequest) {
   try {
     const { supabase, organizationId, user } = await requireAuth();
     const offset = Math.max(0, Math.min(100000, Number(req.nextUrl.searchParams.get('offset')) || 0));
-    const result = await supabase.from('contacted_leads').select('id,user_id,organization_id,lead_id,name,email,company,subject,provider,status,sent_at,replied_at,reply_intent,reply_preview,reply_summary,reply_subject,last_reply_text,opened_at,click_count,scheduled_at,conversation_resolved_at,conversation_outbound_at,reply_sync_succeeded_at,reply_sync_error,message_id,thread_id,conversation_id,internet_message_id').eq('organization_id', organizationId).order('id').range(offset, offset + 99);
+    const result = await supabase.from('contacted_leads').select('id,user_id,organization_id,lead_id,name,email,company,subject,provider,status,sent_at,replied_at,reply_intent,reply_preview,reply_summary,reply_subject,last_reply_text,opened_at,click_count,scheduled_at,conversation_resolved_at,conversation_outbound_at,reply_sync_succeeded_at,reply_sync_error,message_id,thread_id,conversation_id,internet_message_id').eq('organization_id', organizationId)
+      // Conversations are each person's own (6 Nov 2026): a teammate's threads are theirs to answer, and their content needs their mailbox.
+      .eq('user_id', user.id).order('id').range(offset, offset + 99);
     if (result.error) throw result.error;
     const leadRefs = [...new Set<string>((result.data || []).map((r: any) => String(r.lead_id || '')).filter(Boolean))];
     let phaseComplete = true;

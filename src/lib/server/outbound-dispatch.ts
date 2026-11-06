@@ -227,6 +227,8 @@ export type OutboundDispatchReconciliationEvidence =
       message: string;
       providerResponse?: Record<string, unknown> | null;
       details?: Record<string, unknown> | null;
+      /** The provider was never called (the dispatch was never claimed for sending): it stays at attempt 0, «pre_provider_rejected». */
+      preProvider?: boolean;
     }
   | { outcome: 'unresolved'; details?: Record<string, unknown> | null };
 
@@ -769,6 +771,17 @@ export async function reconcileUnknownOutboundDispatch(
       });
       if (!dispatch.startedAt) patch.attempt_count = 1;
     }
+  } else if (evidence.outcome === 'failed' && evidence.preProvider) {
+    // Never claimed, so never handed to the provider: the state check keeps it at attempt 0, without a start.
+    Object.assign(patch, {
+      status: 'failed',
+      provider_message_id: null,
+      provider_response: { ...(evidence.providerResponse ?? dispatch.providerResponse ?? {}), providerInvoked: false },
+      error_code: 'pre_provider_rejected',
+      error_message: evidence.message,
+      reconciled_at: attemptedAt,
+      completed_at: dispatch.completedAt || attemptedAt,
+    });
   } else if (evidence.outcome === 'failed') {
     Object.assign(patch, {
       status: 'failed',

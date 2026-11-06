@@ -23,6 +23,8 @@ import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 
 /** Below this many proposals, the campaign offers finding new people with Cowork. */
 const FEW_RESULTS = 10;
+/** Below this many contacts of your own, the base is said to be small (6 Nov 2026: a seller with 5). */
+const SMALL_OWN_BASE = 20;
 
 /** «Buscar personas nuevas con Cowork»: the description, written in a new conversation; the person sends it (src/components/cowork/CoworkWorkspace.tsx). */
 function coworkSearchHref(description: string) {
@@ -80,7 +82,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   const [feedback, setFeedback] = useState('');
   const [messageIndex, setMessageIndex] = useState(0);
   const [audienceMode, setAudienceMode] = useState<'ai' | 'manual'>('ai');
-  const [rankMeta, setRankMeta] = useState<{ rankedCount: number; candidateCount: number; truncated: boolean; ineligibleCount: number; poolCount: number; excluded: AudienceExclusions } | null>(null);
+  const [rankMeta, setRankMeta] = useState<{ rankedCount: number; candidateCount: number; truncated: boolean; ineligibleCount: number; poolCount: number; excluded: AudienceExclusions; ownCount: number | null } | null>(null);
   const [recipientIndex, setRecipientIndex] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(false);
@@ -175,7 +177,8 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
     });
     setPeople(result.people); setAudienceTotal(result.people.length); setAudiencePage(0); setSearched(true);
     setRankMeta({ rankedCount: result.rankedCount, candidateCount: result.candidateCount, truncated: result.truncated, ineligibleCount: result.ineligibleCount,
-      poolCount: Number(result.poolCount ?? result.candidateCount) || 0, excluded: result.excluded ?? {} });
+      poolCount: Number(result.poolCount ?? result.candidateCount) || 0, excluded: result.excluded ?? {},
+      ownCount: typeof result.ownCount === 'number' ? result.ownCount : null });
     preselect(result.people);
   }
   function selectAllResults(select: boolean) {
@@ -245,7 +248,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
           <Link className="inline-block text-sm text-muted-foreground underline underline-offset-4" href="/campaigns/history">Ver campañas anteriores</Link>
         </> : <>
           <div className="flex flex-wrap items-center justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={async () => { if ((dirty || individual) && !(await confirm({ title: '¿Salir sin guardar?', description: 'Tienes cambios sin guardar en esta campaña.', confirmLabel: 'Salir sin guardar', tone: 'danger' }))) return; setEditing(false); setDirty(false); setIndividual(null); void run(refresh); }}>← Tus campañas</Button><span className="text-sm text-muted-foreground">{campaign ? stateLabels[campaign.status] : 'Nueva campaña'}{dirty ? ' · Sin guardar' : ''}</span></div>
-          <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !frozen && !reviseMode} onGo={setStep} />
+          <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !frozen && !reviseMode} onGo={index => { if (index === 2 && dirty) void run(() => save()); else setStep(index); }} />
           <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-7" aria-busy={busy}>
             {step === 0 && <>
               <h2 className="text-xl font-semibold">¿A quién quieres contactar?</h2>
@@ -262,8 +265,10 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
                   {audienceExclusionSummary(rankMeta.excluded) ? ` ${audienceExclusionSummary(rankMeta.excluded)}` : ''}
                   {rankMeta.ineligibleCount > 0 ? ` ${rankMeta.ineligibleCount} propuestos no están disponibles para contactar.` : ''}</p>}
                 {/* The campaign picks from contacts already saved with an email: when they are few, the way to more is finding new ones. */}
-                {rankMeta && rankMeta.rankedCount < FEW_RESULTS && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
-                  <p className="min-w-0 flex-1 text-sm">¿Necesitas más? Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.</p>
+                {rankMeta && (rankMeta.rankedCount < FEW_RESULTS || (rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE)) && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
+                  <p className="min-w-0 flex-1 text-sm">{rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE
+                    ? `Tienes ${plural(rankMeta.ownCount, 'lead propio', 'leads propios')} con correo: es una base chica para una campaña. Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.`
+                    : '¿Necesitas más? Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.'}</p>
                   <Button asChild variant="outline" size="sm"><Link href={coworkSearchHref(definition.description)}>Buscar personas nuevas con Cowork</Link></Button>
                 </div>}
               </> : <>
@@ -360,7 +365,8 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
                   <li>Cada seguimiento sale en su fecha y se detiene si la persona responde.</li>
                   <li>Puedes pausar la campaña cuando quieras.</li>
                 </ol>
-              </section><div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap justify-end gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="ghost" disabled={busy || Boolean(individual)} onClick={() => setStep(0)}>Editar audiencia</Button><Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('reject'))}>Rechazar y editar</Button><Button disabled={busy || dirty || Boolean(individual)} onClick={() => void run(() => decide('approve'))}>Aprobar campaña</Button></div></> : <>
+              </section><div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap justify-end gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="ghost" disabled={busy || Boolean(individual)} onClick={() => setStep(0)}>Editar audiencia</Button><Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('reject'))}>Rechazar y editar</Button>{dirty ? <><p className="mr-auto self-center text-sm text-muted-foreground" role="status">Hay cambios sin guardar: guárdalos para aprobar.</p><Button disabled={busy || Boolean(individual)} onClick={() => void run(() => save())}>Guardar cambios</Button></>
+                : <Button disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('approve'))}>Aprobar campaña</Button>}</div></> : <>
                 <p className="text-sm text-muted-foreground">{deliveries.filter(value => value.status === 'sent').length} envíos confirmados. {automationEnabled ? 'Los correos aprobados se procesan automáticamente, incluso con esta página cerrada. Los seguimientos esperan su fecha y se detienen ante una respuesta.' : '«Enviar correos disponibles» los envía desde el servidor, por tandas. Los seguimientos futuros se envían al volver a pulsarlo, cuando corresponda su fecha.'}</p>
                 <div className="flex flex-wrap gap-3"><Button variant="outline" disabled={busy} onClick={() => void run(() => decide(campaign.status === 'paused' ? 'resume' : 'pause'))}>{campaign.status === 'paused' ? 'Reanudar campaña' : 'Pausar campaña'}</Button><Button variant="ghost" disabled={busy} onClick={() => void run(() => open(campaign.id))}>Actualizar estado</Button><Button disabled={busy || campaign.status !== 'approved'} onClick={() => void run(sendAvailable)}>{busy ? 'Procesando…' : 'Enviar correos disponibles'}</Button>{campaign.recipients.some(person => person.messages.some(message => !isCampaignMessageLocked(message.draftId, deliveries))) && <Button variant="outline" disabled={busy} onClick={() => { setDefinition({ ...campaign.definition }); setReviseMode(true); setStep(1); setMessageIndex(0); setDirty(false); setFeedback('Edita solo los mensajes pendientes. Los enviados o en curso están bloqueados.'); }}>Editar mensajes pendientes</Button>}</div>
                 <section aria-label="Estado por destinatario" className="divide-y rounded-xl border">

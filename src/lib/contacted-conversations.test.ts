@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { activeTouch, conversationStatus, conversationTone, conversationUrl, groupConversations, matchesConversationView, needsReply, readConversationUrl } from './contacted-conversations';
+import { activeTouch, conversationStatus, conversationSummary, conversationTone, conversationUrl, groupConversations, matchesConversationView, needsReply, nextTouchFor, readConversationUrl } from './contacted-conversations';
 
 const row = (overrides: Record<string, unknown> = {}) => ({ id: 'a', organization_id: 'org', user_id: 'user', email: 'ana@example.com', provider: 'gmail', status: 'replied', replied_at: '2026-09-22T10:00:00Z', ...overrides });
 
@@ -56,4 +56,37 @@ test('statuses that need you stand out; closed ones stay quiet', () => {
   assert.equal(conversationTone('No contactar · Baja solicitada'), 'danger');
   assert.equal(conversationTone('Programado'), 'info');
   assert.equal(conversationTone('Resuelto'), 'neutral');
+});
+
+const day = (value?: string | null) => (value ? value.slice(0, 10) : '—');
+const touch = (overrides: Record<string, unknown> = {}) => ({ id: 't1', email: 'ana@example.com', ownerId: 'user', campaignId: 'c', enrollmentId: 'e',
+  kind: 'first_contact', state: 'scheduled', dueAt: '2026-11-08T12:00:00Z', enrollmentState: 'active', draftId: 'd', versionId: 'v', index: 1,
+  error: null, autoSend: true, ...overrides }) as any;
+
+test('opening a conversation says where it stands and what comes next', () => {
+  assert.equal(conversationSummary(row({ reply_summary: 'Le interesa y pide precios.' }) as any, null, day),
+    'Respondió el 2026-09-22: Le interesa y pide precios. Te toca responder.');
+  assert.equal(conversationSummary(row({ reply_intent: 'meeting_request' }) as any, null, day),
+    'Pidió una reunión el 2026-09-22. Te toca proponer un horario.');
+  const waiting = row({ status: 'sent', replied_at: undefined, sent_at: '2026-10-29T19:55:58Z' });
+  assert.equal(conversationSummary(waiting as any, touch(), day),
+    'Le escribiste el 2026-10-29. Sin respuesta todavía. Próximo seguimiento el 2026-11-08, sale solo.');
+  assert.equal(conversationSummary(waiting as any, touch({ autoSend: false }), day),
+    'Le escribiste el 2026-10-29. Sin respuesta todavía. Próximo seguimiento el 2026-11-08, lo envías tú.');
+  assert.equal(conversationSummary(waiting as any, touch({ kind: 'bulk', campaignName: 'Hoteles' }), day),
+    'Le escribiste el 2026-10-29. Sin respuesta todavía. Próximo seguimiento el 2026-11-08, de la campaña «Hoteles».');
+  assert.equal(conversationSummary(waiting as any, null, day), 'Le escribiste el 2026-10-29. Sin respuesta todavía. No hay seguimientos programados.');
+  assert.equal(conversationSummary(row({ reply_intent: 'negative' }) as any, null, day), 'Dijo que no le interesa. Sus seguimientos se detuvieron.');
+  assert.equal(conversationSummary(row({ reply_intent: 'unsubscribe' }) as any, null, day), 'Pidió no recibir más correos. No se le vuelve a escribir.');
+  assert.equal(conversationSummary(row({ status: 'failed', replied_at: undefined }) as any, null, day), 'El correo no llegó. Revisa la dirección antes de volver a escribir.');
+});
+
+test('the next follow-up is the earliest one still to go out, of this person and owner', () => {
+  const r = row({ status: 'sent', replied_at: undefined });
+  const later = touch({ id: 'later', dueAt: '2026-11-20T00:00:00Z' });
+  const sooner = touch({ id: 'sooner', dueAt: '2026-11-10T00:00:00Z' });
+  const sent = touch({ id: 'sent', dueAt: '2026-11-01T00:00:00Z', state: 'sent' });
+  const other = touch({ id: 'other', dueAt: '2026-11-02T00:00:00Z', ownerId: 'someone-else' });
+  assert.equal(nextTouchFor(r as any, [later, sent, other, sooner])?.id, 'sooner');
+  assert.equal(nextTouchFor(r as any, [sent, other]), null);
 });

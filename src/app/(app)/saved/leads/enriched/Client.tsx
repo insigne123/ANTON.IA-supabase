@@ -22,6 +22,7 @@ import { ContactActions } from '@/components/contact/ContactActions';
 import { dialable, lastCallLine, needsCall, type CallOutcome, type LastCall } from '@/lib/contact-calls';
 import { CALL_OUTCOME_EVENT, recordFinishedCall, type CallOutcomeDetail } from '@/lib/contact-calls-client';
 import { supabaseService } from '@/lib/supabase-service';
+import { organizationService } from '@/lib/services/organization-service';
 import { CompleteContactsDialog } from '@/components/enrichment/complete-contacts-dialog';
 import { bringSavedWithEmail } from '@/lib/leads-workspace/saved-enrichment';
 import { completeSavedContacts, completionSummary, type ContactLookup } from '@/lib/leads-workspace/complete-contacts';
@@ -60,6 +61,7 @@ import { normalizeLockEmail } from '@/lib/team-lock';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { useConfirm } from '@/components/confirm-dialog';
 import { PageHeader } from '@/components/page-header';
+import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 import { Badge } from '@/components/ui/badge';
 import { ActionBar } from '@/components/ui/action-bar';
 import { InitialsAvatar } from '@/components/initials-avatar';
@@ -155,6 +157,28 @@ export default function EnrichedLeadsClient() {
       if (wanted === 'to_call') setStageFilter('to_call');
       else if (wanted && (ENRICHED_STAGE_ORDER as string[]).includes(wanted)) setStageFilter(wanted as EnrichedStage);
     } catch { /* no address to read: all stages, as before */ }
+  }, []);
+  // Your own leads first (6 Nov 2026): «Todo el equipo» lists everyone's, each with who found it.
+  const [scope, setScope] = useState<'mine' | 'team'>('mine');
+  const [meId, setMeId] = useState<string | null>(null);
+  const [memberNames, setMemberNames] = useState<Map<string, string>>(() => new Map());
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (active && user) setMeId(user.id);
+        const details = await organizationService.getOrganizationDetails();
+        const names = new Map<string, string>();
+        for (const member of details?.members || []) {
+          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
+          const name = String(profile?.full_name || profile?.email || '').trim();
+          if (member?.user_id && name) names.set(String(member.user_id), name);
+        }
+        if (active) setMemberNames(names);
+      } catch { /* without names the team view says «otra persona del equipo» */ }
+    })();
+    return () => { active = false; };
   }, []);
   // Follow-up plans still waiting for the first email (audit K1): they start only when it goes out, and stop after 14 days.
   const [waitingFirstEmail, setWaitingFirstEmail] = useState(0);
@@ -733,15 +757,23 @@ export default function EnrichedLeadsClient() {
     return state.pending ? 'Preparando informe' : state.failed || state.unavailable ? 'Revisar informe' : null;
   };
 
+  const mineCount = useMemo(() => (meId ? enriched.filter((lead) => lead.userId === meId).length : enriched.length), [enriched, meId]);
+  const scoped = useMemo(
+    () => (scope === 'team' || !meId ? enriched : enriched.filter((lead) => lead.userId === meId)),
+    [enriched, scope, meId],
+  );
+  const ownerOf = (lead: EnrichedLead) => (lead.userId && lead.userId !== meId
+    ? memberNames.get(lead.userId) || 'otra persona del equipo' : null);
+
   const industryOptions = useMemo(
-    () => Array.from(new Set(enriched.map((lead) => String(lead.industry || lead.organizationIndustry || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [enriched],
+    () => Array.from(new Set(scoped.map((lead) => String(lead.industry || lead.organizationIndustry || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [scoped],
   );
 
   // ---- Filtros con varios términos separados por coma (src/lib/leads-workspace/enriched-view.ts) ----
   const filtered = useMemo(
-    () => filterEnrichedLeads(enriched, { searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, applied }),
-    [enriched, applied, searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo],
+    () => filterEnrichedLeads(scoped, { searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, applied }),
+    [scoped, applied, searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo],
   );
 
   // One stage per contact (src/lib/leads-workspace/enriched-view.ts). «Listo para escribir» counts here when the report
@@ -759,9 +791,9 @@ export default function EnrichedLeadsClient() {
 
   const stageCounts = useMemo(() => {
     const counts: Record<EnrichedStage, number> = { to_research: 0, researching: 0, review: 0, ready: 0, draft_ready: 0, no_email: 0 };
-    for (const lead of enriched) counts[stageOf(lead)] += 1;
+    for (const lead of scoped) counts[stageOf(lead)] += 1;
     return counts;
-  }, [enriched, stageOf]);
+  }, [scoped, stageOf]);
 
   // The last call of each contact (contact_calls), read once the list is known and updated as results are told.
   const [lastCalls, setLastCalls] = useState<Map<string, LastCall>>(new Map());
@@ -800,7 +832,7 @@ export default function EnrichedLeadsClient() {
     return fallback || null;
   }, []);
   const awaitsCall = useCallback((lead: EnrichedLead) => needsCall(Boolean(leadPhone(lead)), lastCalls.get(lead.id)), [lastCalls, leadPhone]);
-  const toCallCount = useMemo(() => enriched.filter(awaitsCall).length, [enriched, awaitsCall]);
+  const toCallCount = useMemo(() => scoped.filter(awaitsCall).length, [scoped, awaitsCall]);
 
   const listed = useMemo(
     () => stageFilter === 'all' ? filtered
@@ -1252,6 +1284,7 @@ export default function EnrichedLeadsClient() {
           ) : null}
         </div>
         <div className="truncate text-xs text-foreground/70">{lead.title || 'Sin cargo'}</div>
+        {scope === 'team' && ownerOf(lead) && !teamLockFor(lead) ? <div className="truncate text-xs text-foreground/70">Lo encontró {ownerOf(lead)}</div> : null}
         <TeamLockBadge lock={teamLockFor(lead)} className="mt-0.5" />
       </div>
     </div>
@@ -1317,7 +1350,7 @@ export default function EnrichedLeadsClient() {
     <div className="space-y-4 pb-8">
       <PageHeader
         title="Por escribir"
-        count={enriched.length}
+        count={scoped.length}
         description="Tus contactos guardados. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas antes de enviar."
         actions={(
           <>
@@ -1327,6 +1360,17 @@ export default function EnrichedLeadsClient() {
           </>
         )}
       />
+
+      {meId && enriched.length > mineCount && (
+        <div className={`${SEGMENT_TRACK} grid w-full grid-cols-2 sm:w-auto sm:inline-grid`} role="group" aria-label="De quién son los leads">
+          {(['mine', 'team'] as const).map((value) => (
+            <button key={value} type="button" className={segmentClass(scope === value)} aria-pressed={scope === value}
+              onClick={() => { setScope(value); setPage(1); }}>
+              {value === 'mine' ? `Mis leads · ${mineCount.toLocaleString('es-CL')}` : `Todo el equipo · ${enriched.length.toLocaleString('es-CL')}`}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Audit P1: one notice above the list, not two boxes with two buttons. Saved contacts that already have an email are the main
           action (no credits); the ones without go as a quiet second action in the same line. */}

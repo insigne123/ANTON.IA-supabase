@@ -255,3 +255,13 @@ test('bookkeeping compare-and-set misses are surfaced', async () => {
     console.error = originalConsoleError;
   }
 });
+
+test('only an unknown dispatch never claimed for sending is known not to have gone out', async () => {
+  const { neverHandedToProvider } = await import('./outbound-reconciliation');
+  const base = { status: 'unknown', attemptCount: 0, startedAt: null, providerMessageId: null } as const;
+  assert.equal(neverHandedToProvider(base), true);
+  assert.equal(neverHandedToProvider({ ...base, attemptCount: 1 }), false, 'claimed once: the provider may have been called');
+  assert.equal(neverHandedToProvider({ ...base, startedAt: '2026-10-29T19:44:06Z' }), false);
+  assert.equal(neverHandedToProvider({ ...base, providerMessageId: 'abc' }), false);
+  assert.equal(neverHandedToProvider({ ...base, status: 'sending' } as any), false);
+});

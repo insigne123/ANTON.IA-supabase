@@ -20,6 +20,7 @@ function normalizeEmailKey(email?: string | null) {
 export function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
+        userId: typeof row.user_id === 'string' ? row.user_id : undefined,
         sourceProvider: row.source_provider || row.data?.sourceProvider,
         sourceProviderId: row.source_provider_id || row.data?.sourceProviderId,
         apolloId: row.apollo_id || row.data?.apolloId,

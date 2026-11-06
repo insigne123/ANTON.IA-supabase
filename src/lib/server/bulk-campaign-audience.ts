@@ -138,7 +138,7 @@ export async function loadAudienceForScope(scope: { client: any; organizationId:
 
 // The industry often comes only inside `data` (115 of 229 contacts of one team on 6 Nov 2026): without it the model sees
 // a hotel as a company with no industry. The region is where a «Biobío» or «Concepción» can match.
-const ENRICHED_COLUMNS = 'id,email,full_name,title,company_name,organization_name,organization_industry,organization_size,country,state,city,headline,seniority,departments,email_status,updated_at,'
+const ENRICHED_COLUMNS = 'id,user_id,email,full_name,title,company_name,organization_name,organization_industry,organization_size,country,state,city,headline,seniority,departments,email_status,updated_at,'
   + 'data_industry:data->>industry,org_industry:data->organization->>industry,about:data->organization->>short_description';
 /** How many saved contacts the ranking reads, most recently enriched first; the model sees the first AI_RANK_CANDIDATE_LIMIT that can be written to. */
 const ENRICHED_READ_LIMIT = 1000;
@@ -223,6 +223,7 @@ export async function getEnrichedCandidates(auth: AuthContext, limit = ENRICHED_
       emailStatus: String((row as any).email_status || ''), leadRef: String((row as any).id || ''),
       contacted: person?.contacted ?? false, replied: person?.replied ?? false,
       blockedReason: person?.blockedReason ?? null, lastSentAt: person?.lastSentAt ?? null, teamHold: null,
+      mine: row.user_id === auth.user.id,
     };
   });
   const holds = await teamHolds(auth, candidates.map(candidate => candidate.email), dependencies.readTeamLocks);
@@ -242,6 +243,8 @@ export async function rankAudience(auth: AuthContext, input: unknown,
   poolCount: number;
   /** Who was left out before the ranking, and why. */
   excluded: AudienceExclusions;
+  /** Saved contacts of the person asking: a small base says to look for more. */
+  ownCount: number;
 }> {
   const request = AudienceRankRequestSchema.parse(input);
   const { candidates, total } = await getEnrichedCandidates(auth, ENRICHED_READ_LIMIT, dependencies);
@@ -251,8 +254,9 @@ export async function rankAudience(auth: AuthContext, input: unknown,
     if (kind) excluded[kind] = (excluded[kind] ?? 0) + 1;
     return !kind;
   });
+  const ownCount = candidates.filter(candidate => candidate.mine).length;
   if (!eligible.length) {
-    return { people: [], rankedCount: 0, candidateCount: 0, truncated: false, ineligibleCount: 0, poolCount: total, excluded };
+    return { people: [], rankedCount: 0, candidateCount: 0, truncated: false, ineligibleCount: 0, poolCount: total, excluded, ownCount };
   }
   const { csv, included } = buildCandidatesCsv(eligible);
   const result = await generateStructured({
@@ -285,5 +289,5 @@ export async function rankAudience(auth: AuthContext, input: unknown,
     if (!reasons) { ineligibleCount++; continue; }
     people.push({ ...person, score: item.score, reasons: [`Afinidad ${item.score}/100`, item.reason, ...reasons] });
   }
-  return { people, rankedCount: items.length, candidateCount: eligible.length, truncated: eligible.length > included, ineligibleCount, poolCount: total, excluded };
+  return { people, rankedCount: items.length, candidateCount: eligible.length, truncated: eligible.length > included, ineligibleCount, poolCount: total, excluded, ownCount };
 }

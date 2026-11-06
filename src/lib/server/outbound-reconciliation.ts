@@ -34,6 +34,7 @@ function mapRow(row: any): RepairableOutboundDispatch {
     metadata: row.metadata,
     providerMessageId: row.provider_message_id ?? null,
     providerResponse: row.provider_response ?? null,
+    attemptCount: Number(row.attempt_count || 0),
     errorCode: row.error_code ?? null,
     errorMessage: row.error_message ?? null,
     createdAt: row.created_at,
@@ -315,6 +316,31 @@ export async function repairReconciledOutboundDispatchHistories(input?: {
   };
 }
 
+/** What the person reads on a message that never went out (the dispatch and its history). */
+export const NEVER_SENT_MESSAGE = 'No salió: la app no alcanzó a entregarlo a tu correo.';
+/** The same, where a campaign shows each message: it is not tried again on its own. */
+export const NEVER_SENT_CAMPAIGN_MESSAGE = 'Este correo no salió: la app no alcanzó a entregarlo a tu correo. No se reintenta solo.';
+
+/** A campaign message closed as not sent says so in the campaign, instead of «pendiente de confirmación» for ever. */
+async function recordNeverSentCampaignAttempt(admin: ReturnType<typeof getSupabaseAdminClient>, idempotencyKey: string) {
+  const match = /^bulk:([0-9a-f-]{36}):([0-9a-f-]{36})$/i.exec(idempotencyKey || '');
+  if (!match) return;
+  const { error } = await admin.rpc('record_bulk_campaign_attempt_v1', {
+    p_campaign_id: match[1], p_draft_id: match[2], p_state: 'attention', p_code: 'never_sent',
+    p_message: NEVER_SENT_CAMPAIGN_MESSAGE, p_retry_at: null,
+  });
+  if (error) console.error('[outbound-reconciliation] could not record the campaign message as not sent', { error });
+}
+
+/**
+ * An «unknown» dispatch that was never claimed for sending (attempt 0, no start): the only way there is a failure before the
+ * provider call (outbound-dispatch.ts, «Could not durably mark outbound dispatch as sending»), so it did not go out. Searching the
+ * mailbox for it never ends (2.235 searches for one email of 29 Oct 2026); it is closed as not sent instead, and can be sent again.
+ */
+export function neverHandedToProvider(dispatch: Pick<RepairableOutboundDispatch, 'status' | 'attemptCount' | 'startedAt' | 'providerMessageId'>) {
+  return dispatch.status === 'unknown' && (dispatch.attemptCount ?? 0) === 0 && !dispatch.startedAt && !dispatch.providerMessageId;
+}
+
 export async function reconcileUnknownOutboundDispatches(input?: { limit?: number; staleSendingMinutes?: number; historyLimit?: number }) {
   const admin = getSupabaseAdminClient();
   const limit = Math.min(Math.max(Number(input?.limit || 50), 1), 200);
@@ -345,6 +371,16 @@ export async function reconcileUnknownOutboundDispatches(input?: { limit?: numbe
       if (!claimedRow) continue;
 
       const dispatch = mapRow(claimedRow);
+      if (neverHandedToProvider(dispatch)) {
+        const result = await reconcileUnknownOutboundDispatch(dispatch, {
+          async reconcile() {
+            return { outcome: 'failed', preProvider: true, message: NEVER_SENT_MESSAGE, details: { reason: 'never_claimed_for_sending' } };
+          },
+        }, { client: admin });
+        if (result.reconciled && result.dispatch.status === 'failed') await recordNeverSentCampaignAttempt(admin, dispatch.idempotencyKey);
+        results.push({ id: dispatch.id, status: result.dispatch.status, reconciled: result.reconciled });
+        continue;
+      }
       if (dispatch.providerMessageId) {
         const result = await reconcileUnknownOutboundDispatch(dispatch, {
           async reconcile() { return { outcome: 'unresolved' }; },

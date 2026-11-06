@@ -108,6 +108,8 @@ export type EnrichedCandidate = {
   about?: string;
   /** Another member of the team holds this person («Adjudicado a Ana: le quedan 12 días»): nobody else writes to them. */
   teamHold?: string | null;
+  /** Saved by the person asking (not by a teammate). */
+  mine?: boolean;
 };
 
 /** Why someone cannot receive this campaign: decided before the model ranks, so it never proposes people who cannot be written to. */
