@@ -438,6 +438,12 @@ env:
   - variable: EMAIL_FINDER_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Cuando el lead no tiene dominio o el suyo no recibe correo (el sitio en .com y el correo en .cl), el dominio sale de los
+  # correos verificados de sus colegas en la base y, si no, de Claude (Haiku) con la web, una llamada por pasada y solo con
+  # datos de la empresa (src/lib/server/email-finder/company-domain.ts). Sin esta variable, solo los colegas.
+  - variable: EMAIL_FINDER_DOMAIN_AI_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Leads Finder como alternativa de prueba, solo la cuenta del dueño.
   # Bóveda de contactos y secretos server-only verificados; tope monetario por corrida.
   - variable: LEADS_FINDER_ENABLED
