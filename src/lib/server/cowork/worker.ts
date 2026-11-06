@@ -21,7 +21,7 @@ import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
 import { processCoworkResearchNotices } from './research-notice';
 import { coworkSchedulesEnabled, processCoworkSchedules } from './schedules';
-import { coworkExecutionPolicy, coworkEffectCanAutoApprove } from '@/lib/cowork/execution-policy';
+import { coworkExecutionPolicy, coworkEffectCanAutoApprove, coworkRequestApprovesEffect } from '@/lib/cowork/execution-policy';
 import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { loadCoworkThreadStats } from './thread-stats';
 import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
@@ -727,6 +727,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // campaign-stop effects never self-approve: they always wait for a
         // human decision. Creating a paused draft is harmless and may proceed.
         if (coworkEffectCanAutoApprove(run.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true', proposal.kind, { fromWeb: proposal.fromWeb })) {
+          const approved = await resolveCoworkEffect(client, scope, run.id, true);
+          if (!approved) throw new Error('Could not approve effect');
+        } else if (!proposal.fromWeb && coworkRequestApprovesEffect(proposal.kind, run.message, history.turns.at(-1)?.reply)) {
+          // The person asked for it in this message («investiga a Cristian…»): their words are the approval, no second question.
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         } else if (activeTask && coworkTaskApproves(activeTask, proposal.kind, { searches: 0, credits: taskCredits })) {
