@@ -18,8 +18,17 @@ import { firstSelection } from '@/lib/campaign-audience-selection';
 import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { companyProfileService } from '@/lib/services/company-profile-service';
-import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignListStats, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
+import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, audienceExclusionSummary, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudienceExclusions, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignListStats, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
+
+/** Below this many proposals, the campaign offers finding new people with Cowork. */
+const FEW_RESULTS = 10;
+
+/** «Buscar personas nuevas con Cowork»: the description, written in a new conversation; the person sends it (src/components/cowork/CoworkWorkspace.tsx). */
+function coworkSearchHref(description: string) {
+  const asked = description.trim().replace(/\s+/g, ' ').slice(0, 1500);
+  return `/cowork?pregunta=${encodeURIComponent(`Busca personas nuevas para una campaña: ${asked}. Muéstrame quiénes calzan y, cuando elija, guárdalas con su correo y arma la campaña.`)}`;
+}
 
 async function request(path: string, body?: unknown, method = 'POST') {
   const response = await fetch(`/api/campaigns/bulk${path}`, body === undefined ? { cache: 'no-store' } : {
@@ -71,7 +80,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   const [feedback, setFeedback] = useState('');
   const [messageIndex, setMessageIndex] = useState(0);
   const [audienceMode, setAudienceMode] = useState<'ai' | 'manual'>('ai');
-  const [rankMeta, setRankMeta] = useState<{ rankedCount: number; candidateCount: number; truncated: boolean; ineligibleCount: number } | null>(null);
+  const [rankMeta, setRankMeta] = useState<{ rankedCount: number; candidateCount: number; truncated: boolean; ineligibleCount: number; poolCount: number; excluded: AudienceExclusions } | null>(null);
   const [recipientIndex, setRecipientIndex] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(false);
@@ -165,7 +174,8 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
       maxResults: 100,
     });
     setPeople(result.people); setAudienceTotal(result.people.length); setAudiencePage(0); setSearched(true);
-    setRankMeta({ rankedCount: result.rankedCount, candidateCount: result.candidateCount, truncated: result.truncated, ineligibleCount: result.ineligibleCount });
+    setRankMeta({ rankedCount: result.rankedCount, candidateCount: result.candidateCount, truncated: result.truncated, ineligibleCount: result.ineligibleCount,
+      poolCount: Number(result.poolCount ?? result.candidateCount) || 0, excluded: result.excluded ?? {} });
     preselect(result.people);
   }
   function selectAllResults(select: boolean) {
@@ -246,7 +256,16 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
               </div>
               {audienceMode === 'ai' ? <>
                 <div className="space-y-2"><Label htmlFor="audience-description">Describe tu lead ideal</Label><Textarea id="audience-description" disabled={busy} value={definition.description} onChange={event => change({ description: event.target.value })} placeholder="Necesito contactar leads con cargo suficiente para decidir una compra, de empresas de seguridad en Chile" /><Button variant="outline" disabled={busy || definition.description.trim().length < 10} onClick={() => void run(rankAudience)}>Buscar leads ideales</Button></div>
-                {rankMeta && <p className="text-sm text-muted-foreground" role="status">La IA evaluó {rankMeta.candidateCount} leads enriquecidos{rankMeta.truncated ? ' (los más recientes)' : ''} y propuso {rankMeta.rankedCount}.{rankMeta.ineligibleCount > 0 ? ` ${rankMeta.ineligibleCount} propuestos no están disponibles para contactar.` : ''}</p>}
+                {rankMeta && <p className="text-sm text-muted-foreground" role="status">{rankMeta.candidateCount
+                  ? `La IA revisó ${plural(rankMeta.candidateCount, 'lead enriquecido que puedes contactar', 'leads enriquecidos que puedes contactar')}${rankMeta.truncated ? ' (los más recientes)' : ''} y propuso ${rankMeta.rankedCount}.`
+                  : `De tus ${plural(rankMeta.poolCount, 'lead enriquecido', 'leads enriquecidos')}, ninguno se puede contactar con este criterio.`}
+                  {audienceExclusionSummary(rankMeta.excluded) ? ` ${audienceExclusionSummary(rankMeta.excluded)}` : ''}
+                  {rankMeta.ineligibleCount > 0 ? ` ${rankMeta.ineligibleCount} propuestos no están disponibles para contactar.` : ''}</p>}
+                {/* The campaign picks from contacts already saved with an email: when they are few, the way to more is finding new ones. */}
+                {rankMeta && rankMeta.rankedCount < FEW_RESULTS && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
+                  <p className="min-w-0 flex-1 text-sm">¿Necesitas más? Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.</p>
+                  <Button asChild variant="outline" size="sm"><Link href={coworkSearchHref(definition.description)}>Buscar personas nuevas con Cowork</Link></Button>
+                </div>}
               </> : <>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {/* «Tamaño de empresa» only shows to clear a value saved before: the search compares it as text and the

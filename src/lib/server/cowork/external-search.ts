@@ -18,6 +18,7 @@ import { coworkOwnSavedByProvider } from './prepare-batch';
 import { normalizeLockLinkedin, teamLockNotice } from '@/lib/team-lock';
 import type { AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
 import { linkedinProfilesMatch } from '@/lib/linkedin-url';
+import { sectorFromIndustryCodes } from '@/lib/industry-codes';
 import { COWORK_CONTINUE_AFTER_SEARCH } from '@/lib/cowork/continuation-messages';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
@@ -33,9 +34,14 @@ function record(value: unknown) { return value && typeof value === 'object' ? va
 type ProviderRecord = z.infer<typeof providerLead>;
 type Company = { id: string; name: string | null; website: string | null; linkedin: string | null; industry: string | null; employees: number | null };
 
+/** The sector Apollo gives, else the one its NAICS or SIC codes say: the company search brings no industry (src/lib/industry-codes.ts). */
+function companyIndustry(org: ProviderRecord) {
+  return text(org.industry) || sectorFromIndustryCodes({ naics: org.naics_codes, sic: org.sic_codes });
+}
+
 function companyOf(org: ProviderRecord): Company {
   return { id: org.id, name: text(org.name), website: webUrl(org.website_url), linkedin: webUrl(org.linkedin_url),
-    industry: text(org.industry), employees: count(org.estimated_num_employees) };
+    industry: companyIndustry(org), employees: count(org.estimated_num_employees) };
 }
 
 /** One person as Cowork shows and saves it; the company found first fills what the people search leaves out. */
@@ -69,6 +75,12 @@ function rankedRows(rows: Array<ReturnType<typeof personRow> & { companyKey: str
   return { total: ranked.total, items: ranked.items.map(({ companyKey: _key, ...row }) => row) };
 }
 
+/**
+ * What a company search can say. Apollo's company search returns neither the industry nor the headcount nor the city of each
+ * company (docs.apollo.io, Organization Search, 6 Nov 2026): the companies match the industries and places searched, by keyword.
+ */
+export const COMPANY_SEARCH_NOTICE = 'Apollo no entrega el rubro, la dotación ni la ciudad de cada empresa en esta búsqueda: las empresas calzan con los rubros y la sede buscados, por palabras clave. Cuando el rubro aparece, viene de su código de actividad (NAICS o SIC). Confirma el encaje antes de buscar personas. Son empresas, no contactos guardables como personas.';
+
 export function normalizeCoworkSearchResult(value: unknown, limit: number, target: 'people' | 'companies' = 'people', rolePolicy?: AudienceRolePolicy | null, page = 1) {
   if (target === 'companies') {
     const payload = z.object({ organizations: z.array(providerLead).max(1000) }).parse(value);
@@ -78,9 +90,9 @@ export function normalizeCoworkSearchResult(value: unknown, limit: number, targe
       items: payload.organizations.slice(0, limit).map(org => ({
         id: `apollo-company:${org.id}`, name: text(org.name), domain: text(org.primary_domain),
         website: webUrl(org.website_url), linkedin_url: webUrl(org.linkedin_url),
-        industry: text(org.industry), employees: typeof org.estimated_num_employees === 'number' ? org.estimated_num_employees : null,
+        industry: companyIndustry(org), employees: typeof org.estimated_num_employees === 'number' ? org.estimated_num_employees : null,
         location: [org.city, org.country].filter(item => typeof item === 'string').join(', ').slice(0, 500),
-      })), notice: 'Resultados del proveedor por palabras clave; confirma el encaje del sector. Son empresas, no contactos guardables como personas.' };
+      })), notice: COMPANY_SEARCH_NOTICE };
   }
   const payload = z.object({ leads: z.array(providerLead).max(1000) }).parse(value);
   const ranked = rankedRows(payload.leads.map(lead => ({ ...personRow(lead), companyKey: companyKey(lead) })), { rolePolicy, limit });
