@@ -28,6 +28,8 @@ function fakeClient(input: {
   known?: Array<Record<string, unknown>>;
   catchAllKnown?: boolean;
   suppressed?: boolean;
+  /** Verifications each attempt already spent, by attempt id. */
+  spent?: Record<string, number>;
 }) {
   const rpcCalls: Array<{ name: string; params: Record<string, any> }> = [];
   const query = (table: string) => {
@@ -36,6 +38,11 @@ function fakeClient(input: {
       limit: async () => ({
         data: table === 'email_finder_attempts' ? (input.catchAllKnown ? [{ id: 'x' }] : [])
           : table === 'enriched_leads' ? input.known || [] : [],
+        error: null,
+      }),
+      // What each claimed attempt already spent (select('id,verifications').in('id', …)).
+      then: (resolve: (value: unknown) => unknown) => resolve({
+        data: table === 'email_finder_attempts' ? Object.entries(input.spent || {}).map(([id, verifications]) => ({ id, verifications })) : [],
         error: null,
       }),
     };
@@ -171,4 +178,44 @@ test('when every answer is unknown the lead is tried again later', async () => {
   const [saved] = completion(rpcCalls);
   assert.equal(saved.p_status, 'retry');
   assert.equal(saved.p_verifications, 6);
+});
+
+test('a person who already spent twice the addresses of a run is closed without asking Reoon again', async () => {
+  // 2 Nov 2026: leads cut short by the time of the run were verified again from their first address, up to 200 times each.
+  const { client, rpcCalls } = fakeClient({ leads: [lead()], spent: { 'a0000000-0000-4000-8000-000000000001': 12 } });
+  const { asked, fetchImpl } = reoon({ 'paula.soto@acme.test': 'safe' });
+  await runEmailFinderTick({ client, environment: ENV, fetchImpl, lookupMx: hasMx });
+  assert.deepEqual(asked, [], 'no verification spent');
+  const [saved] = completion(rpcCalls);
+  assert.equal(saved.p_status, 'not_found');
+  assert.equal(saved.p_last_result, 'verification_cap');
+  assert.equal(saved.p_verifications, 0);
+});
+
+test('a person cut short by the time of the run counts the attempt and waits an hour; one not started goes back as it was', async () => {
+  const { client, rpcCalls } = fakeClient({
+    leads: [lead(), lead({ attempt_id: 'a0000000-0000-4000-8000-000000000002', target_lead_id: 'lead-2', full_name: 'Ana Rojas', first_name: 'Ana', last_name: 'Rojas' })],
+  });
+  const slow = (async (url: URL) => {
+    await new Promise(resolve => setTimeout(resolve, 40));
+    return Response.json({ email: url.searchParams.get('email'), status: 'invalid' });
+  }) as unknown as typeof fetch;
+  await runEmailFinderTick({ client, environment: ENV, fetchImpl: slow, lookupMx: hasMx, budgetMs: 20 });
+  const [first, second] = completion(rpcCalls);
+  assert.deepEqual([first.p_status, first.p_last_result, first.p_retry_after_seconds, first.p_verifications], ['retry', 'cut_short', 3600, 1],
+    'started: an attempt, not the next run again from its first address');
+  assert.deepEqual([second.p_status, second.p_retry_after_seconds, second.p_verifications], ['release', 3600, 0]);
+});
+
+test('a verification that timed out is counted: Reoon charges it all the same', async () => {
+  const { client, rpcCalls } = fakeClient({ leads: [lead()] });
+  let calls = 0;
+  const flaky = (async (url: URL) => {
+    calls += 1;
+    if (calls === 2) throw new Error('timeout');
+    return Response.json({ email: url.searchParams.get('email'), status: 'invalid' });
+  }) as unknown as typeof fetch;
+  await runEmailFinderTick({ client, environment: ENV, fetchImpl: flaky, lookupMx: hasMx });
+  const [saved] = completion(rpcCalls);
+  assert.deepEqual([saved.p_status, saved.p_last_result, saved.p_verifications], ['retry', 'reoon_unreachable', 2]);
 });
