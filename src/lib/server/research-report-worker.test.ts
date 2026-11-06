@@ -153,12 +153,12 @@ test('pre-claim snapshot failures consume a durable non-retryable candidate atte
   assert.equal(rejection?.retryable, false);
 });
 
-test('a tick writes up to three V2 reports at once and leaves the rest unclaimed', async () => {
+test('a tick writes up to five V2 reports at once and leaves the rest unclaimed', async () => {
   let running = 0;
   let mostAtOnce = 0;
   let rejected = 0;
   const result = await processResearchReportSynthesisQueue({}, {
-    admin: adminFixture(['a', 'b', 'c', 'd'].map((id) => ({ ...candidate('research-report-document/v2'), id }))),
+    admin: adminFixture(['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ ...candidate('research-report-document/v2'), id }))),
     loadV2Configuration: (async () => ({ mode: 'shadow', sellerProfile: { products: [] }, icpRules: null, synthesisContextHash: 'a'.repeat(64) })) as any,
     processV2: (async () => {
       running += 1;
@@ -169,9 +169,9 @@ test('a tick writes up to three V2 reports at once and leaves the rest unclaimed
     }) as any,
     rejectCandidate: async () => { rejected += 1; return null; },
   });
-  assert.equal(mostAtOnce, 3, 'written together, not one after the other');
+  assert.equal(mostAtOnce, 5, 'written together, not one after the other');
   assert.equal(rejected, 0);
-  assert.deepEqual(result, { claimed: 4, completed: 3, failed: 0, skipped: 1 });
+  assert.deepEqual(result, { claimed: 6, completed: 5, failed: 0, skipped: 1 });
 });
 
 test('a V2 report that fails for good queues the V1 report, which then writes it', async () => {

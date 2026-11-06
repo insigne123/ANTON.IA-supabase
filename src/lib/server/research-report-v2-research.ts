@@ -96,7 +96,15 @@ type ResearchRunMetrics = {
   queries: number; pages: number; elapsedMs: number;
   claudeWeb?: { sources: number; searches: number; reads: number; /** Pages it picked that did not name the company (a namesake): read, not used. Only when there were some. */ offTopic?: number };
   signalHarvest?: { candidates: number; picked: number; accepted: number; inputTokens: number; outputTokens: number };
+  /**
+   * Where the time went (6 Nov 2026: 66 s of research per report, unexplained): when the Claude researcher finished and how long the
+   * research waited for it, the page reads, the extraction and the signal harvest, in ms.
+   */
+  timings?: { discoveryMs?: number; discoveryWaitMs?: number; pagesMs?: number; extractionMs?: number; harvestMs?: number };
 };
+
+/** Pages read at the same time: other companies' sites and news pages, each with its own time limit (they were read three at a time). */
+const PAGE_READS_AT_ONCE = 6;
 
 export async function gatherReportV2Research(input: {
   projection: ReportV2SnapshotProjection;
@@ -143,10 +151,12 @@ export async function gatherReportV2Research(input: {
   // The researcher starts at once and works while the site is read, the entity resolved and the queries planned: the research only waits
   // for it when it is late, and a failure costs nothing but the pages it would have found.
   const claudeWeb = dependencies.claudeWeb !== undefined ? dependencies.claudeWeb : claudeWebSourcesSettings();
+  const timings: NonNullable<ResearchRunMetrics['timings']> = {};
   const discovery = claudeWeb ? (dependencies.discover || findResearchSourcesWithClaude)({
     companyName: entity.companyName, domain, country: entity.contactCountry, language: input.language,
     contactTitle: entity.contact.title, department: entity.contact.department, sellerOffer: sellerOfferSummary(input.sellerProfile), signal,
-  }, claudeWeb).catch(() => { warnings.push('claude_web_unavailable'); return null; }) : null;
+  }, claudeWeb).then((value) => { timings.discoveryMs = Date.now() - started; return value; })
+    .catch(() => { warnings.push('claude_web_unavailable'); return null; }) : null;
   const fetched = new Map<string, ParsedWebEvidenceV2>();
   const attempted = new Set<string>();
   // The pages the researcher picked, and how many of them were about someone else: a search by name also finds a namesake (SalfaCorp and Salfa), and a
@@ -209,7 +219,9 @@ export async function gatherReportV2Research(input: {
   });
   // What the researcher chose goes first: it read the results and picked recent pages about this company; the search engines give the top of
   // each query in order, which the loop below still fills in after them.
+  const waitFrom = Date.now();
   const found = discovery ? await discovery : null;
+  if (discovery) timings.discoveryWaitMs = Date.now() - waitFrom;
   const candidates: string[] = (found?.sources ?? []).map((source) => source.url).filter((url) => !/\.(?:pdf|docx?|xlsx?)(?:\?|$)/i.test(url));
   for (const url of candidates) { try { picked.add(canonicalResearchUrl(url)); } catch { /* A malformed address is not fetched either. */ } }
   for (let rank = 0; rank < 4; rank += 1) {
@@ -222,30 +234,37 @@ export async function gatherReportV2Research(input: {
       } catch { /* Ignore malformed search URLs. */ }
     }
   }
+  const pagesFrom = Date.now();
   for (let offset = 0; offset < candidates.length && attempted.size < depthBudget.maxPages && fetched.size < depthBudget.maxPages;) {
-    const batchSize = Math.min(3, depthBudget.maxPages - fetched.size);
+    const batchSize = Math.min(PAGE_READS_AT_ONCE, depthBudget.maxPages - fetched.size);
     await Promise.all(candidates.slice(offset, offset + batchSize).map(fetchOne));
     offset += batchSize;
   }
+  timings.pagesMs = Date.now() - pagesFrom;
   const sources = [...fetched.values()].slice(0, depthBudget.maxPages);
   const claudeMetrics: Pick<ResearchRunMetrics, 'claudeWeb'> = found ? { claudeWeb: { sources: found.sources.length, searches: found.searches, reads: found.reads, ...(offTopic ? { offTopic } : {}) } } : {};
-  if (!sources.length) return { ...input.projection, entity, researchWarnings: [...warnings, 'web_context_unavailable'], researchMetrics: { queries: searches.length, pages: 0, elapsedMs: Date.now() - started, ...claudeMetrics } };
+  const emptyMetrics: ResearchRunMetrics = { queries: searches.length, pages: 0, elapsedMs: Date.now() - started, ...claudeMetrics, timings };
+  if (!sources.length) return { ...input.projection, entity, researchWarnings: [...warnings, 'web_context_unavailable'], researchMetrics: emptyMetrics };
   // Three sources per extraction and three extractions at a time: with 18 pages that is two rounds instead of six model
   // calls in a row, the longest part of a research (1 Oct: 22 to 303 s). Results keep the order of the sources.
   const chunks = Array.from({ length: Math.ceil(sources.length / 3) }, (_, index) => sources.slice(index * 3, index * 3 + 3));
+  const extractionFrom = Date.now();
   const results = (await mapLimited(chunks, 3, (chunk) => signal.aborted ? Promise.resolve(null)
     : (dependencies.extract || extractClaimsFromSourcesV2)({ companyName: entity.companyName, companyDomain: domain, sources: chunk, providerContext: entity.contact, capturedAt: input.generatedAt || new Date().toISOString() }, { generate })))
     .filter((result): result is Awaited<ReturnType<typeof extractClaimsFromSourcesV2>> => result !== null);
+  timings.extractionMs = Date.now() - extractionFrom;
   const facts = results.flatMap((result) => result.facts);
   const extractedDrafts = results.flatMap((result) => result.claimDrafts);
   // The extraction keeps a signal for an event with the date of the event; the Claude here also reads a dated notice of vacancies, an
   // announcement or a contract as the reason to write that it is, and every signal it adds must be in the facts it cites.
   const harvestSettings = dependencies.signalHarvest !== undefined ? dependencies.signalHarvest : signalHarvestSettings();
+  const harvestFrom = Date.now();
   const harvested = harvestSettings && facts.length ? await (dependencies.harvest || harvestResearchSignals)({
     companyName: entity.companyName, companyDomain: domain, country: entity.contactCountry, contactTitle: entity.contact.title, department: entity.contact.department,
     sellerOffer: sellerOfferSummary(input.sellerProfile), sources: sources.map((source) => source.source), facts,
     existingSignals: extractedDrafts.filter((draft) => draft.dimension === 'signal').map((draft) => draft.statement), today: input.generatedAt, signal,
   }, harvestSettings).catch(() => { warnings.push('signal_harvest_unavailable'); return null; }) : null;
+  if (harvested) timings.harvestMs = Date.now() - harvestFrom;
   const harvestMetrics: Pick<ResearchRunMetrics, 'signalHarvest'> = harvested ? { signalHarvest: {
     candidates: harvested.candidates, picked: harvested.picked, accepted: harvested.drafts.length,
     inputTokens: harvested.usage?.inputTokens ?? 0, outputTokens: harvested.usage?.outputTokens ?? 0,
@@ -261,6 +280,6 @@ export async function gatherReportV2Research(input: {
   return {
     ...projection,
     researchWarnings: warnings,
-    researchMetrics: { queries: searches.length, pages: sources.length, elapsedMs: Date.now() - started, ...claudeMetrics, ...harvestMetrics },
+    researchMetrics: { queries: searches.length, pages: sources.length, elapsedMs: Date.now() - started, ...claudeMetrics, ...harvestMetrics, timings } as ResearchRunMetrics,
   };
 }
