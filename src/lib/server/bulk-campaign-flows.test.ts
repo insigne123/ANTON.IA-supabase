@@ -135,7 +135,7 @@ async function rankWith(options: { rows: any[]; history?: any[]; dispatches?: an
 }
 
 const hotelRows = [
-  { id: 'e1', email: 'gerencia@hotel-ejemplo.cl', full_name: 'Gerente Hotel', title: 'Gerente de Operaciones', company_name: '—', organization_name: 'Hotel Ejemplo',
+  { id: 'e1', user_id: OWNER, email: 'gerencia@hotel-ejemplo.cl', full_name: 'Gerente Hotel', title: 'Gerente de Operaciones', company_name: '—', organization_name: 'Hotel Ejemplo',
     organization_industry: null, data_industry: 'hospitality', state: 'Biobío', city: null, about: 'Hotel  de negocios en el centro', updated_at: '2026-11-06T00:00:00Z' },
   { id: 'e2', email: 'ya-escrito@hotel-dos.cl', full_name: 'Ya Escrito', title: 'Gerente General', company_name: 'Hotel Dos', updated_at: '2026-11-05T00:00:00Z' },
   { id: 'e3', email: 'de-ana@hotel-tres.cl', full_name: 'De Ana', title: 'Jefa de Operaciones', company_name: 'Hotel Tres', updated_at: '2026-11-04T00:00:00Z' },
@@ -167,6 +167,7 @@ test('AI ranking only shows the model people who can receive the campaign, and s
   assert.equal(result.rankedCount, 1);
   assert.equal(result.ineligibleCount, 0);
   assert.deepEqual(result.excluded, { contacted: 1, team: 1, blocked: 1 });
+  assert.equal(result.ownCount, 1, 'only the contact this person saved is theirs');
 });
 
 test('AI ranking does not call the model when nobody can receive the campaign', async () => {
@@ -176,6 +177,7 @@ test('AI ranking does not call the model when nobody can receive the campaign', 
   assert.equal(result.candidateCount, 0);
   assert.equal(result.poolCount, 3);
   assert.deepEqual(result.excluded, { contacted: 1, team: 1, blocked: 1 });
+  assert.equal(result.ownCount, 0);
 });
 
 test('AI ranking keeps working when the team holds cannot be read', async () => {

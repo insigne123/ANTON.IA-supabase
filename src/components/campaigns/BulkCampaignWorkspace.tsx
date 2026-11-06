@@ -23,6 +23,8 @@ import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 
 /** Below this many proposals, the campaign offers finding new people with Cowork. */
 const FEW_RESULTS = 10;
+/** Below this many contacts of your own, the base is said to be small (6 Nov 2026: a seller with 5). */
+const SMALL_OWN_BASE = 20;
 
 /** «Buscar personas nuevas con Cowork»: the description, written in a new conversation; the person sends it (src/components/cowork/CoworkWorkspace.tsx). */
 function coworkSearchHref(description: string) {
@@ -80,7 +82,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   const [feedback, setFeedback] = useState('');
   const [messageIndex, setMessageIndex] = useState(0);
   const [audienceMode, setAudienceMode] = useState<'ai' | 'manual'>('ai');
-  const [rankMeta, setRankMeta] = useState<{ rankedCount: number; candidateCount: number; truncated: boolean; ineligibleCount: number; poolCount: number; excluded: AudienceExclusions } | null>(null);
+  const [rankMeta, setRankMeta] = useState<{ rankedCount: number; candidateCount: number; truncated: boolean; ineligibleCount: number; poolCount: number; excluded: AudienceExclusions; ownCount: number | null } | null>(null);
   const [recipientIndex, setRecipientIndex] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(false);
@@ -175,7 +177,8 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
     });
     setPeople(result.people); setAudienceTotal(result.people.length); setAudiencePage(0); setSearched(true);
     setRankMeta({ rankedCount: result.rankedCount, candidateCount: result.candidateCount, truncated: result.truncated, ineligibleCount: result.ineligibleCount,
-      poolCount: Number(result.poolCount ?? result.candidateCount) || 0, excluded: result.excluded ?? {} });
+      poolCount: Number(result.poolCount ?? result.candidateCount) || 0, excluded: result.excluded ?? {},
+      ownCount: typeof result.ownCount === 'number' ? result.ownCount : null });
     preselect(result.people);
   }
   function selectAllResults(select: boolean) {
@@ -262,8 +265,10 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
                   {audienceExclusionSummary(rankMeta.excluded) ? ` ${audienceExclusionSummary(rankMeta.excluded)}` : ''}
                   {rankMeta.ineligibleCount > 0 ? ` ${rankMeta.ineligibleCount} propuestos no están disponibles para contactar.` : ''}</p>}
                 {/* The campaign picks from contacts already saved with an email: when they are few, the way to more is finding new ones. */}
-                {rankMeta && rankMeta.rankedCount < FEW_RESULTS && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
-                  <p className="min-w-0 flex-1 text-sm">¿Necesitas más? Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.</p>
+                {rankMeta && (rankMeta.rankedCount < FEW_RESULTS || (rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE)) && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
+                  <p className="min-w-0 flex-1 text-sm">{rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE
+                    ? `Tienes ${plural(rankMeta.ownCount, 'lead propio', 'leads propios')} con correo: es una base chica para una campaña. Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.`
+                    : '¿Necesitas más? Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.'}</p>
                   <Button asChild variant="outline" size="sm"><Link href={coworkSearchHref(definition.description)}>Buscar personas nuevas con Cowork</Link></Button>
                 </div>}
               </> : <>
