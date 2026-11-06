@@ -252,6 +252,8 @@ export type LeadSearchResult = {
 
 export type EnrichedLead = {
   id: string;
+  /** Who of the team saved it: «Por escribir» shows your own first and says whose the rest are. */
+  userId?: string;
   sourceProvider?: string;
   sourceProviderId?: string;
   apolloId?: string;

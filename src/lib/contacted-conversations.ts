@@ -31,6 +31,36 @@ export function conversationStatus(row: ConversationRow) {
   if (row.status === 'scheduled') return 'Programado';
   return 'Esperando respuesta';
 }
+/** The next follow-up of this conversation that is still to go out, if any. */
+export function nextTouchFor(row: ConversationRow, touches: PlannedTouch[]): PlannedTouch | null {
+  return touches
+    .filter(touch => touch.email.toLowerCase() === (row.email || '').toLowerCase() && touch.ownerId === row.user_id && activeTouch(touch))
+    .sort((a, b) => (Date.parse(a.dueAt || '') || Infinity) - (Date.parse(b.dueAt || '') || Infinity))[0] ?? null;
+}
+
+/**
+ * What is happening in a conversation and what comes next, in one or two sentences, read from what the app already knows
+ * (the reply and its summary, the sends and the follow-ups planned): opening it says where it stands, no button needed.
+ */
+export function conversationSummary(row: ConversationRow, next: PlannedTouch | null, format: (value?: string | null) => string): string {
+  const summary = (row.reply_summary || '').trim().replace(/\s+/g, ' ').replace(/[.\s]+$/, '');
+  const said = summary ? `: ${summary}` : '';
+  if (row.reply_intent === 'unsubscribe') return 'Pidió no recibir más correos. No se le vuelve a escribir.';
+  if (row.status === 'failed' || row.reply_intent === 'delivery_failure') return 'El correo no llegó. Revisa la dirección antes de volver a escribir.';
+  if (needsReply(row)) return row.reply_intent === 'meeting_request'
+    ? `Pidió una reunión el ${format(row.replied_at)}${said}. Te toca proponer un horario.`
+    : `Respondió el ${format(row.replied_at)}${said}. Te toca responder.`;
+  if (row.reply_intent === 'negative') return `Dijo que no le interesa${said}. Sus seguimientos se detuvieron.`;
+  if (row.conversation_resolved_at && Date.parse(row.conversation_resolved_at) >= (Date.parse(row.replied_at || '') || 0)) {
+    return `Cerraste esta conversación el ${format(row.conversation_resolved_at)}.`;
+  }
+  if (row.status === 'scheduled') return `El correo sale el ${format(row.scheduled_at)}.`;
+  const automatic = row.reply_intent === 'auto_reply' ? ' Solo llegó una respuesta automática.' : '';
+  const followUp = !next ? ' No hay seguimientos programados.'
+    : next.kind === 'bulk' ? ` Próximo seguimiento el ${format(next.dueAt)}, de la campaña${next.campaignName ? ` «${next.campaignName}»` : ''}.`
+      : ` Próximo seguimiento el ${format(next.dueAt)}${next.autoSend ? ', sale solo' : ', lo envías tú'}.`;
+  return `Le escribiste el ${format(row.conversation_outbound_at || row.sent_at)}. Sin respuesta todavía.${automatic}${followUp}`;
+}
 export function activeTouch(touch: PlannedTouch) {
   return ['active', 'pending_initial_send'].includes(touch.enrollmentState) && !['sent', 'skipped', 'blocked'].includes(touch.state);
 }
