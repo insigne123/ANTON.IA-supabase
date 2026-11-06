@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  COWORK_COMPANY_SEARCH_MAX,
   coworkApolloPayload, coworkCompanyStepPayload, coworkPeopleStepPayload, coworkSearchCriteriaSchema, coworkSearchStrategy, coworkSplitTerms,
 } from './search-proposal';
 import { runCoworkReadLoop } from './agent-loop';
@@ -145,4 +146,18 @@ test('a packed entry becomes one title per term, without the piece the length li
   assert.deepEqual(coworkSplitTerms(['Gerente de Personas / People Manager']), ['Gerente de Personas', 'People Manager']);
   // The card parses the stored criteria again: the split is stable.
   assert.deepEqual(coworkSearchCriteriaSchema.parse(parsed).titles, parsed.titles);
+});
+
+test('a company search brings up to 1000 companies, in pages of 100; people stay at 100 a search', () => {
+  const companies = { target: 'companies', titles: [], industries: ['Construcción'], locations: [], companyLocations: ['Chile'] } as const;
+  assert.equal(coworkSearchCriteriaSchema.safeParse({ ...companies, limit: 1000 }).success, true, '«todas las que calcen» is 1000');
+  assert.equal(coworkSearchCriteriaSchema.safeParse({ ...companies, limit: 1001 }).success, false);
+  const people = coworkSearchCriteriaSchema.safeParse({ ...criteria, limit: 300 });
+  assert.equal(people.success, false);
+  assert.match(people.success ? '' : people.error.issues[0].message, /Hasta 100 personas por búsqueda/);
+  assert.equal(COWORK_COMPANY_SEARCH_MAX, 1000);
+  const payload = coworkApolloPayload({ ...companies, limit: 300 } as any, 'owner');
+  assert.equal(payload.per_page, 100, 'the provider gives at most 100 a page: the search asks for the pages one by one');
+  assert.equal(payload.max_results, 100);
+  assert.equal(coworkApolloPayload({ ...companies, limit: 25 } as any, 'owner').per_page, 25);
 });

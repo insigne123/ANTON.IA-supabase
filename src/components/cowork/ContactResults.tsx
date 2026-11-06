@@ -15,6 +15,8 @@ import { CwButton } from './ui';
 
 /** What «Traer más» sends: Cowork proposes the same search with the next page (search-proposal.ts). */
 export const COWORK_MORE_RESULTS_MESSAGE = 'Trae más resultados de la última búsqueda.';
+/** A company search can bring up to 1000: the list shows the first ones and the rest on request; the filter and the download cover all. */
+const FIRST_ROWS = 100;
 
 const AVATAR_TONES = [
   'bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-200',
@@ -54,6 +56,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
   sendHint?: string;
 }) {
   const [search, setSearch] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const [enriched, setEnriched] = useState<Record<string, string | null>>({});
   // «Ver todos» (Plan 13): the last search of your contacts the turn read cut at 20, and its whole list once asked for.
   const cutSearch = useMemo(() => events.filter(event => event.kind === 'tool.completed' && event.payload?.action === 'leads.search'
@@ -105,6 +108,12 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
     const result = observation.result as { next?: unknown } | null;
     return observation.action === 'prospecting.search' && Boolean(result?.next);
   });
+  // How many companies match in all, as the provider counted them: «300 de 1.240 que calzan».
+  const matched = useMemo(() => {
+    const total = (observations.filter(observation => observation.action === 'prospecting.search').at(-1)?.result as { total?: unknown } | null)?.total;
+    return typeof total === 'number' && Number.isFinite(total) ? total : null;
+  }, [observations]);
+  const visible = term || showAll ? filtered : filtered.slice(0, FIRST_ROWS);
   // People of the same company read together, under its name, when the list has more than one company.
   const groups = useMemo(() => {
     const sizes = new Map<number, number>();
@@ -126,7 +135,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
     {showHeader && <div className="flex flex-wrap items-start justify-between gap-3 pb-3">
       <div className="min-w-0">
         <h3 className="text-[15px] font-semibold tracking-tight">{heading}</h3>
-        <p className="mt-0.5 text-[12.5px] text-cw-muted">{rows.length} {noun(rows.length)} · {external ? 'Incluye resultados externos no guardados' : 'Contactos propios'}</p>
+        <p className="mt-0.5 text-[12.5px] text-cw-muted">{rows.length.toLocaleString('es-CL')} {noun(rows.length)}{matched && matched > rows.length ? ` de ${matched.toLocaleString('es-CL')} que calzan` : ''} · {external ? 'Incluye resultados externos no guardados' : 'Contactos propios'}</p>
       </div>
       <ExportMenu runId={runId} kind="contacts" read={full?.sequence ?? null} onError={onError} onAccessDenied={onAccessDenied} />
     </div>}
@@ -165,7 +174,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
     {filtered.length === 0
       ? <p className="mt-3 rounded-xl border border-dashed border-cw-border px-4 py-6 text-center text-[13px] text-cw-muted">No hay coincidencias. Cambia o borra el filtro.</p>
       : <ul className="mt-3 divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated">
-        {filtered.map((row, index) => {
+        {visible.map((row, index) => {
           const company = row.id.startsWith('apollo-company:');
           const name = String(row.name || (company ? 'Empresa sin nombre' : 'Nombre no disponible'));
           // The search hides surnames («Du***n»): show «Rafael D.» and say when the full name arrives.
@@ -224,6 +233,11 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
           </Fragment>;
         })}
       </ul>}
+    {visible.length < filtered.length && <div className="mt-2 flex justify-center">
+      <CwButton size="sm" variant="secondary" onClick={() => setShowAll(true)}>
+        <ListChecks aria-hidden="true" />{`Mostrar las ${(filtered.length - visible.length).toLocaleString('es-CL')} restantes`}
+      </CwButton>
+    </div>}
     {companiesOnly && <p className="mt-2 text-[12px] text-cw-muted">Son empresas, no contactos: pide buscar personas en sus dominios para continuar.</p>}
   </section>;
 }

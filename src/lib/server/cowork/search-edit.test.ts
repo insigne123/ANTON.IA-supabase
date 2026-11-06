@@ -98,7 +98,10 @@ test('the card says what to fill when an edit leaves the search without what it 
   assert.equal(message(people, { titles: [], industries: [], locations: [] }), '400 Deja al menos un cargo, un sector o una ubicación.');
   assert.equal(message({ ...people, strategy: 'companies_first' }, { titles: [] }), '400 Para buscar personas dentro de esas empresas, deja al menos un cargo.');
   assert.equal(message({ ...people, strategy: 'companies_first' }, { industries: [] }), '400 Para buscar empresas primero, deja al menos un sector.');
-  assert.throws(() => coworkEditedSearchCriteria(people, { limit: 101 }));
+  assert.equal(message(people, { limit: 101 }), '400 Se buscan hasta 100 personas a la vez; para más, usa «Traer más».');
+  const companies = { target: 'companies', titles: [], industries: ['Construcción'], locations: [], companyLocations: ['Chile'], limit: 100 };
+  assert.equal(coworkEditedSearchCriteria(companies, { limit: 1000 }).limit, 1000, 'a company search brings up to 1000');
+  assert.throws(() => coworkEditedSearchCriteria(companies, { limit: 1001 }));
   assert.throws(() => coworkEditedSearchCriteria(people, { page: 2 } as any), 'only the four fields of the card');
   // A packed title is split as when Cowork proposes it.
   assert.deepEqual(coworkEditedSearchCriteria(people, { titles: ['Gerente de Personas / People Manager'] }).titles, ['Gerente de Personas', 'People Manager']);

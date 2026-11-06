@@ -309,7 +309,7 @@ export function coworkProposalView(run: Pick<CoworkRun, 'status'>, events: Cowor
     return { type: 'search', payload, state, icon: 'globe',
       title: criteria.linkedinUrl ? 'Consultar perfil de LinkedIn' : criteria.target === 'companies' ? 'Buscar empresas' : 'Buscar nuevos contactos',
       label: criteria.linkedinUrl ? 'Una persona, por su perfil exacto'
-        : `Hasta ${criteria.limit ?? 25} ${criteria.target === 'companies' ? 'empresas' : 'contactos'}` };
+        : `Hasta ${(criteria.limit ?? 25).toLocaleString('es-CL')} ${criteria.target === 'companies' ? 'empresas' : 'contactos'}` };
   }
   if (payload.action === 'crm.replace_note') {
     const state: CoworkProposalState = completed ? (completed.applied === true ? 'done' : 'discarded')
@@ -383,7 +383,7 @@ export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' 
       return { happens: `Se buscan empresas de esos rubros y, dentro de ellas, hasta ${parsed.data.limit} contactos nuevos${more} en el proveedor (no gasta créditos).`,
         not: 'No se revelan correos ni se guardan contactos, y no se envía nada.' };
     }
-    return { happens: `Se buscan hasta ${criteria.limit ?? 25} ${companies ? 'empresas' : 'contactos nuevos'}${more} en el proveedor (no gasta créditos).`,
+    return { happens: `Se buscan hasta ${(criteria.limit ?? 25).toLocaleString('es-CL')} ${companies ? 'empresas' : 'contactos nuevos'}${more} en el proveedor (no gasta créditos).`,
       not: 'No se revelan correos ni se guardan contactos, y no se envía nada.' };
   }
   if (proposal.type === 'note') {

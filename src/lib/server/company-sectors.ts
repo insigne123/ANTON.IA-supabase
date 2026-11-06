@@ -81,7 +81,12 @@ export type CompanySectorDependencies = {
   now?: () => number;
 };
 
-const MAX_COMPANIES = 100;
+/** A search brings up to 1000 companies (COWORK_COMPANY_SEARCH_MAX): they go in calls of 100, a few at a time. */
+const MAX_COMPANIES = 1_000;
+const PER_CALL = 100;
+const CALLS_AT_ONCE = 4;
+/** The home pages read: the first 100, the ones the list shows first. The rest are named from their name and domain. */
+const PAGES_READ_MAX = 100;
 const PAGE_TIMEOUT_MS = 4_500;
 const PAGE_CONCURRENCY = 12;
 const MEMORY_MAX = 5_000;
@@ -135,7 +140,7 @@ const deliverSchema = z.object({
     rubro: z.string().max(80).nullable().describe('El rubro en 2 a 5 palabras, o null si no lo sabes'),
     certeza: z.enum(['alta', 'media', 'baja']),
     fuente: z.enum(['sitio', 'web', 'nombre']).optional().describe('De dónde lo sacaste: la portada de su sitio, una búsqueda o su nombre'),
-  })).max(MAX_COMPANIES),
+  })).max(PER_CALL),
 });
 
 const SYSTEM = [
@@ -207,7 +212,7 @@ async function ask(model: ModelClient, entries: Entry[], pages: Map<string, Home
     messages: [{ role: 'user', content: JSON.stringify(brief) }],
     registry: new ToolRegistry([deliver]), finalTool: 'entregar_rubros',
     ...(options.web ? { serverTools: (spent: Usage) => webToolSpecs({ searches: options.web, fetches: 0, basic: options.basic, country: options.country }, spent) } : {}),
-    limits: { maxRounds: options.web ? 4 : 2, deadlineMs: options.deadlineMs, maxTokens: 4_000 },
+    limits: { maxRounds: options.web ? 4 : 2, deadlineMs: options.deadlineMs, maxTokens: 6_000 },
     effort: 'low', signal: options.signal,
   });
   const delivered = run.stopReason === 'final_tool' ? deliverSchema.safeParse(run.output) : null;
@@ -275,11 +280,24 @@ export async function classifyCompanySectors(
 
   try {
     const pageSignal = AbortSignal.any([AbortSignal.timeout(Math.min(PAGE_TIMEOUT_MS + 500, Math.max(1_000, remaining() - 4_000))), signal]);
-    pages = await readPages(entries, readHomePage, pageSignal);
+    pages = await readPages(entries.slice(0, PAGES_READ_MAX), readHomePage, pageSignal);
     pagesRead = pages.size;
-    const first = await ask(model, entries, pages, { web: 0, basic: settings.basic, country, deadlineMs: Math.max(3_000, remaining()), signal });
-    usage = addUsage(usage, first.usage);
-    let unknown = settle(first.answers, new Set(entries.map(entry => entry.id)), false);
+    // The first pass in calls of 100, a few at a time: a call that fails leaves only its companies without a sector.
+    const batches = Array.from({ length: Math.ceil(entries.length / PER_CALL) }, (_, index) => entries.slice(index * PER_CALL, (index + 1) * PER_CALL));
+    const firsts: Array<{ answers: z.infer<typeof deliverSchema>['empresas']; usage: Usage }> = [];
+    const queue = batches.map((batch, index) => ({ batch, index }));
+    const worker = async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) {
+        firsts[next.index] = await ask(model, next.batch, pages, { web: 0, basic: settings.basic, country, deadlineMs: Math.max(3_000, remaining()), signal })
+          .catch(() => ({ answers: [], usage: emptyUsage() }));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CALLS_AT_ONCE, batches.length) }, worker));
+    let unknown = new Set<string>();
+    batches.forEach((batch, index) => {
+      usage = addUsage(usage, firsts[index].usage);
+      for (const id of settle(firsts[index].answers, new Set(batch.map(entry => entry.id)), false)) unknown.add(id);
+    });
     const lookUp = [...unknown].slice(0, settings.searches).map(id => byId.get(id)!);
     if (lookUp.length && remaining() > 5_000) {
       searched = lookUp.length;

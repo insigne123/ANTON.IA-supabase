@@ -68,3 +68,11 @@ test('a search result already among the contacts keeps its mark for the table, a
   assert.equal(rows.find(row => row.id === 'apollo:2')?.savedLeadId, undefined);
   assert.ok(!(coworkLeadColumns as readonly string[]).includes('savedLeadId'));
 });
+
+test('a company search of hundreds shows and downloads every company', () => {
+  const items = Array.from({ length: 300 }, (_, index) => ({ id: `apollo-company:c${index}`, name: `Empresa ${index}`, industry: 'Construcción', industryEstimated: index % 2 === 0 }));
+  const rows = collectCoworkLeadRows([{ action: 'prospecting.search', result: { scope: 'external_company_search', items } }]);
+  assert.equal(rows.length, 300);
+  assert.equal(rows[0].industryEstimated, true);
+  assert.equal(buildCoworkLeadCsv([{ action: 'prospecting.search', result: { scope: 'external_company_search', items } }])!.split('\r\n').length, 301);
+});
