@@ -27,7 +27,7 @@ globalThis.__campaignEditAdmin = {
       insert: async values => { state.writes.push({ table, op: 'insert', values }); return { error: null }; },
       maybeSingle: async () => {
         if (query.op === 'update' || query.op === 'upsert') { state.writes.push({ table, op: query.op, values: query.values }); return { data: { run_id: RUN }, error: null }; }
-        return { data: { definition: structuredClone(state.definition) }, error: null };
+        return { data: state.definition ? { definition: structuredClone(state.definition) } : null, error: null };
       },
     };
     return builder;
@@ -123,15 +123,18 @@ try {
   const proposal = { name: 'AXIS', objective: 'Reuniones', criteria: stored.criteria, emails: stored.emails, provider: 'google',
     messages: [{ subject: 'AXIS', body: 'Hola {{nombre}},\nte escribo por AXIS.', delayDays: 0 }, { subject: 'Seguimiento', body: 'Hola {{nombre}},\n¿lo pudiste ver?', delayDays: 3 }],
     firstEmails: [felipe] };
-  reset(null);
+  // A run with nothing staged yet: a retried turn finds its definition and keeps it (campaign-ops unit tests).
+  const fresh = () => { reset(null); state.definition = null; };
+  fresh();
   globalThis.__campaignEditAudience = [person('marcela@sodexo.cl', 'Marcela Soto'), person('felipe@securitas.cl', 'Felipe Muñoz')];
   // No mailbox read in this isolated client: the model's choice stays (the default mailbox has its own unit tests).
-  assert.deepEqual(await stageCoworkCampaignDefinition(scope, RUN, proposal), { recipients: 2, provider: 'google' });
+  // The proposal brings its follow-up, so Cowork writes none.
+  assert.deepEqual(await stageCoworkCampaignDefinition(scope, RUN, proposal), { recipients: 2, provider: 'google', messages: 2, followUpsAdded: 0 });
   const staged = state.writes.find(write => write.op === 'upsert').values.definition;
   assert.deepEqual(staged.overrides, [{ ...felipe, messageIndex: 0 }]);
   assert.deepEqual(staged.messages.map(message => message.body.split('\n')[0]), ['Hola {{nombre}},', 'Hola {{nombre}},']);
   // Someone without a first name never gets «Hola ,»: the proposal goes back to the model and nothing is staged.
-  reset(null);
+  fresh();
   globalThis.__campaignEditAudience = [person('marcela@sodexo.cl', 'Ma***a Soto'), person('felipe@securitas.cl', 'Felipe Muñoz')];
   await assert.rejects(stageCoworkCampaignDefinition(scope, RUN, proposal), /marcela@sodexo\.cl no tiene un nombre de pila guardado/);
   assert.equal(state.writes.length, 0);

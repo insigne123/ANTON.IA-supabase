@@ -542,7 +542,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.campaign) throw new Error('Missing campaign definition');
           const staged = await stageCoworkCampaignDefinition(scope, run.id, proposal.campaign, run.message);
           targetId = run.id;
-          label = `Crear campaña «${proposal.campaign.name.slice(0, 80)}» · ${staged.recipients} ${staged.recipients === 1 ? 'destinatario' : 'destinatarios'} · ${proposal.campaign.messages.length} ${proposal.campaign.messages.length === 1 ? 'correo' : 'correos'} · desde ${MAIL_PROVIDER_LABEL[staged.provider]} · se guarda sin enviar`;
+          // The count of what was staged: the follow-ups the app wrote count too (campaign-ops.ts).
+          label = `Crear campaña «${proposal.campaign.name.slice(0, 80)}» · ${staged.recipients} ${staged.recipients === 1 ? 'destinatario' : 'destinatarios'} · ${staged.messages} ${staged.messages === 1 ? 'correo' : 'correos'}${staged.followUpsAdded ? ` (${staged.followUpsAdded} ${staged.followUpsAdded === 1 ? 'seguimiento escrito' : 'seguimientos escritos'} por Cowork)` : ''} · desde ${MAIL_PROVIDER_LABEL[staged.provider]} · se guarda sin enviar`;
         }
         if (proposal.kind === 'campaign_activate' || proposal.kind === 'campaign_pause') {
           const campaign = await getBulkCampaign(

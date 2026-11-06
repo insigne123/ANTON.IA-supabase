@@ -315,7 +315,7 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
         return { status: 'ok', output: { emails: emails?.length ?? 0, personal: personal?.length ?? 0 },
           text: ['La Redactora ya escribió los correos y la Revisora los revisó; la persona pidió la campaña. Este es el texto, no hace falta revisarlo de nuevo:',
             coworkWrittenPreview(emails, personal),
-            'Propónla ahora con proponer_campana (action campaign.create): la app copia este texto tal cual. En explicacion di a quiénes va y cuántos correos lleva.'].join('\n\n') };
+            'Propónla ahora con proponer_campana (action campaign.create): la app copia este texto tal cual. En explicacion di a quiénes va y cuántos correos lleva; si es un solo correo, la app le agrega 3 seguimientos escritos desde él (días 3, 7 y 14), salvo que la persona haya pedido un solo correo: dilo así («el primer correo y 3 seguimientos»).'].join('\n\n') };
       },
     }));
   }
