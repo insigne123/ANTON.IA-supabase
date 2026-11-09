@@ -1,24 +1,34 @@
 'use client';
 
 import { PageHeader } from '@/components/page-header';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Check, Copy, RefreshCw } from 'lucide-react';
 import { CampaignSequenceEditor } from './CampaignSequenceEditor';
 import { CampaignAudienceTable } from './CampaignAudienceTable';
 import { CampaignSteps } from './CampaignSteps';
+import { CampaignList, type CampaignListItem } from './CampaignList';
+import { CampaignPreview } from './CampaignPreview';
+import { CampaignProgressTiles, CampaignRecipientsStatus } from './CampaignProgressPanel';
+import { campaignStatusBadge, providerName } from './campaign-status';
 import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
-import { describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { campaignProgress } from '@/lib/bulk-campaign-progress';
 import { firstSelection } from '@/lib/campaign-audience-selection';
 import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
+import { formatDate, formatDateTime } from '@/lib/dates';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { companyProfileService } from '@/lib/services/company-profile-service';
-import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, audienceExclusionSummary, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudienceExclusions, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignListStats, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
+import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, audienceExclusionSummary, defaultAudience, isCampaignMessageLocked, type AudienceExclusions, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
 
 /** Below this many proposals, the campaign offers finding new people with Cowork. */
@@ -53,7 +63,6 @@ async function request(path: string, body?: unknown, method = 'POST') {
   return result;
 }
 const initial = (): CampaignInput => ({ name: '', description: '', objective: '', criteria: { ...defaultAudience }, emails: [], overrides: [], provider: 'google', messages: [{ subject: '', body: '', delayDays: 0 }] });
-const stateLabels = { draft: 'Borrador', rejected: 'Cambios solicitados', approved: 'Aprobada', paused: 'En pausa' };
 const STEPS = [
   { label: 'Audiencia', hint: 'A quién le escribes' },
   { label: 'Correos', hint: 'El primer correo y los seguimientos' },
@@ -62,7 +71,11 @@ const STEPS = [
 const MAX_RECIPIENTS = 100;
 /** Server batches one click may chain (each sends up to 25), so 100 recipients go out in one click. */
 const SEND_BATCHES_PER_CLICK = 4;
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+const plural = (count: number, one: string, many: string) => `${count.toLocaleString('es-CL')} ${count === 1 ? one : many}`;
+const RELATIONSHIPS = [
+  { value: 'never_contacted', label: 'Nunca contactados' },
+  { value: 'previously_contacted', label: 'Contactados anteriormente' },
+] as const;
 
 export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId?: string } = {}) {
   // «Ver seguimientos» from Por escribir opens on the follow-ups (?vista=seguimientos, audit K1).
@@ -71,13 +84,16 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
     try { if (new URLSearchParams(window.location.search).get('vista') === 'seguimientos') setTab('followups'); } catch { /* stays on campaigns */ }
   }, []);
   const confirm = useConfirm();
-  const [items, setItems] = useState<Array<BulkCampaign & { stats?: CampaignListStats }>>([]);
+  const [items, setItems] = useState<CampaignListItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [step, setStep] = useState(0);
   const [definition, setDefinition] = useState(initial);
   const [campaign, setCampaign] = useState<BulkCampaign | null>(null);
   const [deliveries, setDeliveries] = useState<CampaignDelivery[]>([]);
   const [attempts, setAttempts] = useState<CampaignAttempt[]>([]);
+  const [replied, setReplied] = useState<string[] | null>(null);
+  const [view, setView] = useState<'people' | 'emails'>('people');
   const [people, setPeople] = useState<AudiencePerson[]>([]);
   const [searched, setSearched] = useState(false);
   const [audienceTotal, setAudienceTotal] = useState(0);
@@ -134,7 +150,12 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
     try { await work(); } catch (caught) { setError(caught instanceof Error ? caught.message : 'No se pudo completar la operación.'); }
     finally { setBusy(false); }
   }
-  const refresh = async () => { const result = await request(''); setItems(result.campaigns); setAutomationEnabled(result.automationEnabled === true); };
+  const refresh = async () => {
+    try {
+      const result = await request('');
+      setItems(result.campaigns); setAutomationEnabled(result.automationEnabled === true);
+    } finally { setLoaded(true); }
+  };
   useEffect(() => { void run(async () => { await refresh(); if (initialCampaignId) await open(initialCampaignId); }); }, [initialCampaignId]);
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => { if (dirty || busy || individual) { event.preventDefault(); event.returnValue = ''; } };
@@ -146,11 +167,33 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
       overrides: patch.overrides ?? (patch.messages ? [] : (value.overrides || []).filter(override => !patch.emails || patch.emails.includes(override.email))),
     })); setDirty(true);
   }
+  /** A criterion of the audience changed: the results shown no longer answer it. */
+  function changeCriteria(patch: Partial<CampaignInput['criteria']>) {
+    change({ criteria: { ...definition.criteria, ...patch } }); setSearched(false);
+  }
   async function open(id: string) {
     const result = await request(`/${id}`);
     setCampaign(result.campaign); setDefinition(result.campaign.definition);
     setDeliveries(withSentAttemptsAsDeliveries(result.deliveries || [], result.attempts || [])); setAttempts(result.attempts || []);
+    setReplied(Array.isArray(result.replied) ? result.replied : null);
     setStep(2); setEditing(true); setDirty(false); setRecipientIndex(0); setMessageIndex(0); setReviseMode(false); setHistory({}); setIndividual(null);
+  }
+  function startNew() {
+    objectivePending.current = !profileObjective;
+    setDefinition({ ...initial(), objective: profileObjective, provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false);
+    setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setFeedback(''); setReviseMode(false);
+    setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); setReplied(null); void loadProfiles();
+  }
+  /** «Duplicar»: the audience profile and the e-mails of this campaign start a new one; the people are chosen again. */
+  function duplicate() {
+    if (!campaign) return;
+    setDefinition({ ...campaign.definition, name: `${campaign.definition.name} · Copia`, emails: [], overrides: [] });
+    setCampaign(null); setPeople([]); setSearched(false); setStep(0); setDirty(true); setMessageIndex(0); setRankMeta(null); setReplied(null);
+    setFeedback('Copiamos el perfil de la audiencia y los correos. Elige a quién escribir esta vez.');
+  }
+  async function leave() {
+    if ((dirty || individual) && !(await confirm({ title: '¿Salir sin guardar?', description: 'Tienes cambios sin guardar en esta campaña.', confirmLabel: 'Salir sin guardar', tone: 'danger' }))) return;
+    setEditing(false); setDirty(false); setIndividual(null); setFeedback(''); void run(refresh);
   }
   async function save(input = definition) {
     // Reached through the steps above without a name, it takes the same one «Continuar a correos» gives.
@@ -195,17 +238,21 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   }
   function selectAllResults(select: boolean) {
     const eligible = people.filter(person => !person.blockedReason).map(person => person.email);
-    change({ emails: select ? [...new Set([...definition.emails, ...eligible])].slice(0, 100) : definition.emails.filter(email => !eligible.includes(email)) });
+    change({ emails: select ? [...new Set([...definition.emails, ...eligible])].slice(0, MAX_RECIPIENTS) : definition.emails.filter(email => !eligible.includes(email)) });
   }
   async function loadProfiles() {
     try { setProfiles((await request('/profiles', undefined, 'GET')).profiles || []); } catch { setProfiles([]); }
   }
-  async function decide(action: 'approve' | 'reject' | 'pause' | 'resume') {
+  async function decide(action: 'approve' | 'pause' | 'resume') {
     if (!campaign) return;
     const result = await request(`/${campaign.id}`, { action, revision: campaign.revision, reviewHash: campaign.review_hash });
     setCampaign(result.campaign); await refresh();
-    if (action === 'reject') { setStep(1); setFeedback('Puedes editar el mensaje o pedir cambios a la IA y volver a revisar.'); }
-    if (action === 'approve') setFeedback('Contenido y audiencia aprobados. Ya puedes iniciar los envíos disponibles.');
+    if (action === 'approve') {
+      setView('people');
+      setFeedback(automationEnabled ? 'Campaña aprobada. Los primeros correos salen en el próximo envío automático.' : 'Campaña aprobada. Envía los primeros correos con «Enviar correos disponibles».');
+    }
+    if (action === 'pause') setFeedback('Campaña en pausa. No sale ningún correo hasta que la reanudes.');
+    if (action === 'resume') setFeedback('Campaña reanudada. Los correos pendientes salen en su fecha.');
   }
   // The server sends what is due in batches (…/dispatch): one request per batch instead of one per person, with the same
   // checks and idempotency as the scheduled worker. A batch stops at its own limit; the next one continues.
@@ -229,65 +276,104 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
     } finally {
       await open(campaign.id);
     }
-    const parts = [`${plural(total.sent, 'correo enviado', 'correos enviados')}.`];
+    const parts = [total.sent ? `${plural(total.sent, 'correo enviado', 'correos enviados')}.` : 'No había correos para enviar ahora.'];
     if (total.held) parts.push(`${plural(total.held, 'contacto quedó', 'contactos quedaron')} en revisión porque cambió, respondió o ya no cumple los criterios.`);
     if (total.deferred || total.attention) parts.push(`${plural(total.deferred + total.attention, 'envío espera', 'envíos esperan')}: revisa el estado de cada persona.`);
     if (ready) parts.push(`Quedan ${plural(ready, 'correo listo', 'correos listos')}: vuelve a pulsar «Enviar correos disponibles».`);
-    parts.push('Los seguimientos respetan el tiempo desde el envío confirmado.');
+    if (total.sent) parts.push('Los seguimientos respetan el tiempo desde el envío confirmado.');
     setFeedback(parts.join(' '));
   }
-  const selectedPreview = campaign?.recipients[recipientIndex];
+  function loadHistory(email: string) {
+    if (!campaign || history[email] || historyLoading) return;
+    setHistoryLoading(email);
+    fetch(`/api/campaigns/bulk/${campaign.id}/history?email=${encodeURIComponent(email)}`, { cache: 'no-store' })
+      .then(response => response.json()).then(result => {
+        if (Array.isArray(result.events)) setHistory(value => ({ ...value, [email]: result.events }));
+      }).catch(() => {}).finally(() => setHistoryLoading(''));
+  }
   const reviseLocked = (index: number) => reviseMode && campaign
     ? campaign.recipients.some(person => isCampaignMessageLocked(person.messages[index]?.draftId || '', deliveries))
     : false;
+  const progress = useMemo(() => campaign && frozen
+    ? campaignProgress({ campaign, deliveries, attempts, replied, automation: automationEnabled, paused: campaign.status === 'paused' })
+    : null, [campaign, frozen, deliveries, attempts, replied, automationEnabled]);
+  const badge = campaign ? campaignStatusBadge(campaign.status, progress?.finished) : null;
+  const pendingEditable = Boolean(campaign && frozen && campaign.recipients.some(person => person.messages.some(message => !isCampaignMessageLocked(message.draftId, deliveries))));
+  const individualName = individual ? (campaign?.recipients.find(person => person.email === individual.email)?.name || individual.email) : '';
+  const blockedOnPage = people.filter(person => person.blockedReason).length;
+  const selectionOutsideResults = definition.emails.filter(email => !people.some(person => person.email === email)).length;
 
-  return <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6 p-4 sm:p-6 [&_button]:h-auto [&_button]:min-h-11 [&_button]:max-w-full [&_button]:whitespace-normal [&_button]:py-2 [&_select]:min-w-0">
+  const individualEditor = individual ? (
+    <div className="space-y-4 rounded-xl border border-primary/40 bg-background p-4 shadow-sm sm:p-5">
+      <div className="space-y-1">
+        <h4 className="font-semibold">Editar solo para {individualName}</h4>
+        <p className="text-xs text-muted-foreground">{individual.messageIndex === 0 ? 'Primer correo' : `Seguimiento ${individual.messageIndex}`}. El resto de la audiencia recibe el correo de la campaña.</p>
+      </div>
+      <div className="space-y-2"><Label htmlFor="individual-subject">Asunto individual</Label><Input id="individual-subject" disabled={busy} value={individual.subject} onChange={event => { setIndividual({ ...individual, subject: event.target.value }); setIndividualProposal(null); }} /></div>
+      <div className="space-y-2"><Label htmlFor="individual-body">Correo individual</Label><Textarea id="individual-body" disabled={busy} className="min-h-48" value={individual.body} onChange={event => { setIndividual({ ...individual, body: event.target.value }); setIndividualProposal(null); }} /></div>
+      <div className="space-y-2">
+        <Label htmlFor="individual-instruction">Cambio con IA para esta persona</Label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input id="individual-instruction" disabled={busy} value={individualInstruction} onChange={event => setIndividualInstruction(event.target.value)} placeholder="Menciona su última contratación masiva" />
+          <Button variant="outline" className="shrink-0" disabled={busy || individualInstruction.trim().length < 5} onClick={() => void run(async () => {
+            const result = await request('/assist', { mode: 'message', instruction: individualInstruction, objective: definition.objective, relationship: definition.criteria.relationship,
+              current: { subject: individual.subject, body: individual.body, delayDays: definition.messages[individual.messageIndex].delayDays } });
+            setIndividualProposal(result.proposal);
+          })}>Proponer cambio individual</Button>
+        </div>
+      </div>
+      {individualProposal && <div className="space-y-2 rounded-lg bg-muted/40 p-3"><p className="text-xs font-medium text-muted-foreground">Propuesta de IA</p><p className="font-medium">{individualProposal.subject}</p><p className="whitespace-pre-wrap text-sm leading-6">{individualProposal.body}</p><div className="flex flex-wrap gap-2"><Button variant="secondary" size="sm" disabled={busy} onClick={() => { setIndividual({ ...individual, subject: individualProposal.subject, body: individualProposal.body }); setIndividualProposal(null); }}>Aplicar propuesta</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => setIndividualProposal(null)}>Descartar</Button></div></div>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" disabled={busy} onClick={() => { setIndividual(null); setIndividualProposal(null); }}>Cancelar</Button>
+        <Button disabled={busy} onClick={() => void run(async () => {
+          const overrides = [...(definition.overrides || []).filter(value => value.email !== individual.email || value.messageIndex !== individual.messageIndex), individual];
+          await save({ ...definition, overrides }); setIndividual(null); setIndividualProposal(null);
+        })}>Guardar edición individual</Button>
+      </div>
+    </div>
+  ) : null;
+
+  return <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6 p-4 sm:p-6 [&_button:not([role=checkbox])]:h-auto [&_button:not([role=checkbox])]:min-h-11 [&_button:not([role=checkbox])]:max-w-full [&_button:not([role=checkbox])]:whitespace-normal [&_button:not([role=checkbox])]:py-2">
     <PageHeader title="Campañas" description="Escribe a un grupo con una sola aprobación o revisa los seguimientos uno por uno." />
-    {error && <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">{error}<Button className="ml-3" size="sm" variant="outline" disabled={busy} onClick={() => void run(refresh)}>Actualizar</Button></div>}
-    {feedback && <p role="status" className="text-sm text-muted-foreground">{feedback}</p>}
+    {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm"><span className="min-w-0 flex-1">{error}</span><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(campaign && editing && !dirty && !individual ? () => open(campaign.id) : refresh)}>Actualizar</Button></div>}
     <Tabs value={tab} onValueChange={setTab}>
       <TabsList data-tour="campaigns-tabs" className="grid h-auto w-full grid-cols-2 sm:w-fit"><TabsTrigger value="campaigns">Campañas masivas</TabsTrigger><TabsTrigger value="followups">Seguimientos individuales</TabsTrigger></TabsList>
       <TabsContent value="followups"><CampaignReviewInbox /></TabsContent>
       <TabsContent value="campaigns" className="space-y-5">
+        {feedback && <p role="status" className="rounded-xl bg-muted/50 px-4 py-3 text-sm">{feedback}</p>}
         {!editing ? <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { objectivePending.current = !profileObjective; setDefinition({ ...initial(), objective: profileObjective, provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
-          {busy && <p role="status">Cargando campañas…</p>}
-          {!busy && !items.length && !error && <div className="rounded-2xl border bg-card p-8"><h3 className="font-medium">Tu próxima conversación empieza aquí</h3><p className="mt-2 text-sm text-muted-foreground">Crea una campaña para tus contactos nuevos o vuelve a escribir a quienes ya conoces.</p></div>}
-          <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.stats
-            // A launched campaign says how it goes (APP-10); a draft, what it will send.
-            ? `Enviada a ${item.stats.sent} de ${item.stats.recipients} · ${plural(item.stats.replied, 'respuesta', 'respuestas')}`
-            : `${plural(item.definition.emails.length, 'destinatario', 'destinatarios')} · ${plural(item.definition.messages.length, 'correo', 'correos')} por persona`}</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>
-          <Link className="inline-block text-sm text-muted-foreground underline underline-offset-4" href="/campaigns/history">Ver campañas anteriores</Link>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Tus campañas</h2>
+            {items.length > 0 && <Button disabled={busy} onClick={startNew}>Nueva campaña</Button>}
+          </div>
+          <CampaignList items={items} loading={!loaded} busy={busy} onOpen={id => void run(() => open(id))} onNew={startNew} />
+          <Link className="inline-flex min-h-11 items-center text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground" href="/campaigns/history">Ver campañas anteriores</Link>
         </> : <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={async () => { if ((dirty || individual) && !(await confirm({ title: '¿Salir sin guardar?', description: 'Tienes cambios sin guardar en esta campaña.', confirmLabel: 'Salir sin guardar', tone: 'danger' }))) return; setEditing(false); setDirty(false); setIndividual(null); void run(refresh); }}>← Tus campañas</Button><span className="text-sm text-muted-foreground">{campaign ? stateLabels[campaign.status] : 'Nueva campaña'}{dirty ? ' · Sin guardar' : ''}</span></div>
-          <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !frozen && !reviseMode} onGo={index => { if (index === 2 && dirty) void run(() => save()); else setStep(index); }} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button variant="ghost" className="-ml-3" disabled={busy} onClick={() => void leave()}><ArrowLeft aria-hidden="true" />Tus campañas</Button>
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              {dirty ? <span>Sin guardar</span> : null}
+              {badge ? <Badge variant={badge.variant} className="font-medium">{badge.label}</Badge> : <Badge variant="outline" className="font-medium">Nueva campaña</Badge>}
+            </span>
+          </div>
+          {!frozen && <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !reviseMode} onGo={index => { if (index === 2 && dirty) void run(() => save()); else setStep(index); }} />}
           <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-7" aria-busy={busy}>
             {step === 0 && <>
-              <h2 className="text-xl font-semibold">¿A quién quieres contactar?</h2>
-              <p className="text-sm text-muted-foreground">Las campañas usan tus leads guardados enriquecidos, con los datos de cargo, empresa e industria de Apollo.</p>
-              <div className="space-y-2"><Label htmlFor="campaign-name">Nombre de campaña</Label><Input id="campaign-name" value={definition.name} disabled={busy} onChange={event => change({ name: event.target.value })} placeholder="Primer contacto · Logística" /></div>
+              <header className="space-y-1">
+                <h2 className="text-xl font-semibold">¿A quién quieres contactar?</h2>
+                <p className="text-sm text-muted-foreground">Eliges entre tus leads guardados con correo, con su cargo, empresa e industria.</p>
+              </header>
+              <div className="space-y-2"><Label htmlFor="campaign-name">Nombre de campaña</Label><Input id="campaign-name" value={definition.name} disabled={busy} onChange={event => change({ name: event.target.value })} placeholder="Si lo dejas vacío, lo tomamos de lo que describas" /></div>
               <div className={`${SEGMENT_TRACK} grid w-full grid-cols-2`} role="group" aria-label="Modo de búsqueda de audiencia">
                 {(['ai', 'manual'] as const).map(mode => <button key={mode} type="button" className={segmentClass(audienceMode === mode)} aria-pressed={audienceMode === mode} disabled={busy} onClick={() => { setAudienceMode(mode); setSearched(false); setPeople([]); setRankMeta(null); }}>{mode === 'ai' ? 'Describir lead ideal con IA' : 'Filtros manuales'}</button>)}
               </div>
-              {audienceMode === 'ai' ? <>
-                <div className="space-y-2"><Label htmlFor="audience-description">Describe tu lead ideal</Label><Textarea id="audience-description" disabled={busy} value={definition.description} onChange={event => change({ description: event.target.value })} placeholder="Necesito contactar leads con cargo suficiente para decidir una compra, de empresas de seguridad en Chile" /><Button variant="outline" disabled={busy || definition.description.trim().length < 10} onClick={() => void run(rankAudience)}>Buscar leads ideales</Button></div>
-                {rankMeta && <p className="text-sm text-muted-foreground" role="status">{rankMeta.candidateCount
-                  ? `La IA revisó ${plural(rankMeta.candidateCount, 'lead enriquecido que puedes contactar', 'leads enriquecidos que puedes contactar')}${rankMeta.truncated ? ' (los más recientes)' : ''} y propuso ${rankMeta.rankedCount}.`
-                  : `De tus ${plural(rankMeta.poolCount, 'lead enriquecido', 'leads enriquecidos')}, ninguno se puede contactar con este criterio.`}
-                  {audienceExclusionSummary(rankMeta.excluded) ? ` ${audienceExclusionSummary(rankMeta.excluded)}` : ''}
-                  {rankMeta.ineligibleCount > 0 ? ` ${rankMeta.ineligibleCount} propuestos no están disponibles para contactar.` : ''}</p>}
-                {/* The campaign picks from contacts already saved with an email: when they are few, the way to more is finding new ones. */}
-                {rankMeta && (rankMeta.rankedCount < FEW_RESULTS || (rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE)) && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
-                  <p className="min-w-0 flex-1 text-sm">{rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE
-                    ? `Tienes ${plural(rankMeta.ownCount, 'lead propio', 'leads propios')} con correo: es una base chica para una campaña. Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.`
-                    : '¿Necesitas más? Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.'}</p>
-                  <Button asChild variant="outline" size="sm"><Link href={coworkSearchHref(definition.description)}>Buscar personas nuevas con Cowork</Link></Button>
-                </div>}
-              </> : <>
+              {audienceMode === 'ai' ? (
+                <div className="space-y-2"><Label htmlFor="audience-description">Describe tu lead ideal</Label><Textarea id="audience-description" disabled={busy} value={definition.description} onChange={event => change({ description: event.target.value })} placeholder="Necesito contactar leads con cargo suficiente para decidir una compra, de empresas de seguridad en Chile" /></div>
+              ) : <>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {/* «Tamaño de empresa» only shows to clear a value saved before: the search compares it as text and the
                       contacts carry the number of employees, so a range never matched (docs/ui-ux/sencillez.md). */}
-                  {(['titles', 'industries', 'countries', ...(definition.criteria.sizes.some(Boolean) ? ['sizes' as const] : [])] as const).map(field => <div key={field} className="space-y-2"><Label htmlFor={field}>{({ titles: 'Cargos', industries: 'Industrias', countries: 'Países', sizes: 'Tamaño de empresa' })[field]} (separados por comas)</Label><Input id={field} disabled={busy} value={definition.criteria[field].join(',')} onChange={event => { change({ criteria: { ...definition.criteria, [field]: event.target.value.split(',') } }); setSearched(false); }} /></div>)}
+                  {(['titles', 'industries', 'countries', ...(definition.criteria.sizes.some(Boolean) ? ['sizes' as const] : [])] as const).map(field => <div key={field} className="space-y-2"><Label htmlFor={field}>{({ titles: 'Cargos', industries: 'Industrias', countries: 'Países', sizes: 'Tamaño de empresa' })[field]} (separados por comas)</Label><Input id={field} disabled={busy} value={definition.criteria[field].join(',')} onChange={event => changeCriteria({ [field]: event.target.value.split(',') })} /></div>)}
                 </div>
                 <fieldset className="space-y-2" disabled={busy}>
                   <legend className="text-sm font-medium">Nivel del cargo <span className="font-normal text-muted-foreground">(opcional, uno o varios)</span></legend>
@@ -296,121 +382,145 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
                     {[...SENIORITY_LEVELS, ...definition.criteria.seniorities.filter(code => code.trim() && !SENIORITY_LEVELS.some(level => level.code === code)).map(code => ({ code, label: code }))].map(level => {
                       const chosen = definition.criteria.seniorities.includes(level.code);
                       return <Button key={level.code} type="button" size="sm" variant={chosen ? 'default' : 'outline'} aria-pressed={chosen} className="h-8 rounded-full"
-                        onClick={() => { change({ criteria: { ...definition.criteria, seniorities: chosen ? definition.criteria.seniorities.filter(code => code !== level.code) : [...definition.criteria.seniorities, level.code] } }); setSearched(false); }}>{level.label}</Button>;
+                        onClick={() => changeCriteria({ seniorities: chosen ? definition.criteria.seniorities.filter(code => code !== level.code) : [...definition.criteria.seniorities, level.code] })}>{level.label}</Button>;
                     })}
                   </div>
                 </fieldset>
-                <details onToggle={event => { if ((event.target as HTMLDetailsElement).open) void loadProfiles(); }}>
-                  <summary className="cursor-pointer text-sm">Perfiles de audiencia guardados ({profiles.length})</summary>
-                  <div className="mt-2 flex flex-wrap gap-2"><Input className="max-w-64" disabled={busy} value={profileName} onChange={event => setProfileName(event.target.value)} placeholder="Nombre del perfil" aria-label="Nombre del perfil" /><Button variant="outline" disabled={busy || !profileName.trim()} onClick={() => void run(async () => { await request('/profiles', { name: profileName.trim(), criteria: definition.criteria }); setProfileName(''); await loadProfiles(); setFeedback('Perfil guardado.'); })}>Guardar criterios actuales</Button></div>
-                  {profiles.map(profile => <div key={profile.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"><span className="font-medium">{profile.name}</span><span className="flex gap-2"><Button variant="ghost" size="sm" disabled={busy} onClick={() => { change({ criteria: AudienceCriteriaSchema.parse(profile.criteria) }); setSearched(false); setFeedback(`Perfil «${profile.name}» aplicado. Busca para ver resultados.`); }}>Aplicar</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(async () => { await fetch(`/api/campaigns/bulk/profiles/${profile.id}`, { method: 'DELETE' }); await loadProfiles(); })}>Eliminar</Button></span></div>)}
+                <details className="rounded-xl border px-4 py-1" onToggle={event => { if ((event.target as HTMLDetailsElement).open) void loadProfiles(); }}>
+                  <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium">Perfiles de audiencia guardados ({profiles.length})</summary>
+                  <div className="space-y-2 pb-3">
+                    <div className="flex flex-wrap gap-2"><Input className="max-w-64" disabled={busy} value={profileName} onChange={event => setProfileName(event.target.value)} placeholder="Nombre del perfil" aria-label="Nombre del perfil" /><Button variant="outline" disabled={busy || !profileName.trim()} onClick={() => void run(async () => { await request('/profiles', { name: profileName.trim(), criteria: definition.criteria }); setProfileName(''); await loadProfiles(); setFeedback('Perfil guardado.'); })}>Guardar criterios actuales</Button></div>
+                    {profiles.map(profile => <div key={profile.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-1 text-sm"><span className="font-medium">{profile.name}</span><span className="flex gap-1"><Button variant="ghost" size="sm" disabled={busy} onClick={() => { change({ criteria: AudienceCriteriaSchema.parse(profile.criteria) }); setSearched(false); setFeedback(`Perfil «${profile.name}» aplicado. Busca para ver resultados.`); }}>Aplicar</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(async () => { await fetch(`/api/campaigns/bulk/profiles/${profile.id}`, { method: 'DELETE' }); await loadProfiles(); })}>Eliminar</Button></span></div>)}
+                  </div>
                 </details>
-                <div className="flex flex-wrap gap-2"><Input className="max-w-72" disabled={busy} value={audienceQuery} onChange={event => setAudienceQuery(event.target.value)} placeholder="Buscar por nombre, empresa o correo" aria-label="Buscar en resultados" /><Button disabled={busy} onClick={() => void run(() => searchAudience(0))}>{busy ? 'Buscando…' : 'Buscar con filtros'}</Button></div>
               </>}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2"><Label htmlFor="relationship">Contacto previo</Label><select id="relationship" className="h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={definition.criteria.relationship} onChange={event => { change({ criteria: { ...definition.criteria, relationship: event.target.value as typeof definition.criteria.relationship } }); setSearched(false); }}><option value="never_contacted">Nunca contactados</option><option value="previously_contacted">Contactados anteriormente</option></select></div>
-                {definition.criteria.relationship === 'previously_contacted' && <div className="space-y-2"><Label htmlFor="days">Días mínimos desde el último envío</Label><Input id="days" type="number" min={0} max={3650} disabled={busy} value={definition.criteria.minimumDaysSinceSent} onChange={event => { change({ criteria: { ...definition.criteria, minimumDaysSinceSent: Number(event.target.value) } }); setSearched(false); }} /></div>}
+              {/* Who can be written to comes before the search, because the search answers it (9 Nov 2026 review). */}
+              <div className="grid items-end gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="relationship">Contacto previo</Label>
+                  <Select disabled={busy} value={definition.criteria.relationship} onValueChange={value => changeCriteria({ relationship: value as CampaignInput['criteria']['relationship'] })}>
+                    <SelectTrigger id="relationship"><SelectValue /></SelectTrigger>
+                    <SelectContent>{RELATIONSHIPS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                {definition.criteria.relationship === 'previously_contacted' && <div className="space-y-2"><Label htmlFor="days">Días mínimos desde el último envío</Label><Input id="days" type="number" min={0} max={3650} disabled={busy} value={definition.criteria.minimumDaysSinceSent} onChange={event => changeCriteria({ minimumDaysSinceSent: Number(event.target.value) })} /></div>}
               </div>
-              <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" disabled={busy} checked={definition.criteria.excludeReplied} onChange={event => { change({ criteria: { ...definition.criteria, excludeReplied: event.target.checked } }); setSearched(false); }} />Excluir personas que ya respondieron</label>
-              {searched && <><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm" role="status">{plural(audienceTotal, 'resultado', 'resultados')} · {plural(definition.emails.length, 'seleccionado', 'seleccionados')} (máximo {MAX_RECIPIENTS}){people.some(person => person.blockedReason) ? ` · ${plural(people.filter(person => person.blockedReason).length, 'no disponible', 'no disponibles')} en esta página` : ''}</p><span className="flex gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={() => selectAllResults(true)}>Seleccionar todos</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => selectAllResults(false)}>Quitar todos</Button></span></div>{!people.length ? <p className="text-sm text-muted-foreground">No encontramos leads para esta búsqueda. Prueba describirlo de otra forma, con menos filtros, o revisa tus leads enriquecidos.</p> : <CampaignAudienceTable people={people} selected={definition.emails} max={MAX_RECIPIENTS} busy={busy} onToggle={(email, checked) => change({ emails: checked ? [...definition.emails, email] : definition.emails.filter(value => value !== email) })} />}{audienceMode === 'manual' && audienceTotal > 25 && <div className="flex items-center justify-between gap-2 text-sm"><Button variant="outline" size="sm" disabled={busy || audiencePage === 0} onClick={() => void run(() => searchAudience(audiencePage - 1))}>Anterior</Button><span>Página {audiencePage + 1} de {Math.max(1, Math.ceil(audienceTotal / 25))}</span><Button variant="outline" size="sm" disabled={busy || (audiencePage + 1) * 25 >= audienceTotal} onClick={() => void run(() => searchAudience(audiencePage + 1))}>Siguiente</Button></div>}</>}
-              {definition.emails.length > 0 && <details><summary className="cursor-pointer text-sm">Revisar selección guardada ({definition.emails.length})</summary><p className="my-2 text-sm text-muted-foreground">Al guardar verificaremos que todos sigan cumpliendo los criterios.</p>{definition.emails.map(email => <div key={email} className="flex items-center justify-between gap-2 text-sm"><span className="break-all">{email}</span><Button variant="ghost" size="sm" disabled={busy} onClick={() => change({ emails: definition.emails.filter(value => value !== email) })}>Quitar</Button></div>)}</details>}
-              <div className="sticky bottom-0 z-10 -mx-1 flex justify-end border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button disabled={busy || !definition.emails.length} onClick={() => { if (!definition.name.trim()) change({ name: suggestedCampaignName(definition) }); setStep(1); }}>Continuar a correos</Button></div>
+              <div className="flex min-h-11 items-center gap-3">
+                <Checkbox id="exclude-replied" disabled={busy} checked={definition.criteria.excludeReplied} onCheckedChange={checked => changeCriteria({ excludeReplied: checked === true })} />
+                <Label htmlFor="exclude-replied" className="font-normal">Excluir personas que ya respondieron</Label>
+              </div>
+              {audienceMode === 'ai'
+                ? <Button variant={searched && definition.emails.length ? 'outline' : 'default'} disabled={busy || definition.description.trim().length < 10} onClick={() => void run(rankAudience)}>{busy ? 'Buscando…' : 'Buscar leads ideales'}</Button>
+                : <div className="flex flex-wrap gap-2"><Input className="max-w-72" disabled={busy} value={audienceQuery} onChange={event => setAudienceQuery(event.target.value)} placeholder="Buscar por nombre, empresa o correo" aria-label="Buscar en resultados" /><Button variant={searched && definition.emails.length ? 'outline' : 'default'} disabled={busy} onClick={() => void run(() => searchAudience(0))}>{busy ? 'Buscando…' : 'Buscar con filtros'}</Button></div>}
+              {rankMeta && <p className="text-sm text-muted-foreground" role="status">{rankMeta.candidateCount
+                ? `La IA revisó ${plural(rankMeta.candidateCount, 'lead enriquecido que puedes contactar', 'leads enriquecidos que puedes contactar')}${rankMeta.truncated ? ' (los más recientes)' : ''} y propuso ${rankMeta.rankedCount.toLocaleString('es-CL')}.`
+                : `De tus ${plural(rankMeta.poolCount, 'lead enriquecido', 'leads enriquecidos')}, ninguno se puede contactar con este criterio.`}
+                {audienceExclusionSummary(rankMeta.excluded) ? ` ${audienceExclusionSummary(rankMeta.excluded)}` : ''}
+                {rankMeta.ineligibleCount > 0 ? ` ${rankMeta.ineligibleCount === 1 ? '1 propuesto no está disponible' : `${rankMeta.ineligibleCount.toLocaleString('es-CL')} propuestos no están disponibles`} para contactar.` : ''}</p>}
+              {/* The campaign picks from contacts already saved with an email: when they are few, the way to more is finding new ones. */}
+              {rankMeta && (rankMeta.rankedCount < FEW_RESULTS || (rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE)) && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
+                <p className="min-w-0 flex-1 text-sm">{rankMeta.ownCount !== null && rankMeta.ownCount < SMALL_OWN_BASE
+                  ? `Tienes ${plural(rankMeta.ownCount, 'lead propio', 'leads propios')} con correo: es una base chica para una campaña. Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.`
+                  : '¿Necesitas más? Cowork busca personas nuevas en Apollo, las guarda con su correo y te arma la campaña.'}</p>
+                <Button asChild variant="outline" size="sm"><Link href={coworkSearchHref(definition.description)}>Buscar personas nuevas con Cowork</Link></Button>
+              </div>}
+              {searched && <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm" role="status">{plural(audienceTotal, 'resultado', 'resultados')} · <span className="font-medium">{plural(definition.emails.length, 'seleccionado', 'seleccionados')}</span> <span className="text-muted-foreground">(máximo {MAX_RECIPIENTS})</span>{blockedOnPage ? <span className="text-muted-foreground"> · {plural(blockedOnPage, 'no disponible', 'no disponibles')} en esta página</span> : null}</p>
+                  <span className="flex gap-1"><Button variant="ghost" size="sm" disabled={busy} onClick={() => selectAllResults(true)}>Seleccionar todos</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => selectAllResults(false)}>Quitar todos</Button></span>
+                </div>
+                {!people.length ? <p className="rounded-xl bg-muted/40 p-4 text-sm text-muted-foreground">No encontramos leads para esta búsqueda. Prueba describirlo de otra forma, con menos filtros, o revisa tus leads enriquecidos.</p> : <CampaignAudienceTable people={people} selected={definition.emails} max={MAX_RECIPIENTS} busy={busy} onToggle={(email, checked) => change({ emails: checked ? [...definition.emails, email] : definition.emails.filter(value => value !== email) })} />}
+                {audienceMode === 'manual' && audienceTotal > 25 && <div className="flex items-center justify-between gap-2 text-sm"><Button variant="outline" size="sm" disabled={busy || audiencePage === 0} onClick={() => void run(() => searchAudience(audiencePage - 1))}>Anterior</Button><span>Página {audiencePage + 1} de {Math.max(1, Math.ceil(audienceTotal / 25))}</span><Button variant="outline" size="sm" disabled={busy || (audiencePage + 1) * 25 >= audienceTotal} onClick={() => void run(() => searchAudience(audiencePage + 1))}>Siguiente</Button></div>}
+              </>}
+              {/* The table already shows who is chosen; the list says who else is, from another page or an earlier search. */}
+              {definition.emails.length > 0 && (!searched || selectionOutsideResults > 0) && <details className="rounded-xl border px-4 py-1"><summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium">Revisar selección guardada ({definition.emails.length})</summary><div className="space-y-1 pb-3"><p className="text-sm text-muted-foreground">Al guardar verificaremos que todos sigan cumpliendo los criterios.</p>{definition.emails.map(email => <div key={email} className="flex items-center justify-between gap-2 text-sm"><span className="break-all">{email}</span><Button variant="ghost" size="sm" disabled={busy} onClick={() => change({ emails: definition.emails.filter(value => value !== email) })}>Quitar</Button></div>)}</div></details>}
+              <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-end gap-3 border-t bg-card/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+                {!definition.emails.length && <p className="mr-auto text-sm text-muted-foreground">Elige al menos una persona para continuar.</p>}
+                <Button disabled={busy || !definition.emails.length} onClick={() => { if (!definition.name.trim()) change({ name: suggestedCampaignName(definition) }); setStep(1); }}>Continuar a correos</Button>
+              </div>
             </>}
             {step === 1 && <CampaignSequenceEditor definition={definition} messageIndex={messageIndex} busy={busy} reviseMode={reviseMode}
               isLocked={reviseLocked} onSelect={setMessageIndex} onChange={change} onBusyChange={setBusy}
               onAssist={input => request('/assist', input)} onSave={() => void run(() => save())} objectiveFromProfile={profileObjective}
               onBack={() => { if (reviseMode) { setReviseMode(false); setStep(2); } else setStep(0); }} />}
-            {step === 2 && campaign && <>
-              <h2 className="text-xl font-semibold">{campaign.definition.name}</h2><p className="text-sm text-muted-foreground">{plural(campaign.recipients.length, 'destinatario', 'destinatarios')} · {plural(campaign.definition.messages.length, 'correo', 'correos')} por persona · {plural(campaign.recipients.length * campaign.definition.messages.length, 'correo', 'correos')} en total. Revisa cómo le llega a cada persona antes de aprobar.</p>
-              <Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => {
-                setDefinition({ ...campaign.definition, name: `${campaign.definition.name} · Copia`, emails: [], overrides: [] });
-                setCampaign(null); setPeople([]); setSearched(false); setStep(0); setDirty(true); setMessageIndex(0);
-              }}>Reutilizar perfil y mensajes</Button>
-              <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-                <section aria-labelledby="campaign-review-people" className="min-w-0 space-y-2">
-                  <h3 id="campaign-review-people" className="text-sm font-semibold">Personas ({campaign.recipients.length})</h3>
-                  <p className="text-xs leading-5 text-muted-foreground">Elige a una persona para ver sus correos tal como los recibirá.</p>
-                  <ul className="max-h-[28rem] divide-y overflow-y-auto rounded-xl border" aria-label="Personas de la campaña">
-                    {campaign.recipients.map((person, index) => {
-                      const edited = (definition.overrides || []).some(value => value.email === person.email);
-                      return <li key={person.email}><button type="button" aria-current={index === recipientIndex ? 'true' : undefined} disabled={Boolean(individual)} onClick={() => setRecipientIndex(index)}
-                        className={`block w-full min-w-0 px-3 py-2 text-left text-sm hover:bg-muted/60 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring ${index === recipientIndex ? 'bg-muted font-medium' : ''}`}>
-                        <span className="block break-words">{person.name || person.email}</span>
-                        <span className="block break-all text-xs font-normal text-muted-foreground">{person.email}</span>
-                        {edited && <span className="mt-1 inline-block rounded-full border px-2 py-0.5 text-[11px] font-normal text-muted-foreground">Editado para esta persona</span>}
-                      </button></li>;
-                    })}
-                  </ul>
-                </section>
-                <section aria-label={selectedPreview ? `Correos para ${selectedPreview.name || selectedPreview.email}` : 'Correos'} className="min-w-0 space-y-3">
-                {!frozen && selectedPreview && <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2">{selectedPreview.messages.map((value, index) => <Button key={value.draftId} variant="outline" disabled={busy || Boolean(individual)} onClick={() => {
-                    setIndividual({ email: selectedPreview.email, messageIndex: index, subject: value.subject, body: value.body });
-                    setIndividualInstruction(''); setIndividualProposal(null);
-                  }}>Editar {index === 0 ? 'correo inicial' : `seguimiento ${index}`} de esta persona</Button>)}</div>
-                  {individual && <div className="space-y-3 rounded-xl border p-4">
-                    <h3 className="font-medium">Editar solo para {individual.email}</h3>
-                    <Label htmlFor="individual-subject">Asunto individual</Label><Input id="individual-subject" disabled={busy} value={individual.subject} onChange={event => { setIndividual({ ...individual, subject: event.target.value }); setIndividualProposal(null); }} />
-                    <Label htmlFor="individual-body">Correo individual</Label><Textarea id="individual-body" disabled={busy} className="min-h-48" value={individual.body} onChange={event => { setIndividual({ ...individual, body: event.target.value }); setIndividualProposal(null); }} />
-                    <Label htmlFor="individual-instruction">Cambio con IA para esta persona</Label><Input id="individual-instruction" disabled={busy} value={individualInstruction} onChange={event => setIndividualInstruction(event.target.value)} />
-                    <Button variant="outline" disabled={busy || individualInstruction.trim().length < 5} onClick={() => void run(async () => {
-                      const result = await request('/assist', { mode: 'message', instruction: individualInstruction, objective: definition.objective, relationship: definition.criteria.relationship,
-                        current: { subject: individual.subject, body: individual.body, delayDays: definition.messages[individual.messageIndex].delayDays } });
-                      setIndividualProposal(result.proposal);
-                    })}>Proponer cambio individual</Button>
-                    {individualProposal && <div className="space-y-2 rounded-lg bg-muted/40 p-3"><p className="font-medium">{individualProposal.subject}</p><p className="whitespace-pre-wrap text-sm">{individualProposal.body}</p><Button variant="secondary" disabled={busy} onClick={() => { setIndividual({ ...individual, subject: individualProposal.subject, body: individualProposal.body }); setIndividualProposal(null); }}>Aplicar propuesta</Button><Button variant="ghost" disabled={busy} onClick={() => setIndividualProposal(null)}>Descartar</Button></div>}
-                    <div className="flex gap-2"><Button disabled={busy} onClick={() => void run(async () => {
-                      const overrides = [...(definition.overrides || []).filter(value => value.email !== individual.email || value.messageIndex !== individual.messageIndex), individual];
-                      await save({ ...definition, overrides }); setIndividual(null); setIndividualProposal(null);
-                    })}>Guardar edición individual</Button><Button variant="ghost" disabled={busy} onClick={() => { setIndividual(null); setIndividualProposal(null); }}>Cancelar</Button></div>
-                  </div>}
-                </div>}
-                {selectedPreview?.messages.map((value, index) => <article key={value.draftId} className="space-y-3 rounded-xl border bg-background p-5"><p className="text-xs text-muted-foreground">{index === 0 ? 'Primer correo' : `Seguimiento ${index} · ${value.delayDays} días después del anterior`}</p><h3 className="font-semibold">{value.subject}</h3><p className="whitespace-pre-wrap break-words text-sm leading-7">{value.body}</p><p className="border-t pt-3 text-xs text-muted-foreground">El envío incluye el enlace para darse de baja.</p></article>)}
-                </section>
-              </div>
-              {!frozen ? <><section aria-labelledby="campaign-approve-what" className="rounded-xl border bg-muted/30 p-4">
+            {step === 2 && campaign && !frozen && <>
+              <header className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <h2 className="break-words text-xl font-semibold">{campaign.definition.name}</h2>
+                  <p className="text-sm text-muted-foreground">{plural(campaign.recipients.length, 'persona', 'personas')} · {plural(campaign.definition.messages.length, 'correo', 'correos')} por persona · desde tu {providerName(campaign.definition.provider)}</p>
+                </div>
+                <Button variant="ghost" size="sm" disabled={busy || Boolean(individual)} onClick={duplicate}><Copy aria-hidden="true" />Duplicar</Button>
+              </header>
+              <CampaignPreview recipients={campaign.recipients} overrides={definition.overrides || []} selected={recipientIndex} onSelect={setRecipientIndex}
+                editable busy={busy} editing={individual} editor={individualEditor}
+                onEdit={(email, index) => {
+                  const message = campaign.recipients.find(person => person.email === email)?.messages[index];
+                  if (!message) return;
+                  setIndividual({ email, messageIndex: index, subject: message.subject, body: message.body }); setIndividualInstruction(''); setIndividualProposal(null);
+                }} />
+              <section aria-labelledby="campaign-approve-what" className="rounded-xl bg-muted/40 p-4">
                 <h3 id="campaign-approve-what" className="text-sm font-semibold">Qué pasa al aprobar</h3>
-                <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-                  <li>Antes de aprobar no sale nada.</li>
-                  <li>{campaign.recipients.length === 1 ? 'Apruebas estos correos para la persona de la audiencia.' : `Apruebas estos correos para las ${campaign.recipients.length} personas de la audiencia, de una vez.`}</li>
-                  <li>{automationEnabled ? 'Al aprobar, los primeros correos salen solos.' : 'Al aprobar, los envías desde esta página con «Enviar correos disponibles».'}</li>
-                  <li>Cada seguimiento sale en su fecha y se detiene si la persona responde.</li>
-                  <li>Puedes pausar la campaña cuando quieras.</li>
-                </ol>
-              </section><div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap justify-end gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="ghost" disabled={busy || Boolean(individual)} onClick={() => setStep(0)}>Editar audiencia</Button><Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('reject'))}>Rechazar y editar</Button>{dirty ? <><p className="mr-auto self-center text-sm text-muted-foreground" role="status">Hay cambios sin guardar: guárdalos para aprobar.</p><Button disabled={busy || Boolean(individual)} onClick={() => void run(() => save())}>Guardar cambios</Button></>
-                : <Button disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('approve'))}>Aprobar campaña</Button>}</div></> : <>
-                <p className="text-sm text-muted-foreground">{deliveries.filter(value => value.status === 'sent').length} envíos confirmados. {automationEnabled ? 'Los correos aprobados se procesan automáticamente, incluso con esta página cerrada. Los seguimientos esperan su fecha y se detienen ante una respuesta.' : '«Enviar correos disponibles» los envía desde el servidor, por tandas. Los seguimientos futuros se envían al volver a pulsarlo, cuando corresponda su fecha.'}</p>
-                <div className="flex flex-wrap gap-3"><Button variant="outline" disabled={busy} onClick={() => void run(() => decide(campaign.status === 'paused' ? 'resume' : 'pause'))}>{campaign.status === 'paused' ? 'Reanudar campaña' : 'Pausar campaña'}</Button><Button variant="ghost" disabled={busy} onClick={() => void run(() => open(campaign.id))}>Actualizar estado</Button><Button disabled={busy || campaign.status !== 'approved'} onClick={() => void run(sendAvailable)}>{busy ? 'Procesando…' : 'Enviar correos disponibles'}</Button>{campaign.recipients.some(person => person.messages.some(message => !isCampaignMessageLocked(message.draftId, deliveries))) && <Button variant="outline" disabled={busy} onClick={() => { setDefinition({ ...campaign.definition }); setReviseMode(true); setStep(1); setMessageIndex(0); setDirty(false); setFeedback('Edita solo los mensajes pendientes. Los enviados o en curso están bloqueados.'); }}>Editar mensajes pendientes</Button>}</div>
-                <section aria-label="Estado por destinatario" className="divide-y rounded-xl border">
-                  {campaign.recipients.map(person => {
-                    const next = nextCampaignMessage(person, deliveries, campaign.approved_at!);
-                    const attempt = attempts.find(value => value.draft_id === next?.message.draftId);
-                    const confirmed = person.messages.filter(message => deliveries.some(value => value.draft_id === message.draftId && value.status === 'sent')).length;
-                    const labels: Record<string, string> = { ready: 'Listo para enviar', waiting: 'Esperando su fecha', failed: 'Requiere atención', unknown: 'Por confirmar', sending: 'Enviando', pending: 'Envío pendiente' };
-                    return <div key={person.email} className="space-y-1 p-4 text-sm">
-                      <p className="break-words font-medium">{person.name || person.email}</p><p className="break-all text-muted-foreground">{person.email} · {confirmed}/{person.messages.length} enviados</p>
-                      <p>{!next ? 'Secuencia finalizada' : attempt && attempt.state !== 'sent' ? attempt.message : labels[next.state] || 'Pendiente'}</p>
-                      {next?.dueAt && next.state === 'waiting' && <p className="text-muted-foreground">Próximo correo: {new Date(next.dueAt).toLocaleString('es-CL')}</p>}
-                      {attempt?.retry_at && <p className="text-muted-foreground">Próxima comprobación: {new Date(attempt.retry_at).toLocaleString('es-CL')}</p>}
-                      {attempt && attempt.state !== 'sent' && next?.state === 'ready' && describeCampaignFailure(attempt.code).retryable && <Button variant="outline" size="sm" disabled={busy || campaign.status !== 'approved'} onClick={() => void run(async () => {
-                        await request(`/${campaign.id}/retry`, { draftId: attempt.draft_id }); await open(campaign.id);
-                        setFeedback('Se volverá a comprobar el contacto antes de enviar.');
-                      })}>Volver a comprobar</Button>}
-                      <details onToggle={event => {
-                        if (!(event.target as HTMLDetailsElement).open || history[person.email] || historyLoading) return;
-                        setHistoryLoading(person.email);
-                        fetch(`/api/campaigns/bulk/${campaign.id}/history?email=${encodeURIComponent(person.email)}`, { cache: 'no-store' })
-                          .then(response => response.json()).then(result => {
-                            if (Array.isArray(result.events)) setHistory(value => ({ ...value, [person.email]: result.events }));
-                          }).catch(() => {}).finally(() => setHistoryLoading(''));
-                      }}>
-                        <summary className="cursor-pointer text-sm underline underline-offset-4">Ver historial unificado</summary>
-                        <div className="mt-2 space-y-2">{historyLoading === person.email && <p>Cargando historial…</p>}{(history[person.email] || []).map((event, index) => <div key={index} className="rounded-lg bg-muted/40 p-3"><p className="font-medium">{event.label}</p>{event.at && <p>{new Date(event.at).toLocaleString('es-CL')}</p>}{event.detail && <p className="break-words">{event.detail}</p>}</div>)}{history[person.email] && !history[person.email].length && <p>Sin actividad registrada.</p>}</div>
-                      </details>
-                    </div>;
-                  })}
-                </section>
-              </>}
+                <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+                  {[
+                    campaign.recipients.length === 1 ? 'Apruebas los correos de esta persona; antes de eso no sale nada.' : `Apruebas de una vez los correos de las ${campaign.recipients.length.toLocaleString('es-CL')} personas; antes de eso no sale nada.`,
+                    automationEnabled ? 'Los primeros correos salen solos, también con esta página cerrada.' : 'Los primeros correos los envías desde aquí, con «Enviar correos disponibles».',
+                    'Cada seguimiento sale en su fecha y se detiene si la persona responde. Puedes pausar cuando quieras.',
+                    'Cada correo lleva tu firma y el enlace para darse de baja.',
+                  ].map(line => <li key={line} className="flex gap-2"><Check aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><span>{line}</span></li>)}
+                </ul>
+              </section>
+              <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-end gap-2 border-t bg-card/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+                {dirty && <p className="mr-auto self-center text-sm text-muted-foreground" role="status">Hay cambios sin guardar: guárdalos para aprobar.</p>}
+                <Button variant="ghost" disabled={busy || Boolean(individual)} onClick={() => setStep(0)}>Editar audiencia</Button>
+                <Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => setStep(1)}>Editar correos</Button>
+                {dirty
+                  ? <Button disabled={busy || Boolean(individual)} onClick={() => void run(() => save())}>Guardar cambios</Button>
+                  : <Button disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('approve'))}>Aprobar campaña</Button>}
+              </div>
+            </>}
+            {step === 2 && campaign && frozen && progress && <>
+              <header className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <h2 className="break-words text-xl font-semibold">{campaign.definition.name}</h2>
+                  <p className="text-sm text-muted-foreground">{[
+                    campaign.approved_at ? `Aprobada el ${formatDate(campaign.approved_at)}` : null,
+                    `desde tu ${providerName(campaign.definition.provider)}`,
+                    campaign.status === 'approved' && progress.nextAt ? `próximo envío: ${formatDateTime(progress.nextAt)}` : null,
+                  ].filter(Boolean).join(' · ')}</p>
+                </div>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={duplicate}><Copy aria-hidden="true" />Duplicar</Button>
+              </header>
+              <CampaignProgressTiles progress={progress} />
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+                  {campaign.status === 'paused'
+                    ? <Button disabled={busy} onClick={() => void run(() => decide('resume'))}>Reanudar campaña</Button>
+                    : <>
+                      <Button variant={automationEnabled ? 'outline' : 'default'} disabled={busy} onClick={() => void run(sendAvailable)}>{busy ? 'Procesando…' : 'Enviar correos disponibles'}</Button>
+                      <Button variant="outline" disabled={busy} onClick={() => void run(() => decide('pause'))}>Pausar campaña</Button>
+                    </>}
+                  {pendingEditable && <Button variant="ghost" disabled={busy} onClick={() => { setDefinition({ ...campaign.definition }); setReviseMode(true); setStep(1); setMessageIndex(0); setDirty(false); setFeedback('Edita solo los mensajes pendientes. Los enviados o en curso están bloqueados.'); }}>Editar mensajes pendientes</Button>}
+                  <Button variant="ghost" disabled={busy} onClick={() => void run(() => open(campaign.id))}><RefreshCw aria-hidden="true" />Actualizar estado</Button>
+                </div>
+                <p className="text-xs leading-5 text-muted-foreground">{campaign.status === 'paused'
+                  ? 'En pausa no sale ningún correo. Al reanudar, cada seguimiento sale en su fecha.'
+                  : automationEnabled
+                    ? 'Los correos salen solos, también con esta página cerrada; «Enviar correos disponibles» adelanta los que ya tocan. Cada seguimiento se detiene si la persona responde.'
+                    : '«Enviar correos disponibles» envía los que ya tocan, por tandas. Vuelve a pulsarlo cuando llegue la fecha de cada seguimiento.'}</p>
+              </div>
+              <div className={`${SEGMENT_TRACK} max-w-full`} role="group" aria-label="Qué ver de la campaña">
+                <button type="button" className={segmentClass(view === 'people')} aria-pressed={view === 'people'} onClick={() => setView('people')}>Estado por persona</button>
+                <button type="button" className={segmentClass(view === 'emails')} aria-pressed={view === 'emails'} onClick={() => setView('emails')}>Correos aprobados</button>
+              </div>
+              {view === 'people'
+                ? <CampaignRecipientsStatus progress={progress} busy={busy} canRetry={campaign.status === 'approved'} history={history} historyLoading={historyLoading}
+                  onHistory={loadHistory}
+                  onRetry={draftId => void run(async () => {
+                    await request(`/${campaign.id}/retry`, { draftId }); await open(campaign.id);
+                    setFeedback('Se volverá a comprobar el contacto antes de enviar.');
+                  })} />
+                : <CampaignPreview recipients={campaign.recipients} overrides={definition.overrides || []} selected={recipientIndex} onSelect={setRecipientIndex}
+                  editable={false} busy={busy} editing={null} editor={null} onEdit={() => undefined} />}
             </>}
           </section>
         </>}

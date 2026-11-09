@@ -41,7 +41,8 @@ test('inbox validates complete shared pages and exposes every cursor through Loa
   assert.match(inboxComponent, /cursor=\$\{encodeURIComponent\(options\.cursor\)\}/);
   assert.match(inboxComponent, /loadInbox\(\{ append: true, cursor: page\.nextCursor \}\)/);
   assert.match(inboxComponent, /Cargar más/);
-  assert.match(inboxComponent, /El resumen y los filtros corresponden a los/);
+  // With more to load, the footer says the counts above are of the loaded ones (9 Nov 2026: said once, not three times).
+  assert.match(inboxComponent, /los números de arriba cuentan los/);
   assert.match(inboxComponent, /Aún puede haber más resultados por cargar/);
   assert.doesNotMatch(inboxComponent, /truncated|Mostramos hasta 100 elementos/);
 });

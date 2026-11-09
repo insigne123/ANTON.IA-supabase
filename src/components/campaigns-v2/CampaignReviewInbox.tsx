@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -80,16 +81,10 @@ function recipientContext(item: CampaignV2InboxItem) {
     : item.recipientEmail;
 }
 
+/** «8 nov, 15:05», as every date of the app (src/lib/dates.ts); the 12-hour «03:05 p. m.» read differently from the rest. */
 function formatDueDate(value?: string | null) {
-  if (!value) return 'Sin fecha definida';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Sin fecha definida';
-  return new Intl.DateTimeFormat('es-CL', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  if (!value || Number.isNaN(new Date(value).getTime())) return 'Sin fecha definida';
+  return formatDateTime(value);
 }
 
 function stateLabel(value: string) {
@@ -415,13 +410,11 @@ export function CampaignReviewInbox({ className, onEnabledChange }: CampaignRevi
                 ) : null}
               </div>
               <CardDescription className="mt-1 max-w-2xl leading-6">
-                Revisa el trabajo actual y los bloqueos que necesitan atención. Los seguimientos detenidos o finalizados permanecen en el historial.
+                Los seguimientos que programaste al escribir a alguien, uno por uno: los revisas antes de que salgan. Los detenidos o terminados quedan en el historial.
               </CardDescription>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                En los {summary.displayed} cargados: {summary.pending} pendientes · {summary.attention} necesitan atención · {summary.campaigns} {summary.campaigns === 1 ? 'campaña' : 'campañas'}
-              </p>
             </div>
-            <div className="grid w-full grid-cols-2 gap-1 rounded-xl bg-muted p-1 sm:w-auto" role="group" aria-label="Filtrar seguimientos cargados">
+            {/* With nothing loaded there is nothing to filter (9 Nov 2026 review): the empty state says it once. */}
+            {summary.displayed > 0 || page?.hasMore ? <div className="grid w-full grid-cols-2 gap-1 rounded-xl bg-muted p-1 sm:w-auto" role="group" aria-label="Filtrar seguimientos cargados">
               <Button
                 type="button"
                 variant="ghost"
@@ -454,11 +447,11 @@ export function CampaignReviewInbox({ className, onEnabledChange }: CampaignRevi
               >
                 Atención <span className="text-xs tabular-nums" aria-hidden="true">{summary.attention}</span>
               </Button>
-            </div>
+            </div> : null}
           </CardHeader>
 
           <CardContent id="campaign-review-inbox-results" className="p-0">
-            <p className="border-b border-border/60 px-4 py-2.5 text-xs text-muted-foreground sm:px-5" role="status" aria-live="polite" aria-atomic="true">
+            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
               Mostrando {filteredItems.length} {filter === 'attention' ? 'que necesitan atención' : 'pendientes'} de {summary.displayed} seguimientos cargados.
               {page?.hasMore ? ' Aún puede haber más resultados por cargar.' : ' No quedan más seguimientos en curso por cargar.'}
             </p>
@@ -489,7 +482,7 @@ export function CampaignReviewInbox({ className, onEnabledChange }: CampaignRevi
                 </h3>
                 <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
                   {summary.displayed === 0
-                    ? 'Los seguimientos detenidos o finalizados no aparecen en esta vista; sus correos permanecen en el historial.'
+                    ? 'Cuando programes seguimientos al escribir a alguien, aparecen aquí para revisarlos antes de que salgan.'
                     : otherCount > 0
                       ? `Hay ${otherCount} ${otherFilter === 'attention' ? 'que necesitan atención' : 'pendientes'} en la otra vista.`
                       : page?.hasMore
@@ -586,12 +579,11 @@ export function CampaignReviewInbox({ className, onEnabledChange }: CampaignRevi
               </ul>
             )}
 
-            {page && (summary.displayed > 0 || page.hasMore || loadMoreError) ? (
+            {page && (page.hasMore || loadMoreError) ? (
               <div className="border-t border-border/60 bg-muted/10 px-4 py-4 sm:flex sm:items-center sm:justify-between sm:gap-4 sm:px-5">
                 <div className="min-w-0">
                   <p className="text-xs leading-5 text-muted-foreground">
-                    El resumen y los filtros corresponden a los {summary.displayed} seguimientos cargados.
-                    {page.hasMore ? ' Aún quedan seguimientos en curso por cargar.' : ' Ya cargaste todos los seguimientos en curso.'}
+                    {page.hasMore ? `Hay más seguimientos por cargar: los números de arriba cuentan los ${summary.displayed} cargados.` : `Ya cargaste los ${summary.displayed} seguimientos en curso.`}
                   </p>
                   {loadMoreError ? (
                     <p className="mt-1 text-sm text-destructive" role="alert">{loadMoreError}</p>
