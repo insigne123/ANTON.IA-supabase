@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AI_RANK_CANDIDATE_LIMIT, SENIORITY_LEVELS, audienceExclusionSummary, audiencePersonStatus, candidateExclusion, campaignListStats, seniorityLabel, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
+import { AI_RANK_CANDIDATE_LIMIT, SENIORITY_LEVELS, audienceExclusionSummary, audiencePersonStatus, candidateExclusion, campaignListStats, campaignRepliedEmails, seniorityLabel, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
 
 const person: AudiencePerson = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', title: 'Operaciones', country: 'Chile', industry: '', size: '11-50', seniority: 'Manager', leadRef: 'lead', contacted: false, lastSentAt: null, replied: false, blockedReason: null, reasons: [], enriched: true };
 test('audience excludes prior contacts and missing industry evidence', () => {
@@ -185,6 +185,21 @@ test('a launched campaign says how it goes: who got its first e-mail and who ans
     { email: 'BRUNO@cliente.cl', replied_at: '2026-10-21T09:00:00Z' },
     // Before the launch: an answer to something else.
     { email: 'carla@cliente.cl', replied_at: '2026-10-19T09:00:00Z' },
-  ]), { recipients: 3, sent: 2, replied: 1 });
-  assert.deepEqual(campaignListStats({ approved_at: null, recipients: [] }, new Set(), []), { recipients: 0, sent: 0, replied: 0 });
+  ]), { recipients: 3, sent: 2, replied: 1, finished: false });
+  assert.deepEqual(campaignListStats({ approved_at: null, recipients: [] }, new Set(), []), { recipients: 0, sent: 0, replied: 0, finished: false });
+  // Finished: every person got every e-mail, or answered (which stops the rest).
+  assert.equal(campaignListStats(campaign, new Set(['d1', 'd2', 'd3', 'd5', 'd6']), [{ email: 'bruno@cliente.cl', replied_at: '2026-10-22T09:00:00Z' }]).finished, true);
+  assert.equal(campaignListStats(campaign, new Set(['d1', 'd2', 'd3', 'd5', 'd6']), []).finished, false);
+  assert.deepEqual(campaignRepliedEmails(campaign, [{ email: ' BRUNO@cliente.cl ', replied_at: '2026-10-21T09:00:00Z' }, { email: 'carla@cliente.cl', replied_at: '2026-10-19T09:00:00Z' }]),
+    ['bruno@cliente.cl']);
+});
+
+test('the history never shows the provider\'s own error text', () => {
+  const recipient = { email: 'ana@cliente.cl', name: 'Ana', messages: [{ draftId: 'first', subject: 'Hola', body: 'Texto', delayDays: 0 }, { draftId: 'second', subject: 'Hola', body: 'Texto', delayDays: 3 }] } as unknown as CampaignRecipient;
+  const events = buildRecipientHistory({
+    recipient, approvedAt: '2026-09-01T00:00:00Z', now: Date.parse('2026-09-10T00:00:00Z'),
+    deliveries: [{ draft_id: 'first', status: 'unknown', completed_at: null, error_message: 'Provider accepted the message without a usable message identifier.' }],
+  });
+  assert.equal(events.find(event => event.label === 'Correo inicial de campaña')?.detail, 'Falta confirmar si salió. Lo buscamos en tus enviados y no se repite.');
+  assert.equal(events.some(event => /Provider/.test(event.detail || '')), false);
 });

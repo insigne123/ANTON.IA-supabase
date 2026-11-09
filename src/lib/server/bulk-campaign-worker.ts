@@ -2,7 +2,7 @@ import { nextCampaignMessage, type AudiencePerson, type BulkCampaign, type Campa
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getCampaignAttempts, recordCampaignAttempt, sendTrackedCampaignMessage } from '@/lib/server/bulk-campaign-attempts';
 import { loadAudienceForScope } from '@/lib/server/bulk-campaign-audience';
-import { campaignAttemptAllowsRetry, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { CONFIRMED_SEND_COPY, attemptsConfirmedSent, campaignAttemptAllowsRetry, withConfirmedSends, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
 import { recipientEligibility, type RecipientEligibility } from '@/lib/bulk-campaign-eligibility';
 
 export type BulkWorkerDependencies = {
@@ -20,6 +20,8 @@ export type BulkWorkerDependencies = {
   audience?: (campaign: BulkCampaign) => Promise<AudiencePerson[]>;
   /** Holds one message for review when the audience no longer allows it, so it is not retried on every pass. */
   hold?: (campaign: BulkCampaign, message: CampaignRecipient['messages'][number], check: Extract<RecipientEligibility, { ok: false }>) => Promise<void>;
+  /** Records as sent a message whose send was confirmed after its attempt (an Outlook send, reconciled later). */
+  confirm?: (campaign: BulkCampaign, draftId: string) => Promise<void>;
 };
 export function bulkWorkerDependencies(): BulkWorkerDependencies {
   const admin = getSupabaseAdminClient();
@@ -28,6 +30,7 @@ export function bulkWorkerDependencies(): BulkWorkerDependencies {
     attempts: campaign => getCampaignAttempts(admin, campaign),
     audience: campaign => loadAudienceForScope({ client: admin, organizationId: campaign.organization_id }),
     hold: (campaign, message, check) => recordCampaignAttempt(campaign, message.draftId, 'attention', check.code, check.message, null),
+    confirm: (campaign, draftId) => recordCampaignAttempt(campaign, draftId, 'sent', 'sent', CONFIRMED_SEND_COPY, null),
     async list() {
       // Touching attempted batches rotates the queue so one failing campaign cannot starve others.
       const { data, error } = await admin.from('bulk_campaigns').select('*').eq('status', 'approved').order('updated_at').order('id').limit(20);
@@ -65,8 +68,15 @@ export async function runBulkCampaignWorker(deps: BulkWorkerDependencies = bulkW
     summary.campaigns++;
     try {
       let audience: Map<string, AudiencePerson> | null = null;
-      const attempts = await deps.attempts(campaign);
-      const deliveries = withSentAttemptsAsDeliveries(await deps.deliveries(campaign), attempts);
+      const loaded = await deps.attempts(campaign);
+      const dispatched = await deps.deliveries(campaign);
+      // A send confirmed after its attempt (Outlook, reconciled later) gets its success marker here, before retention can
+      // remove the dispatch that proves it.
+      for (const attempt of attemptsConfirmedSent(loaded, dispatched)) {
+        try { await deps.confirm?.(campaign, attempt.draft_id); } catch { summary.attention++; }
+      }
+      const attempts = withConfirmedSends(loaded, dispatched);
+      const deliveries = withSentAttemptsAsDeliveries(dispatched, attempts);
       const spacingMinutes = deps.batchSpacing ? await deps.batchSpacing(campaign) : 0;
       {
         if (spacingMinutes > 0) {

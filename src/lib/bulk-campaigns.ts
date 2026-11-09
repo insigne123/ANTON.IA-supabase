@@ -192,18 +192,30 @@ export type BulkCampaign = {
 };
 export type CampaignDelivery = { draft_id: string; status: string; completed_at: string | null; error_message: string | null };
 
-/** How a launched campaign goes, for its row in «Tus campañas» (APP-10): who got its first e-mail and who answered after it went out. */
-export type CampaignListStats = { recipients: number; sent: number; replied: number };
+/**
+ * How a launched campaign goes, for its row in «Tus campañas» (APP-10): who got its first e-mail, who answered after it went
+ * out, and whether every sequence ended (each person got every e-mail or answered, which stops the rest).
+ */
+export type CampaignListStats = { recipients: number; sent: number; replied: number; finished: boolean };
+
+/** The recipients (lowercase e-mail) who answered after the campaign went out; an answer from before is to something else. */
+export function campaignRepliedEmails(campaign: Pick<BulkCampaign, 'recipients' | 'approved_at'>,
+  replies: Array<{ email?: string | null; replied_at?: string | null }>): string[] {
+  const since = Date.parse(campaign.approved_at || '') || 0;
+  const answered = new Set(replies.filter(row => (Date.parse(row.replied_at || '') || 0) >= since).map(row => String(row.email || '').trim().toLowerCase()));
+  return (campaign.recipients || []).map(person => person.email.trim().toLowerCase()).filter(email => answered.has(email));
+}
 
 export function campaignListStats(campaign: Pick<BulkCampaign, 'recipients' | 'approved_at'>, sentDraftIds: Set<string>,
   replies: Array<{ email?: string | null; replied_at?: string | null }>): CampaignListStats {
-  const since = Date.parse(campaign.approved_at || '') || 0;
-  const answered = new Set(replies.filter(row => (Date.parse(row.replied_at || '') || 0) >= since).map(row => String(row.email || '').trim().toLowerCase()));
+  const answered = new Set(campaignRepliedEmails(campaign, replies));
   const recipients = campaign.recipients || [];
   return {
     recipients: recipients.length,
     sent: recipients.filter(person => person.messages.some(message => sentDraftIds.has(message.draftId))).length,
-    replied: recipients.filter(person => answered.has(person.email.trim().toLowerCase())).length,
+    replied: answered.size,
+    finished: recipients.length > 0 && recipients.every(person => answered.has(person.email.trim().toLowerCase())
+      || person.messages.every(message => sentDraftIds.has(message.draftId))),
   };
 }
 
@@ -304,6 +316,14 @@ export type CampaignHistoryEvent = {
   detail: string | null;
 };
 
+/** What an unfinished delivery means, in the words the campaign shows (the provider's text stays out). */
+export const DELIVERY_STATE_COPY: Record<string, string> = {
+  failed: 'No se pudo enviar. Revisa el contacto y la cuenta de envío.',
+  unknown: 'Falta confirmar si salió. Lo buscamos en tus enviados y no se repite.',
+  sending: 'Enviando.',
+  pending: 'Enviando.',
+};
+
 /** Unified per-recipient timeline: campaign messages, deliveries, attempts and legacy contact history. */
 export function buildRecipientHistory(input: {
   recipient: CampaignRecipient;
@@ -326,7 +346,8 @@ export function buildRecipientHistory(input: {
     if (delivery?.status === 'sent' && delivery.completed_at) {
       events.push({ at: delivery.completed_at, kind: 'campaign_sent', label, detail: message.subject });
     } else if (delivery && delivery.status !== 'deferred') {
-      events.push({ at: null, kind: delivery.status === 'unknown' ? 'campaign_attention' : 'campaign_attention', label, detail: delivery.error_message || attempt?.message || null });
+      // The dispatch's error_message is the provider's own text (in English, sometimes technical): never shown.
+      events.push({ at: null, kind: 'campaign_attention', label, detail: attempt && attempt.state !== 'sent' ? attempt.message : DELIVERY_STATE_COPY[delivery.status] || null });
     } else if (attempt && attempt.state !== 'sent') {
       events.push({ at: null, kind: 'campaign_attention', label, detail: attempt.message });
     } else if (input.approvedAt) {

@@ -61,6 +61,24 @@ test('a sent marker completes the sequence when retention removed the dispatch r
   assert.equal(result.sent, 3);
 });
 
+test('a send confirmed after its attempt (Outlook) is recorded as sent once and its follow-up keeps its cadence', async () => {
+  const confirmed: string[] = [];
+  const outlook: Partial<BulkWorkerDependencies> = {
+    list: async () => [campaign('a')],
+    deliveries: async () => [{ draft_id: 'a-one', status: 'sent', completed_at: '2026-09-05T00:00:00Z', error_message: null }],
+    attempts: async () => [{ draft_id: 'a-one', state: 'attention', code: 'invalid_provider_response', message: 'El envío está pendiente de confirmación.', retry_at: null, updated_at: null }],
+  };
+  const { deps, sent } = fixture({ ...outlook, confirm: async (_campaign, draftId) => { confirmed.push(draftId); } });
+  const result = await runBulkCampaignWorker(deps);
+  assert.deepEqual(confirmed, ['a-one']);
+  assert.deepEqual(sent, ['a-two'], 'a-one is never sent again; the other person goes out as usual');
+  assert.equal(result.attention, 0);
+  // A failing repair is counted and the pass goes on: the next pass repairs it.
+  const failing = fixture({ ...outlook, confirm: async () => { throw new Error('offline'); } });
+  const again = await runBulkCampaignWorker(failing.deps);
+  assert.equal(again.attention, 1); assert.deepEqual(failing.sent, ['a-two']);
+});
+
 test('spaced batches attempt only one recipient per pass and fail closed on spacing read errors', async () => {
   const spaced = fixture({ batchSpacing: async () => 30 });
   assert.equal((await runBulkCampaignWorker(spaced.deps)).sent, 2);

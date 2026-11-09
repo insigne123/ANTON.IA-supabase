@@ -3,6 +3,7 @@ import { AuthError, type AuthContext } from '@/lib/server/auth-utils';
 import { buildRecipientHistory, type BulkCampaign, type CampaignHistoryEvent } from '@/lib/bulk-campaigns';
 import { campaignDeliveries, getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { getCampaignAttempts } from '@/lib/server/bulk-campaign-attempts';
+import { withConfirmedSends, withSentAttemptsAsDeliveries } from '@/lib/bulk-campaign-attempts';
 
 function exactIlike(value: string) {
   return value.replace(/[\\%_*]/g, '\\$&');
@@ -14,7 +15,7 @@ export async function getBulkRecipientHistory(auth: AuthContext, campaignId: str
   const campaign: BulkCampaign = await getBulkCampaign(auth, campaignId);
   const recipient = campaign.recipients.find(person => person.email === normalized);
   if (!recipient) throw new AuthError('El destinatario no pertenece a esta campaña.', 404);
-  const [deliveries, attempts, contacted] = await Promise.all([
+  const [dispatched, loaded, contacted] = await Promise.all([
     campaignDeliveries(auth, campaign),
     getCampaignAttempts(auth.supabase, campaign),
     auth.supabase.from('contacted_leads').select('status,sent_at,replied_at,subject')
@@ -22,6 +23,9 @@ export async function getBulkRecipientHistory(auth: AuthContext, campaignId: str
       .order('sent_at', { ascending: false }).limit(50),
   ]);
   if (contacted.error) throw contacted.error;
+  // The same reading as the status view: a send confirmed later counts as sent, and a confirmed send outlives dispatch retention.
+  const attempts = withConfirmedSends(loaded, dispatched);
+  const deliveries = withSentAttemptsAsDeliveries(dispatched, attempts);
   return {
     recipient: { email: recipient.email, name: recipient.name },
     events: buildRecipientHistory({
