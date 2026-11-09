@@ -27,7 +27,8 @@ function Banner({ text, children, accent }: { text: ReactNode; children: ReactNo
     <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
       <div className="min-w-0 space-y-1">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />Contacto del día</h2>
-        <div className="text-sm text-muted-foreground">{text}</div>
+        {/* On the tinted card the muted grey fell under 4.5:1 (axe, 9 Nov 2026): the same grey the rest of «Hoy» uses for secondary text. */}
+        <div className="text-sm text-foreground/75">{text}</div>
       </div>
       <div className="sm:w-56 sm:shrink-0">{children}</div>
     </CardContent>

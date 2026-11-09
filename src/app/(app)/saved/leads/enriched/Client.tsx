@@ -762,6 +762,8 @@ export default function EnrichedLeadsClient() {
     () => (scope === 'team' || !meId ? enriched : enriched.filter((lead) => lead.userId === meId)),
     [enriched, scope, meId],
   );
+  // Someone who has found nobody yet is told so, with the team's leads one click away, instead of «no hay contactos con estos filtros».
+  const noOwnLeads = scope === 'mine' && Boolean(meId) && mineCount === 0 && enriched.length > 0;
   const ownerOf = (lead: EnrichedLead) => (lead.userId && lead.userId !== meId
     ? memberNames.get(lead.userId) || 'otra persona del equipo' : null);
 
@@ -880,16 +882,17 @@ export default function EnrichedLeadsClient() {
     [enriched],
   );
 
-  const selectedLeads = useMemo(() => enriched.filter((lead) => selected.has(lead.id)), [enriched, selected]);
+  // What is picked is always on screen: switching to «Mis leads» drops the team's leads from the selection.
+  const selectedLeads = useMemo(() => scoped.filter((lead) => selected.has(lead.id)), [scoped, selected]);
   const selectedToResearch = selectedLeads.filter((lead) => stageOf(lead) === 'to_research').length;
   const selectedReady = selectedLeads.filter((lead) => ['ready', 'draft_ready'].includes(stageOf(lead))).length;
   const selectablePage = pageLeads.filter((lead) => hasUsableEmail(lead.email));
   const allPageChecked = selectablePage.length > 0 && selectablePage.every((lead) => selected.has(lead.id));
 
   useEffect(() => {
-    const next = retainVisibleSelection(selected, enriched.map((lead) => lead.id));
+    const next = retainVisibleSelection(selected, scoped.map((lead) => lead.id));
     if (!haveSameSelection(selected, next)) setSelected(next);
-  }, [enriched, selected]);
+  }, [scoped, selected]);
 
   const investigatedInList = useMemo(
     () => listed.filter(hasReportStrict).length,
@@ -1211,7 +1214,7 @@ export default function EnrichedLeadsClient() {
   // «Por investigar» and «Listos para escribir» always show (the tour points at them); the rest only when someone is there.
   // «Por llamar» shows while someone waits for a call: the contacts with a mobile nobody called, or who did not answer.
   const stageChips: Array<{ value: 'all' | EnrichedStage | 'to_call'; label: string; count: number }> = [
-    { value: 'all', label: 'Todos', count: enriched.length },
+    { value: 'all', label: 'Todos', count: scoped.length },
     ...(toCallCount > 0 || stageFilter === 'to_call' ? [{ value: 'to_call' as const, label: 'Por llamar', count: toCallCount }] : []),
     ...ENRICHED_STAGE_ORDER
       .filter((stage) => stage === 'to_research' || stage === 'ready' || stageCounts[stage] > 0 || stageFilter === stage)
@@ -1555,7 +1558,7 @@ export default function EnrichedLeadsClient() {
             </Collapsible>
 
             <p className="text-xs text-foreground/70" role="status" aria-live="polite">
-              {listed.length} de {enriched.length} contactos
+              {listed.length.toLocaleString('es-CL')} de {scoped.length.toLocaleString('es-CL')} contactos
             </p>
           </div>
 
@@ -1610,15 +1613,28 @@ export default function EnrichedLeadsClient() {
                   </div>
                 ))}
               </div>
+            ) : !loadError && pageLeads.length === 0 && noOwnLeads ? (
+              <EmptyState
+                className="min-h-56 max-w-none justify-center rounded-2xl border border-dashed border-border/70"
+                icon={MailCheck}
+                title="Aún no tienes contactos propios"
+                description={`Busca prospectos y guarda los que te interesen, o mira los ${enriched.length.toLocaleString('es-CL')} que encontró tu equipo.`}
+                action={(
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button size="sm" onClick={() => router.push('/search')}>Buscar prospectos</Button>
+                    <Button size="sm" variant="outline" onClick={() => { setScope('team'); setPage(1); }}>Ver los del equipo</Button>
+                  </div>
+                )}
+              />
             ) : !loadError && pageLeads.length === 0 ? (
               <EmptyState
                 className="min-h-56 max-w-none justify-center rounded-2xl border border-dashed border-border/70"
-                icon={enriched.length === 0 ? MailCheck : Search}
-                title={enriched.length === 0 ? 'Aún no tienes contactos con correo' : 'No hay contactos con estos filtros'}
-                description={enriched.length === 0
+                icon={scoped.length === 0 ? MailCheck : Search}
+                title={scoped.length === 0 ? 'Aún no tienes contactos con correo' : 'No hay contactos con estos filtros'}
+                description={scoped.length === 0
                   ? 'Busca prospectos y guarda los que te interesen: al guardar te ofrecemos buscar su correo y llegan aquí listos para escribirles.'
                   : 'Cambia la etapa, ajusta la búsqueda o limpia los filtros para volver a ver la lista.'}
-                action={<Button size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/search') : clearFilters()}>{enriched.length === 0 ? 'Buscar prospectos' : 'Limpiar filtros'}</Button>}
+                action={<Button size="sm" variant={scoped.length === 0 ? 'default' : 'outline'} onClick={() => scoped.length === 0 ? router.push('/search') : clearFilters()}>{scoped.length === 0 ? 'Buscar prospectos' : 'Limpiar filtros'}</Button>}
               />
             ) : !loadError ? (
               <>

@@ -14,6 +14,14 @@ const MAX_SIGNATURE_CHARS = 20_000;
 
 const textOf = (node: Node | null | undefined) => String(node?.textContent || '').replace(/\s+/g, ' ').trim();
 
+/**
+ * What a phone or a mail app writes by itself under each email («Obtener Outlook para Android», «Enviado desde mi iPhone»): nobody's
+ * signature (9 Nov 2026). Brought on its own, it would close every campaign email; someone who writes from the phone keeps the
+ * signature of the emails they send from the computer.
+ */
+const APP_DEFAULT_SIGNATURE = /^(?:(?:get|obtener|obt[eé]n|descarga|descargar|download)\s+outlook\s+(?:for|para)\b|(?:sent|enviado)\s+(?:from|desde)\s+(?:my|mi|outlook|correo|mail|yahoo)\b)/i;
+export const isAppDefaultSignature = (text: string) => text.trim().length <= 80 && APP_DEFAULT_SIGNATURE.test(text.trim());
+
 /** The signature of one sent email, or null: the block Outlook marks, or from Word's «_MailAutoSig» bookmark to the quoted message. */
 export function signatureFromSentHtml(html: string, parse: ParseHtml): string | null {
   if (!html || !/<[a-z]/i.test(html)) return null;
@@ -25,7 +33,10 @@ export function signatureFromSentHtml(html: string, parse: ParseHtml): string | 
   }
   for (const selector of SIGNATURE_CONTAINERS) {
     const found = doc.querySelector(selector);
-    if (found && (textOf(found) || found.querySelector('img'))) return found.innerHTML.trim().slice(0, MAX_SIGNATURE_CHARS) || null;
+    if (!found) continue;
+    const hasImage = Boolean(found.querySelector('img'));
+    if (!hasImage && isAppDefaultSignature(textOf(found))) continue;
+    if (textOf(found) || hasImage) return found.innerHTML.trim().slice(0, MAX_SIGNATURE_CHARS) || null;
   }
   const bookmark = doc.querySelector('a[name="_MailAutoSig"]');
   if (bookmark) {

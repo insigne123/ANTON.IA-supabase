@@ -127,7 +127,7 @@ export default function ConversationsWorkspace() {
     window.history.replaceState(null, '', conversationUrl(window.location.href, { view: next }));
   }, []);
 
-  const sync = useCallback(async () => {
+  const sync = useCallback(async (automatic = false) => {
     setSyncing(true); setSyncStatus('Consultando tus cuentas de correo…');
     try {
       let cursor: string | null = null;
@@ -137,9 +137,13 @@ export default function ConversationsWorkspace() {
         found += data.synced; issues += data.skippedNoToken + data.errors.length; cursor = data.nextCursor;
         if (!cursor) break;
       }
-      setSyncStatus(cursor ? 'Actualización parcial. Quedan contactos por consultar.' : issues ? `Actualización parcial: ${issues} consultas requieren revisar la conexión. ${found} respuestas nuevas.` : `Tus cuentas actualizadas a las ${new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })}. ${found} respuestas nuevas.`);
+      const replies = found === 0 ? 'Sin respuestas nuevas.' : found === 1 ? '1 respuesta nueva.' : `${found} respuestas nuevas.`;
+      setSyncStatus(cursor ? 'Actualización parcial. Quedan contactos por consultar.' : issues ? `Actualización parcial: ${issues === 1 ? 'una consulta requiere' : `${issues} consultas requieren`} revisar la conexión. ${replies}` : `Tus cuentas actualizadas a las ${new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })}. ${replies}`);
       await load();
-    } catch (e) { setSyncStatus((e as Error).message); }
+    } catch (e) {
+      // On arrival nobody asked: say what to do, not that «la consulta» failed.
+      setSyncStatus(automatic ? 'No pudimos revisar tus correos ahora. «Traer respuestas» lo intenta de nuevo.' : (e as Error).message);
+    }
     finally { setSyncing(false); }
   }, [load]);
 
@@ -150,7 +154,7 @@ export default function ConversationsWorkspace() {
     if (autoSynced.current || loading || syncing || error || !rows.length) return;
     autoSynced.current = true;
     const checked = Math.max(0, ...rows.map(row => Date.parse(row.reply_sync_succeeded_at || '') || 0));
-    if (Date.now() - checked > 10 * 60_000) void sync();
+    if (Date.now() - checked > 10 * 60_000) void sync(true);
   }, [loading, syncing, error, rows, sync]);
 
   const open = useCallback(async (row: ConversationRow, address: 'push' | 'replace' | 'none' = 'push') => {
@@ -273,7 +277,11 @@ export default function ConversationsWorkspace() {
       setReplyIdempotencyKey(crypto.randomUUID());
       revealReply.current = reveal;
       setReplyEditorOpen(true);
-    } catch (e) { if (version !== request.current) return; setReplyError((e as Error).message); setReplySubject(`Re: ${(selected.subject || '').replace(/^(?:re:\s*)+/i, '')}`); setReplyBody(''); setReplyIdempotencyKey(crypto.randomUUID()); setReplyEditorOpen(true); }
+    } catch (e) {
+      // A suggestion nobody asked for that could not be made leaves «Responder» and «Sugerir con IA» as they were, without an error.
+      if (version !== request.current || !reveal) return;
+      setReplyError((e as Error).message); setReplySubject(`Re: ${(selected.subject || '').replace(/^(?:re:\s*)+/i, '')}`); setReplyBody(''); setReplyIdempotencyKey(crypto.randomUUID()); setReplyEditorOpen(true);
+    }
     finally { if (version === request.current) setDraftingReply(false); }
   }
 

@@ -16,13 +16,11 @@ import {
   buildSignatureHtml, buildSignatureText, EMPTY_SIGNATURE_FIELDS, SIGNATURE_DESIGNS, signatureProblem,
   type SignatureDesign, type SignatureFields,
 } from '@/lib/email-studio/signature-builder';
-import {
-  decodeSignatureFile, hasPendingImages, importSignatureHtml, placeUploadedImages, SIGNATURE_MAX_IMAGE_BYTES,
-} from '@/lib/email-studio/signature-import';
+import { decodeSignatureFile, importSignatureHtml } from '@/lib/email-studio/signature-import';
+import { prepareSignature, storeSignatureImage } from '@/lib/email-studio/signature-upload';
 import { emailSignatureStorage, type EmailChannel, type SignatureConfig } from '@/lib/email-signature-storage';
 import { profileService } from '@/lib/services/profile-service';
 import { buildSenderInfo } from '@/lib/signature-placeholders';
-import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 
 /**
@@ -114,6 +112,12 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
   }, []);
 
   const html = useMemo(() => buildSignatureHtml(fields, design), [fields, design]);
+  // What the account on screen already sends, read the way the form was filled: equal to `html` while nothing changed.
+  const savedHtml = useMemo(() => {
+    const stored = draftFrom(configs[channel], profileFields);
+    return stored ? buildSignatureHtml(stored.fields, stored.design) : null;
+  }, [configs, channel, profileFields]);
+  const ownState: OwnSignatureState = !fields.customHtml ? 'empty' : savedHtml !== html ? 'unsaved' : configs[channel]?.enabled ? 'on' : 'off';
   const update = (patch: Partial<SignatureFields>) => {
     setFields(current => ({ ...current, ...patch }));
     setStatus(null);
@@ -129,24 +133,13 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
     setProblem(null);
   }
 
-  /** An image of the signature, uploaded to the public storage the email reads it from. */
-  async function storeImage(file: Blob, type: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.');
-    const extension = type === 'image/png' ? 'png' : type === 'image/gif' ? 'gif' : 'jpg';
-    const key = `signatures/${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
-    const { error } = await supabase.storage.from('public').upload(key, file, { cacheControl: '3600', upsert: false, contentType: type });
-    if (error) throw error;
-    return supabase.storage.from('public').getPublicUrl(key).data.publicUrl;
-  }
-
   async function upload(file: File) {
     setProblem(null);
     if (!/^image\/(png|jpeg)$/i.test(file.type)) { setProblem('Sube una imagen PNG o JPG.'); return; }
     if (file.size > 2 * 1024 * 1024) { setProblem('La imagen pasa de 2 MB. Usa una más liviana.'); return; }
     setUploading(true);
     try {
-      update({ imageUrl: await storeImage(file, file.type) });
+      update({ imageUrl: await storeSignatureImage(file, file.type) });
     } catch (error) {
       setProblem(error instanceof Error && error.message.includes('sesión') ? error.message : 'No pudimos subir la imagen. Inténtalo de nuevo.');
     } finally {
@@ -162,34 +155,22 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
     setProblem(null);
     setStatus(null);
     setNotes([]);
-    const result = importSignatureHtml(raw, window);
-    if (!result.html) {
-      setProblem(from === 'file' ? 'No encontramos una firma en ese archivo. Sube el .htm de tu firma o pégala.' : 'No encontramos una firma en lo que pegaste. Cópiala completa e inténtalo de nuevo.');
-      return;
-    }
-    if (result.tooLong) {
-      setProblem('Tu firma es demasiado larga para enviarla. Pega una versión más simple o usa otro diseño.');
-      return;
-    }
     setImporting(true);
     try {
-      const uploaded = await Promise.all(result.embedded.map(async image => {
-        try {
-          const blob = await (await fetch(image.dataUrl)).blob();
-          return blob.size > SIGNATURE_MAX_IMAGE_BYTES ? null : await storeImage(blob, image.type);
-        } catch {
-          return null;
-        }
-      }));
-      const html = placeUploadedImages(result.html, uploaded);
-      const failed = uploaded.filter(url => !url).length;
+      const prepared = await prepareSignature(raw, window);
+      if (!prepared.ok) {
+        setProblem(prepared.problem === 'too_long' ? 'Tu firma es demasiado larga para enviarla. Pega una versión más simple o usa otro diseño.'
+          : prepared.problem === 'failed' ? 'No pudimos preparar tu firma. Inténtalo de nuevo.'
+            : from === 'file' ? 'No encontramos una firma en ese archivo. Sube el .htm de tu firma o pégala.' : 'No encontramos una firma en lo que pegaste. Cópiala completa e inténtalo de nuevo.');
+        return;
+      }
+      const { uploaded, failed, dropped } = prepared;
       const next = [
-        uploaded.length - failed ? `Subimos ${uploaded.length - failed === 1 ? 'la imagen' : `las ${uploaded.length - failed} imágenes`} de tu firma para que se vea en cada correo.` : '',
+        uploaded ? `Subimos ${uploaded === 1 ? 'la imagen' : `las ${uploaded} imágenes`} de tu firma para que se vea en cada correo.` : '',
         failed ? `${failed === 1 ? 'Una imagen no se pudo subir' : `${failed} imágenes no se pudieron subir`} (más de 2 MB o sin conexión) y quedó fuera.` : '',
-        result.dropped ? `${result.dropped === 1 ? 'Una imagen está' : `${result.dropped} imágenes están`} solo en tu computador y no llegaría a nadie: súbela con el diseño «Con logo» o «Imagen».` : '',
+        dropped ? `${dropped === 1 ? 'Una imagen está' : `${dropped} imágenes están`} solo en tu computador y no llegaría a nadie: súbela con el diseño «Con logo» o «Imagen».` : '',
       ].filter(Boolean);
-      if (hasPendingImages(html) || !html.trim()) { setProblem('No pudimos preparar tu firma. Inténtalo de nuevo.'); return; }
-      update({ customHtml: html });
+      update({ customHtml: prepared.html });
       setNotes(next);
       setCodeOpen(false);
       setCode('');
@@ -320,7 +301,7 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
         </fieldset>
 
         {design === 'propia' ? (
-          <OwnSignature baseId={baseId} hasSignature={Boolean(fields.customHtml)} importing={importing || readingMailbox} notes={notes}
+          <OwnSignature baseId={baseId} state={ownState} importing={importing || readingMailbox} notes={notes}
             onFromMailbox={() => void importFromMailbox()}
             codeOpen={codeOpen} code={code} onCode={setCode} onToggleCode={() => setCodeOpen(open => !open)}
             onImport={(raw, from) => void importSignature(raw, from)} onPickFile={() => htmlFileRef.current?.click()}
@@ -445,12 +426,22 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
  * «Tu firma actual»: a box that only takes a paste (typing in it does nothing), the .htm file Outlook keeps, or the HTML code
  * for whoever has it. What comes in is shown in the preview, as the email will carry it.
  */
-function OwnSignature({ baseId, hasSignature, importing, notes, codeOpen, code, onCode, onToggleCode, onImport, onPickFile, onClear, onFromMailbox }: {
-  baseId: string; hasSignature: boolean; importing: boolean; notes: string[]; codeOpen: boolean; code: string;
+/** Where «Tu firma actual» stands: nothing yet, brought and not saved, or saved and going out (or turned off). */
+type OwnSignatureState = 'empty' | 'unsaved' | 'on' | 'off';
+const OWN_COPY: Record<OwnSignatureState, { title: string; text: string }> = {
+  empty: { title: 'Trae la firma que ya usas', text: 'La traemos de tu Gmail u Outlook con su foto, o la pegas abajo: se conservan el formato, los enlaces y las imágenes.' },
+  unsaved: { title: 'Tu firma está lista', text: 'Revísala en la vista previa y guárdala. Para cambiarla, pega otra encima.' },
+  on: { title: 'Tu firma ya va en tus correos', text: 'Es la de la vista previa. Para cambiarla, pega otra encima o tráela de nuevo de tu correo.' },
+  off: { title: 'Tu firma está guardada', text: 'Está apagada: activa «Usar al enviar» para que vaya en tus correos.' },
+};
+
+function OwnSignature({ baseId, state, importing, notes, codeOpen, code, onCode, onToggleCode, onImport, onPickFile, onClear, onFromMailbox }: {
+  baseId: string; state: OwnSignatureState; importing: boolean; notes: string[]; codeOpen: boolean; code: string;
   onFromMailbox: () => void;
   onCode: (value: string) => void; onToggleCode: () => void; onImport: (raw: string, from: 'paste' | 'code' | 'file') => void;
   onPickFile: () => void; onClear: () => void;
 }) {
+  const hasSignature = state !== 'empty';
   const paste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     event.preventDefault();
     const html = event.clipboardData.getData('text/html');
@@ -460,11 +451,8 @@ function OwnSignature({ baseId, hasSignature, importing, notes, codeOpen, code, 
   return (
     <section aria-labelledby={`${baseId}-own`} className="space-y-3">
       <div>
-        <h3 id={`${baseId}-own`} className="text-sm font-medium text-foreground">{hasSignature ? 'Tu firma está lista' : 'Trae la firma que ya usas'}</h3>
-        <p className="text-xs leading-5 text-muted-foreground">
-          {hasSignature ? 'Revísala en la vista previa y guárdala. Para cambiarla, pega otra encima.'
-            : 'La traemos de tu Gmail u Outlook con su foto, o la pegas abajo: se conservan el formato, los enlaces y las imágenes.'}
-        </p>
+        <h3 id={`${baseId}-own`} className="text-sm font-medium text-foreground">{OWN_COPY[state].title}</h3>
+        <p className="text-xs leading-5 text-muted-foreground">{OWN_COPY[state].text}</p>
       </div>
       <div
         role="textbox" aria-multiline="true" aria-label="Recuadro para pegar tu firma" aria-describedby={`${baseId}-own-help`}
@@ -483,7 +471,8 @@ function OwnSignature({ baseId, hasSignature, importing, notes, codeOpen, code, 
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" onClick={onFromMailbox} disabled={importing}>
+        {/* The main action until there is a signature; then «Guardar firma» is. */}
+        <Button type="button" size="sm" variant={hasSignature ? 'outline' : 'default'} onClick={onFromMailbox} disabled={importing}>
           <Mail className="h-4 w-4" aria-hidden="true" />Traer mi firma de mi correo
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={onPickFile} disabled={importing}>
