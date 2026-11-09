@@ -82,6 +82,14 @@ export default () => [
         c.check('el botón lleva a Cowork con lo que describí', /^\/cowork\?/.test(href || '') && /retail/i.test(decodeURIComponent(href || '')), href);
         c.check('los dos propuestos vienen elegidos', await c.has('Andrea Soto') && await c.has('Valentina Araya'));
       } },
+      { say: 'Sigo sin ponerle nombre a la campaña', do: async c => {
+        await c.click('Continuar a correos');
+        await c.seeRole('heading', 'Prepara tu secuencia de correos');
+        c.check('«Continuar a correos» no se quedó gris por falta de nombre', true);
+        await c.click({ name: /Audiencia/ });
+        const name = await c.page.getByLabel('Nombre de campaña').inputValue().catch(() => '');
+        c.check('toma su nombre de lo que describí, y se puede cambiar', /Gerentes de Personas de retail/.test(name), name);
+      } },
     ] },
   { id: 'conversaciones-respuesta-sugerida', persona: 'owner', title: 'Abrir Conversaciones y encontrar la respuesta ya sugerida',
     goal: 'Leer quién me respondió y tener la respuesta escrita, sin pulsar «Traer respuestas» ni «Sugerir con IA».',
