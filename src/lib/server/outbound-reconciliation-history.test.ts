@@ -170,3 +170,40 @@ test('campaign history repair finalizes the durable delivery before the history 
   ]);
   assert.equal(result.finalized, true);
 });
+
+test('a reconciled bulk campaign send also records the campaign attempt as sent, before the history', async () => {
+  const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+  const campaignId = '60000000-0000-4000-8000-000000000001';
+  const bulkDispatch = { ...dispatch, provider: 'outlook' as const, idempotencyKey: `bulk:${campaignId}:${dispatch.draftId}` };
+  const result = await repairReconciledSentDispatchHistory({
+    admin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        return { data: name === 'record_bulk_campaign_attempt_v1' ? null : { repaired: true, finalized: true }, error: null };
+      },
+    },
+    dispatch: bulkDispatch,
+    draftVersion: { recipient: { email: 'ada@example.com' } },
+  });
+  assert.deepEqual(calls.map(call => call.name), ['record_bulk_campaign_attempt_v1', 'finalize_sent_outbound_dispatch_history_v1']);
+  assert.deepEqual(calls[0].args, {
+    p_campaign_id: campaignId, p_draft_id: dispatch.draftId, p_state: 'sent', p_code: 'sent', p_message: 'Envío confirmado.', p_retry_at: null,
+  });
+  assert.equal(result.finalized, true);
+
+  // The marker is best effort: when it cannot be written, the history repair still runs (the worker writes it later).
+  const repaired: string[] = [];
+  const outcome = await repairReconciledSentDispatchHistory({
+    admin: {
+      async rpc(name: string) {
+        if (name === 'record_bulk_campaign_attempt_v1') throw new Error('offline');
+        repaired.push(name);
+        return { data: { repaired: true, finalized: true }, error: null };
+      },
+    },
+    dispatch: bulkDispatch,
+    draftVersion: { recipient: { email: 'ada@example.com' } },
+  });
+  assert.deepEqual(repaired, ['finalize_sent_outbound_dispatch_history_v1']);
+  assert.equal(outcome.finalized, true);
+});

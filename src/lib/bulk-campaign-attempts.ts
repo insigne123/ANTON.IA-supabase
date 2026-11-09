@@ -7,6 +7,34 @@ export type CampaignAttempt = {
   updated_at: string | null;
 };
 
+/** What a confirmed send reads as; the sender and the repair below write the same words. */
+export const CONFIRMED_SEND_COPY = 'Envío confirmado.';
+
+/**
+ * Attempts that still say «en espera» or «requiere atención» although their send was confirmed afterwards. Outlook accepts a
+ * message without an id: the dispatch is recorded as unknown and reconciliation marks it sent later, while the attempt kept
+ * «pendiente de confirmación» (15 in production, 9 Nov 2026). Left as they are, once dispatch retention removes the row nothing
+ * says the message went out, and «Volver a comprobar» would send it again.
+ */
+export function attemptsConfirmedSent(attempts: CampaignAttempt[], deliveries: Array<{ draft_id: string; status: string }>) {
+  const sent = new Set(deliveries.filter(row => row.status === 'sent').map(row => row.draft_id));
+  return attempts.filter(attempt => attempt.state !== 'sent' && sent.has(attempt.draft_id));
+}
+
+/** The attempts as they read once those confirmations are recorded. */
+export function withConfirmedSends(attempts: CampaignAttempt[], deliveries: Array<{ draft_id: string; status: string }>): CampaignAttempt[] {
+  const confirmed = new Set(attemptsConfirmedSent(attempts, deliveries).map(attempt => attempt.draft_id));
+  return attempts.map(attempt => confirmed.has(attempt.draft_id)
+    ? { ...attempt, state: 'sent' as const, code: 'sent', message: CONFIRMED_SEND_COPY, retry_at: null }
+    : attempt);
+}
+
+/** The campaign of a bulk send, read from its dispatch key («bulk:<campaña>:<borrador>»); null for any other send. */
+export function bulkCampaignIdFromDispatchKey(key: string | null | undefined) {
+  const match = /^bulk:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):[0-9a-f-]{36}$/i.exec(String(key || ''));
+  return match ? match[1] : null;
+}
+
 /** Success markers survive dispatch retention: a confirmed send is never recomputed as pending. */
 export function withSentAttemptsAsDeliveries(
   deliveries: Array<{ draft_id: string; status: string; completed_at: string | null; error_message: string | null }>,

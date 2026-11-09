@@ -1,5 +1,5 @@
 import type { BulkCampaign, CampaignRecipient } from '@/lib/bulk-campaigns';
-import { campaignAttemptAllowsRetry, describeCampaignFailure, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { CONFIRMED_SEND_COPY, campaignAttemptAllowsRetry, describeCampaignFailure, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { sendBulkCampaignMessage } from '@/lib/server/bulk-campaign-sender';
 
@@ -36,7 +36,7 @@ export async function sendTrackedCampaignMessage(campaign: BulkCampaign, message
       failure.retryable ? new Date(Date.now() + failure.delayMs).toISOString() : null);
     throw error;
   }
-  if (result.status === 'sent') await record('sent', 'sent', 'Envío confirmado.', null);
+  if (result.status === 'sent') await record('sent', 'sent', CONFIRMED_SEND_COPY, null);
   else if (result.status === 'deferred') {
     const code = result.dispatch?.errorCode || 'deferred';
     const failure = describeCampaignFailure(code);

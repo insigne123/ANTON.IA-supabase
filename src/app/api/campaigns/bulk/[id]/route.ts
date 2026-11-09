@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { withConfirmedSends } from '@/lib/bulk-campaign-attempts';
 import { getCampaignAttempts } from '@/lib/server/bulk-campaign-attempts';
 import { requireBulkCampaignAuth as requireAuth } from '@/lib/server/bulk-campaigns';
-import { bulkCampaignError, campaignDeliveries, getBulkCampaign, reviewBulkCampaign, saveBulkCampaign } from '@/lib/server/bulk-campaigns';
+import { bulkCampaignError, campaignDeliveries, campaignReplies, getBulkCampaign, reviewBulkCampaign, saveBulkCampaign } from '@/lib/server/bulk-campaigns';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -11,8 +12,10 @@ export async function GET(_req: NextRequest, context: Context) {
   try {
     const auth = await requireAuth();
     const campaign = await getBulkCampaign(auth, (await context.params).id);
-    const [deliveries, attempts] = await Promise.all([campaignDeliveries(auth, campaign), getCampaignAttempts(auth.supabase, campaign)]);
-    return NextResponse.json({ campaign, deliveries, attempts }, { headers: { 'Cache-Control': 'no-store' } });
+    // Who answered is best effort: without it the view says nothing about answers instead of «0».
+    const [deliveries, attempts, replied] = await Promise.all([campaignDeliveries(auth, campaign), getCampaignAttempts(auth.supabase, campaign),
+      campaignReplies(auth, campaign).catch(() => null)]);
+    return NextResponse.json({ campaign, deliveries, attempts: withConfirmedSends(attempts, deliveries), replied }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return bulkCampaignError(error); }
 }
 export async function PUT(req: NextRequest, context: Context) {

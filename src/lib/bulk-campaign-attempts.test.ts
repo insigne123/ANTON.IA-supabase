@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { campaignAttemptAllowsRetry, describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from './bulk-campaign-attempts';
+import { CONFIRMED_SEND_COPY, attemptsConfirmedSent, bulkCampaignIdFromDispatchKey, campaignAttemptAllowsRetry, describeCampaignFailure, withConfirmedSends, withSentAttemptsAsDeliveries, type CampaignAttempt } from './bulk-campaign-attempts';
 
 test('retry policy fails closed for attention, missing and invalid retry dates', () => {
   const attempt: CampaignAttempt = { draft_id: 'draft', state: 'retry_wait', code: 'quota', message: 'Wait', retry_at: null, updated_at: null };
@@ -28,4 +28,32 @@ test('sent markers merge as sent deliveries without duplicating live rows', () =
   assert.deepEqual(merged.map(row => row.draft_id), ['live', 'retained']);
   assert.equal(merged[1].status, 'sent');
   assert.equal(merged[1].completed_at, '2026-09-02T00:00:00Z');
+});
+
+test('an Outlook send confirmed after its attempt reads as sent, and only that one (9 Nov 2026: 15 in production)', () => {
+  const attempts: CampaignAttempt[] = [
+    { draft_id: 'outlook', state: 'attention', code: 'invalid_provider_response', message: 'El envío está pendiente de confirmación. No se repetirá automáticamente.', retry_at: null, updated_at: null },
+    { draft_id: 'quota', state: 'retry_wait', code: 'daily_quota_exceeded', message: 'Se alcanzó el límite diario.', retry_at: '2026-11-10T12:00:00Z', updated_at: null },
+    { draft_id: 'failed', state: 'attention', code: 'never_sent', message: 'No salió.', retry_at: null, updated_at: null },
+    { draft_id: 'done', state: 'sent', code: 'sent', message: CONFIRMED_SEND_COPY, retry_at: null, updated_at: null },
+  ];
+  const deliveries = [
+    { draft_id: 'outlook', status: 'sent' }, { draft_id: 'failed', status: 'failed' }, { draft_id: 'done', status: 'sent' },
+  ];
+  assert.deepEqual(attemptsConfirmedSent(attempts, deliveries).map(attempt => attempt.draft_id), ['outlook']);
+  const read = withConfirmedSends(attempts, deliveries);
+  assert.deepEqual(read[0], { ...attempts[0], state: 'sent', code: 'sent', message: CONFIRMED_SEND_COPY, retry_at: null });
+  assert.deepEqual(read.slice(1), attempts.slice(1), 'a wait, a failure and a confirmed send stay as they are');
+  // Once retention removes the dispatch, the corrected attempt is what still says the e-mail went out.
+  assert.deepEqual(withSentAttemptsAsDeliveries([], read).map(row => row.draft_id), ['outlook', 'done']);
+});
+
+test('the campaign of a bulk send is read from its dispatch key, and only from a bulk key', () => {
+  const campaign = '60000000-0000-4000-8000-000000000001';
+  const draft = '20000000-0000-4000-8000-000000000001';
+  assert.equal(bulkCampaignIdFromDispatchKey(`bulk:${campaign}:${draft}`), campaign);
+  assert.equal(bulkCampaignIdFromDispatchKey(`campaign:${campaign}:contact-1:step:0`), null);
+  assert.equal(bulkCampaignIdFromDispatchKey('manual:ada'), null);
+  assert.equal(bulkCampaignIdFromDispatchKey(`bulk:${draft}`), null);
+  assert.equal(bulkCampaignIdFromDispatchKey(null), null);
 });

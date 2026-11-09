@@ -245,6 +245,7 @@ test('recipient history is scoped to the campaign member and merges sources', as
       campaignDeliveries: async () => [{ draft_id: 'draft-0', status: 'sent', completed_at: '2026-09-05T00:00:00Z', error_message: null }],
     },
     '@/lib/server/bulk-campaign-attempts': { getCampaignAttempts: async () => [] },
+    '@/lib/bulk-campaign-attempts': await import('../bulk-campaign-attempts'),
   });
   const auth: any = { supabase: { from: () => chain({ data: [{ status: 'sent', sent_at: '2026-01-01T00:00:00Z', replied_at: null, subject: 'Previo' }], error: null }) } };
   const result = await getBulkRecipientHistory(auth, 'campaign', 'ANA@example.com');

@@ -11,9 +11,10 @@ import os from 'node:os';
 const playwrightModule = process.env.PLAYWRIGHT_MODULE || path.join(process.env.LOCALAPPDATA || '', 'Temp/opencode/campaign-browser/node_modules/playwright/index.mjs');
 const { chromium } = await import(pathToFileURL(playwrightModule).href);
 const launchOptions = process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE, headless: true } : { channel: 'chrome', headless: true };
-test('campaign workspace: AI rank, manual filters, profiles, AI proposal, individual edit, rejection, approval, revision, history, responsive and keyboard', async () => {
+test('campaign workspace: AI rank, manual filters, profiles, AI proposal, individual edit, back to the e-mails, approval, revision, history, responsive and keyboard', async () => {
   const output = await build({
-    stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {BulkCampaignWorkspace} from './src/components/campaigns/BulkCampaignWorkspace'; createRoot(document.getElementById('root')).render(<BulkCampaignWorkspace/>);`, loader: 'tsx', resolveDir: process.cwd() },
+    // The app renders the workspace inside <ConfirmProvider> (src/app/layout.tsx); without it «Salir sin guardar» cannot ask.
+    stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {ConfirmProvider} from './src/components/confirm-dialog'; import {BulkCampaignWorkspace} from './src/components/campaigns/BulkCampaignWorkspace'; createRoot(document.getElementById('root')).render(<ConfirmProvider><BulkCampaignWorkspace/></ConfirmProvider>);`, loader: 'tsx', resolveDir: process.cwd() },
     bundle: true, write: false, platform: 'browser', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'isolate-navigation-and-inbox', setup(build) {
       build.onResolve({ filter: /^(next\/link|@\/components\/campaigns-v2\/CampaignReviewInbox)$/ }, args => ({ path: args.path, namespace: 'mock' }));
@@ -39,7 +40,8 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       const ranked = { ...person, score: 88 };
       await page.route('**/*', async route => {
         const url = new URL(route.request().url());
-        if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: `<html class="${theme}"><head><style>${css}</style></head><body><div id="root"></div></body></html>` });
+        // The browser has no process.env: the Supabase client reads its NEXT_PUBLIC_ variables from it (empty here, as offline).
+        if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: `<html class="${theme}"><head><style>${css}</style><script>window.process = { env: { NODE_ENV: 'test' } };</script></head><body><div id="root"></div></body></html>` });
         const body = route.request().postDataJSON();
         let result;
         if (url.pathname.endsWith('/audience/rank')) result = { people: [ranked], rankedCount: 1, candidateCount: 5, truncated: true, ineligibleCount: 1 };
@@ -80,15 +82,15 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       await page.getByLabel('Describe tu lead ideal').fill('Reclutadores con poder de compra en empresas de retail');
       await page.getByRole('button', { name: 'Buscar leads ideales' }).click();
       await page.getByText('1 resultado ·', { exact: false }).waitFor();
-      await page.getByRole('columnheader', { name: 'Empresa y cargo' }).waitFor();
-      await page.getByText('evaluó 5 leads', { exact: false }).waitFor();
+      // On a phone the company and the reason go under the name; the columns are there from a tablet up.
+      await page.getByRole('columnheader', { name: 'Empresa y cargo', includeHidden: true }).waitFor({ state: 'attached' });
+      await page.getByText('revisó 5 leads', { exact: false }).waitFor();
       await page.getByRole('button', { name: 'Seleccionar todos' }).click();
       assert.equal(await page.getByRole('checkbox', { name: /Ana Pérez/ }).isChecked(), true);
       await page.getByRole('button', { name: 'Filtros manuales' }).click();
-      await page.getByLabel('Tamaño de empresa').fill('11-50');
       await page.getByLabel('Buscar en resultados').fill('ana');
       await page.getByRole('button', { name: 'Buscar con filtros' }).click();
-      await page.getByText('Sin envíos registrados', { exact: true }).waitFor();
+      await page.getByText('Sin envíos registrados', { exact: true }).first().waitFor();
       if (process.env.CAMPAIGN_SCREENSHOT_DIR) for (const width of [390, 1280]) {
         await page.setViewportSize({ width, height: 900 });
         await page.screenshot({ path: path.join(process.env.CAMPAIGN_SCREENSHOT_DIR, `campaign-audience-${theme}-${width}.png`), fullPage: true });
@@ -104,9 +106,12 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       assert.equal(await page.getByRole('button', { name: 'Generar secuencia con IA', exact: true }).isDisabled(), true);
       const objective = 'Presentar el servicio AXIS y proponer una conversación sobre selección de colaboradores';
       await page.getByLabel('¿Qué quieres conseguir con la campaña?').fill(objective);
-      assert.equal(await page.getByLabel('¿Cuántos seguimientos quieres?').inputValue(), '');
-      assert.equal(await page.getByRole('button', { name: 'Generar secuencia con IA', exact: true }).isDisabled(), true);
-      await page.getByLabel('¿Cuántos seguimientos quieres?').selectOption('2');
+      const followUps = page.getByRole('combobox', { name: '¿Cuántos seguimientos quieres?' });
+      assert.match(await followUps.textContent(), /Sin elegir/);
+      // Without a count the AI writes the first e-mail and 3 follow-ups (J, 6 Nov 2026), so the objective is enough.
+      assert.equal(await page.getByRole('button', { name: 'Generar secuencia con IA', exact: true }).isDisabled(), false);
+      await followUps.click();
+      await page.getByRole('option', { name: 'Correo inicial + 2 seguimientos' }).click();
       await page.getByRole('button', { name: 'Seguimiento 1', exact: true }).click();
       await page.getByLabel('Días después del envío anterior').fill('5');
       await page.getByRole('button', { name: 'Primer correo', exact: true }).click();
@@ -119,7 +124,7 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       await page.getByRole('button', { name: 'Generar secuencia con IA', exact: true }).click();
       await page.getByText('Secuencia generada: 3 correos. Revisa cada mensaje antes de continuar.', { exact: true }).waitFor();
       assert.equal(assistInputs[1].objective, objective);
-      assert.deepEqual(assistInputs[1].followUpDelays, [5, 3]);
+      assert.deepEqual(assistInputs[1].followUpDelays, [5, 4], 'the second follow-up keeps its default gap (days 3, 7 and 14)');
       assert.equal(await page.getByLabel('Asunto', { exact: true }).inputValue(), 'Correo 0');
       await page.getByRole('button', { name: 'Seguimiento 2', exact: true }).click();
       assert.equal(await page.getByLabel('Correo', { exact: true }).inputValue(), 'Mensaje completo 2');
@@ -158,7 +163,7 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
         await page.screenshot({ path: path.join(process.env.CAMPAIGN_SCREENSHOT_DIR, `campaign-review-${theme}-${width}.png`), fullPage: true });
       }
       await page.setViewportSize({ width: 380, height: 900 });
-      await page.getByRole('button', { name: 'Editar correo inicial de esta persona' }).click();
+      await page.getByRole('button', { name: /^Editar solo para esta persona: primer correo/ }).click();
       await page.getByLabel('Asunto individual').fill('Solo para Ana');
       assert.equal(await page.getByRole('button', { name: 'Aprobar campaña' }).isDisabled(), true);
       await page.getByRole('button', { name: 'Guardar edición individual' }).click();
@@ -176,12 +181,13 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       await page.getByRole('list', { name: 'Personas de la campaña' }).getByRole('button', { name: /Ana Pérez/ }).focus();
       await page.keyboard.press('Tab');
       assert.notEqual(await page.evaluate(() => document.activeElement.tagName), 'BODY');
-      await page.getByRole('button', { name: 'Rechazar y editar' }).click();
+      // «Editar correos» goes back to the e-mails without a decision: the draft is the author's own.
+      await page.getByRole('button', { name: 'Editar correos' }).click();
       await page.getByRole('heading', { name: 'Prepara tu secuencia de correos' }).waitFor();
       await page.getByRole('button', { name: 'Guardar y revisar correos' }).click();
       await page.getByRole('button', { name: 'Aprobar campaña' }).click();
       await page.getByRole('button', { name: 'Pausar campaña' }).waitFor();
-      await page.getByText('Ver historial unificado', { exact: true }).click();
+      await page.getByText('Ver historial', { exact: true }).click();
       await page.getByText('Correo inicial de campaña', { exact: true }).waitFor();
       await page.getByRole('button', { name: 'Editar mensajes pendientes' }).click();
       await page.getByRole('heading', { name: 'Edita los mensajes pendientes' }).waitFor();

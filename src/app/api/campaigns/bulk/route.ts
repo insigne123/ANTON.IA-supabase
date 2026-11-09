@@ -20,6 +20,11 @@ async function launchedCampaignStats(auth: AuthContext, rows: BulkCampaign[]) {
     if (result.error) throw result.error;
     for (const row of result.data || []) sent.add(String((row as { draft_id: string }).draft_id));
   }
+  // A confirmed send outlives dispatch retention in its attempt (and an Outlook send is confirmed there too).
+  const confirmed = await auth.supabase.from('bulk_campaign_attempts').select('draft_id').eq('organization_id', auth.organizationId)
+    .eq('user_id', auth.user.id).eq('state', 'sent').in('campaign_id', launched.map(row => row.id)).limit(2000);
+  if (confirmed.error) throw confirmed.error;
+  for (const row of confirmed.data || []) sent.add(String((row as { draft_id: string }).draft_id));
   const replies = await auth.supabase.from('contacted_leads').select('email,replied_at').eq('organization_id', auth.organizationId)
     .eq('user_id', auth.user.id).gte('replied_at', since).limit(2000);
   if (replies.error) throw replies.error;

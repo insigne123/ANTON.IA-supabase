@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { CampaignInputSchema, matchAudience, renderCampaignMessage, type BulkCampaign, type CampaignDelivery } from '@/lib/bulk-campaigns';
+import { CampaignInputSchema, campaignRepliedEmails, matchAudience, renderCampaignMessage, type BulkCampaign, type CampaignDelivery } from '@/lib/bulk-campaigns';
 import { getCampaignAttempts } from '@/lib/server/bulk-campaign-attempts';
 import { withSentAttemptsAsDeliveries } from '@/lib/bulk-campaign-attempts';
 import { canonicalSha256, deterministicMessagingUuid, MessagingDraftV1Schema, hashMessagingDraftContent } from '@/lib/messaging-contracts';
@@ -38,6 +38,15 @@ export async function campaignDeliveries(auth: AuthContext, campaign: BulkCampai
     .eq('user_id', auth.user.id).in('draft_id', ids).limit(1000);
   if (error) throw error;
   return data || [];
+}
+
+/** Who answered after the campaign went out (lowercase e-mails); null before it went out. */
+export async function campaignReplies(auth: AuthContext, campaign: BulkCampaign): Promise<string[] | null> {
+  if (!campaign.approved_at) return null;
+  const { data, error } = await auth.supabase.from('contacted_leads').select('email,replied_at').eq('organization_id', auth.organizationId)
+    .eq('user_id', auth.user.id).gte('replied_at', campaign.approved_at).limit(2000);
+  if (error) throw error;
+  return campaignRepliedEmails(campaign, data || []);
 }
 
 export async function assertCampaignRecipientAllowed(auth: AuthContext, email: string) {

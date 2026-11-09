@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { CampaignMessageSchema, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 import { DEFAULT_FOLLOW_UP_DELAYS, validateSequenceProposal } from '@/lib/bulk-campaign-assist';
 import { chipClass } from '@/components/ui/chip';
+import { cn } from '@/lib/utils';
 
 type Props = {
   definition: CampaignInput;
@@ -171,23 +173,26 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
       {!reviseMode && <>
         <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-2"><Label htmlFor="follow-up-count">¿Cuántos seguimientos quieres?</Label>
-            <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={effectiveCount ?? ''} onChange={event => void chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
-              <option value="" disabled>{`Sin elegir: correo inicial + ${DEFAULT_FOLLOW_UPS} seguimientos`}</option>
-              {[0, 1, 2, 3, 4].map(count => <option key={count} value={count}>{count === 0 ? 'Solo el correo inicial' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'} + correo inicial`}</option>)}
-            </select>
+            <Select disabled={busy} value={effectiveCount === null ? '' : String(effectiveCount)} onValueChange={value => void chooseCount(Number(value))}>
+              <SelectTrigger id="follow-up-count" aria-describedby="sequence-help"><SelectValue placeholder={`Sin elegir: correo inicial + ${DEFAULT_FOLLOW_UPS} seguimientos`} /></SelectTrigger>
+              <SelectContent>{[0, 1, 2, 3, 4].map(count => <SelectItem key={count} value={String(count)}>{count === 0 ? 'Solo el correo inicial' : `Correo inicial + ${count} ${count === 1 ? 'seguimiento' : 'seguimientos'}`}</SelectItem>)}</SelectContent>
+            </Select>
           </div>
-          <Button disabled={busy || definition.objective.trim().length < 5 || !scheduleValid} onClick={() => void generate('sequence')}>{job === 'sequence' ? 'Generando secuencia…' : hasContent ? 'Proponer nueva secuencia' : 'Generar secuencia con IA'}</Button>
+          {/* Once the e-mails are written, saving is the next step: a new sequence is a second thought, not the main action. */}
+          <Button variant={hasContent ? 'outline' : 'default'} disabled={busy || definition.objective.trim().length < 5 || !scheduleValid} onClick={() => void generate('sequence')}>{job === 'sequence' ? 'Generando secuencia…' : hasContent ? 'Proponer nueva secuencia' : 'Generar secuencia con IA'}</Button>
         </div>
         <p id="sequence-help" className="text-sm text-muted-foreground">{followUpCount === null ? 'Si no eliges, la IA escribe el correo inicial y 3 seguimientos (días 3, 7 y 14); puedes cambiarlo después.' : `La secuencia tendrá ${followUpCount + 1} ${followUpCount === 0 ? 'correo' : 'correos'}. Puedes ajustar los días de espera al seleccionar cada seguimiento.`}</p>
         {firstWritten && effectiveCount === 0 && <Button variant="outline" disabled={busy} onClick={() => void chooseCount(DEFAULT_FOLLOW_UPS)}>{`Agregar ${DEFAULT_FOLLOW_UPS} seguimientos escritos desde el primer correo`}</Button>}
         {firstWritten && emptyFollowUps > 0 && <Button variant="outline" disabled={busy} onClick={() => void writeFollowUps(definition.messages)}>{job === 'follow_ups' ? 'Escribiendo seguimientos…' : emptyFollowUps === 1 ? 'Escribir el seguimiento desde el primer correo' : `Escribir los ${emptyFollowUps} seguimientos desde el primer correo`}</Button>}
       </>}
-      {complete && definition.messages.length > 1 && <div className="space-y-2">
-        <Label htmlFor="sequence-instruction">Instrucción para toda la secuencia</Label>
-        <Textarea id="sequence-instruction" className="min-h-20" maxLength={2000} disabled={busy} value={general} onChange={event => { setGeneral(event.target.value); invalidateSequence(); }}
-          placeholder="Hazlos más breves, tutea y en cada seguimiento propone una llamada de 15 minutos." aria-describedby="sequence-instruction-help" />
-        <p id="sequence-instruction-help" className="text-sm text-muted-foreground">{reviseMode ? 'Se aplica a los correos pendientes; los enviados no cambian.' : 'Se aplica a todos los correos a la vez; revisas la propuesta antes de aplicarla.'}</p>
-        <Button variant="outline" disabled={busy || general.trim().length < 5} onClick={() => void applyToAll()}>{job === 'instruction' ? 'Aplicando a todos los correos…' : 'Aplicar a todos los correos'}</Button>
+      {complete && definition.messages.length > 1 && <div className="space-y-2 rounded-xl bg-muted/40 p-4">
+        <Label htmlFor="sequence-instruction">Cambiar todos los correos con IA</Label>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <Textarea id="sequence-instruction" rows={1} className="min-h-11 bg-background" maxLength={2000} disabled={busy} value={general} onChange={event => { setGeneral(event.target.value); invalidateSequence(); }}
+            placeholder="Hazlos más breves, tutea y en cada seguimiento propone una llamada de 15 minutos." aria-describedby="sequence-instruction-help" />
+          <Button variant="outline" className="shrink-0" disabled={busy || general.trim().length < 5} onClick={() => void applyToAll()}>{job === 'instruction' ? 'Aplicando…' : 'Aplicar a todos los correos'}</Button>
+        </div>
+        <p id="sequence-instruction-help" className="text-xs text-muted-foreground">{reviseMode ? 'Se aplica a los correos pendientes; los enviados no cambian.' : 'Se aplica a todos los correos a la vez; revisas la propuesta antes de aplicarla.'}</p>
       </div>}
       <>
         <div ref={sequenceResultRef} tabIndex={-1} className="space-y-3 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
@@ -204,15 +209,17 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
       </>
     </div>
 
-    <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
+    <div className={cn('grid min-w-0 items-start gap-5', (hasContent || reviseMode) && 'lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]')}>
       <div className="min-w-0 space-y-4">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Correos de la secuencia">{definition.messages.map((_, index) => <button key={index} type="button" disabled={busy} aria-pressed={messageIndex === index} className={chipClass(messageIndex === index)} onClick={() => onSelect(index)}>{label(index)}{isLocked(index) ? ' · Bloqueado' : ''}</button>)}</div>
-        <h3 className="text-lg font-medium">{label(messageIndex)}</h3>
+        <h3 className="sr-only">{label(messageIndex)}</h3>
+        {!hasContent && !reviseMode && <p className="text-sm text-muted-foreground">O escríbelo tú: el asunto y el texto de cada correo.</p>}
         {messageIndex > 0 && <div className="space-y-2"><Label htmlFor="delay">Días después del envío anterior</Label><Input id="delay" className="max-w-32" type="number" min={1} max={90} disabled={busy || isLocked(messageIndex)} value={message.delayDays} onChange={event => updateMessage({ delayDays: Number(event.target.value) })} /><p className="text-sm text-muted-foreground">El plazo empieza cuando se confirma el envío anterior. Los seguimientos se detienen si la persona responde.</p></div>}
         <div className="space-y-2"><Label htmlFor="subject">Asunto</Label><Input id="subject" maxLength={300} disabled={busy || isLocked(messageIndex)} value={message.subject} onChange={event => updateMessage({ subject: event.target.value })} /></div>
         <div className="space-y-2"><Label htmlFor="body">Correo</Label><Textarea id="body" className="min-h-64" maxLength={12000} disabled={busy || isLocked(messageIndex)} value={message.body} onChange={event => updateMessage({ body: event.target.value })} /><p className="text-sm text-muted-foreground">Puedes usar {'{{nombre}}'}, {'{{empresa}}'} y {'{{cargo}}'}. Tu firma se agrega sola al enviar, desde «Firmas y estilo».</p></div>
       </div>
-      <aside aria-label="Asistente de IA" className="min-w-0 space-y-4 rounded-xl border bg-muted/30 p-4 lg:sticky lg:top-6">
+      {/* Before anything is written there is nothing to change: the assistant shows with the first e-mail. */}
+      {(hasContent || reviseMode) && <aside aria-label="Asistente de IA" className="min-w-0 space-y-4 rounded-xl border bg-muted/30 p-4 lg:sticky lg:top-6">
         <header className="space-y-1"><h3 className="font-semibold">Editar con IA</h3><p className="text-sm text-muted-foreground">{label(messageIndex)} · {isLocked(messageIndex) ? 'Este correo está bloqueado.' : 'Los cambios se proponen solo para este correo.'}</p></header>
         <div className="space-y-2"><Label htmlFor="instruction">¿Qué quieres cambiar en este correo?</Label><Textarea id="instruction" className="min-h-28" maxLength={2000} disabled={busy || isLocked(messageIndex)} value={instruction} onChange={event => { setInstruction(event.target.value); setProposal(null); setMessageError(''); setMessageFeedback(''); }} placeholder="Haz este seguimiento más breve, retoma el beneficio principal y termina con una pregunta." /></div>
         <Button variant="outline" className="w-full" disabled={busy || isLocked(messageIndex) || instruction.trim().length < 5} onClick={() => void generate('message')}>{job === 'message' ? 'Preparando cambios…' : 'Proponer cambios con IA'}</Button>
@@ -222,11 +229,16 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
           {messageFeedback && <p role="status" className="text-sm text-muted-foreground">{messageFeedback}</p>}
           {proposal && <div className="space-y-3"><h4 className="font-medium">Propuesta de IA</h4><p className="break-words font-medium">{proposal.subject}</p><p className="whitespace-pre-wrap break-words text-sm">{proposal.body}</p><div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => { updateMessage(proposal); setMessageFeedback(`Cambios aplicados a ${label(messageIndex).toLowerCase()}.`); }}>Aplicar propuesta</Button><Button variant="ghost" disabled={busy} onClick={() => setProposal(null)}>Descartar</Button></div></div>}
         </div>
-      </aside>
+      </aside>}
     </div>
-    {!reviseMode && <div className="space-y-2"><Label htmlFor="provider">Enviar desde</Label><select id="provider" disabled={busy} className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring sm:max-w-sm" value={definition.provider} onChange={event => onChange({ provider: event.target.value as 'google' | 'outlook' })}><option value="google">Mi cuenta de Gmail conectada</option><option value="outlook">Mi cuenta de Outlook conectada</option></select></div>}
+    {!reviseMode && <div className="space-y-2 sm:max-w-sm"><Label htmlFor="provider">Enviar desde</Label>
+      <Select disabled={busy} value={definition.provider} onValueChange={value => onChange({ provider: value as 'google' | 'outlook' })}>
+        <SelectTrigger id="provider"><SelectValue /></SelectTrigger>
+        <SelectContent><SelectItem value="google">Mi cuenta de Gmail conectada</SelectItem><SelectItem value="outlook">Mi cuenta de Outlook conectada</SelectItem></SelectContent>
+      </Select>
+    </div>}
     {(definition.overrides || []).length > 0 && <p className="text-sm text-muted-foreground">Cambiar la plantilla reemplazará las ediciones individuales. Podrás ajustarlas nuevamente en la revisión.</p>}
     {!canSave && <p className="text-sm text-muted-foreground">Elige la cantidad de seguimientos y completa el asunto, el texto y los días de espera de cada correo para continuar.</p>}
-    <div className="sticky bottom-0 z-10 -mx-1 flex justify-between gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="ghost" disabled={busy} onClick={onBack}>{reviseMode ? 'Cancelar edición' : 'Atrás'}</Button><Button disabled={busy || !canSave} onClick={onSave}>{busy && !job ? 'Preparando…' : reviseMode ? 'Guardar pendientes y volver a revisión' : 'Guardar y revisar correos'}</Button></div>
+    <div className="sticky bottom-0 z-10 -mx-1 flex justify-between gap-3 border-t bg-card/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80"><Button variant="ghost" disabled={busy} onClick={onBack}>{reviseMode ? 'Cancelar edición' : 'Atrás'}</Button><Button disabled={busy || !canSave} onClick={onSave}>{busy && !job ? 'Preparando…' : reviseMode ? 'Guardar pendientes y volver a revisión' : 'Guardar y revisar correos'}</Button></div>
   </>;
 }
