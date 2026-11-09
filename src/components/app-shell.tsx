@@ -13,6 +13,7 @@ import QuotaSync from '@/components/quota/quota-sync';
 import ThemeToggle from '@/components/theme-toggle';
 import { CommandPalette, CommandPaletteButton } from '@/components/command-palette';
 import { UsageCapture } from '@/components/admin/UsageCapture';
+import { SignatureAutoImport } from '@/components/email-studio/SignatureAutoImport';
 import { useAdminUsageAccess } from '@/hooks/use-admin-usage-access';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/context/AuthContext';
@@ -81,6 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <ProductTourProvider userId={fullName.state === 'done' ? user?.id : undefined} onNavigate={(href) => router.push(href)}>
         <QuotaSync />
         <UsageCapture />
+        <SignatureAutoImport />
         <AppSidebar access={access} adminUsage={adminUsage} pending={pending} />
         <SidebarInset>
           <p className="sr-only" role="status" aria-live="polite">{workspaceAnnouncement}</p>

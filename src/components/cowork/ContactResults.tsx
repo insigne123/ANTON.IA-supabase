@@ -83,6 +83,8 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
   };
   const rows = useMemo(() => collectCoworkLeadRows(observations), [observations]);
   const { title: heading, noun, companies: companiesOnly, external } = coworkContactsTitle(rows);
+  // «La descarga incluye 1.000», as the header counts them, not «1000».
+  const count = (value: number) => value.toLocaleString('es-CL');
   // What the last external search asked for: Apollo's company search brings no industry, headcount or city of each company,
   // so the list says once what the companies matched instead of «Sector no informado» on every row.
   const asked = useMemo(() => {
@@ -154,20 +156,20 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
         </div>
         {!showHeader && <ExportMenu runId={runId} kind="contacts" read={full?.sequence ?? null} onError={onError} onAccessDenied={onAccessDenied} />}
       </div>
-      <p className="text-[12px] text-cw-muted">La descarga incluye {rows.length} {noun(rows.length)}, sin aplicar este filtro.</p>
+      <p className="text-[12px] text-cw-muted">La descarga incluye {count(rows.length)} {noun(rows.length)}, sin aplicar este filtro.</p>
       {(unknownSector || estimatedSector) && <p className="text-[12px] text-cw-muted">{askedLine ? `${askedLine} ` : ''}{estimatedSector
         ? 'Apollo no entrega el rubro en la búsqueda: el que ves lo estimó una IA con el sitio web de cada empresa.'
         : 'Apollo no entrega el rubro ni la dotación de cada empresa en la búsqueda.'}</p>}
       {omittedNote && <p className="text-[12px] text-cw-muted">{omittedNote}</p>}
       {cutSearch && !full && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
-        <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Cowork revisó los primeros {rows.length}. Hay más contactos tuyos que calzan con esta búsqueda.</p>
+        <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Cowork revisó los primeros {count(rows.length)}. Hay más contactos tuyos que calzan con esta búsqueda.</p>
         <CwButton size="sm" variant="secondary" disabled={loadingFull} onClick={() => void loadFull()}>
           {loadingFull ? <Loader2 className="motion-safe:animate-spin" aria-hidden="true" /> : <ListChecks aria-hidden="true" />}{loadingFull ? 'Trayendo…' : 'Ver todos'}
         </CwButton>
       </div>}
       {full && <p role="status" className="text-[12px] text-cw-muted">{fullCut
-        ? `Lista completa hasta ${rows.length} ${noun(rows.length)}: hay más; acota la búsqueda para ver el resto.`
-         : `Lista completa: ${rows.length} ${noun(rows.length)}.`}</p>}
+        ? `Lista completa hasta ${count(rows.length)} ${noun(rows.length)}: hay más; acota la búsqueda para ver el resto.`
+         : `Lista completa: ${count(rows.length)} ${noun(rows.length)}.`}</p>}
       {Boolean(full?.payload.snapshot) && <p className="text-[12px] text-cw-muted">La lista se actualizó al abrir «Ver todos». Se conserva esa misma versión para descargarla.</p>}
       {partial && <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-[12px] text-cw-warning">Una consulta alcanzó el límite de resultados. Esta lista no representa toda tu base.</p>}
       {more && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
@@ -176,7 +178,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
         {!onSend && <p className="w-full text-[12px] text-cw-muted">{sendHint}</p>}
       </div>}
     </div>
-    <p role="status" className="sr-only">{filtered.length} {noun(filtered.length)} {filtered.length === 1 ? 'visible' : 'visibles'}</p>
+    <p role="status" className="sr-only">{count(filtered.length)} {noun(filtered.length)} {filtered.length === 1 ? 'visible' : 'visibles'}</p>
     {filtered.length === 0
       ? <p className="mt-3 rounded-xl border border-dashed border-cw-border px-4 py-6 text-center text-[13px] text-cw-muted">No hay coincidencias. Cambia o borra el filtro.</p>
       : <ul className="mt-3 divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated">

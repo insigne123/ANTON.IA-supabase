@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { pickRecurringSignature, signatureContentIds, signatureFromSentHtml, withInlineImages } from './mailbox-signature';
+import { isAppDefaultSignature, pickRecurringSignature, signatureContentIds, signatureFromSentHtml, withInlineImages } from './mailbox-signature';
 
 const parse = (html: string) => new JSDOM(html).window.document;
 
@@ -32,6 +32,16 @@ test('Outlook on the desktop: from its «_MailAutoSig» mark to the quoted email
 test('an email without a marked signature gives none', () => {
   assert.equal(signatureFromSentHtml('<html><body><p>Hola</p><p>Pedro</p></body></html>', parse), null);
   assert.equal(signatureFromSentHtml('solo texto', parse), null);
+});
+
+test('what the phone writes by itself is nobody’s signature: it is never brought', () => {
+  const phone = (line: string) => `<html><body><div>Te llamo mañana.</div><div id="ms-outlook-mobile-signature"><div dir="ltr">${line}</div></div></body></html>`;
+  assert.equal(signatureFromSentHtml(phone('Obtener <a href="https://aka.ms/AAb9ysg">Outlook para Android</a>'), parse), null);
+  assert.equal(signatureFromSentHtml(phone('Get <a href="https://aka.ms/o0ukef">Outlook for iOS</a>'), parse), null);
+  for (const line of ['Enviado desde mi iPhone', 'Sent from my Galaxy', 'Enviado desde Correo para Windows', 'Descarga Outlook para iOS']) assert.equal(isAppDefaultSignature(line), true, line);
+  // A phone signature the person wrote is theirs.
+  assert.match(signatureFromSentHtml(phone('Pedro Soto · Gerente Comercial · +56 9 1234 5678'), parse)!, /Pedro Soto/);
+  assert.equal(isAppDefaultSignature('Pedro Soto, enviado desde mi oficina en Santiago'), false);
 });
 
 test('the signature most emails carry wins over a one-off', () => {

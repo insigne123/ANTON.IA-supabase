@@ -30,6 +30,56 @@ export function stripHtmlToText(html: string) {
     .trim();
 }
 
+/** The closing words a signature may open with; they never count as the person's name. */
+const SIGN_OFF = /^(?:saludos|un saludo|un abrazo|abrazos?|gracias|muchas gracias|atentamente|cordialmente|quedo atent|best|regards|kind regards|cheers)\b/;
+const signKey = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').replace(/^[\s,.;:·|•–—-]+|[\s,.;:·|•–—-]+$/g, '');
+const signParts = (line: string) => line.split(/\s+[|·•–—]\s+|\s*,\s+|\t+/).map(signKey).filter(Boolean);
+
+/**
+ * The body without its own closing block when the signature that follows already says it (9 Nov 2026, with the signature of
+ * Outlook or Gmail on everyone's emails): «Camila Torres / Gerente comercial / Yago QA» above a signature with that name, title
+ * and company would read twice. Only the last lines go, only when each one is in the signature and one of them is the name;
+ * «Saludos,» and a first name alone («Camila») stay, as in an email written in Outlook.
+ */
+export function withoutRepeatedSignOff(body: string, signatureText: string): string {
+  const signatureLines = signatureText.split('\n').map(line => line.trim()).filter(Boolean);
+  const name = signatureLines.flatMap(signParts).find(part => !SIGN_OFF.test(part) && /\p{L}/u.test(part));
+  if (!name) return body;
+  const known = new Set(signatureLines.flatMap(line => [signKey(line), ...signParts(line)]));
+  const nameWords = new Set(name.split(' '));
+  // «Pedro Soto» is the name of a signature that says «Pedro Soto Rojas»; «Pedro» alone is a sign-off, not the name.
+  const isName = (key: string) => key === name || (key.split(' ').length >= 2 && key.split(' ').every(word => nameWords.has(word)));
+  const covered = (line: string) => {
+    const key = signKey(line);
+    if (!key) return false;
+    if (known.has(key) || isName(key)) return true;
+    const parts = signParts(line);
+    return parts.length > 0 && parts.every(part => known.has(part) || isName(part));
+  };
+  const lines = body.replace(/\s+$/, '').split('\n');
+  let end = lines.length;
+  let removed = 0;
+  let sawName = false;
+  while (end > 0 && removed < 6) {
+    const line = lines[end - 1];
+    if (!line.trim()) { end -= 1; continue; }
+    if (!covered(line)) break;
+    if (isName(signKey(line)) || signParts(line).some(isName)) sawName = true;
+    end -= 1;
+    removed += 1;
+  }
+  if (!removed || !sawName) return body;
+  let kept = lines.slice(0, end);
+  // A signature that opens with its own «Saludos cordiales,» takes the place of the body's.
+  if (SIGN_OFF.test(signKey(signatureLines[0] || ''))) {
+    let last = kept.length;
+    while (last > 0 && !kept[last - 1].trim()) last -= 1;
+    if (last > 0 && kept[last - 1].trim().length <= 40 && SIGN_OFF.test(signKey(kept[last - 1]))) kept = kept.slice(0, last - 1);
+  }
+  const result = kept.join('\n').replace(/\s+$/, '');
+  return result || body;
+}
+
 function textToHtml(text: string) {
   return `<div style="white-space:pre-wrap;line-height:1.55;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">${escapeHtml(text || '').replace(/\n/g, '<br>')}</div>`;
 }
@@ -81,6 +131,15 @@ export function prepareOutboundEmail(input: {
   let html = String(input.html || '').trim();
   let text = String(input.text || '').trim();
   const unsubscribeUrl = String(input.unsubscribeUrl || '').trim();
+  const signature = input.signature;
+  const signatureText = signature && (signature.html || signature.text) ? (signature.text || stripHtmlToText(signature.html)).trim() : '';
+
+  // A plain body (the AI's, a template's, a reply) loses its own closing block when the signature repeats it, before it becomes
+  // HTML. A body written as HTML is left as it is, and so is one that already carries the signature (prepared twice).
+  if (signatureText && (!html || !looksLikeHtml(html)) && !text.includes(signatureText) && !html.includes(SIGNATURE_MARKER)) {
+    if (text) text = withoutRepeatedSignOff(text, signatureText);
+    if (html) html = withoutRepeatedSignOff(html, signatureText);
+  }
 
   if (html && !looksLikeHtml(html)) {
     if (!text) text = html;
@@ -96,12 +155,10 @@ export function prepareOutboundEmail(input: {
     warnings.push('Email body was empty; generated a minimal body.');
   }
 
-  const signature = input.signature;
   if (signature && (signature.html || signature.text) && !html.includes(SIGNATURE_MARKER)) {
     const block = `<div ${SIGNATURE_MARKER}="1" style="margin-top:16px;">${signature.html || textToHtml(signature.text)}</div>`;
     if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, `${block}</body>`);
     else html += block;
-    const signatureText = (signature.text || stripHtmlToText(signature.html)).trim();
     if (signatureText && !text.includes(signatureText)) text += `\n\n${signature.separator === false ? '' : '-- \n'}${signatureText}`;
   }
 

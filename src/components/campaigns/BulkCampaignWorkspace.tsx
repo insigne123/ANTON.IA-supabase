@@ -32,6 +32,17 @@ function coworkSearchHref(description: string) {
   return `/cowork?pregunta=${encodeURIComponent(`Busca personas nuevas para una campaña: ${asked}. Muéstrame quiénes calzan y, cuando elija, guárdalas con su correo y arma la campaña.`)}`;
 }
 
+/**
+ * A campaign without a name takes one from what was described (9 Nov 2026): «Continuar a correos» stayed grey without saying
+ * why. The name can be changed in the first step at any time.
+ */
+function suggestedCampaignName(definition: Pick<CampaignInput, 'description' | 'criteria'>) {
+  const described = definition.description.trim().replace(/\s+/g, ' ');
+  if (described) return described.length > 60 ? `${described.slice(0, 59).trimEnd()}…` : described;
+  const filters = [definition.criteria.titles[0], definition.criteria.industries[0]].map(value => String(value || '').trim()).filter(Boolean);
+  return filters.length ? filters.join(' · ') : `Campaña del ${new Date().toLocaleDateString('es-CL', { day: 'numeric', month: 'long' })}`;
+}
+
 async function request(path: string, body?: unknown, method = 'POST') {
   const response = await fetch(`/api/campaigns/bulk${path}`, body === undefined ? { cache: 'no-store' } : {
     method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -142,7 +153,8 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
     setStep(2); setEditing(true); setDirty(false); setRecipientIndex(0); setMessageIndex(0); setReviseMode(false); setHistory({}); setIndividual(null);
   }
   async function save(input = definition) {
-    const parsed = CampaignInputSchema.safeParse(input);
+    // Reached through the steps above without a name, it takes the same one «Continuar a correos» gives.
+    const parsed = CampaignInputSchema.safeParse(input.name.trim() ? input : { ...input, name: suggestedCampaignName(input) });
     if (!parsed.success) throw new Error(parsed.error.issues[0].message);
     const result = campaign && !reviseMode
       ? await request(`/${campaign.id}`, { revision: campaign.revision, definition: parsed.data }, 'PUT')
@@ -302,7 +314,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
               <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" disabled={busy} checked={definition.criteria.excludeReplied} onChange={event => { change({ criteria: { ...definition.criteria, excludeReplied: event.target.checked } }); setSearched(false); }} />Excluir personas que ya respondieron</label>
               {searched && <><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm" role="status">{plural(audienceTotal, 'resultado', 'resultados')} · {plural(definition.emails.length, 'seleccionado', 'seleccionados')} (máximo {MAX_RECIPIENTS}){people.some(person => person.blockedReason) ? ` · ${plural(people.filter(person => person.blockedReason).length, 'no disponible', 'no disponibles')} en esta página` : ''}</p><span className="flex gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={() => selectAllResults(true)}>Seleccionar todos</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => selectAllResults(false)}>Quitar todos</Button></span></div>{!people.length ? <p className="text-sm text-muted-foreground">No encontramos leads para esta búsqueda. Prueba describirlo de otra forma, con menos filtros, o revisa tus leads enriquecidos.</p> : <CampaignAudienceTable people={people} selected={definition.emails} max={MAX_RECIPIENTS} busy={busy} onToggle={(email, checked) => change({ emails: checked ? [...definition.emails, email] : definition.emails.filter(value => value !== email) })} />}{audienceMode === 'manual' && audienceTotal > 25 && <div className="flex items-center justify-between gap-2 text-sm"><Button variant="outline" size="sm" disabled={busy || audiencePage === 0} onClick={() => void run(() => searchAudience(audiencePage - 1))}>Anterior</Button><span>Página {audiencePage + 1} de {Math.max(1, Math.ceil(audienceTotal / 25))}</span><Button variant="outline" size="sm" disabled={busy || (audiencePage + 1) * 25 >= audienceTotal} onClick={() => void run(() => searchAudience(audiencePage + 1))}>Siguiente</Button></div>}</>}
               {definition.emails.length > 0 && <details><summary className="cursor-pointer text-sm">Revisar selección guardada ({definition.emails.length})</summary><p className="my-2 text-sm text-muted-foreground">Al guardar verificaremos que todos sigan cumpliendo los criterios.</p>{definition.emails.map(email => <div key={email} className="flex items-center justify-between gap-2 text-sm"><span className="break-all">{email}</span><Button variant="ghost" size="sm" disabled={busy} onClick={() => change({ emails: definition.emails.filter(value => value !== email) })}>Quitar</Button></div>)}</details>}
-              <div className="sticky bottom-0 z-10 -mx-1 flex justify-end border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button disabled={busy || !definition.name.trim() || !definition.emails.length} onClick={() => setStep(1)}>Continuar a correos</Button></div>
+              <div className="sticky bottom-0 z-10 -mx-1 flex justify-end border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button disabled={busy || !definition.emails.length} onClick={() => { if (!definition.name.trim()) change({ name: suggestedCampaignName(definition) }); setStep(1); }}>Continuar a correos</Button></div>
             </>}
             {step === 1 && <CampaignSequenceEditor definition={definition} messageIndex={messageIndex} busy={busy} reviseMode={reviseMode}
               isLocked={reviseLocked} onSelect={setMessageIndex} onChange={change} onBusyChange={setBusy}
