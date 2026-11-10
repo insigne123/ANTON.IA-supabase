@@ -455,11 +455,9 @@ env:
   - variable: LEADS_FINDER_MAX_RUN_USD
     value: "0.50"
     availability: [RUNTIME]
-  # Contacto del día con Apollo (PR 640) queda apagado hasta su OK y los cupos de Apollo de noviembre: los contactos del día siguen
-  # saliendo de Leads Finder (Apify), como antes. Quitar esta variable y desplegar lo enciende (docs/contacto-del-dia.md).
-  - variable: LEAD_DROPS_PROVIDER
-    value: apify
-    availability: [RUNTIME]
+  # Contacto del día con Apollo, encendido el 10 de noviembre por decisión del dueño: la búsqueda es la gratuita de Apollo y el
+  # contacto llega sin enriquecer, así que prepararlo y enviarlo no gasta créditos ni saldo de Apify. El crédito lo usa la persona
+  # si elige «Enriquecer y guardar». Para volver a Leads Finder (Apify): LEAD_DROPS_PROVIDER=apify (docs/contacto-del-dia.md).
   # The app's own emails (weekly report, alerts, contact of the day, Apify balance) go out from this Yago address through
   # Resend (yago.cl verified, sa-east-1). Secret created 21 Oct; docs/informe-semanal.md, «Resend».
   - variable: REPORTS_FROM_EMAIL
