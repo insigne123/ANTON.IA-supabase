@@ -36,6 +36,10 @@ Idea del dueño: «que se use Apollo para esto, buscar un lead no nos tiene cost
   - Si Apollo no encuentra el correo, lo dice y se puede intentar de nuevo.
 - **Escribir tarda más:** son 4 correos por contacto. La corrida de la mañana escribe 4 a la vez y empieza una ronda solo si quedan 2 minutos, lo que da unos 48 por mañana para unos 38 contactos.
 - **Para volver a Leads Finder:** `LEAD_DROPS_PROVIDER=apify`. Vuelven el correo en la búsqueda, el guardado sin créditos y el presupuesto `LEAD_DROPS_MONTHLY_USD`.
+- **En producción desde el 10 de noviembre.** Hasta ese día `apphosting.yaml` tenía `LEAD_DROPS_PROVIDER=apify` y los contactos seguían saliendo de Leads Finder. Se quitó por decisión del dueño («que salga de Apollo, pero que no se gasten créditos de enriquecimiento: mandémosle al usuario un lead sin enriquecer»), el mismo día en que la cuenta gratis de Apify quedó sin saldo hasta el 3 de diciembre.
+  - Preparar y enviar el contacto no gasta nada: ni créditos de Apollo ni saldo de Apify. El contacto llega sin correo y con el apellido oculto.
+  - El único crédito es el de la persona, y solo si pulsa «Enriquecer y guardar · 1 crédito».
+  - Con Leads Finder, el 10 de noviembre quedaron 2 personas sin contacto por «Se acabó el presupuesto del mes». Con Apollo ese presupuesto no aplica.
 
 Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el calce, la redacción y el envío de la mañana son iguales con Apollo.
 
