@@ -60,14 +60,16 @@ select is(
 
 reset role;
 
+-- Compared as text: production keeps lead_responses.lead_id as a uuid with its foreign key, a database built from these
+-- migrations as text. The guard works on both.
 select is(
-  (select lead_id from public.lead_responses where contacted_id = 'pgtap-inbound-unsaved'),
-  null::uuid,
+  (select lead_id::text from public.lead_responses where contacted_id = 'pgtap-inbound-unsaved'),
+  null::text,
   'the response of a contact that is not a saved lead carries no lead link'
 );
 select is(
-  (select lead_id from public.lead_responses where contacted_id = 'pgtap-inbound-saved'),
-  'd7200000-0000-4000-8000-000000000001'::uuid,
+  (select lead_id::text from public.lead_responses where contacted_id = 'pgtap-inbound-saved'),
+  'd7200000-0000-4000-8000-000000000001'::text,
   'the response of a saved lead keeps its lead link'
 );
 select results_eq(
