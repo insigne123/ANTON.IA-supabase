@@ -103,12 +103,17 @@ async function gmailBody(accessToken: string, id: string) {
 async function outlookListed(accessToken: string): Promise<Listed[]> {
   const out: Listed[] = [];
   const since = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString();
-  let path: string | null = `/me/mailFolders/sentitems/messages?${new URLSearchParams({
-    '$filter': `sentDateTime ge ${since}`, '$orderby': 'sentDateTime desc', '$top': '50',
-    '$select': 'id,internetMessageId,subject,sentDateTime,toRecipients,ccRecipients,from,conversationIndex',
+  const first = (fields: string) => `/me/mailFolders/sentitems/messages?${new URLSearchParams({
+    '$filter': `sentDateTime ge ${since}`, '$orderby': 'sentDateTime desc', '$top': '50', '$select': fields,
   })}`;
+  const FIELDS = 'id,internetMessageId,subject,sentDateTime,toRecipients,ccRecipients,from';
+  let path: string | null = first(`${FIELDS},conversationIndex`);
   for (let page = 0; page < 3 && path && out.length < LISTED; page += 1) {
-    const res: Response = await fetch(`${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }, cache: 'no-store' });
+    let res: Response = await fetch(`${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }, cache: 'no-store' });
+    // A mailbox that will not give the conversation index is still read: an answer is then told by its subject and by the thread under it.
+    if (res.status === 400 && page === 0) {
+      res = await fetch(`${GRAPH_BASE}${first(FIELDS)}`, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }, cache: 'no-store' });
+    }
     if (!res.ok) throw new Error(`Outlook sent list failed (${res.status})`);
     const data: { value?: unknown[]; '@odata.nextLink'?: string } = await res.json();
     for (const item of (data.value || []) as Array<Record<string, any>>) {
