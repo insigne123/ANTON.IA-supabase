@@ -6,7 +6,9 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
-import { blockedPhrasesIn } from '@/lib/server/human-tone-checks';
+import { blockedPhrasesIn, checkHumanTone } from '@/lib/server/human-tone-checks';
+import { voicePass } from '@/lib/server/outreach-voice-pass';
+import { voiceTreatmentOf } from '@/lib/outreach-voice';
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { firstNameOf } from '@/lib/lead-name';
@@ -66,6 +68,8 @@ const GenerateOutreachFromDraftContextV2InputSchema = z.object({
     errors: z.array(z.string().trim().min(1).max(2_000)).max(20).default([]),
     instruction: z.string().trim().min(1).max(1_000).optional(),
   }).optional(),
+  voiceSamples: z.array(z.string().trim().min(1).max(3_000)).max(3).optional()
+    .describe('Correos que la organización guardó como su voz: la pasada de voz toma de ellos la forma.'),
 });
 
 const GeneratedOutreachModelV2Schema = z.object({
@@ -93,6 +97,7 @@ export type GenerateOutreachFromDraftContextV2Input = {
     errors: string[];
     instruction?: string;
   };
+  voiceSamples?: string[];
 };
 
 export type GeneratedOutreachFromDraftContextV2 = GeneratedOutreachV2 & {
@@ -102,6 +107,10 @@ export type GeneratedOutreachFromDraftContextV2 = GeneratedOutreachV2 & {
   usage: DraftModelUsage;
   hechos_usados: string[];
   datos_faltantes: string[];
+  /** The email as it was before the voice pass, when that pass rewrote it: what stands if the checks turn the rewrite back. */
+  beforeVoice?: { subject: string; body: string };
+  /** Why the voice pass left the writer's email as it was, when it did (no version of it could replace the email). */
+  voiceDropped?: string;
 };
 
 export type DraftModelUsage = {
@@ -656,7 +665,7 @@ ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
     ? 'English'
     : 'Español (Chile)';
 
-  return `Idioma: ${language}. Redacta un único correo frío B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing. El objetivo es abrir una conversación comercial relevante, no presentar un catálogo ni cerrar una venta en el primer contacto.
+  const prompt = `Idioma: ${language}. Redacta un único correo frío B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing. El objetivo es abrir una conversación comercial relevante, no presentar un catálogo ni cerrar una venta en el primer contacto.
 
 Usa exclusivamente WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION y los campos eligibleFacts y seller de DRAFT_MESSAGE_BRIEF como hechos y capacidades autorizados. REQUIRED_COMMERCIAL_ANGLE solo orienta relevancia, nunca prueba hechos. El historial y el cargo del brief no autorizan afirmaciones nuevas. No inventes datos, métricas, clientes, necesidades ni fuentes. Tampoco límites ni garantías del servicio que el vendedor no declara: qué no hace, qué no reemplaza, quién decide o en qué etapa se usa. No muestres URLs, IDs ni el proceso de investigación dentro del correo. Solo nombra herramientas si son capacidades declaradas por el vendedor.
 
@@ -741,6 +750,7 @@ ${correction}
  TRAZABILIDAD (obligatorio): en "hechos_usados" anota cada hecho del correo con el campo de entrada de donde salió (por ejemplo "señal: abrirán dos tiendas" o "actividad: cadena de retail"). En "datos_faltantes" anota lo que te habría servido y no recibiste (por ejemplo "nombre del contacto"); si no falta nada, devuelve [].
  Devuelve SOLO JSON válido con esta forma exacta:
 {"subject":"...","opening":"...","value":"...","hechos_usados":["..."],"datos_faltantes":[]}`;
+  return { prompt, words: modelBodyWords, anchorLines, facts: requiredEvidence.map((item) => item.statement) };
 }
 
 /**
@@ -753,7 +763,9 @@ export async function generateOutreachFromDraftContextV2(
   const parsed = GenerateOutreachFromDraftContextV2InputSchema.parse(input);
   const isCloseStep = isCloseOutreachStep(parsed.sequenceContext);
   const isFollowUpStep = Boolean(parsed.sequenceContext) && !isCloseStep;
-  const writingPrompt = draftContextPrompt(parsed);
+  const { prompt: writingPrompt, words, anchorLines, facts } = draftContextPrompt(parsed);
+  // The guide and the samples of the voice pass are Spanish: a draft in English keeps the editorial pass, as before.
+  const voiceMode = String(parsed.context.style.profile.language || '').toLowerCase().startsWith('en') ? 'off' : draftVoiceMode();
   const result = await generateStructuredWithTelemetry({
     prompt: writingPrompt,
     schema: GeneratedOutreachModelV2Schema,
@@ -764,7 +776,7 @@ export async function generateOutreachFromDraftContextV2(
   });
   // A separate editorial pass reads the entire candidate in context. The native
   // draft service still validates the edited result against evidence and CTA.
-  const edited = await generateStructuredWithTelemetry({
+  const edited = voiceMode === 'replace' ? result : await generateStructuredWithTelemetry({
     prompt: `${writingPrompt}
 
 REVISIÓN EDITORIAL FINAL:
@@ -788,13 +800,56 @@ ${JSON.stringify({ subject: result.data.subject.slice(0, 1_000), opening: result
     reasoningEffort: draftReasoningEffort(parsed, 'edit'),
   });
   const ownNames = [parsed.context.company.name, parsed.context.seller.companyName];
-  return {
+  const greeting = draftGreeting(parsed.context);
+  const written = {
     subject: sentenceCaseSubject(spanishForCopiedEnglish(edited.data.subject, ownNames)),
-    body: [
-      draftGreeting(parsed.context),
-      spanishForCopiedEnglish(edited.data.opening, ownNames),
-      spanishForCopiedEnglish(edited.data.value, ownNames),
-    ].join('\n\n'),
+    paragraphs: [spanishForCopiedEnglish(edited.data.opening, ownNames), spanishForCopiedEnglish(edited.data.value, ownNames)],
+  };
+  // A repair of a phrase keeps the rest of an email that already went through the voice pass: rewriting it all brought new problems (30 Oct 2026).
+  const phraseRepair = Boolean(parsed.rewrite && !parsed.rewrite.instruction && parsed.rewrite.errors.length > 0
+    && parsed.rewrite.errors.every((error) => PHRASE_ONLY_ISSUE.test(error)));
+  const questions = (written.paragraphs.join(' ').match(/\?/g) || []).length;
+  const voiced = voiceMode === 'off' || phraseRepair ? null : await voicePass({
+    ...written,
+    step: isCloseStep ? 'close' : isFollowUpStep ? 'follow_up' : 'initial',
+    treatment: voiceTreatmentOf(`${written.paragraphs.join(' ')} ${parsed.sequenceContext ? '' : parsed.context.constraints.cta.exactText}`),
+    sender: { name: parsed.context.seller.name, company: parsed.context.seller.companyName },
+    recipient: { firstName: greeting.replace(/^Hola\s*|,$/g, ''), company: parsed.context.company.name },
+    // A later email already told the fact: shown it again, the pass opened every follow-up by retelling it (bench, 11 Nov 2026).
+    facts: parsed.sequenceContext ? [] : facts,
+    keep: [
+      ...(anchorLines.length > 0
+        ? [parsed.sequenceContext
+          ? `Su hecho va solo nombrado en pocas palabras, como ya lo hace el correo, con dos de estos términos juntos: ${anchorLines.join(' / ')}.`
+          : `El hecho del destinatario queda reconocible en una misma oración: ${anchorLines.join(' / ')}.`]
+        : []),
+      'Una sola capacidad de la oferta, la que el correo ya nombra: no sumes otros servicios, pruebas ni detalles.',
+      ...(parsed.sequenceContext ? [] : [`Nombra una vez a ${parsed.context.seller.companyName} y di qué hace en concreto por esa persona.`]),
+      ...(isCloseStep ? ['La oración que avisa que es tu último correo sobre esto y la pregunta final quedan exactamente como están: solo cambia lo anterior.'] : []),
+      ...(parsed.sequenceContext ? ['Es un correo posterior: entra directo con lo que trae. No vuelvas a contar su hecho completo, no digas por qué escribes («Te escribo porque…») ni que retomas o vuelves a escribir.'] : []),
+      ...(!parsed.sequenceContext && !anchoredOnDatedEvent(parsed.context) ? ['No digas «Vi que…»: lo que sabes de la empresa no es una noticia.'] : []),
+    ],
+    words,
+    // A first email takes no question (the approved closing line is added after); a later one keeps its own.
+    questions: !parsed.sequenceContext ? { min: 0, max: 0 } : { min: Math.min(1, questions), max: 1 },
+    seed: draftVarietySeed(parsed.context),
+    ownSamples: parsed.voiceSamples,
+    instruction: parsed.rewrite?.instruction || parsed.userInstruction || null,
+    check: (version) => [...addedOfferTerms(written.paragraphs, version.paragraphs, parsed.context.seller), ...checkHumanTone({
+      subject: sentenceCaseSubject(version.subject),
+      body: [greeting, ...version.paragraphs].join('\n\n'),
+      recipientFirstName: greeting.replace(/^Hola\s*|,$/g, '') || null,
+      companyName: parsed.context.company.name,
+      maxModelQuestions: parsed.sequenceContext ? 1 : 0,
+      hasSignal: anchoredOnDatedEvent(parsed.context),
+      sellerName: parsed.context.seller.companyName,
+      knownNames: [parsed.context.seller.companyName],
+    }).errors.map((finding) => finding.message)],
+  });
+  const final = voiced?.rewritten ? { subject: sentenceCaseSubject(voiced.subject), paragraphs: voiced.paragraphs } : written;
+  return {
+    subject: final.subject,
+    body: [greeting, ...final.paragraphs].join('\n\n'),
     personalization: requiredReportAwareDraftPersonalizationV2(parsed.context),
     hypothesisIds: [],
     hechos_usados: edited.data.hechos_usados || [],
@@ -802,9 +857,37 @@ ${JSON.stringify({ subject: result.data.subject.slice(0, 1_000), opening: result
     provider: 'openai',
     model: edited.telemetry.modelName,
     promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
-    usage: addDraftModelUsage(
+    usage: [
       normalizeDraftModelUsage(result.telemetry.usage),
-      normalizeDraftModelUsage(edited.telemetry.usage),
-    ),
+      ...(edited === result ? [] : [normalizeDraftModelUsage(edited.telemetry.usage)]),
+      ...(voiced?.usage || []).map(normalizeDraftModelUsage),
+    ].reduce(addDraftModelUsage),
+    ...(voiced?.rewritten ? { beforeVoice: { subject: written.subject, body: [greeting, ...written.paragraphs].join('\n\n') } } : {}),
+    ...(voiced && !voiced.rewritten && voiced.dropped ? { voiceDropped: voiced.dropped } : {}),
   };
+}
+
+/**
+ * The voice pass changes how the email sounds, not what it offers: given the seller's profile to keep it true, it wrote the profile into the
+ * email («…, reemplazamos turnos el mismo día y nos ocupamos de contratos, anexos y finiquitos», bench of 11 Nov 2026). Three or more words
+ * of the profile that the writer's email did not carry turn the version back.
+ */
+function addedOfferTerms(before: string[], after: string[], seller: DraftContextV2['seller']) {
+  const terms = (value: string) => new Set((value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-zñ]{6,}/g) || []));
+  const profile = terms(draftSellerStatementsV2(seller).join(' '));
+  const had = terms(before.join(' '));
+  const added = [...terms(after.join(' '))].filter((term) => profile.has(term) && !had.has(term));
+  return added.length >= 3 ? [`Sumaste a la oferta cosas que el correo no decía (${added.slice(0, 4).join(', ')}): deja una sola capacidad, la que ya traía.`] : [];
+}
+
+/**
+ * How the voice pass joins the calls of a draft. «replace» (the default): it takes the place of the editorial pass. «after»: it follows it.
+ * «off»: the draft is the editorial pass's, as before 11 Nov 2026. Measured over the 40 emails of the bench (docs/correos-voz-humana.md):
+ * replacing it left as few tells as following it (20 against 19, from 91), every draft valid at the first attempt, 43 % less cost and
+ * 41 % less time, because the editorial pass reads the whole writing prompt again and the voice pass reads one email.
+ * DRAFT_VOICE_PASS chooses another.
+ */
+function draftVoiceMode(): 'replace' | 'after' | 'off' {
+  const value = String(process.env.DRAFT_VOICE_PASS || '').trim().toLowerCase();
+  return value === 'off' || value === 'after' ? value : 'replace';
 }

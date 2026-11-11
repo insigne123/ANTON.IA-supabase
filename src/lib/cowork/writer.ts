@@ -93,7 +93,7 @@ type Observation = { action: string; input?: string; result?: unknown };
 type Recipient = { name: string; email: string | null; company: string };
 /** meeting: whether the person asked for a meeting, a call or a demo (undefined when the request is not known: nothing is flagged).
  * products: the names the offer goes by (its all-caps names and the seller's company), lowercase and accent-free. */
-type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: boolean; proofs?: string[]; recipients?: Recipient[];
+export type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: boolean; proofs?: string[]; recipients?: Recipient[];
   meeting?: boolean; products?: string[]; keepsAsk?: boolean; followUp?: boolean;
   /** The person pasted an email of their own to improve. */
   pasted?: boolean;
@@ -1455,7 +1455,7 @@ const NARRATES_FIX = /\b(?:ajuste|corregi|modifique|cambie|reescribi)\b[^.]{0,60
 const shortList = (issues: CoworkDraftIssue[]) => [...new Set(issues.map(issue => issue.short.replace(/[.\s]+$/, '')))].slice(0, 4);
 const problemList = (issues: CoworkDraftIssue[]) => [...new Set(issues.map(issue => `${issue.where}: ${issue.problem.replace(/\.$/, '')}`))].slice(0, 3);
 
-type WriterInput = {
+export type WriterInput = {
   request: string;
   now?: Date;
   brief: CoworkWriteBrief;
@@ -1472,6 +1472,15 @@ type WriterInput = {
   canReview?: () => boolean;
 };
 
+/** What the checks of a writing turn read the drafts against: the same for the Writer's corrections and for the voice pass after them. */
+export function coworkRunContext(input: Pick<WriterInput, 'request' | 'brief' | 'userContext' | 'observations'>): WriterContext {
+  const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
+  return { ...coworkWriterContext(input.userContext as { fullName?: string | null } | null, input.observations,
+    coworkSignerPreference([input.request, input.brief.notes, ...(Array.isArray(memories) ? memories.map(String) : [])]), input.request),
+    // One email to one person whose objective is a follow-up: it must reopen the first one.
+    followUp: input.brief.kind === 'email' && input.brief.recipients?.length === 1 && /seguimiento/i.test(input.brief.objective) && !PASTED_EDIT.test(input.request) };
+}
+
 /**
  * The whole writing step: the Writer drafts (streamed, so the page shows it as it
  * is written), the checks and the Reviewer read it, and the Writer corrects it once
@@ -1487,11 +1496,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   const hasTime = () => input.canReview?.() ?? true;
   await input.step({ agent: 'writer', state: 'working', label: `Escribiendo ${what}` });
   const systemPrompt = COWORK_WRITER_RULES.join('\n');
-  const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
-  const context = { ...coworkWriterContext(input.userContext as { fullName?: string | null } | null, input.observations,
-    coworkSignerPreference([input.request, input.brief.notes, ...(Array.isArray(memories) ? memories.map(String) : [])]), input.request),
-    // One email to one person whose objective is a follow-up: it must reopen the first one.
-    followUp: input.brief.kind === 'email' && input.brief.recipients?.length === 1 && /seguimiento/i.test(input.brief.objective) && !PASTED_EDIT.test(input.request) };
+  const context = coworkRunContext(input);
   // Every draft goes to the people it names and stays in the thread it continues, before the checks read it.
   const settle = (draft: CoworkWriterOutput) => coworkNewEmailReply(coworkEarlierThread(coworkAddressDrafts(draft, input.brief, context.recipients), context), context);
   let first: CoworkWriterOutput;

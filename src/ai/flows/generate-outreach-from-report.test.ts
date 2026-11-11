@@ -6,6 +6,10 @@ import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { draftContextFixture } from '@/lib/server/draft-v2-test-fixtures';
 import { validateDraftPreflightV2 } from '@/lib/server/draft-preflight-v2';
 
+// These tests read what the writer and the editorial pass are asked, call by call. The voice pass that follows the writer by default
+// (src/lib/server/outreach-voice-pass.ts) has its own tests, and the ones at the end of this file for how it joins a draft.
+process.env.DRAFT_VOICE_PASS = 'off';
+
 test('editor receives each screenshot-style candidate and returns the edited content, never the first pass', async () => {
   const previousKey = process.env.OPENAI_API_KEY;
   const previousFetch = globalThis.fetch;
@@ -868,4 +872,88 @@ test('a follow-up uses the anchor as the place or moment of what it offers, not 
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousKey;
   }
+});
+
+// A fictional recipient and seller (draftContextFixture). The writer's email, then the voice pass's.
+const WRITTEN = { subject: 'Aprobaciones en Acme', opening: 'En una empresa de software como Acme, las aprobaciones se suman a cada entrega. En software, cuando se suman aprobaciones, se demoran las entregas.', value: 'Soy Grace, de Northstar; automatizamos tareas repetitivas para reducir trabajo manual.' };
+const VOICED = { subject: 'Aprobaciones en Acme', paragraphs: ['En una empresa de software como Acme, si las aprobaciones se te juntan en cada entrega, tu equipo termina entregando más tarde.', 'En Northstar automatizamos esas tareas repetitivas, para que tu equipo tenga menos trabajo manual.'] };
+
+async function withVoice<T>(mode: string | undefined, answers: (call: number) => unknown, run: () => Promise<T>) {
+  const previous = { key: process.env.OPENAI_API_KEY, fetch: globalThis.fetch, mode: process.env.DRAFT_VOICE_PASS };
+  const prompts: string[] = [];
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    if (mode === undefined) delete process.env.DRAFT_VOICE_PASS;
+    else process.env.DRAFT_VOICE_PASS = mode;
+    globalThis.fetch = async (_input, init) => {
+      const messages = JSON.parse(String(init?.body)).messages as Array<{ content: string }>;
+      prompts.push(messages.map((message) => message.content).join('\n'));
+      return Response.json({ choices: [{ message: { content: JSON.stringify(answers(prompts.length)) } }], usage: { prompt_tokens: 100, completion_tokens: 20 } });
+    };
+    return { result: await run(), prompts };
+  } finally {
+    globalThis.fetch = previous.fetch;
+    if (previous.key === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous.key;
+    if (previous.mode === undefined) delete process.env.DRAFT_VOICE_PASS;
+    else process.env.DRAFT_VOICE_PASS = previous.mode;
+  }
+}
+
+test('by default the voice pass takes the place of the editorial pass and the draft is its version, with the writer\'s kept beside it', async () => {
+  const { result, prompts } = await withVoice(undefined, (call) => (call === 1 ? WRITTEN : VOICED), () => generateOutreachFromDraftContextV2({ context: draftContextFixture() }));
+  assert.equal(prompts.length, 2);
+  assert.doesNotMatch(prompts[1], /REVISIÓN EDITORIAL FINAL/);
+  assert.match(prompts[1], /Cómo escribe una persona un correo de prospección/);
+  assert.match(prompts[1], /ASÍ SUENA/);
+  assert.match(prompts[1], /Sin preguntas ni invitaciones/, 'a first email: the approved closing line is the server\'s');
+  assert.match(prompts[1], /Una sola capacidad de la oferta/);
+  assert.match(prompts[1], /Nadie escribe punto y coma/, 'what gives this email away is named');
+  assert.ok(!prompts[1].includes('Usa exclusivamente WRITING_CONTEXT'), 'one email to read, not the whole writing prompt again');
+  assert.equal(result.body, ['Hola Ada,', ...VOICED.paragraphs].join('\n\n'));
+  assert.equal(result.beforeVoice?.body, ['Hola Ada,', WRITTEN.opening, WRITTEN.value].join('\n\n'));
+  assert.equal(result.promptVersion, 'native-draft/v42');
+  assert.deepEqual(result.usage, { inputTokens: 200, outputTokens: 40, reasoningTokens: 0 });
+});
+
+test('«after» keeps the editorial pass before the voice pass, and «off» leaves the draft as the editorial pass wrote it', async () => {
+  const after = await withVoice('after', (call) => (call === 3 ? VOICED : WRITTEN), () => generateOutreachFromDraftContextV2({ context: draftContextFixture() }));
+  assert.equal(after.prompts.length, 3);
+  assert.match(after.prompts[1], /REVISIÓN EDITORIAL FINAL/);
+  assert.match(after.prompts[2], /ASÍ SUENA/);
+  assert.equal(after.result.body, ['Hola Ada,', ...VOICED.paragraphs].join('\n\n'));
+  const off = await withVoice('off', () => WRITTEN, () => generateOutreachFromDraftContextV2({ context: draftContextFixture() }));
+  assert.equal(off.prompts.length, 2);
+  assert.equal(off.result.beforeVoice, undefined);
+  assert.equal(off.result.body, ['Hola Ada,', WRITTEN.opening, WRITTEN.value].join('\n\n'));
+});
+
+test('a voice version that says something else is asked again and then dropped: the writer\'s email is the draft, and why is kept', async () => {
+  const invented = { ...VOICED, paragraphs: [VOICED.paragraphs[0], 'En Northstar automatizamos esas tareas en 48 horas, para que tu equipo tenga menos trabajo manual.'] };
+  const { result, prompts } = await withVoice(undefined, (call) => (call === 1 ? WRITTEN : invented), () => generateOutreachFromDraftContextV2({ context: draftContextFixture() }));
+  assert.equal(prompts.length, 3, 'the writer, the pass and its one retry');
+  assert.match(prompts[2], /Tu versión anterior no sirve: Agregaste una cifra que el correo no tenía \(48\)/);
+  assert.equal(result.body, ['Hola Ada,', WRITTEN.opening, WRITTEN.value].join('\n\n'));
+  assert.equal(result.beforeVoice, undefined);
+  assert.match(result.voiceDropped || '', /cifra/);
+});
+
+test('a draft in English keeps the editorial pass: the voice pass speaks Spanish', async () => {
+  const context = draftContextFixture();
+  context.style.profile = { ...context.style.profile, language: 'en' };
+  const { prompts, result } = await withVoice(undefined, () => WRITTEN, () => generateOutreachFromDraftContextV2({ context }));
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0], /^Idioma: English/m);
+  assert.match(prompts[1], /REVISIÓN EDITORIAL FINAL/);
+  assert.equal(result.beforeVoice, undefined);
+});
+
+test('a repair of a phrase keeps the email that already went through the voice pass, and the organization\'s own emails give the shape', async () => {
+  const repair = await withVoice(undefined, () => WRITTEN, () => generateOutreachFromDraftContextV2({ context: draftContextFixture(),
+    rewrite: { previous: { subject: 'Aprobaciones en Acme', body: 'Hola Ada,\n\nUn correo.', personalization: [], hypothesisIds: [] }, errors: ['Cambia los guiones largos por punto, coma o dos puntos.'] } }));
+  assert.equal(repair.prompts.length, 1, 'only the writer repairs the phrase');
+  const own = await withVoice(undefined, (call) => (call === 1 ? WRITTEN : VOICED), () => generateOutreachFromDraftContextV2({ context: draftContextFixture(),
+    voiceSamples: ['Hola Pedro, te cuento que partimos el lunes con la faena y quería saber quién ve hoy los turnos de noche en tu equipo.'] }));
+  assert.match(own.prompts[1], /ASÍ ESCRIBES TÚ/);
+  assert.match(own.prompts[1], /partimos el lunes con la faena/);
 });

@@ -50,6 +50,7 @@ import {
   type DraftPersonalizationProvenanceV2,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
+import { organizationVoiceSamples } from '@/lib/server/outreach-voice-samples';
 import {
   ensureMessagingDraftV1,
   getCurrentMessagingDraftVersionV1,
@@ -202,6 +203,8 @@ export type NativeDraftGenerationDependencies = {
   findPersistedDraft?: (input: NativeDraftAccess & { draftId: string; versionId: string }) => Promise<MessagingDraftV1 | null>;
   findExistingContentFingerprints?: (input: NativeDraftAccess & { email: string; excludeVersionId?: string | null }) => Promise<string[]>;
   generate?: (input: GenerateOutreachFromDraftContextV2Input) => Promise<GeneratedOutreachFromDraftContextV2>;
+  /** The organization's own voice examples for the voice pass. A caller that brings its own writer reads none unless it asks. */
+  readVoiceSamples?: (organizationId: string) => Promise<string[]>;
   persistDraft?: (draft: MessagingDraftV1) => Promise<MessagingDraftV1>;
   persistDraftWithMetadata?: (draft: MessagingDraftV1, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
   appendRevisionWithMetadata?: (draft: MessagingDraftV1, changes: { content: MessagingContentV1 }, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
@@ -720,6 +723,28 @@ function ctaPolicyFor(sequenceContext: OutreachSequenceContextV2 | null | undefi
   return { ctaMode: 'append-exact' as const, expectedCtaCount: 1 as const };
 }
 
+/**
+ * The draft as the checks read it. When the voice pass rewrote it and the checks turn that version back, the writer's own email is read
+ * instead: if it passes, it is the draft (the attempt records «voice_reverted»), so the voice pass never costs a draft or a retry.
+ */
+function checkedGeneratedDraft(
+  context: DraftContextV2,
+  generated: GeneratedOutreachFromDraftContextV2,
+  ctaPolicy: ReturnType<typeof ctaPolicyFor>,
+  requested: string | null | undefined,
+  options: Parameters<typeof validateDraftPreflightV2>[2],
+) {
+  const read = (candidate: GeneratedOutreachFromDraftContextV2) => {
+    const effective = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, candidate.body, requested) : context;
+    const output = outputForPreflight(effective, candidate, ctaPolicy);
+    return { output, validation: validateDraftPreflightV2(effective, output, options) };
+  };
+  const voiced = read(generated);
+  if (voiced.validation.valid || !generated.beforeVoice) return { ...voiced, issueCodes: voiced.validation.issues.map((issue) => issue.code as string) };
+  const own = read({ ...generated, ...generated.beforeVoice });
+  return own.validation.valid ? { ...own, issueCodes: ['voice_reverted'] } : { ...voiced, issueCodes: voiced.validation.issues.map((issue) => issue.code as string) };
+}
+
 export type NativeDraftAttemptStep = 'initial' | 'follow_up' | 'close';
 export type NativeDraftAttemptOrigin = 'create' | 'rewrite' | 'rewrite_preview';
 
@@ -1170,6 +1195,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
     const existingContentFingerprints = await findExistingContentFingerprints({ ...input, email });
     const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
+    const voiceSamples = await (dependencies?.readVoiceSamples || (dependencies?.generate ? async () => [] as string[] : organizationVoiceSamples))(input.organizationId);
     const attemptStep = attemptStepFor(sequenceContext);
     const bufferedAttempts: Array<{
       generated: GeneratedOutreachFromDraftContextV2 | null;
@@ -1212,6 +1238,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         ...(userInstruction ? { userInstruction } : {}),
         ...(instruction ? { instruction } : {}),
         ...(sequenceContext ? { sequenceContext } : { openingKind }),
+        ...(voiceSamples.length ? { voiceSamples } : {}),
       });
     } catch (error) {
       console.warn('[native-drafts] OpenAI generation failed:', error);
@@ -1226,14 +1253,15 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     }
 
     const ctaPolicy = ctaPolicyFor(sequenceContext);
-    const effectiveContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, [userInstruction, instruction].filter(Boolean).join(' ')) : context;
-    let generatedOutput = outputForPreflight(effectiveContext, generated, ctaPolicy);
-    let validation = validateDraftPreflightV2(effectiveContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    const requestedWording = [userInstruction, instruction].filter(Boolean).join(' ');
+    let checked = checkedGeneratedDraft(context, generated, ctaPolicy, requestedWording, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    let generatedOutput = checked.output;
+    let validation = checked.validation;
     bufferedAttempts.push({
       generated,
       attemptNo: 1,
       passed: validation.valid,
-      issueCodes: validation.issues.map((issue) => issue.code),
+      issueCodes: checked.issueCodes,
     });
     if (!validation.valid) {
       try {
@@ -1243,6 +1271,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
           ...(userInstruction ? { userInstruction } : {}),
           ...(instruction ? { instruction } : {}),
           ...(sequenceContext ? { sequenceContext } : { openingKind }),
+          ...(voiceSamples.length ? { voiceSamples } : {}),
           rewrite: {
             previous: generatedOutput,
             errors: validation.issues.map((issue) => issue.message),
@@ -1259,14 +1288,14 @@ export async function createNativeDraft(input: NativeDraftAccess & {
           now,
         });
       }
-      const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, [userInstruction, instruction].filter(Boolean).join(' ')) : context;
-      generatedOutput = outputForPreflight(retryContext, generated, ctaPolicy);
-      validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, retryAttempt: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      checked = checkedGeneratedDraft(context, generated, ctaPolicy, requestedWording, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, retryAttempt: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      generatedOutput = checked.output;
+      validation = checked.validation;
       bufferedAttempts.push({
         generated,
         attemptNo: 2,
         passed: validation.valid,
-        issueCodes: validation.issues.map((issue) => issue.code),
+        issueCodes: checked.issueCodes,
       });
     }
     if (!validation.valid) {
@@ -1530,6 +1559,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
     });
     existingContentFingerprints.push(draftContentFingerprintV2(previous.subject, previous.body));
     const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
+    const voiceSamples = await (dependencies?.readVoiceSamples || (dependencies?.generate ? async () => [] as string[] : organizationVoiceSamples))(input.organizationId);
     const attemptStep = attemptStepFor(sequenceContext);
     const attemptOrigin = input.previewOnly ? 'rewrite_preview' : 'rewrite';
     const bufferedAttempts: Array<{
@@ -1571,6 +1601,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
       generated = await generate({
         context,
         ...(sequenceContext ? { sequenceContext } : { openingKind }),
+        ...(voiceSamples.length ? { voiceSamples } : {}),
         rewrite: { previous, errors: [], instruction },
       });
     } catch (error) {
@@ -1580,20 +1611,21 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
       throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
     }
     const ctaPolicy = ctaPolicyFor(sequenceContext);
-    const effectiveContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, instruction) : context;
-    let generatedOutput = outputForPreflight(effectiveContext, generated, ctaPolicy);
-    let validation = validateDraftPreflightV2(effectiveContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    let checked = checkedGeneratedDraft(context, generated, ctaPolicy, instruction, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    let generatedOutput = checked.output;
+    let validation = checked.validation;
     bufferedAttempts.push({
       generated,
       attemptNo: 1,
       passed: validation.valid,
-      issueCodes: validation.issues.map((issue) => issue.code),
+      issueCodes: checked.issueCodes,
     });
     if (!validation.valid) {
       try {
         generated = await generate({
           context,
           ...(sequenceContext ? { sequenceContext } : { openingKind }),
+          ...(voiceSamples.length ? { voiceSamples } : {}),
           rewrite: {
             previous: generatedOutput,
             errors: validation.issues.map((issue) => issue.message),
@@ -1605,14 +1637,14 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
         await flushAttempts(null);
         throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
       }
-      const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, instruction) : context;
-      generatedOutput = outputForPreflight(retryContext, generated, ctaPolicy);
-      validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, retryAttempt: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      checked = checkedGeneratedDraft(context, generated, ctaPolicy, instruction, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, retryAttempt: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      generatedOutput = checked.output;
+      validation = checked.validation;
       bufferedAttempts.push({
         generated,
         attemptNo: 2,
         passed: validation.valid,
-        issueCodes: validation.issues.map((issue) => issue.code),
+        issueCodes: checked.issueCodes,
       });
     }
     if (!validation.valid) {

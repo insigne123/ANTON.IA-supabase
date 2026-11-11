@@ -64,3 +64,38 @@ test('one instruction changes every email it may change, with the same count and
   assert.equal(revised[1].subject, 'Segundo breve');
   assert.deepEqual(JSON.parse(prompt).locked, [0]);
 });
+
+test('the follow-ups are shown how a person writes one, and those that read as a template are written once more', async () => {
+  const calls: Array<{ systemPrompt?: string; prompt: string }> = [];
+  const template = [
+    { subject: 'Cobertura de turnos', body: 'Hola Ana,\n\nQuería consultarte si te interesa conversar sobre la cobertura de turnos.\n\nSi te parece pertinente, podemos coordinar una breve conversación.' },
+    { subject: 'Cierro por ahora', body: 'No te escribo más sobre esto. ¿Lo dejamos hasta aquí?' },
+  ];
+  const person = [
+    { subject: 'Los turnos de noche', body: 'Hola Ana,\n\nSobre la faena de Temuco: también cubrimos los turnos de noche, así que tu supervisor no tiene que doblar.\n\n¿Quién cubre hoy esos turnos?' },
+    { subject: 'Cierro por ahora', body: 'Hola Ana,\n\nNo te escribo más sobre esto. ¿Lo dejamos hasta aquí?' },
+  ];
+  const followUps = await writeCampaignFollowUps({ first, objective: 'Reunión para cubrir turnos', followUpDelays: [3, 7], recipients: 1 }, {
+    generate: (async (options: { systemPrompt?: string; prompt: string }) => { calls.push(options); return { followUps: calls.length === 1 ? template : person }; }) as never,
+  });
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].systemPrompt || '', /Cómo escribe una persona un correo de prospección/);
+  assert.match(calls[0].systemPrompt || '', /ASÍ SUENAN/);
+  assert.match(calls[0].systemPrompt || '', /Hola \{\{nombre\}\},\n\nSobre la bodega/, 'the samples carry a greeting, so the follow-ups do');
+  const again = JSON.parse(calls[1].prompt);
+  assert.equal(again.previous.length, 2);
+  assert.match(again.corrections.join(' '), /Correo 1: Esta es una fórmula de plantilla/);
+  assert.deepEqual(followUps.map((item) => item.subject), ['Los turnos de noche', 'Cierro por ahora']);
+  assert.deepEqual(followUps.map((item) => item.delayDays), [3, 7]);
+
+  // A second version that is no better, or that fails, leaves the first; and a greeting that is missing is the first email's.
+  const kept = await writeCampaignFollowUps({ first, followUpDelays: [3, 7], recipients: 1 }, { generate: (async () => ({ followUps: template })) as never });
+  assert.match(kept[0].body, /Quería consultarte/);
+  assert.match(kept[1].body, /^Hola Ana,\n\nNo te escribo más sobre esto\./);
+  let count = 0;
+  const failed = await writeCampaignFollowUps({ first, followUpDelays: [3, 7], recipients: 1 }, { generate: (async () => { count += 1; if (count > 1) throw new Error('503'); return { followUps: template }; }) as never });
+  assert.match(failed[0].body, /Quería consultarte/);
+  const many = await writeCampaignFollowUps({ first: { subject: first.subject, body: 'Hola {{nombre}},\n\nUn correo.' }, followUpDelays: [3], recipients: 5 },
+    { generate: (async () => ({ followUps: [{ subject: 'Una idea', body: 'Podemos partir con un turno de prueba en {{empresa}}, y si te sirve sumamos el resto. ¿Lo vemos esta semana?' }] })) as never });
+  assert.match(many[0].body, /^Hola \{\{nombre\}\},\n\nPodemos partir/);
+});

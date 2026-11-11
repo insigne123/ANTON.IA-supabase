@@ -757,9 +757,9 @@ export function validateDraftPreflightV2(
       add('body_length', `El cuerpo debe tener entre ${minWords} y ${maxWords} palabras.`, 'body');
     }
   }
-  // A first touch is the greeting, the opening, the value and the approved CTA. A step of a sequence has no approved CTA (its own question closes the
-  // value), so three paragraphs are its whole structure: asking for four warned about 18 of the 25 drafts written in October 2026.
-  if (bodyParagraphs(rawBody).length < ((options.expectedCtaCount ?? 1) === 1 ? 4 : 3)) {
+  // An email is its greeting, what it says and how it closes: three paragraphs at least. A first touch used to need four (an opening and
+  // a value apart); since the voice pass an email may say it all in one paragraph, as a person often does (native-draft/v42).
+  if (bodyParagraphs(rawBody).length < 3) {
     warnings.push('Revisa la legibilidad: separa el saludo, el contenido útil y el CTA según la plantilla.');
   }
   if (hasPlaceholder(subject) || hasPlaceholder(body)) {
