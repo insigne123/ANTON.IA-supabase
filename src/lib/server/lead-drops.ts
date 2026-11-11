@@ -23,6 +23,7 @@ import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
+import { coworkVoicePass } from '@/lib/server/cowork/writer-voice';
 import { leadsFinderMaxRunUsd, leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
 import { LEADS_FINDER_MAX_PER_RUN, leadsFinderIndustry } from '@/lib/server/leads-finder/input';
 import { enrichedLeadRow } from '@/lib/server/leads-finder/reveal';
@@ -456,8 +457,9 @@ async function draftFor(item: DropItem, userContext: Record<string, unknown> | n
     companySize: item.size, city: item.city, companyFacts: item.research } ] } }];
   const models = coworkWriterModels();
   const efforts = coworkWriterEfforts();
-  const output = await runCoworkWriter({
-    request: `Escríbele a ${who} un primer correo y tres seguimientos.`,
+  const request = `Escríbele a ${who} un primer correo y tres seguimientos.`;
+  const written = await runCoworkWriter({
+    request,
     brief, userContext, observations, now,
     generate: async ({ role, schema, systemPrompt, prompt, fix }) => {
       const chosen = coworkWriterCallModel('sequence', role, fix, models, efforts);
@@ -466,6 +468,15 @@ async function draftFor(item: DropItem, userContext: Record<string, unknown> | n
     },
     step: async () => {},
   });
+  // The voice pass (writer-voice.ts): these emails are read first thing in the morning, next to each other. On the model of the Writer's
+  // corrections and through the same call as the rest of the drop.
+  const voice = coworkWriterCallModel('sequence', 'writer', true, models, efforts);
+  const output = await coworkVoicePass(written, { request, brief, userContext, observations,
+    generate: (async (call: { schema: z.ZodTypeAny; systemPrompt?: string; prompt: string }) => ({
+      data: await generate({ schema: call.schema, systemPrompt: call.systemPrompt || '', prompt: call.prompt, openAiModel: voice.model, reasoningEffort: voice.effort,
+        maxOutputTokens: 1500, timeoutMs: 25_000 }),
+      telemetry: { modelName: voice.model || '', usage: null, durationMs: 0 },
+    })) as never });
   const blocks = coworkWriterBlocks(output) as Array<{ type: string; subject?: string; body?: string; steps?: Array<{ day?: number; subject?: string; body?: string }> }>;
   const clean = (step: { subject?: string; body?: string } | undefined) => step?.subject && step.body
     ? { subject: text(step.subject, 200), body: String(step.body).trim().slice(0, 4000) } : null;

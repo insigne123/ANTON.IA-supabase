@@ -704,7 +704,9 @@ test('compact structure is a warning, not a waiver of factual or CTA gates', () 
   const context = draftContextFixture();
   const output = validOutput();
   const compact = output.body.replace('manual.\n\nEn Northstar', 'manual. En Northstar');
-  const result = validateDraftPreflightV2(context, { ...output, body: compact });
+  // Greeting, one paragraph and the closing line: how a person often writes it, and what the voice pass may return (native-draft/v42).
+  assert.ok(!validateDraftPreflightV2(context, { ...output, body: compact }).preflight.warnings.some((warning) => warning.includes('legibilidad')));
+  const result = validateDraftPreflightV2(context, { ...output, body: compact.replace('Hola Ada,\n\n', 'Hola Ada, ') });
   assert.ok(result.preflight.warnings.some((warning) => warning.includes('legibilidad')));
   assert.ok(!result.issues.some((issue) => issue.code === 'body_structure'));
   const invalid = validateDraftPreflightV2(context, { ...output, body: compact.replace(context.constraints.cta.exactText, '') });
@@ -721,8 +723,8 @@ test('the steps of a sequence are not warned for lacking the approved CTA paragr
   // The follow-up writes its own question and the close has none: greeting, opening and value are the structure.
   assert.equal(readability(step, 'model'), false);
   assert.equal(readability(step.replace('repetitivas. ¿Hoy esas tareas las hace alguien del equipo una por una?', 'repetitivas.'), 0), false);
-  // The same three paragraphs as a first touch lack the CTA paragraph, and two paragraphs are compact for any step.
-  assert.equal(readability(step), true);
+  // Three paragraphs are an email whatever its step; two are compact for any of them.
+  assert.equal(readability(step), false);
   assert.equal(readability(step.replace('\n\nEn Northstar', ' En Northstar'), 'model'), true);
 });
 
