@@ -150,3 +150,15 @@ test('what the person asked of the draft reaches the pass and comes before the s
   assert.match(voicePassPrompt({ ...base, instruction: 'Más corto y de usted.' }), /manda sobre los ejemplos: "Más corto y de usted\."/);
   assert.match(voicePassPrompt({ ...base, treatment: 'usted' }), /de usted en todo el correo/);
 });
+
+test('the person\'s own emails lend their turns of phrase, and never a sentence whole', async () => {
+  const own = ['Hola Pedro, te cuento que partimos el lunes con la faena y quedo atenta a lo que necesites para coordinar los turnos de la primera semana.'];
+  // A short turn of phrase of theirs is their voice.
+  const turn = { ...person, paragraphs: [person.paragraphs[0], `${person.paragraphs[1]} Quedo atenta a lo que necesites.`] };
+  assert.equal((await voicePass({ ...base, ownSamples: own, words: { min: 30, max: 110 }, generate: answering(turn).generate })).rewritten, true);
+  // Seven words in a row are what that other email said.
+  const sentence = { ...person, paragraphs: [person.paragraphs[0], `${person.paragraphs[1]} Te cuento que partimos el lunes con la faena.`] };
+  const result = await voicePass({ ...base, ownSamples: own, words: { min: 30, max: 110 }, generate: answering(sentence).generate });
+  assert.equal(result.rewritten, false);
+  assert.match(result.dropped || '', /Copiaste una frase del ejemplo/);
+});

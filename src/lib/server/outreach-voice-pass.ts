@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import type { StructuredEffort } from '@/ai/anthropic-json';
+import { ownVoiceTraits } from '@/lib/voice-own-samples';
 import {
   HUMAN_VOICE_GUIDE,
   HUMAN_VOICE_GUIDE_EXAMPLES,
@@ -96,10 +97,13 @@ export function voicePassPrompt(input: VoicePassInput, feedback: string | null =
     HUMAN_VOICE_GUIDE,
     '',
     samples.length
-      ? 'ASÍ ESCRIBES TÚ (correos tuyos; es tu voz y manda sobre todo lo demás, pero sus datos son de otros correos y no pasan a este):'
+      // Told only that these were theirs, the pass shortened sentences and kept its own neutral register (8 drafts, 11 Nov 2026): the
+      // register is named, so a person who writes «te cuento cortito» does not get a correct email nobody would take for theirs.
+      ? 'ASÍ ESCRIBES TÚ (correos tuyos, sobre otros temas). Es tu voz y manda sobre los puntos de arriba: el correo de abajo tiene que poder pasar por uno de estos. Toma de ellos qué tan cercano o sobrio eres, tus muletillas y cómo unes las ideas, el largo de tus frases y cómo planteas lo que ofreces. Sus datos, sus nombres y sus oraciones enteras son de otros correos y no pasan a este:'
       : 'ASÍ SUENA (un correo escrito a mano para otra empresa). Escribe el tuyo con esa forma y ese tono: cómo entra, el largo de sus frases, cómo une las ideas. Sus datos, sus nombres y sus frases no pasan a tu correo:',
     ...[...samples, ...builtIn].map((sample) => `---\n${sample}`),
     '---',
+    ...ownTraits(samples, input.questions.max > 0, input.seed),
     '',
     'LO QUE NO CAMBIA:',
     '- Los hechos, las cifras, los nombres y la oferta son los del correo. No agregues nada que no esté en él: ni experiencia tuya («trabajo con empresas como la tuya», «es lo que más nos piden»), ni clientes, plazos, precios, garantías o promesas. HECHOS está solo para que no los tuerzas.',
@@ -124,6 +128,22 @@ export function voicePassPrompt(input: VoicePassInput, feedback: string | null =
     '',
     'Devuelve SOLO JSON con esta forma: {"subject":"...","paragraphs":["..."]}',
   ].join('\n');
+}
+
+/**
+ * The person's own way of starting a sentence and of asking, named: shown only the emails, the model kept its neutral register. A few
+ * of their openers, which ones depending on the recipient: all of them every time and half the drafts opened with the same one.
+ */
+function ownTraits(samples: string[], asks: boolean, seed: string) {
+  if (!samples.length) return [];
+  const traits = ownVoiceTraits(samples);
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  const openers = traits.openers.length <= 3 ? traits.openers : Array.from({ length: 3 }, (_, index) => traits.openers[(hash + index) % traits.openers.length]);
+  return [
+    ...(openers.length >= 2 ? [`Así arrancas algunas frases en tus correos: ${openers.map((opener) => `«${opener}…»`).join(', ')}. Si calza con lo que este correo ya dice, empieza una frase de una de esas maneras o de otra del mismo aire. Un arranque nunca agrega un encuentro, una conversación ni un envío que no ocurrió.`] : []),
+    ...(asks && traits.questions.length ? [`Así preguntas: ${traits.questions.map((question) => `«${question}»`).join(', ')}.`] : []),
+  ];
 }
 
 function systemPrompt(input: VoicePassInput) {
@@ -170,14 +190,16 @@ export async function voicePass(input: VoicePassInput): Promise<VoicePassResult>
     const paragraphs = version.paragraphs.map((paragraph) => paragraph.replace(/\s*\n+\s*/g, ' ').trim()).filter(Boolean);
     const after = paragraphs.join('\n\n');
     const tellsAfter = voiceTells(after, { recipientCompany: input.recipient.company }).length;
-    const lifted = input.ownSamples?.length ? null : voiceSharedPhrase(after, voicePassSample(input));
+    // A built-in sample lends no phrase at all. The person's own emails lend their turns of phrase, which are their voice, and not a
+    // sentence whole: seven words in a row from one of them is what that other email said.
+    const lifted = input.ownSamples?.length ? voiceSharedPhrase(after, input.ownSamples.join('\n'), 7) : voiceSharedPhrase(after, voicePassSample(input));
     const fromGuide = voiceSharedPhrase(after, HUMAN_VOICE_GUIDE_EXAMPLES);
     const recipient = firstName(input.recipient.firstName);
     // «Hola Felipe, / Felipe, vi que…»: the greeting already names them (4 of 24 rewrites of the first bench run).
     const namedTwice = recipient.length >= 2 && new RegExp(`^${recipient.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,`, 'iu').test(after);
     feedback = voiceFactsChanged(before, after, { names, questions: input.questions, words: input.words, treatment: input.treatment })
       || (tellsAfter > tellsBefore ? 'Quedó con más marcas de plantilla que el original.' : null)
-      || (lifted && !voiceSharedPhrase(before, lifted) ? `Copiaste una frase del ejemplo («${lifted}»): dilo con tus palabras.` : null)
+      || (lifted && !voiceSharedPhrase(before, lifted, input.ownSamples?.length ? 7 : 5) ? `Copiaste una frase del ejemplo («${lifted}»): dilo con tus palabras.` : null)
       || (fromGuide && !voiceSharedPhrase(before, fromGuide) ? `Copiaste palabras de la guía («${fromGuide}») que el correo no decía: quítalas.` : null)
       || (namedTwice ? 'No empieces con el nombre de la persona: el saludo ya lo lleva.' : null);
     if (!feedback) {

@@ -77,6 +77,7 @@ export default function PrivacyPolicyPage() {
                 <li>De fuentes públicas o de proveedores de datos y enriquecimiento activados por la organización usuaria.</li>
                 <li>De respuestas e interacciones generadas dentro de las campañas o flujos de contacto.</li>
                 <li>Del buzón que el usuario conecta: el destinatario, el asunto y la fecha de los correos que envía desde ese buzón a los prospectos que su organización guardó en ANTON.IA, aunque no los envíe desde la plataforma. No se lee ni se guarda el texto de esos correos.</li>
+                <li>Solo cuando el usuario lo pide en «Firmas y estilo → Tu voz»: el texto de correos que envió desde ese buzón en los últimos 90 días, para ofrecerle ejemplos de su forma de escribir. Se guardan únicamente los ejemplos que el usuario confirma (cinco como máximo), solo él puede verlos y puede borrarlos cuando quiera. Se usan para redactar sus propios correos con su estilo y para ningún otro fin.</li>
               </ul>
             </section>
 

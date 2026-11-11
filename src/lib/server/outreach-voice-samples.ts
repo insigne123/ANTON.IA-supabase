@@ -6,9 +6,9 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
  * the voice pass takes its shape from them instead of the built-in samples (src/lib/outreach-voice.ts).
  * Never blocks a draft: without the table, the row or the examples, the built-in samples are used.
  */
-export async function organizationVoiceSamples(organizationId: string): Promise<string[]> {
+export async function organizationVoiceSamples(organizationId: string, client?: any): Promise<string[]> {
   try {
-    const { data, error } = await getSupabaseAdminClient().from('organization_messaging_context')
+    const { data, error } = await (client || getSupabaseAdminClient()).from('organization_messaging_context')
       .select('voice_examples').eq('organization_id', organizationId).maybeSingle();
     if (error || !data) return [];
     return voiceSamplesFrom((data as { voice_examples?: unknown }).voice_examples);

@@ -22,6 +22,7 @@ import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
+import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
 import { coworkVoicePass } from '@/lib/server/cowork/writer-voice';
 import { leadsFinderMaxRunUsd, leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
@@ -446,7 +447,7 @@ const addressed = (name: string) => isMaskedName(name) ? name.split(' ')[0] : na
  * sequence: each email with its own role and the day it goes (the first is day 1). When the Writer answers with one email
  * only, that one is the first and there are no follow-ups.
  */
-async function draftFor(item: DropItem, userContext: Record<string, unknown> | null, generate: Generate, now: Date) {
+async function draftFor(item: DropItem, userContext: Record<string, unknown> | null, generate: Generate, now: Date, ownSamples: string[] = []) {
   const name = addressed(item.name);
   const who = `${name}${item.title ? `, ${item.title}` : ''}${item.company ? ` en ${item.company}` : ''}`;
   const brief: CoworkWriteBrief = {
@@ -471,7 +472,7 @@ async function draftFor(item: DropItem, userContext: Record<string, unknown> | n
   // The voice pass (writer-voice.ts): these emails are read first thing in the morning, next to each other. On the model of the Writer's
   // corrections and through the same call as the rest of the drop.
   const voice = coworkWriterCallModel('sequence', 'writer', true, models, efforts);
-  const output = await coworkVoicePass(written, { request, brief, userContext, observations,
+  const output = await coworkVoicePass(written, { request, brief, userContext, observations, ownSamples,
     generate: (async (call: { schema: z.ZodTypeAny; systemPrompt?: string; prompt: string }) => ({
       data: await generate({ schema: call.schema, systemPrompt: call.systemPrompt || '', prompt: call.prompt, openAiModel: voice.model, reasoningEffort: voice.effort,
         maxOutputTokens: 1500, timeoutMs: 25_000 }),
@@ -500,9 +501,11 @@ export async function writeDrop(client: Client, drop: { id: string; organization
   generate: Generate; now: Date; parallel?: number;
 }) {
   const scope = { organizationId: drop.organization_id, userId: drop.user_id };
-  const [userContext, about] = await Promise.all([
+  const [userContext, about, ownSamples] = await Promise.all([
     loadCoworkUserContext(client, scope, { memories: true, mailbox: false }),
     summarizeCompanies(drop.items, deps.generate),
+    // «Tu voz»: the emails the person chose as samples of how they write, else their organization's voice examples.
+    voiceSamplesFor({ ...scope, client }).catch(() => [] as string[]),
   ]);
   // The description stays out of the saved drop: what reaches the person is its summary.
   const items: DropItem[] = drop.items.map(({ description: _description, ...item }) => ({
@@ -512,7 +515,7 @@ export async function writeDrop(client: Client, drop: { id: string; organization
   const [advice] = await Promise.all([adviseOn(drop.items, userContext, deps.generate), (async () => {
     for (let start = 0; start < items.length; start += parallel) {
       await Promise.all(items.slice(start, start + parallel).map(async item => {
-        const written = await draftFor(item, userContext as Record<string, unknown> | null, deps.generate, deps.now).catch(() => null);
+        const written = await draftFor(item, userContext as Record<string, unknown> | null, deps.generate, deps.now, ownSamples).catch(() => null);
         item.draft = written?.draft ?? null;
         if (written?.followUps.length) item.followUps = written.followUps;
       }));

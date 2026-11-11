@@ -43,6 +43,7 @@ const PRICES: Record<string, { input: number; output: number }> = {
   'gpt-6.1-sol': { input: 2, output: 10 },
 };
 
+const ownVoiceSamples: string[] = process.env.OUTREACH_EVAL_VOICE_SAMPLES ? JSON.parse(readFileSync(resolve(process.env.OUTREACH_EVAL_VOICE_SAMPLES), 'utf8')).slice(0, 3) : [];
 const setPath = process.env.OUTREACH_EVAL_SET
   ? resolve(process.env.OUTREACH_EVAL_SET)
   : new URL('./fixtures/outreach-eval-set.json', import.meta.url);
@@ -187,6 +188,8 @@ async function generateWithRetry(
     const reverted = !voiced.validation.valid && Boolean(own?.validation.valid);
     return { ...(reverted && own ? own : voiced), voice: generated.beforeVoice ? (reverted ? 'revertida' : 'reescrita') : 'igual', beforeVoice: own?.body || '', voiceIssues: reverted ? voiced.validation.issues.map((issue) => issue.message) : generated.voiceDropped ? [generated.voiceDropped] : [] };
   };
+  // OUTREACH_EVAL_VOICE_SAMPLES: un JSON con correos propios del vendedor («Tu voz»), para medir qué cambia cuando los hay.
+  if (ownVoiceSamples.length) (baseArgs as { voiceSamples?: string[] }).voiceSamples = ownVoiceSamples;
   let output = await generateOutreachFromDraftContextV2(baseArgs as never);
   onUsage(output.usage, output.model);
   let checked = read(output, false);

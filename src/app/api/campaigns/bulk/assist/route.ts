@@ -7,6 +7,8 @@ import { bulkCampaignError } from '@/lib/server/bulk-campaigns';
 import { consumeAssistBudget } from '@/lib/server/bulk-ai-budget';
 import { BulkAssistInputSchema, validateSequenceProposal } from '@/lib/bulk-campaign-assist';
 import { reviseCampaignSequence, writeCampaignFollowUps } from '@/lib/server/campaign-follow-ups';
+import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
+import { pickOwnVoiceSamples } from '@/lib/voice-own-samples';
 
 export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
@@ -31,8 +33,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ messages: validateSequenceProposal(proposal, input.followUpDelays) }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (input.mode === 'follow_ups') {
+      // «Tu voz»: the follow-ups are written from the person's own emails when they chose some.
+      const voiceSamples = pickOwnVoiceSamples(await voiceSamplesFor({ userId: auth.user.id, organizationId: auth.organizationId }), input.first.subject, 3);
       const messages = await writeCampaignFollowUps({ first: input.first, objective: input.objective, audience: input.audience,
-        relationship: input.relationship, followUpDelays: input.followUpDelays, recipients: input.recipients ?? 2 });
+        relationship: input.relationship, followUpDelays: input.followUpDelays, recipients: input.recipients ?? 2,
+        ...(voiceSamples.length ? { voiceSamples } : {}) });
       return NextResponse.json({ messages }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (input.mode === 'sequence_instruction') {

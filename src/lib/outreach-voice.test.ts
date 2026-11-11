@@ -5,6 +5,7 @@ import {
   VOICE_SAMPLE_NAMES,
   selectVoiceSamples,
   voiceFactsChanged,
+  voiceTreatmentAsked,
   voiceSampleText,
   voiceSharedPhrase,
   voiceSkeleton,
@@ -99,6 +100,16 @@ test('a rewrite may change how an email sounds, never what it says', () => {
   assert.equal(voiceFactsChanged(plural, 'Con dos tiendas nuevas antes de diciembre, te va a tocar armar cada turno.'), null);
   assert.match(voiceFactsChanged(plural, 'Con dos tiendas nuevas antes de diciembre, te va a tocar armar cada turno.', { treatment: 'usted' }) || '', /no tutees/);
   assert.equal(voiceFactsChanged(plural, 'Con dos tiendas nuevas antes de diciembre, usted tendrá que armar cada turno.', { treatment: 'usted' }), null);
+  // A meeting or a talk the email did not mention is an added fact, with no figure or name to catch it by.
+  assert.match(voiceFactsChanged('Tres conserjes renunciaron en agosto y los turnos se cubren con horas extra.', 'Me quedé pensando en lo que me contaste. Tres conserjes renunciaron en agosto y los turnos se cubren con horas extra.') || '', /encuentro, una conversación/);
+  assert.equal(voiceFactsChanged('Gracias por recibirme el otro día. Te mando lo que vimos de los turnos.', 'Gracias por recibirme el otro día. Te mando lo que vimos de los turnos de noche.'), null, 'one the email already had stays');
+  // What was asked in words comes first, and a verb with its «le» attached marks usted like «le escribo» does.
+  assert.equal(voiceTreatmentAsked('formal, de usted'), 'usted');
+  assert.equal(voiceTreatmentAsked('Tutea, directo y cercano'), 'tu');
+  assert.equal(voiceTreatmentAsked('Nunca de usted'), null);
+  assert.equal(voiceTreatmentAsked('Habla de tu empresa en una línea'), null);
+  assert.equal(voiceTreatmentOf('Quería contarle cómo evaluamos a los postulantes de su equipo.'), 'usted');
+  assert.equal(voiceTreatmentOf('Cada turno necesita su equipo completo antes de diciembre.'), 'tu');
   for (const name of ['Dotal', 'Turnia', 'Selecta', 'Lampa']) assert.ok(VOICE_SAMPLE_NAMES.includes(name), name);
 });
 

@@ -81,9 +81,30 @@ Con las correcciones, sobre los mismos seis encargos: 12 de 14 correos reescrito
 4. **Una frase de la guía apareció como dato**: mostrada «…los comparas en la misma pantalla», un correo de otro producto dijo que sus informes se comparaban «en la misma pantalla». Las frases de la guía y de la muestra no pueden pasar a un correo, y los pares de la guía son de otros rubros.
 5. **Una muestra por correo rinde como dos** (91 → 16 marcas contra 91 → 19 sobre los mismos 40 correos) y da más formas (33 contra 31).
 
+## Tu voz: los correos propios de cada persona (11 de noviembre, segunda parte)
+
+El dueño pidió tomar ejemplos del correo de cada persona para alimentar el sistema. Quedó así:
+
+- **Dónde:** «Firmas y estilo → Tu voz». La persona pulsa «Buscar en mis enviados», ve hasta ocho correos suyos de los últimos 90 días, marca los que suenan a ella y guarda hasta cinco. También puede pegar uno a mano.
+- **Qué se lee y qué no.** La política de privacidad prometía que del buzón conectado no se leía el texto de los correos, así que la lectura es a pedido y nunca automática. Se listan los enviados por sus encabezados; las respuestas, los reenvíos, lo interno, lo masivo y lo que envió la app quedan sin abrir; se lee el texto de 40 como máximo. De cada candidato queda lo que la persona escribió, sin el hilo ni la firma. No se ofrece nada que hable de plata, claves, salud o un conflicto. Nada de la búsqueda se guarda; solo lo que la persona confirma, en `user_voice_samples`, que solo lee el servidor y solo para ella (`profiles` lo lee toda la organización, por eso no va ahí). La política y el aviso de «Conexiones» lo dicen.
+- **Cómo se usan.** Borradores de investigación, seguimientos de campaña y Contacto del día escriben desde dos de esos correos (cuáles, según el destinatario) en vez de las muestras incluidas. Si la persona no tiene, valen los ejemplos de voz de su organización y, si tampoco, las incluidas.
+
+### Qué enseñó medirlo
+
+Con tres correos ficticios de un vendedor coloquial («Te cuento cortito», «Si te tinca», «Un abrazo»), sobre el banco del segundo vendedor (8 borradores) y tres seguimientos:
+
+1. **Mostrar los correos y decir «son tuyos» no bastó.** Los 8 borradores siguieron válidos y salieron igual de neutros que sin ejemplos, también los seguimientos. Nombrar el registro («toma tu grado de cercanía, tus muletillas») tampoco lo movió.
+2. **Lo que sí lo movió fue sacar de los ejemplos cómo arranca sus frases la persona** («Te cuento cortito…», «La idea es…», «Si te tinca…») y mostrarlo aparte, sin modelo: los seguimientos salieron con «Te cuento cortito: en los procesos masivos…» y «Si te tinca, te muestro en 15 minutos…».
+3. **Y trajo un riesgo:** un borrador abrió con «Me quedé pensando en lo que me contaste» a alguien con quien nunca se habló. Los arranques que hablan de un encuentro, una conversación o un envío no se ofrecen, y una versión que agrega uno que el correo no tenía se descarta, con o sin ejemplos propios.
+4. **Todos los arranques, siempre, era otro molde** (4 de 8 con «Te cuento cortito»): se muestran tres, cuáles según el destinatario.
+5. Una oración entera copiada de un ejemplo propio (siete palabras seguidas) es lo que decía ese otro correo: se devuelve. Los giros cortos son la voz y pasan.
+6. Un borrador de usted quedó sin reescribir porque la pasada leía el trato solo del cuerpo: ahora lo toma primero de lo pedido (la instrucción o el estilo), como ya hacía la elección del cierre.
+
+Resultado final de esa ronda: 8 de 8 válidos al primer intento, 8 reescritos, la voz del vendedor visible en 3 de 8 y ningún encuentro inventado. En estos correos el saludo y el pedido final los pone el sistema, así que la voz propia se nota menos que en un correo escrito entero por la persona.
+
 ## Lo que queda
 
 - **La Redactora en el chat de Cowork** todavía no pasa por la pasada de voz (sí por la corrección del idioma del saludo). Cada llamada de un turno se reserva en el registro de presupuesto, que le da dos a la Redactora (`cowork_reserve_model_call`): la pasada necesita un cupo propio ahí, que es una migración, y sumaría entre 5 y 19 segundos a un turno que la persona espera mirando. Por volumen pesa poco: entre el 16 de octubre y el 11 de noviembre hubo 23 turnos del chat con correos, contra 216 contactos del Contacto del día (cada uno con hasta cuatro correos), que ya pasan por ella.
-- **La voz de cada persona.** Las muestras incluidas son una voz por defecto. La mejora grande que queda es que cada vendedor tenga las suyas: hoy se cargan como «ejemplos de voz» desde Cowork; el paso siguiente es tomarlas de los correos que la persona edita y envía desde la app.
+- **La voz de cada persona** ya existe («Tu voz»), pero depende de que cada una conecte su correo y elija sus ejemplos. Lo siguiente es ofrecérselo donde lo ve (al conectar la casilla y en «Hoy») y sumar, sin pedir nada, los correos que edita a mano y envía desde la app.
 - **El contenido.** La pasada no inventa: si el primer borrador no tiene nada nuevo que decir en un seguimiento, la versión con voz tampoco. Eso depende de lo que el vendedor cargó en su perfil.
 - Las marcas que quedan (12 de «narrador» en 40 correos) son casi todas oraciones de un hecho dicho sin «vi que» («La Dirección del Trabajo anunció…»), que una persona también escribe.

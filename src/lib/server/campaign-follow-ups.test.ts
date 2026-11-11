@@ -99,3 +99,13 @@ test('the follow-ups are shown how a person writes one, and those that read as a
     { generate: (async () => ({ followUps: [{ subject: 'Una idea', body: 'Podemos partir con un turno de prueba en {{empresa}}, y si te sirve sumamos el resto. ¿Lo vemos esta semana?' }] })) as never });
   assert.match(many[0].body, /^Hola \{\{nombre\}\},\n\nPodemos partir/);
 });
+
+test('with emails the person chose as their voice, the follow-ups are written from those instead of the built-in samples', async () => {
+  const calls: Array<{ systemPrompt?: string }> = [];
+  const followUp = { subject: 'Los turnos de noche', body: 'Hola Ana,\n\nSobre la faena de Temuco: también cubrimos los turnos de noche, así que tu supervisor no tiene que doblar.\n\n¿Quién cubre hoy esos turnos?' };
+  await writeCampaignFollowUps({ first, followUpDelays: [3], recipients: 1, voiceSamples: ['Hola Pedro, te cuento que partimos el lunes con la faena y quedo atenta a lo que necesites para los turnos.'] },
+    { generate: (async (options: { systemPrompt?: string }) => { calls.push(options); return { followUps: [followUp] }; }) as never });
+  assert.match(calls[0].systemPrompt || '', /ASÍ ESCRIBE QUIEN FIRMA/);
+  assert.match(calls[0].systemPrompt || '', /partimos el lunes con la faena/);
+  assert.ok(!/ASÍ SUENAN|Sobre la bodega/.test(calls[0].systemPrompt || ''), 'no built-in sample competes with the person\'s own voice');
+});

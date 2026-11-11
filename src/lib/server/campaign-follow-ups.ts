@@ -4,6 +4,7 @@
  * salesperson had to go to Campañas to write each follow-up; there, the AI changed one email at a time. Cowork (campaign-ops.ts) and
  * Campañas (/api/campaigns/bulk/assist) share this.
  */
+import { ownVoiceTraits } from '@/lib/voice-own-samples';
 import { z } from 'zod';
 import { generateStructured } from '@/ai/openai-json';
 import type { CampaignMessage } from '@/lib/bulk-campaigns';
@@ -26,6 +27,8 @@ export const followUpsInputSchema = z.object({
   research: z.string().trim().max(4000).nullish(),
   /** One person: the follow-ups may name them; several: {{nombre}}. */
   recipients: z.number().int().min(1).max(100_000).default(2),
+  /** Emails the person wrote themselves («Tu voz»): the follow-ups take their voice from these instead of the built-in samples. */
+  voiceSamples: z.array(z.string().trim().min(1).max(3_000)).max(3).optional(),
 });
 export type FollowUpsInput = z.input<typeof followUpsInputSchema>;
 
@@ -55,15 +58,24 @@ const RULES = [
 // 6 Nov 2026, the follow-ups of a real campaign: «Quería consultarte si te interesa conversar sobre…», «Retomo mi correo sobre…»,
 // «Si te parece pertinente, podemos coordinar una breve conversación». Nothing new in any of them and no voice: the prompt asked for «un
 // ángulo nuevo» and showed none. It now shows follow-ups written by hand and says what each one carries (src/lib/outreach-voice.ts).
-const FOLLOW_UPS_SYSTEM = [
+const followUpsSystem = (ownSamples: string[] = []) => [
   'Escribes los seguimientos de un correo comercial que ya está aprobado (first), con la voz de quien lo firma. Escribe exactamente un seguimiento por cada elemento de followUpDelays, en ese orden.',
   'Cada seguimiento trae una sola cosa nueva y concreta que el primer correo no dijo (un detalle de la oferta, un dato de la investigación, una forma fácil de partir) y la dice en una o dos oraciones, entrando directo. No repite la presentación ni las frases del primero, no lo resume y no anuncia que vuelve a escribir («retomo mi correo», «te escribo nuevamente», «quería consultarte», «como te comentaba»). Si first, objective y research no traen nada más que decir, pregunta en concreto cómo lo resuelven hoy: no rellenes.',
   'De 30 a 70 palabras cada uno, y cada uno más breve que el anterior. Termina con una sola pregunta, en su propio párrafo y fácil de contestar en una línea: cómo lo hacen hoy, quién lo ve, o una conversación de 15 minutos. Dos seguimientos no hacen la misma pregunta ni ofrecen «coordinar una conversación» en abstracto.',
   'El último se despide sin presionar: dice en una oración aparte que no vuelve a escribir sobre esto y termina con una pregunta de sí o no.',
   'Si recipients es 1, puedes saludar a la persona por su nombre como en el primer correo; si es más de 1, saluda con «Hola {{nombre}},».',
   HUMAN_VOICE_GUIDE,
-  'ASÍ SUENAN (seguimientos y un cierre escritos a mano para otras empresas; toma la voz y el largo, jamás sus datos, sus nombres ni sus frases):',
-  ...VOICE_SAMPLES.filter((sample) => sample.treatment === 'tu' && sample.step !== 'initial').slice(0, 4).map((sample) => `---\n${voiceSampleText(sample, { greeting: 'Hola {{nombre}},' })}`),
+  ...(ownSamples.length ? [
+    'ASÍ ESCRIBE QUIEN FIRMA (correos suyos sobre otros temas; toma su voz, cómo saluda, cómo une las ideas y cómo cierra, jamás sus datos, sus nombres ni sus frases enteras):',
+    ...ownSamples.map((sample) => `---\n${sample}`),
+    ...((traits) => [
+      ...(traits.openers.length >= 2 ? [`Así arranca sus frases: ${traits.openers.map((opener) => `«${opener}…»`).join(', ')}. Cada seguimiento puede empezar una frase de una de esas maneras o de otra del mismo aire, cada uno de una distinta, y nunca para afirmar un encuentro, una conversación o un envío que no ocurrió.`] : []),
+      ...(traits.questions.length ? [`Así pregunta: ${traits.questions.map((question) => `«${question}»`).join(', ')}.`] : []),
+    ])(ownVoiceTraits(ownSamples)),
+  ] : [
+    'ASÍ SUENAN (seguimientos y un cierre escritos a mano para otras empresas; toma la voz y el largo, jamás sus datos, sus nombres ni sus frases):',
+    ...VOICE_SAMPLES.filter((sample) => sample.treatment === 'tu' && sample.step !== 'initial').slice(0, 4).map((sample) => `---\n${voiceSampleText(sample, { greeting: 'Hola {{nombre}},' })}`),
+  ]),
   '---',
   'Si el pedido trae corrections, son las marcas de plantilla de tu versión anterior (previous): escríbela de nuevo sin ellas y conserva lo demás.',
   RULES,
@@ -110,7 +122,7 @@ export async function writeCampaignFollowUps(input: FollowUpsInput, dependencies
   const parsed = followUpsInputSchema.parse(input);
   const result = await (dependencies.generate ?? generateStructured)({
     schema: z.object({ followUps: z.array(email).length(parsed.followUpDelays.length) }),
-    systemPrompt: FOLLOW_UPS_SYSTEM,
+    systemPrompt: followUpsSystem(parsed.voiceSamples),
     prompt: JSON.stringify({ first: parsed.first, objective: parsed.objective, audience: parsed.audience ?? null, relationship: parsed.relationship,
       followUpDelays: parsed.followUpDelays, research: parsed.research ?? null, recipients: parsed.recipients }),
     signal: dependencies.signal,
@@ -129,7 +141,7 @@ export async function writeCampaignFollowUps(input: FollowUpsInput, dependencies
   try {
     const again = delayed((await (dependencies.generate ?? generateStructured)({
       schema: z.object({ followUps: z.array(email).length(parsed.followUpDelays.length) }),
-      systemPrompt: FOLLOW_UPS_SYSTEM,
+      systemPrompt: followUpsSystem(parsed.voiceSamples),
       prompt: JSON.stringify({ first: parsed.first, objective: parsed.objective, audience: parsed.audience ?? null, relationship: parsed.relationship,
         followUpDelays: parsed.followUpDelays, research: parsed.research ?? null, recipients: parsed.recipients,
         previous: followUps.map(({ subject, body }) => ({ subject, body })), corrections: tells.slice(0, 8) }),
