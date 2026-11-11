@@ -1324,10 +1324,20 @@ export function coworkPlainReply(reply: string) {
 const SIGN_OFF = /^(?:saludos|un saludo|atentamente|cordialmente|gracias|muchas gracias|quedo atent[oa]|un abrazo|abrazo|best|kind regards|regards|sincerely|thanks|thank you|cheers|atenciosamente|abra[çc]os?|um abra[çc]o|obrigad[oa]|cumprimentos)\b/i;
 // The closing word in the email's own language (round 25: «Saludos,» under an email written in English or in Portuguese).
 const ENGLISH = /^(?:hello|hi|hey|dear|good (?:morning|afternoon))\b|\b(?:the|you|your|we|our|would|this week)\b/i;
-const PORTUGUESE = /^(?:ol[áa]|prezad[oa]s?|bom dia|boa tarde)\b|\b(?:voc[êe]s?|n[óo]s|obrigad[oa]|candidat[oa]s|semana|gostar[íi]amos)\b|[çã]o\b/i;
+// Portuguese by what only Portuguese writes, against what only Spanish does. One shared word used to decide it: «semana» turned 19 of the
+// 216 morning contacts written between 16 Oct and 11 Nov 2026 into «Olá …, Atenciosamente,» around an email in Spanish.
+const PORTUGUESE_GREETING = /^\s*(?:ol[áa]|prezad[oa]s?|bom dia|boa tarde)(?!\p{L})/iu;
+const PORTUGUESE_ONLY = /^(?:voc[êe]s?|n[ãa]o|uma|um|com|em|s[ãa]o|nós|muito|tamb[ée]m|já|obrigad[oa]|gostar[íi]amos|ol[áa]|prezad[oa]s?|aos?|isso|noss[oa]s?|seus?|suas?|mês|quant[oa]s?|quem|onde|hoje|\p{L}*[ãõç]\p{L}*)$/iu;
+const SPANISH_ONLY = /^(?:el|los|las|una|con|en|y|del|al|hoy|usted|ustedes|hola|muy|pero|cu[áa]nt[oa]s?|qui[ée]n|d[óo]nde|tambi[ée]n|\p{L}*(?:ci[óo]n|ciones|ñ\p{L}*))$/iu;
+function portuguese(body: string) {
+  const words = body.match(/\p{L}+/gu) ?? [];
+  const only = (pattern: RegExp) => words.filter(word => pattern.test(word)).length;
+  const theirs = only(PORTUGUESE_ONLY) + (PORTUGUESE_GREETING.test(body) ? 2 : 0);
+  // «¿» and «¡» are Spanish alone.
+  return theirs >= 2 && theirs > only(SPANISH_ONLY) + (body.match(/[¿¡]/g) ?? []).length;
+}
 function signOffWord(body: string) {
-  const portuguese = PORTUGUESE.test(body) && !/\b(?:usted|ustedes|postulantes|hola)\b/i.test(body);
-  if (portuguese) return 'Atenciosamente,';
+  if (portuguese(body)) return 'Atenciosamente,';
   const words = body.match(/\p{L}+/gu) ?? [];
   const english = words.filter(word => /^(?:the|you|your|we|our|to|and|of|for|is|are|this|with|would|have|in|at|by|on|an|how|what|does|do|when|it|be|can|will|these|that|team|one|each)$/i.test(word)).length;
   return ENGLISH.test(body.split('\n')[0]) || english >= Math.max(3, words.length / 12) ? 'Best regards,' : 'Saludos,';
