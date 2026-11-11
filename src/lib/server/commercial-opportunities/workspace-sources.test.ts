@@ -25,10 +25,11 @@ const STUBS = {
   './workspace-store': 'export function opportunityDb(result){ if (result && result.error) throw result.error; return result ? result.data : null }',
   './tickets': 'export async function resolveTicketForOrganization(){ return { ticket: "t" } }',
   './mercado-publico': 'export async function listOpenLicitaciones(){ return [] }',
-  './compra-agil': `export class CompraAgilError extends Error { constructor(message, retryable){ super(message); this.retryable = retryable } }
+  './compra-agil': `export class CompraAgilError extends Error { constructor(message, retryable, timedOut = false){ super(message); this.retryable = retryable; this.timedOut = timedOut } }
     globalThis.__CompraAgilError = CompraAgilError;
+    export const SMALL_PAGE_SIZE = 10;
     export function compraAgilQuery(keyword){ return keyword }
-    export async function searchCompraAgil(){ throw globalThis.__compraAgil }`,
+    export async function searchCompraAgil(input){ (globalThis.__compraAgilInputs ||= []).push(input); throw globalThis.__compraAgil }`,
 };
 
 // A client that answers each table with what the test puts in `rows`, and remembers the RPCs.
@@ -71,6 +72,34 @@ test('a busy Mercado Público ticket leaves the keyword search waiting for a lat
   // A rejected ticket is not retried.
   (globalThis as any).__compraAgil = new CompraAgilError('Compra Ágil rechazó el ticket.', false);
   await assert.rejects(captureOpportunityTenders(memoryClient({}) as any, job as any, { revision: 1 }), /rechazó el ticket/);
+});
+
+test('after a timeout the next tries of a Compra Ágil search ask pages of 10, and so does the afternoon round', async () => {
+  const { captureOpportunityTenders } = await load(STUBS);
+  const CompraAgilError = (globalThis as any).__CompraAgilError;
+  const inputs: any[] = (globalThis as any).__compraAgilInputs = [];
+  const job = { id: 'j1', organization_id: 'org', requested_by: 'u1', kind: 'tenders', dedupe_key: 'k', lease_token: 'l', state: 'running', attempts: 1, payload: { keyword: 'aseo', revision: 1 } };
+  const due = (result: any) => ({ ...job, result: { ...result, retry: { ...result.retry, nextAt: new Date(Date.now() - 1000).toISOString() } } });
+  // The first try asks the page of 20, inside the worker's time, and times out.
+  (globalThis as any).__compraAgil = new CompraAgilError('Compra Ágil respondió 504 (falla de Mercado Público).', true, true);
+  const first = await captureOpportunityTenders(memoryClient({}) as any, job as any, { revision: 1 });
+  assert.equal(inputs[0].pageSize, undefined);
+  assert.equal(inputs[0].budgetMs, 150_000);
+  assert.deepEqual([first.retry.tries, first.retry.small], [1, true]);
+  // From then on, pages of 10, and it stays so whatever the next failure is.
+  (globalThis as any).__compraAgil = new CompraAgilError('Compra Ágil respondió 500 (falla de Mercado Público).', true);
+  const second = await captureOpportunityTenders(memoryClient({}) as any, due(first) as any, { revision: 1 });
+  assert.equal(inputs[1].pageSize, 10);
+  assert.deepEqual([second.retry.tries, second.retry.small], [2, true]);
+  // A busy ticket (429) is not a reason to ask twice the pages.
+  (globalThis as any).__compraAgil = new CompraAgilError('Compra Ágil no aceptó más consultas del ticket por ahora (429).', true);
+  const busy = await captureOpportunityTenders(memoryClient({}) as any, job as any, { revision: 1 });
+  assert.equal(busy.retry.small, undefined);
+  await captureOpportunityTenders(memoryClient({}) as any, due(busy) as any, { revision: 1 });
+  assert.equal(inputs.at(-1).pageSize, undefined);
+  // The afternoon round of a search that timed out in the morning starts with pages of 10.
+  await captureOpportunityTenders(memoryClient({}) as any, { ...job, payload: { ...job.payload, afternoon: true, small: true } } as any, { revision: 1 });
+  assert.equal(inputs.at(-1).pageSize, 10);
 });
 
 test('LinkedIn searches ask for a week of ads after a pause, five post queries, and the larger budget', async () => {

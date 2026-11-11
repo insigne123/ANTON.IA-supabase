@@ -9,7 +9,7 @@ import { linkedinLocationTerms } from '@/lib/commercial-opportunities/search-ter
 import { tenderUrl, type Tender } from '@/lib/commercial-opportunities/tenders';
 import { listOpenLicitaciones } from './mercado-publico';
 import { resolveTicketForOrganization } from './tickets';
-import { CompraAgilError, searchCompraAgil, compraAgilQuery } from './compra-agil';
+import { CompraAgilError, searchCompraAgil, compraAgilQuery, SMALL_PAGE_SIZE } from './compra-agil';
 import { opportunityDb } from './workspace-store';
 import { withoutNul } from '@/lib/postgres-json';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
@@ -65,8 +65,12 @@ const tenderCandidate = (t: Tender): Candidate => ({ kind: t.source === 'compra_
  * A busy or failing Compra Ágil is tried again further apart each time (1, 2, 4, 8, 15 and 15 minutes: about 45 minutes in all) instead
  * of six times in five minutes: in two weeks 12 searches failed with «504», and Mercado Público is often back within the hour. The
  * claim takes a waiting job again every 45 s and stops after 100 claims, which leaves room for it.
+ * After a timeout (7 to 9 Nov 2026: three days of «504» on the page of 20) the next tries ask pages of 10, the smallest the
+ * service takes; and a search that still failed is queued once more in the afternoon (requeueFailedCompraAgil, workspace-jobs.ts).
  */
 const COMPRA_AGIL_RETRY_MINUTES = [1, 2, 4, 8, 15, 15];
+/** A search of four pages of 20 takes about a minute; this leaves a slow one inside the worker's five-minute lease. */
+const COMPRA_AGIL_BUDGET_MS = 150_000;
 export async function captureOpportunityTenders(client: SupabaseClient, job: OpportunityJob, context: any) {
   const snapshot = opportunityDb(await client.from('opportunity_source_snapshots').select('candidates').eq('job_id',job.id).eq('organization_id',job.organization_id).maybeSingle());
   if (snapshot) return persistOpportunityCandidates(client,job,snapshot.candidates as Candidate[],context.revision);
@@ -75,16 +79,20 @@ export async function captureOpportunityTenders(client: SupabaseClient, job: Opp
   // One ticket cannot run concurrent MP calls. Listing first; each Compra Ágil query gets its own checkpointed job.
   if (job.payload.keyword) {
     // Not yet time for the next try: the claim took it early, so it waits without calling.
-    const retry = job.result?.retry as { tries: number; nextAt: string } | undefined;
+    const retry = job.result?.retry as { tries: number; nextAt: string; small?: boolean } | undefined;
     if (retry && Date.parse(retry.nextAt) > Date.now()) return { waiting: true as const, retry };
+    // Pages of 10 once a try timed out (now or in the morning round): the page of 20 is what goes past the gateway's limit.
+    const small = Boolean(retry?.small || job.payload.small);
     let response: Awaited<ReturnType<typeof searchCompraAgil>>;
     try {
-      response = await searchCompraAgil({ keyword: compraAgilQuery(job.payload.keyword), publishedFrom: new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10), pages: 4 }, { fetch: globalThis.fetch, ticket: ticket.ticket, canWait: () => false });
+      response = await searchCompraAgil({ keyword: compraAgilQuery(job.payload.keyword), publishedFrom: new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10), pages: 4,
+        ...(small ? { pageSize: SMALL_PAGE_SIZE } : {}), budgetMs: COMPRA_AGIL_BUDGET_MS }, { fetch: globalThis.fetch, ticket: ticket.ticket, canWait: () => false });
     } catch (error) {
       // The ticket takes a limited number of calls at a time: a 429 or a 5xx waits for a later try instead of failing the search.
       const tries = (retry?.tries ?? 0) + 1;
       if (error instanceof CompraAgilError && error.retryable && tries <= COMPRA_AGIL_RETRY_MINUTES.length)
-        return { waiting: true as const, retry: { tries, nextAt: new Date(Date.now() + COMPRA_AGIL_RETRY_MINUTES[tries - 1] * 60_000).toISOString() } };
+        return { waiting: true as const, retry: { tries, nextAt: new Date(Date.now() + COMPRA_AGIL_RETRY_MINUTES[tries - 1] * 60_000).toISOString(),
+          ...(small || error.timedOut ? { small: true } : {}) } };
       throw error instanceof CompraAgilError ? new AuthError(error.message, 503) : error;
     }
     const candidates=withoutNul(response.tenders.map(tenderCandidate));

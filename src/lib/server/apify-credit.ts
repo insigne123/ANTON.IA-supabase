@@ -6,9 +6,10 @@ import { resendSender, sendReportEmail } from '@/lib/server/self-email';
 /**
  * What is left of the Apify plan the app spends from (APIFY_TOKEN): Leads Finder, «Contacto del día» and the LinkedIn
  * sources of «Oportunidades» stop when it runs out. The hourly provider-usage tick reads it, keeps it in
- * antonia_provider_usage_snapshots (provider 'apify') and emails APIFY_ALERT_EMAILS when it runs low (APIFY_LOW_CREDIT_USD,
- * US$0.10 by default) and when it runs out: once per cycle and limit each. An email that could not go out is tried again
- * on the next check.
+ * antonia_provider_usage_snapshots (provider 'apify') and emails APIFY_ALERT_EMAILS when it runs low and when it runs out:
+ * once per cycle and limit each. «Low» is when what is left does not cover two days at this cycle's pace (10 Nov 2026: the
+ * alert at US$0.10 arrived hours before the balance ran out, with a day costing about US$0.85), and never less than
+ * APIFY_LOW_CREDIT_USD (US$0.10 by default). An email that could not go out is tried again on the next check.
  */
 type Fetch = typeof fetch;
 type Env = Record<string, string | undefined>;
@@ -21,6 +22,20 @@ const BILLING_URL = 'https://console.apify.com/billing';
 export function apifyLowCreditUsd(configured = process.env.APIFY_LOW_CREDIT_USD) {
   const value = Number(configured);
   return configured !== undefined && configured.trim() !== '' && Number.isFinite(value) && value >= 0 ? value : 0.1;
+}
+
+/** What a normal day costs this cycle: what was used over the days it has run (one at least). 0 when that cannot be told. */
+export function dailyPaceUsd(credit: Pick<ApifyCredit, 'usedUsd' | 'cycleStart'>, now: Date) {
+  const start = credit.cycleStart ? Date.parse(credit.cycleStart) : NaN;
+  if (!Number.isFinite(start) || !(credit.usedUsd > 0)) return 0;
+  return credit.usedUsd / Math.max(1, (now.getTime() - start) / 86_400_000);
+}
+
+/** How many days of normal use count as a margin: the alert comes while there is still time to add balance. */
+export const LOW_CREDIT_DAYS = 2;
+/** The balance that counts as low: LOW_CREDIT_DAYS at this cycle's pace, and never under the configured floor. */
+export function lowCreditThresholdUsd(credit: Pick<ApifyCredit, 'usedUsd' | 'cycleStart'>, floorUsd: number, now: Date) {
+  return Math.max(floorUsd, Math.round(LOW_CREDIT_DAYS * dailyPaceUsd(credit, now) * 100) / 100);
 }
 
 /** Who gets the alert: APIFY_ALERT_EMAILS, separated by commas or spaces; five at most. */
@@ -56,18 +71,22 @@ const day = (iso: string) => new Intl.DateTimeFormat('es-CL', { day: 'numeric', 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 
 /** The alert: what is left, what stops, and where to add more. */
-export function apifyAlertEmail(level: Exclude<CreditLevel, 'ok'>, credit: ApifyCredit, account: string | null) {
+export function apifyAlertEmail(level: Exclude<CreditLevel, 'ok'>, credit: ApifyCredit, account: string | null, paceUsd = 0) {
   const subject = level === 'empty' ? 'Apify se quedó sin saldo' : `A Apify le quedan ${usd(credit.leftUsd)}`;
   const whose = account ? `La cuenta de Apify de ANTON.IA (${account})` : 'La cuenta de Apify de ANTON.IA';
   const state = level === 'empty'
     ? `${whose} ya usó los ${usd(credit.maxUsd)} de este ciclo.`
     : `${whose} usó ${usd(credit.usedUsd)} de ${usd(credit.maxUsd)} este ciclo: quedan ${usd(credit.leftUsd)}.`;
   const renews = credit.cycleEnd ? `El saldo se renueva el ${day(credit.cycleEnd)}.` : '';
+  // How long it lasts, only when a day's cost is known and it is a matter of days.
+  const daysLeft = paceUsd > 0 ? credit.leftUsd / paceUsd : Infinity;
+  const lasts = level === 'low' && daysLeft < 10
+    ? `Al ritmo de este ciclo (${usd(paceUsd)} al día) alcanza para ${daysLeft < 1 ? 'menos de un día' : daysLeft < 1.5 ? 'cerca de un día' : `cerca de ${Math.round(daysLeft)} días`}.` : '';
   const stops = level === 'empty'
     ? 'Mientras tanto no funcionan la búsqueda de contactos, el «Contacto del día» ni las fuentes de LinkedIn de «Oportunidades».'
     : 'Cuando se acabe, dejan de funcionar la búsqueda de contactos, el «Contacto del día» y las fuentes de LinkedIn de «Oportunidades».';
   const action = 'Para seguir, sube el límite de uso o el plan en Apify.';
-  const paragraphs = [state, [stops, renews].filter(Boolean).join(' '), action];
+  const paragraphs = [[state, lasts].filter(Boolean).join(' '), [stops, renews].filter(Boolean).join(' '), action];
   const text = [...paragraphs, '', `Abrir la facturación de Apify: ${BILLING_URL}`, '',
     'Revisamos el saldo cada hora y te avisamos una vez cuando queda poco y otra cuando se acaba.'].join('\n');
   const html = emailShell(`<h1 style="margin:0 0 12px;font-size:20px;line-height:28px">${escape(subject)}</h1>`
@@ -100,19 +119,20 @@ export async function checkApifyCredit(client: SupabaseClient, deps: { fetch?: F
   const token = String(env.APIFY_TOKEN || '').trim();
   if (!token) return { provider: 'apify' as const, skipped: 'APIFY_TOKEN' };
   const credit = await readApifyCredit(token, request);
-  const level = creditLevel(credit, apifyLowCreditUsd(env.APIFY_LOW_CREDIT_USD));
+  const now = deps.now ?? new Date();
+  const level = creditLevel(credit, lowCreditThresholdUsd(credit, apifyLowCreditUsd(env.APIFY_LOW_CREDIT_USD), now));
   let alert: { level: CreditLevel; sentTo: number; error?: string } | null = null;
   if (level !== 'ok' && !(await alertsSent(client, credit)).has(level)) {
     const recipients = apifyAlertRecipients(env.APIFY_ALERT_EMAILS);
     const account = await apifyGet('/v2/users/me', token, request).then(data => typeof data.username === 'string' ? data.username : null).catch(() => null);
-    const email = apifyAlertEmail(level, credit, account);
+    const email = apifyAlertEmail(level, credit, account, dailyPaceUsd(credit, now));
     const results = [];
     for (const to of recipients) results.push(await sendAlert(client, to, email, { fetch: request, env }));
     const sentTo = results.filter(result => result.ok).length;
     const failed = results.find(result => !result.ok);
     alert = { level, sentTo, ...(recipients.length ? (failed && 'error' in failed ? { error: failed.error } : {}) : { error: 'Falta APIFY_ALERT_EMAILS.' }) };
   }
-  const capturedAt = (deps.now ?? new Date()).toISOString();
+  const capturedAt = now.toISOString();
   const { error } = await client.from('antonia_provider_usage_snapshots').insert({
     provider: 'apify', scope_type: 'team', provider_account_id: null, provider_user_id: null,
     cycle_start: credit.cycleStart, cycle_end: credit.cycleEnd, source: 'apify_direct', request_id: randomUUID(), captured_at: capturedAt,

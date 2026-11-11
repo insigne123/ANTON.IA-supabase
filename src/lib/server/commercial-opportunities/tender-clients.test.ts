@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CompraAgilError, compraAgilQuery, searchCompraAgil } from './compra-agil';
+import { CompraAgilError, compraAgilQuery, isCompraAgilOutage, isCompraAgilTimeout, searchCompraAgil, SMALL_PAGE_SIZE } from './compra-agil';
 import { getLicitacion, isMercadoPublicoBusy, listOpenLicitaciones } from './mercado-publico';
 
 const TICKET = 'TICKET-SECRETO-123';
@@ -86,3 +86,50 @@ test('Mercado Público errors never carry the ticket, and 10500 is «busy», not
   const down = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
   await assert.rejects(listOpenLicitaciones({ fetch: down, ticket: TICKET }), (error: Error) => error.message === 'Mercado Público respondió 500.');
 });
+
+test('after a timeout Compra Ágil is asked in pages of 10: the same quotes in twice the pages, inside a time budget', async () => {
+  // The failures a smaller page helps are told apart from a busy ticket or a broken service.
+  const failing = (status: number) => (async () => json({}, status)) as unknown as typeof fetch;
+  const failure = (work: Promise<unknown>) => work.then(() => null, (error: CompraAgilError) => error);
+  const gateway = await failure(searchCompraAgil({ keyword: 'aseo', publishedFrom: FROM }, { fetch: failing(504), ticket: TICKET, wait: noWait, canWait: () => false }));
+  assert.deepEqual([gateway?.retryable, gateway?.timedOut], [true, true]);
+  const dropped = await failure(searchCompraAgil({ keyword: 'aseo', publishedFrom: FROM },
+    { fetch: (async () => { throw new DOMException('timeout', 'TimeoutError'); }) as unknown as typeof fetch, ticket: TICKET, wait: noWait, canWait: () => false }));
+  assert.deepEqual([dropped?.retryable, dropped?.timedOut], [true, true]);
+  for (const status of [500, 429]) {
+    const other = await failure(searchCompraAgil({ keyword: 'aseo', publishedFrom: FROM }, { fetch: failing(status), ticket: TICKET, wait: noWait, canWait: () => false }));
+    assert.deepEqual([other?.retryable, other?.timedOut], [true, false]);
+  }
+  // The stored reason of a failed search says the same, for the afternoon round.
+  assert.ok(isCompraAgilOutage(gateway?.message) && isCompraAgilTimeout(gateway?.message));
+  assert.ok(isCompraAgilOutage(dropped?.message) && isCompraAgilTimeout(dropped?.message));
+  assert.ok(isCompraAgilOutage('Compra Ágil respondió 500 (falla de Mercado Público).') && !isCompraAgilTimeout('Compra Ágil respondió 500 (falla de Mercado Público).'));
+  assert.ok(isCompraAgilOutage('Compra Ágil no aceptó más consultas del ticket por ahora (429).'));
+  assert.ok(!isCompraAgilOutage('Compra Ágil rechazó el ticket.') && !isCompraAgilOutage('Compra Ágil respondió 400.') && !isCompraAgilOutage(null));
+
+  // Two pages of 20 are four pages of 10.
+  const sizes: string[] = [];
+  const full = (async (url: string) => {
+    const params = new URL(url).searchParams;
+    sizes.push(`${params.get('tamano_pagina')}:${params.get('numero_pagina')}`);
+    return page(Array.from({ length: 10 }, (_, index) => item(`P${params.get('numero_pagina')}-${index}-COT26`)), 9);
+  }) as unknown as typeof fetch;
+  const small = await searchCompraAgil({ keyword: 'aseo', publishedFrom: FROM, pages: 2, pageSize: SMALL_PAGE_SIZE }, { fetch: full, ticket: TICKET, wait: noWait });
+  assert.deepEqual(sizes, ['10:1', '10:2', '10:3', '10:4']);
+  assert.deepEqual([small.tenders.length, small.requests, small.error], [40, 4, null]);
+  // Any other size is the page of 20.
+  sizes.length = 0;
+  await searchCompraAgil({ keyword: 'aseo', publishedFrom: FROM, pageSize: 50 }, { fetch: full, ticket: TICKET, wait: noWait });
+  assert.deepEqual(sizes, ['20:1']);
+
+  // A slow service: past the budget no further page is asked, and what arrived is kept, said as partial.
+  sizes.length = 0;
+  let clock = 0;
+  const slow = (async (url: string) => { clock += 60_000; return full(url); }) as unknown as typeof fetch;
+  const partial = await searchCompraAgil({ keyword: 'aseo', publishedFrom: FROM, pages: 4, pageSize: SMALL_PAGE_SIZE, budgetMs: 150_000 },
+    { fetch: slow, ticket: TICKET, wait: noWait, now: () => clock });
+  assert.deepEqual(sizes, ['10:1', '10:2', '10:3']);
+  assert.equal(partial.tenders.length, 30);
+  assert.match(String(partial.error), /respondió lento/);
+});
+

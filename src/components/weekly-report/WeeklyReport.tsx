@@ -134,7 +134,10 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
     return <span className={met ? 'font-medium text-primary' : undefined}>{goal.counts.contacted}<span className="text-muted-foreground">/{goal.targets.contacted}</span>{met ? <span className="sr-only"> (cumplida)</span> : null}</span>;
   };
 
-  return <div className={embedded ? 'w-full max-w-3xl space-y-6' : 'mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6'}>
+  // Inside «Hoy» the report takes the width «Hoy» takes: the week on the left and, on a wide screen, how it is received by
+  // email in the same right column where «Hoy» keeps the day's numbers. Narrower, the email card goes below, as before.
+  return <div className={cn('grid w-full items-start gap-6', embedded ? (data ? 'xl:grid-cols-[minmax(0,1fr)_380px]' : 'max-w-3xl') : 'mx-auto max-w-3xl px-4 py-6 sm:px-6')}>
+    <div className="min-w-0 space-y-6">
     <header className={cn('flex flex-col gap-4 sm:flex-row sm:justify-between', embedded ? 'sm:items-center' : 'sm:items-end')}>
       <div className="min-w-0">
         {embedded ? null : <h1 className="text-2xl font-semibold tracking-tight">Informe semanal</h1>}
@@ -267,7 +270,9 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
       {report.opportunities.won || report.opportunities.lost ? <p className="text-sm text-muted-foreground">Esta semana se marcaron {report.opportunities.won} como ganadas y {report.opportunities.lost} como perdidas.</p> : null}
     </div> : null}
 
-    {data ? <Card className="rounded-2xl">
+    </div>
+
+    {data ? <Card className="min-w-0 rounded-2xl">
       <CardContent className="space-y-4 p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">

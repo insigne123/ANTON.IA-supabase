@@ -758,3 +758,27 @@ test('the web is offered to a person only when their turns run on the harness an
   assert.equal(coworkWebAvailable({ ...web, COWORK_HARNESS_USER_IDS: ME }, OTHER), false, 'outside the pilot the turn is the loop, which has no web');
   assert.equal(coworkWebAvailable({ ...web, COWORK_WEB_MAX_SEARCHES: '0', COWORK_WEB_MAX_FETCHES: '0' }, ME), false);
 });
+
+test('every read that takes one id is offered to the model as «id», never as a free «consulta»', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { COWORK_ID_READS } = await import('./parallel-reads');
+  const { COWORK_DOMAIN_ENTITY_READS } = await import('./domain-reads');
+  const { coworkReadShape } = await import('./harness-turn');
+  // What went wrong from 4 to 9 Nov 2026: a text input made the tool ask for «consulta», the model wrote {"leadId":"…"} in it
+  // and research.get_existing refused it seven times.
+  assert.equal(coworkReadShape({ name: 'research.get_existing', description: '', input: z.string().max(200) }), 'text');
+  assert.equal(coworkReadShape({ name: 'research.get_existing', description: '', input: z.string().uuid() }), 'id');
+  const source = readFileSync('src/lib/server/cowork/read-capabilities.ts', 'utf8');
+  assert.match(source, /const idInput = z\.string\(\)\.uuid\(\);/);
+  // The domain reads by entity take a uuid as a group.
+  assert.match(source, /COWORK_DOMAIN_FIXED_READS\.some\(action => action === name\) \? z\.literal\(''\) : z\.string\(\)\.uuid\(\)/);
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const action of COWORK_ID_READS.filter(name => !(COWORK_DOMAIN_ENTITY_READS as readonly string[]).includes(name))) {
+    // Its own object literal, read up to its `execute`, or a call of `extended` that passes the id input.
+    const at = source.indexOf(`name: '${action}',`);
+    const literal = at >= 0 && /input: (idInput|z\.string\(\)\.uuid\(\)),/.test(source.slice(at, source.indexOf('execute:', at)));
+    const extended = new RegExp(`extended\\('${escape(action)}', '[^']*', idInput\\)`);
+    assert.ok(literal || extended.test(source), `${action} must declare an id input`);
+  }
+});
+

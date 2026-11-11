@@ -97,3 +97,22 @@ test('view capture verifies the actor and membership server-side, rejects conten
   response=await api.capturePost(req({...input,organizationId:OTHER}));assert.equal(response.status,403);
   response=await api.capturePost(req(input));assert.equal(response.status,200);assert.deepEqual(await response.json(),{recorded:true});
 });
+test('a report that cannot be built says why in the server log, without values, and one plain line to the person',async()=>{
+  reset();state.signedIn=true;
+  const warned:string[]=[],warn=console.warn;console.warn=(...parts:unknown[])=>{warned.push(parts.map(String).join(' '));};
+  const rpc=state.client.rpc;
+  const req=()=>({headers:new Headers(),nextUrl:new URL('https://app.example.test/api/dashboard/admin/usage?from=2026-09-01&to=2026-09-30&organizationId='+ORG)});
+  try{
+    // The function answers something that is not the report (what a test bench without it does): the payload is named, not shown.
+    state.client.rpc=async(name:string,args:any)=>name==='admin_usage_report_v1'?{data:{facts:[{organizationId:ORG,userId:'Ana Pérez'}]},error:null}:rpc(name,args);
+    let response=await api.reportGet(req());assert.equal(response.status,503);
+    assert.deepEqual(await response.json(),{error:'No pudimos abrir el informe. Intenta nuevamente.'});
+    assert.match(warned.at(-1)!,/^\[admin-usage\] report unavailable payload facts\.0\.userId:invalid_string/);
+    assert.doesNotMatch(warned.join(' '),/Ana Pérez/);
+    // The database refuses: its code is logged with the step that failed.
+    state.client.rpc=async(name:string,args:any)=>name==='admin_usage_report_v1'?{data:null,error:{code:'57014',message:'canceling statement due to statement timeout'}}:rpc(name,args);
+    response=await api.reportGet(req());assert.equal(response.status,503);
+    assert.match(warned.at(-1)!,/^\[admin-usage\] report failed: database 57014$/);
+  }finally{console.warn=warn;state.client.rpc=rpc;}
+  assert.equal(api.usageFailureCause(new TypeError('x of undefined')),'TypeError');
+});
