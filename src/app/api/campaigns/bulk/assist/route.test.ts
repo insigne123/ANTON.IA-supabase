@@ -5,6 +5,7 @@ import ts from 'typescript';
 import * as zod from 'zod';
 import * as campaigns from '../../../../../lib/bulk-campaigns';
 import * as assist from '../../../../../lib/bulk-campaign-assist';
+import * as voice from '../../../../../lib/voice-own-samples';
 
 test('sequence endpoint authenticates, budgets once and preserves the requested schedule', async () => {
   const calls: string[] = [];
@@ -25,6 +26,8 @@ test('sequence endpoint authenticates, budgets once and preserves the requested 
       return { messages: [0, 1, 2].map(index => ({ subject: `Correo ${index}`, body: 'Texto completo', delayDays: 90 })) };
     } },
     '@/lib/server/campaign-follow-ups': { writeCampaignFollowUps: async () => [], reviseCampaignSequence: async () => [] },
+    '@/lib/server/voice-own-samples': { voiceSamplesFor: async () => [] },
+    '@/lib/voice-own-samples': voice,
   };
   const exports: any = {};
   const compiled = ts.transpileModule(readFileSync('src/app/api/campaigns/bulk/assist/route.ts', 'utf8'), {
@@ -56,6 +59,9 @@ test('the follow-ups of a first email and one instruction for the whole sequence
       writeCampaignFollowUps: async (input: any) => { calls.push(['follow_ups', input]); return [{ subject: 'Seguimiento', body: 'Hola {{nombre}},', delayDays: 3 }]; },
       reviseCampaignSequence: async (input: any) => { calls.push(['sequence_instruction', input]); return input.messages; },
     },
+    // «Tu voz»: the emails the signed-in person chose as samples of how they write.
+    '@/lib/server/voice-own-samples': { voiceSamplesFor: async (input: any) => { calls.push(['voice', input]); return ['Hola Pedro, te cuento que partimos el lunes con la faena.']; } },
+    '@/lib/voice-own-samples': voice,
   };
   const exports: any = {};
   const compiled = ts.transpileModule(readFileSync('src/app/api/campaigns/bulk/assist/route.ts', 'utf8'), {
@@ -65,9 +71,11 @@ test('the follow-ups of a first email and one instruction for the whole sequence
   const first = { subject: 'Turnos', body: 'Hola {{nombre}}, ¿lo conversamos?' };
   const followUps = await exports.POST({ json: async () => ({ mode: 'follow_ups', objective: 'Reunión', relationship: 'never_contacted', first, followUpDelays: [3] }) });
   assert.equal(followUps.messages.length, 1);
-  assert.deepEqual(calls.slice(0, 2).map(call => call[0]), ['auth', 'budget']);
-  assert.deepEqual(calls[2][1].first, first);
-  assert.equal(calls[2][1].recipients, 2, 'without a count, the follow-ups are for several people');
+  assert.deepEqual(calls.slice(0, 3).map(call => call[0]), ['auth', 'budget', 'voice']);
+  assert.deepEqual({ ...calls[2][1] }, { userId: 'user', organizationId: 'org' }, 'the samples are the signed-in person\'s');
+  assert.deepEqual(calls[3][1].first, first);
+  assert.equal(calls[3][1].recipients, 2, 'without a count, the follow-ups are for several people');
+  assert.deepEqual(calls[3][1].voiceSamples, ['Hola Pedro, te cuento que partimos el lunes con la faena.'], 'and the follow-ups are written from them');
   calls.length = 0;
   const messages = [{ subject: 'Uno', body: 'Hola {{nombre}}', delayDays: 0 }, { subject: 'Dos', body: 'Hola {{nombre}}', delayDays: 3 }];
   const revised = await exports.POST({ json: async () => ({ mode: 'sequence_instruction', instruction: 'Más breves', objective: 'Reunión',

@@ -50,7 +50,8 @@ import {
   type DraftPersonalizationProvenanceV2,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
-import { organizationVoiceSamples } from '@/lib/server/outreach-voice-samples';
+import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
+import { pickOwnVoiceSamples } from '@/lib/voice-own-samples';
 import {
   ensureMessagingDraftV1,
   getCurrentMessagingDraftVersionV1,
@@ -204,7 +205,8 @@ export type NativeDraftGenerationDependencies = {
   findExistingContentFingerprints?: (input: NativeDraftAccess & { email: string; excludeVersionId?: string | null }) => Promise<string[]>;
   generate?: (input: GenerateOutreachFromDraftContextV2Input) => Promise<GeneratedOutreachFromDraftContextV2>;
   /** The organization's own voice examples for the voice pass. A caller that brings its own writer reads none unless it asks. */
-  readVoiceSamples?: (organizationId: string) => Promise<string[]>;
+  /** The emails the draft takes its voice from: the person's own («Tu voz»), else their organization's. */
+  readVoiceSamples?: (organizationId: string, userId: string) => Promise<string[]>;
   persistDraft?: (draft: MessagingDraftV1) => Promise<MessagingDraftV1>;
   persistDraftWithMetadata?: (draft: MessagingDraftV1, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
   appendRevisionWithMetadata?: (draft: MessagingDraftV1, changes: { content: MessagingContentV1 }, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
@@ -1195,7 +1197,8 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
     const existingContentFingerprints = await findExistingContentFingerprints({ ...input, email });
     const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
-    const voiceSamples = await (dependencies?.readVoiceSamples || (dependencies?.generate ? async () => [] as string[] : organizationVoiceSamples))(input.organizationId);
+    const voiceSamples = pickOwnVoiceSamples(await (dependencies?.readVoiceSamples || (dependencies?.generate ? async () => [] as string[]
+      : (organizationId: string, userId: string) => voiceSamplesFor({ organizationId, userId })))(input.organizationId, input.userId), email, 2);
     const attemptStep = attemptStepFor(sequenceContext);
     const bufferedAttempts: Array<{
       generated: GeneratedOutreachFromDraftContextV2 | null;
@@ -1559,7 +1562,8 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
     });
     existingContentFingerprints.push(draftContentFingerprintV2(previous.subject, previous.body));
     const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
-    const voiceSamples = await (dependencies?.readVoiceSamples || (dependencies?.generate ? async () => [] as string[] : organizationVoiceSamples))(input.organizationId);
+    const voiceSamples = pickOwnVoiceSamples(await (dependencies?.readVoiceSamples || (dependencies?.generate ? async () => [] as string[]
+      : (organizationId: string, userId: string) => voiceSamplesFor({ organizationId, userId })))(input.organizationId, input.userId), email, 2);
     const attemptStep = attemptStepFor(sequenceContext);
     const attemptOrigin = input.previewOnly ? 'rewrite_preview' : 'rewrite';
     const bufferedAttempts: Array<{

@@ -147,3 +147,13 @@ test('an email that asks more than once goes to the pass whole, and keeps as man
   assert.ok(after.endsWith(signature));
   assert.ok(!/cierra con esta pregunta/.test(prompts[0]));
 });
+
+test('the emails the person chose as their voice come before the organization\'s examples, two of them per email', async () => {
+  const { prompts, generate } = rewriting(toYou);
+  const own = ['Hola Pedro, te cuento que partimos el lunes con la faena y quedo atenta a lo que necesites.', 'Hola Marta, ¿cómo les fue con el turno de prueba? Cuéntame y vemos cómo seguimos la próxima semana.', 'Hola Luis, te mando lo que conversamos sobre los reemplazos de diciembre para que lo veas con calma.'];
+  await coworkVoicePass(output, { ...options, generate, ownSamples: own, observations: [...options.observations,
+    { action: 'message.context', input: '', result: { configured: true, context: { voiceExamples: [{ label: 'Equipo', text: 'Estimados, junto con saludar, informamos que nuestra empresa ofrece servicios integrales para su organización.' }] } } }] });
+  assert.match(prompts[0], /ASÍ ESCRIBES TÚ/);
+  assert.equal(own.filter((sample) => prompts[0].includes(sample)).length, 2);
+  assert.ok(!prompts[0].includes('junto con saludar'), 'the person\'s voice, not the organization\'s');
+});

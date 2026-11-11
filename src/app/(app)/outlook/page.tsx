@@ -137,6 +137,7 @@ function OutlookConnectPageInner() {
               <li>Envío de correos manuales desde la plataforma.</li>
               <li><strong>Envío automático</strong> de campañas en segundo plano (24/7).</li>
               <li>Lectura de hilos para detectar respuestas y acuses cuando sincronizas la bandeja.</li>
+              <li>Solo si lo pides en «Firmas y estilo → Tu voz»: buscar en tus enviados ejemplos de cómo escribes, que eliges tú.</li>
               <li>Almacenamiento seguro de credenciales (token de acceso cifrado).</li>
             </ul>
             <p className="mt-3 text-muted-foreground">

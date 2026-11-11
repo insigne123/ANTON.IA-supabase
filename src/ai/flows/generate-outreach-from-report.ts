@@ -8,7 +8,7 @@ import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { blockedPhrasesIn, checkHumanTone } from '@/lib/server/human-tone-checks';
 import { voicePass } from '@/lib/server/outreach-voice-pass';
-import { voiceTreatmentOf } from '@/lib/outreach-voice';
+import { voiceTreatmentAsked, voiceTreatmentOf } from '@/lib/outreach-voice';
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { firstNameOf } from '@/lib/lead-name';
@@ -809,10 +809,14 @@ ${JSON.stringify({ subject: result.data.subject.slice(0, 1_000), opening: result
   const phraseRepair = Boolean(parsed.rewrite && !parsed.rewrite.instruction && parsed.rewrite.errors.length > 0
     && parsed.rewrite.errors.every((error) => PHRASE_ONLY_ISSUE.test(error)));
   const questions = (written.paragraphs.join(' ').match(/\?/g) || []).length;
+  const styleProfile = ((parsed.context as { style?: { profile?: Record<string, unknown> } }).style?.profile || {}) as Record<string, unknown>;
   const voiced = voiceMode === 'off' || phraseRepair ? null : await voicePass({
     ...written,
     step: isCloseStep ? 'close' : isFollowUpStep ? 'follow_up' : 'initial',
-    treatment: voiceTreatmentOf(`${written.paragraphs.join(' ')} ${parsed.sequenceContext ? '' : parsed.context.constraints.cta.exactText}`),
+    // What was asked first (the instruction, then the style), as the closing line is chosen (resolveEffectiveCta); else what the email marks.
+    treatment: [parsed.rewrite?.instruction, parsed.userInstruction, parsed.instruction, styleProfile.tone, styleProfile.instructions]
+      .map((source) => (typeof source === 'string' ? voiceTreatmentAsked(source) : null)).find(Boolean)
+      ?? voiceTreatmentOf(`${written.paragraphs.join(' ')} ${parsed.sequenceContext ? '' : parsed.context.constraints.cta.exactText}`),
     sender: { name: parsed.context.seller.name, company: parsed.context.seller.companyName },
     recipient: { firstName: greeting.replace(/^Hola\s*|,$/g, ''), company: parsed.context.company.name },
     // A later email already told the fact: shown it again, the pass opened every follow-up by retelling it (bench, 11 Nov 2026).

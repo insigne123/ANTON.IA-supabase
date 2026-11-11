@@ -373,7 +373,23 @@ export function properNames(value: string): string[] {
 
 const TUTEO = /\b(?:tu|tus|te|ti|contigo|tienes|puedes|quieres|necesitas)\b/;
 // «su equipo» is not here: it is as often the company's («cada turno necesita su equipo completo», read as usted on 11 Nov 2026).
-const USTED = /\b(?:usted|le escribo|le parece|le acomoda|le sirve|le serviria|le dejo|le agrego|le cuento|le comparto|le propongo|le interesa)\b/;
+// «servirle», «escribirle»: the verb with its «le» attached marks usted too (src/lib/server/native-drafts.ts reads the same marks).
+const USTED = /\b(?:usted|le (?:escribo|comparto|cuento|parece|sirve|serviria|interesa|propongo|pregunto|ofrezco|acomoda|consulto|dejo|agrego|envio|mando|escribimos)|\p{L}{3,}(?:ar|er|ir)le)\b/u;
+
+/**
+ * The treatment someone asked for in words («de usted», «formal, de usted», «tutea»), or null when the text says nothing about it.
+ * What was asked comes before what an email's own words mark: a draft of usted may mark it only in a closing line added later.
+ */
+export function voiceTreatmentAsked(value: string | null | undefined): VoiceTreatment | null {
+  const asked = plain(String(value || '')).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  if (!asked) return null;
+  // «tutea», «tuteo», «de tú» (not «de tu empresa»).
+  if (/\btute[ao]\w*/.test(asked) || /\bde tu(?! \p{L}{3,})/u.test(asked)) return 'tu';
+  if (/\busted\b/.test(asked) && !/\bnunca (?:de |trates de |uses )?usted\b/.test(asked)) return 'usted';
+  return null;
+}
+
+const PAST_CONTACT = /\b(?:lo que (?:me |nos )?(?:contaste|conto|comentaste|comento|dijiste|dijo|conversamos|hablamos)|como (?:conversamos|hablamos|quedamos|acordamos)|gracias por (?:recibirme|recibirnos|tu tiempo|su tiempo|la reunion|la llamada)|me quede pensando|el otro dia|cuando (?:conversamos|hablamos|nos vimos|nos reunimos)|nuestra (?:conversacion|reunion|llamada)|te (?:adjunto|envie|mande)|le (?:adjunto|envie|mande))\b/;
 
 /** The treatment an email already uses: «usted» only when it is marked and nothing tutea. */
 export function voiceTreatmentOf(text: string): VoiceTreatment {
@@ -403,6 +419,9 @@ export function voiceFactsChanged(before: string, after: string, keep: VoiceKeep
   const beforeWords = new Set(words(before).map(plain));
   const newNames = properNames(after).filter((name) => !allowed.has(plain(name)) && !beforeWords.has(plain(name)));
   if (newNames.length) return `Agregaste un nombre que el correo no tenía (${newNames.slice(0, 3).join(', ')}).`;
+  // A meeting, a talk or something sent that the email did not mention is a fact too, and one with no figure or name to catch it by.
+  const met = (value: string) => PAST_CONTACT.test(plain(value));
+  if (!met(before) && met(after)) return 'Agregaste un encuentro, una conversación o un envío que el correo no tenía: quítalo.';
   const variables = (value: string) => (value.match(/\{\{\s*[^{}]+?\s*\}\}/g) || []).map((item) => item.replace(/\s+/g, '')).sort().join(',');
   if (variables(before) !== variables(after)) return 'Cambiaste las variables ({{nombre}}, {{empresa}}, {{cargo}}): van las mismas.';
   const links = (value: string) => (value.match(/https?:\/\/\S+/g) || []).sort().join(' ');

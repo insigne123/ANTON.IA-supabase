@@ -17,6 +17,7 @@ import { coworkDraftIssues, coworkRunContext, coworkWriterBlocks, coworkWriterPa
 import { voiceTreatmentOf, type VoiceStep } from '@/lib/outreach-voice';
 import { voicePass, type VoicePassInput } from '@/lib/server/outreach-voice-pass';
 import { voiceSamplesFrom } from '@/lib/server/outreach-voice-samples';
+import { pickOwnVoiceSamples } from '@/lib/voice-own-samples';
 
 type Email = { subject: string; body: string };
 
@@ -84,6 +85,8 @@ type Options = Pick<WriterInput, 'request' | 'brief' | 'userContext' | 'observat
   signal?: AbortSignal;
   /** Whether the turn still has time for it. */
   hasTime?: () => boolean;
+  /** The person's own emails («Tu voz»): they come before the organization's voice examples. */
+  ownSamples?: string[];
 };
 
 /** The Writer's answer with each email in the voice of the person who sends it. Never throws for the pass's own failures. */
@@ -92,7 +95,8 @@ export async function coworkVoicePass(output: CoworkWriterOutput, options: Optio
   // An email the person pasted to improve, or an edit they asked of the previous one, already says how they want it to sound.
   if (coworkWriterPasted(options.request) || context.edit || options.hasTime?.() === false) return output;
   const user = options.userContext as { fullName?: string | null; companyName?: string | null } | null;
-  const ownSamples = voiceSamplesFrom((options.observations.slice().reverse().find((item) => item.action === 'message.context')?.result as
+  const person = (options.ownSamples || []).map((sample) => sample.trim()).filter(Boolean);
+  const shared = person.length ? [] : voiceSamplesFrom((options.observations.slice().reverse().find((item) => item.action === 'message.context')?.result as
     { context?: { voiceExamples?: unknown } | null } | undefined)?.context?.voiceExamples);
   const names = [...(context.recipients || []).flatMap((recipient) => [recipient.name, recipient.company]), ...(context.products || []), context.signer || ''];
   const issues = (blocks: CoworkBlock[]) => coworkDraftIssues(coworkWriterBlocks({ ...output, blocks }), context);
@@ -130,6 +134,7 @@ export async function coworkVoicePass(output: CoworkWriterOutput, options: Optio
     // «Estimado» is how the Writer greets when the request asks for usted (its own rule); the verbs alone do not say it.
     const treatment = /^estimad/i.test(greeting) ? 'usted' as const : voiceTreatmentOf(`${text} ${split.question || ''}`);
     const before = issues(output.blocks).length;
+    const seed = `${(output.blocks[slot.block] as { to?: string[] | null }).to?.[0] || ''}|${email.subject}|${slot.step ?? ''}`;
     try {
       const result = await voicePass({
         subject: email.subject,
@@ -149,8 +154,8 @@ export async function coworkVoicePass(output: CoworkWriterOutput, options: Optio
         // The Writer's lengths are its own rules: the rewrite stays within what it wrote, a little shorter at most.
         words: { min: Math.max(12, Math.round(words * 0.7)), max: words + 6 },
         questions: locked ? { min: 0, max: 0 } : { min: Math.min(1, questions), max: Math.max(1, questions) },
-        seed: `${(output.blocks[slot.block] as { to?: string[] | null }).to?.[0] || ''}|${email.subject}|${slot.step ?? ''}`,
-        ownSamples,
+        seed,
+        ownSamples: person.length ? pickOwnVoiceSamples(person, seed, 2) : shared,
         check: (version) => {
           const found = issues(withBody(output.blocks, slot, assemble(version.paragraphs)));
           return found.length > before ? found.slice(0, 2).map((issue) => `${issue.problem} ${issue.fix}`) : [];
