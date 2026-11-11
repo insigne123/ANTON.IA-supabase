@@ -68,15 +68,20 @@ export default () => [
         c.check('la página no se desplaza de lado', !wide);
       } },
     ] },
-  { id: 'cowork-pendientes', persona: 'owner', title: 'Lo que espera mi aprobación queda arriba, aunque sea de otra conversación',
+  // Since 1 Nov 2026 (auditoría C2) what waits for approval is grouped once, under the Cowork box; in the list of conversations
+  // each one stays in its date and says «Aprobar». Until then the list had its own group on top («Esperan tu aprobación · N»).
+  { id: 'cowork-pendientes', persona: 'owner', title: 'Lo que espera mi aprobación se ve en la lista, en su fecha y con «Aprobar»',
     goal: 'Ver de un vistazo qué propuestas esperan una decisión (COW-16).',
     steps: [
       { say: 'Abro una conversación cualquiera', do: async c => { await c.go(`/cowork?work=${run(1)}`); await c.see('Esperan tu aprobación'); } },
       { say: 'Miro la lista de conversaciones', do: async c => {
         const rail = await c.page.getByRole('navigation', { name: 'Conversaciones' }).first().innerText();
-        const waiting = rail.indexOf('Esperan tu aprobación');
-        const dates = ['Hoy', 'Ayer', 'Últimos 7 días', 'Últimos 30 días', 'Anteriores'].map(label => rail.indexOf(`\n${label}\n`)).filter(at => at >= 0);
-        c.check('las que esperan van primero, con cuántas son', /Esperan tu aprobación · \d+/.test(rail) && dates.every(at => waiting < at), rail.slice(0, 160).replace(/\n/g, ' | '));
+        const lines = rail.split('\n').map(line => line.trim()).filter(Boolean);
+        const approve = lines.indexOf('Aprobar');
+        const dates = ['Hoy', 'Ayer', 'Últimos 7 días', 'Últimos 30 días', 'Anteriores'];
+        const group = lines.slice(0, Math.max(approve, 0)).reverse().find(line => dates.includes(line) || line === 'Fijadas');
+        c.check('la que espera dice «Aprobar» y queda en su fecha', approve > 0 && dates.includes(group || ''), rail.slice(0, 200).replace(/\n/g, ' | '));
+        c.check('la lista no repite el grupo de pendientes', !/Esperan tu aprobación/.test(rail), rail.slice(0, 120).replace(/\n/g, ' | '));
       } },
     ] },
   { id: 'cowork-fijadas', persona: 'owner', title: 'La conversación que uso cada semana queda fijada arriba',

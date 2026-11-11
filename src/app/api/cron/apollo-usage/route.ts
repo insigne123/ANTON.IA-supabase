@@ -3,6 +3,7 @@ import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '..
 import { captureApolloCreditUsageSnapshot } from '@/lib/server/apollo-usage';
 import { checkApifyCredit } from '@/lib/server/apify-credit';
 import { checkApolloCredit, checkReoonCredit } from '@/lib/server/provider-alerts';
+import { checkOpportunitySources } from '@/lib/server/commercial-opportunities/source-health';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,9 @@ export async function POST(req: NextRequest) {
     .catch(() => ({ provider: 'apify' as const, error: 'APIFY_CREDIT_CHECK_FAILED' }));
   const reoon = await checkReoonCredit(client)
     .catch(() => ({ provider: 'reoon' as const, error: 'REOON_CREDIT_CHECK_FAILED' }));
+  // The sources of «Oportunidades»: an email when one ran two days in a row and brought nothing (source-health.ts).
+  const sources = await checkOpportunitySources(client)
+    .catch(() => ({ error: 'OPPORTUNITY_SOURCES_CHECK_FAILED' }));
   try {
     const { creditUsage, ...result } = await captureApolloCreditUsageSnapshot({
       requestId: req.headers.get('x-request-id') || undefined,
@@ -31,10 +35,10 @@ export async function POST(req: NextRequest) {
     });
     const apollo = await checkApolloCredit(client, creditUsage)
       .catch(() => ({ provider: 'apollo' as const, error: 'APOLLO_CREDIT_CHECK_FAILED' }));
-    return NextResponse.json({ ...result, apify, reoon, apolloCredit: apollo }, { headers: firebaseSchedulerResponseHeaders() });
+    return NextResponse.json({ ...result, apify, reoon, apolloCredit: apollo, sources }, { headers: firebaseSchedulerResponseHeaders() });
   } catch {
     return NextResponse.json(
-      { error: 'APOLLO_USAGE_CAPTURE_FAILED', apify, reoon },
+      { error: 'APOLLO_USAGE_CAPTURE_FAILED', apify, reoon, sources },
       { status: 500, headers: firebaseSchedulerResponseHeaders() },
     );
   }

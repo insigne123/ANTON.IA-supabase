@@ -76,12 +76,14 @@ function Steps({ step }: { step: number }) {
  * for whoever gets no email) today's drop is made first, for real. A drop with more than one contact (DROP_SIZE) shows them as a list.
  */
 export function LeadDropFlow({ dropId }: { dropId: string }) {
-  const { organizationId } = useAuth();
+  const { organizationId, loading: authLoading, refreshOrganization } = useAuth();
   const [id, setId] = useState<string | null>(dropId === 'nuevo' ? null : dropId);
   const [making, setMaking] = useState(dropId === 'nuevo');
   const [empty, setEmpty] = useState<Empty | null>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
   const [error, setError] = useState('');
+  /** The drop is not this person's or is no longer there: asking again answers the same, so the way out is today's contact. */
+  const [missing, setMissing] = useState(false);
   const [step, setStep] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -100,10 +102,11 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   }), [organizationId]);
   const load = useCallback(async () => {
     if (!organizationId || !id) return;
-    setError('');
+    setError(''); setMissing(false);
     try {
       const response = await call(`/api/lead-drops/${encodeURIComponent(id)}`);
       const body = await response.json().catch(() => null);
+      if (response.status === 404) setMissing(true);
       if (!response.ok) throw new Error(body?.error || 'No pudimos abrir tu contacto.');
       setDrop(body);
     } catch (e) { setError(e instanceof Error ? e.message : 'No pudimos abrir tu contacto.'); }
@@ -150,6 +153,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     return () => clearTimeout(timer);
   }, [making, drop, step]);
 
+  // The session answered but the organization could not be read (offline, a failed request): nothing below can start, so say it.
+  const noOrganization = !authLoading && !organizationId;
   const left = drop?.items.filter(item => !item.savedLeadId) ?? [];
   const one = drop?.items.length === 1 ? drop.items[0] : null;
   // Found with Apollo: the email is looked up on saving (1 credit), and the screen says so before the click.
@@ -343,11 +348,16 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
 
     {error ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
       <p role="alert" className="text-sm text-muted-foreground">{error}</p>
-      <Button variant="outline" size="sm" onClick={() => void (id ? load() : make())}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>
+      {missing ? <Button asChild variant="outline" size="sm"><Link href={dropHref('nuevo')}>Ver mi contacto de hoy<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
+        : <Button variant="outline" size="sm" onClick={() => void (id ? load() : make())}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>}
     </CardContent></Card> : null}
-    {!drop && !error && !making && !empty ? <p role="status" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Abriendo tu contacto…</p> : null}
+    {noOrganization && !error ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
+      <p role="alert" className="text-sm text-muted-foreground">No pudimos cargar tu organización. Revisa tu conexión y vuelve a intentarlo.</p>
+      <Button variant="outline" size="sm" onClick={() => void refreshOrganization()}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>
+    </CardContent></Card> : null}
+    {!drop && !error && !making && !empty && !noOrganization ? <p role="status" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Abriendo tu contacto…</p> : null}
 
-    {making ? <section aria-labelledby="drop-making" className="rounded-2xl border p-4 sm:p-5">
+    {making && !noOrganization ? <section aria-labelledby="drop-making" className="rounded-2xl border p-4 sm:p-5">
       <h2 id="drop-making" className="flex items-center gap-2 text-sm font-medium"><Search className="h-4 w-4 text-primary" aria-hidden="true" />{searched}</h2>
       <p className="mt-1 text-sm text-muted-foreground">Con tu cliente ideal, como lo haría una búsqueda tuya. Toma uno o dos minutos; si sales, te espera en «Hoy».</p>
       <Steps step={step} />

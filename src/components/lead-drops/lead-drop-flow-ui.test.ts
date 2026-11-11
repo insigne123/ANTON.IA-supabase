@@ -34,6 +34,8 @@ const shared = {
 let home: any = null;
 const { LeadDropBanner } = await component('../home/LeadDropBanner.tsx', { ...shared, './usePersonalHome': { usePersonalHome: () => ({ data: home }) } });
 let answers: Array<{ status: number; body: unknown }> = [];
+// What the session knows: the organization, whether it is still being read, and the way to read it again.
+let auth: { organizationId: string | null; loading: boolean; refreshOrganization: () => Promise<void> } = { organizationId: 'org-1', loading: false, refreshOrganization: async () => {} };
 let gate: Promise<void> | null = null;
 const calls: string[] = [];
 // «Enriquecer y guardar» of an Apollo contact: the saved contact it became and what the lookup found, as the browser sees them.
@@ -48,7 +50,7 @@ const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
     completionSummary: () => ({ title: 'No encontramos correos', description: 'El proveedor no devolvió resultados para estos contactos.' }),
   },
   '@/lib/leads-workspace/enrichment-provider': { enrichmentCreditReceipt: (consumed: number) => consumed ? `Se descontó ${consumed} crédito de ANTON.IA.` : '' },
-  '@/context/AuthContext': { useAuth: () => ({ organizationId: 'org-1' }) },
+  '@/context/AuthContext': { useAuth: () => auth },
   '@/components/page-header': { PageHeader: ({ title, description }: any) => React.createElement('header', null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
   '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
     calls.push(`${init?.method || 'GET'} ${path}`);
@@ -254,4 +256,51 @@ test('a contact found with Apollo: one credit said before the click, «Enriquece
     assert.match(missing.text(), /El proveedor no devolvió resultados/);
     assert.ok([...missing.dom.window.document.querySelectorAll('button')].some(button => button.textContent === 'Enriquecer y guardar · 1 crédito'), 'it can be tried again');
   } finally { await close(missing); }
+});
+
+test('a contact that is not theirs or is gone leads to today\'s, without a retry that would answer the same', async () => {
+  calls.length = 0;
+  answers = [{ status: 404, body: { error: 'No encontramos esos contactos.' } }];
+  const page = await open('drop-de-otro');
+  try {
+    await page.settle();
+    assert.match(page.text(), /No encontramos esos contactos\./);
+    assert.doesNotMatch(page.text(), /Reintentar/);
+    const link = [...page.dom.window.document.querySelectorAll('a')].find(a => /Ver mi contacto de hoy/.test(a.textContent || ''));
+    assert.equal(link?.getAttribute('href'), '/search/contactos/nuevo');
+  } finally { await close(page); }
+});
+
+test('a failed read keeps «Reintentar»; without the organization the page says so and reads it again', async () => {
+  calls.length = 0;
+  answers = [{ status: 500, body: { error: 'No pudimos abrir tu contacto.' } }];
+  const failed = await open('drop-1');
+  try {
+    await failed.settle();
+    assert.match(failed.text(), /No pudimos abrir tu contacto\.[\s\S]*Reintentar/);
+    assert.doesNotMatch(failed.text(), /Ver mi contacto de hoy/);
+  } finally { await close(failed); }
+
+  calls.length = 0;
+  let refreshed = 0;
+  auth = { organizationId: null, loading: true, refreshOrganization: async () => { refreshed += 1; } };
+  const reading = await open('nuevo');
+  try {
+    // While the session is still reading the organization nothing is wrong yet.
+    assert.doesNotMatch(reading.text(), /No pudimos cargar tu organización/);
+  } finally { await close(reading); }
+  auth = { ...auth, loading: false };
+  for (const dropId of ['nuevo', 'drop-1']) {
+    const page = await open(dropId);
+    try {
+      await page.settle();
+      assert.match(page.text(), /No pudimos cargar tu organización\. Revisa tu conexión y vuelve a intentarlo\./);
+      assert.doesNotMatch(page.text(), /Abriendo tu contacto|Buscando personas con tus filtros/);
+      const retry = [...page.dom.window.document.querySelectorAll('button')].find(b => /Reintentar/.test(b.textContent || ''));
+      await act(async () => { retry!.click(); });
+    } finally { await close(page); }
+  }
+  assert.equal(refreshed, 2);
+  assert.deepEqual(calls, []);
+  auth = { organizationId: 'org-1', loading: false, refreshOrganization: async () => {} };
 });

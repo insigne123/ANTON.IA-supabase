@@ -24,10 +24,13 @@ export function MercadoPublicoConnectionCard() {
     try {
       // The same question as the menu, which answers 200 to everyone: people without «Oportunidades» never hit a 404.
       const access = await fetch('/api/commercial-opportunities/access', { cache: 'no-store' });
-      const available = access.ok && ((await access.json().catch(() => ({}))) as { available?: boolean }).available === true;
-      if (!available) { setHidden(true); return; }
+      const answer = access.ok ? ((await access.json().catch(() => ({}))) as { available?: boolean; ticket?: boolean }) : {};
+      // Without «Oportunidades», or seeing it without managing it (the ticket belongs to whoever does): no card.
+      if (answer.available !== true || answer.ticket === false) { setHidden(true); return; }
       const response = await fetch('/api/commercial-opportunities/ticket', { cache: 'no-store' });
-      if (response.status === 404) { setHidden(true); return; }
+      // The same two answers from the ticket itself (404 without «Oportunidades», 403 without managing it): neither is a
+      // failure the person can retry, so the card is not shown.
+      if (response.status === 404 || response.status === 403) { setHidden(true); return; }
       if (!response.ok) throw new Error(String(response.status));
       setStatus(((await response.json()) as { ticket: TicketStatus }).ticket);
     } catch {

@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
-  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions, coworkTurnChoices,
+  groupCoworkThreads, coworkIsGreeting, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions, coworkTurnChoices,
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
@@ -36,6 +36,25 @@ test('a conversation is named by the first sentence of its request, cut at a wor
   assert.equal(coworkCleanTitle('Revisa mis pendientes de hoy'), 'Revisa mis pendientes de hoy');
   assert.equal(coworkCleanTitle('Escríbele a Daniela Rojas de Manpower un primer correo corto sobre la revisión de antecedentes de sus postulantes', 60),
     'Escríbele a Daniela Rojas de Manpower un primer correo…');
+});
+
+test('a conversation that starts with a greeting is named by the first real request, and equal names carry when they started', () => {
+  assert.ok(['hola', 'Hola!', '¡Hola, Anton!', 'buenos días', 'Buenas tardes, cómo estás?', 'hola hola', 'Hola cowork'].every(coworkIsGreeting));
+  assert.ok(['Hola, busca gerentes de RR. HH. en retail', 'Holanda es mi mercado', 'Buenas prácticas de correo', ''].every(text => !coworkIsGreeting(text)));
+  // «hola» and then the request: the request names it.
+  const [asked] = groupCoworkThreads([run('h1', 1, { message: 'hola' }), run('h2', 2, { parent_run_id: 'h1', message: '¿A quién le escribo hoy? Prioriza los que tienen correo.' })]);
+  assert.deepEqual([asked.title, asked.turns], ['A quién le escribo hoy', 2]);
+  // Only greetings so far: «Hola», and two of them in the same list are told apart by their day.
+  const day = (id: string, date: string, extra: Partial<CoworkRun> = {}) => run(id, 0, { message: 'hola', created_at: `${date}T15:00:00Z`, ...extra });
+  const apart = groupCoworkThreads([day('a', '2026-11-04'), day('b', '2026-11-09'), run('c', 3, { message: 'Revisa mis pendientes de hoy' })]);
+  assert.deepEqual(apart.map(thread => thread.title).sort(), ['Hola · 4 nov', 'Hola · 9 nov', 'Revisa mis pendientes de hoy']);
+  // The same day: the time too.
+  const sameDay = groupCoworkThreads([day('a', '2026-11-04'), day('b', '2026-11-04', { created_at: '2026-11-04T18:30:00Z' })]);
+  assert.ok(sameDay.every(thread => /^Hola · 4 nov, \d{2}:\d{2}$/.test(thread.title)));
+  assert.notEqual(sameDay[0].title, sameDay[1].title);
+  // A name the person or Cowork gave is never touched, even when two conversations share it.
+  const named = groupCoworkThreads([day('a', '2026-11-04'), day('b', '2026-11-09')], { a: 'Clientes de retail', b: 'Clientes de retail' });
+  assert.deepEqual(named.map(thread => thread.title), ['Clientes de retail', 'Clientes de retail']);
 });
 
 test('a conversation a scheduled task started is named after the task, and a name the person gave still wins', () => {

@@ -1,19 +1,45 @@
+"use client"
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * The table scrolls inside its own box when it does not fit (a phone, many columns). A box that scrolls has to be reachable
+ * with the keyboard, so while it overflows it takes focus as a named region; a table that fits adds no stop to the page.
+ */
 const Table = React.forwardRef<
   HTMLTableElement,
   React.HTMLAttributes<HTMLTableElement>
->(({ className, ...props }, ref) => (
-  <div className="relative w-full overflow-auto">
-    <table
-      ref={ref}
-      className={cn("w-full caption-bottom text-sm", className)}
-      {...props}
-    />
-  </div>
-))
+>(({ className, ...props }, ref) => {
+  const box = React.useRef<HTMLDivElement>(null)
+  const [scrolls, setScrolls] = React.useState(false)
+  React.useEffect(() => {
+    const element = box.current
+    if (!element || typeof ResizeObserver === "undefined") return
+    const measure = () => setScrolls(
+      element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1
+    )
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    if (element.firstElementChild) observer.observe(element.firstElementChild)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div
+      ref={box}
+      className="relative w-full overflow-auto rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      {...(scrolls ? { tabIndex: 0, role: "region", "aria-label": `${props["aria-label"] || "Tabla"}: desplázala para verla completa` } : {})}
+    >
+      <table
+        ref={ref}
+        className={cn("w-full caption-bottom text-sm", className)}
+        {...props}
+      />
+    </div>
+  )
+})
 Table.displayName = "Table"
 
 const TableHeader = React.forwardRef<

@@ -42,9 +42,39 @@ export default () => [
       { say: 'Leo las filas', do: async c => {
         const row = c.page.getByRole('button', { name: /Logística · centros de distribución/ }).first();
         const text = (await row.innerText().catch(() => '')).replace(/\s+/g, ' ');
-        c.check('la lanzada dice a cuántos se envió y cuántos respondieron', /Enviada a \d+ de \d+ · \d+ respuestas?/.test(text), text.slice(0, 160));
+        // «Enviada a 3 de 6 personas · 1 respuesta» since the campaigns review of 9 Nov 2026 (it said «3 de 6 · 1 respuesta»).
+        c.check('la lanzada dice a cuántos se envió y cuántos respondieron', /Enviada a \d+ de \d+ personas? · \d+ respuestas?/.test(text), text.slice(0, 160));
         const draft = (await c.page.getByRole('button', { name: /Reclutamiento masivo · retail/ }).first().innerText().catch(() => '')).replace(/\s+/g, ' ');
-        c.check('el borrador dice lo que va a enviar', /\d+ destinatarios? · \d+ correos? por persona/.test(draft), draft.slice(0, 160));
+        c.check('el borrador dice lo que va a enviar', /\d+ personas? · \d+ correos? por persona/.test(draft), draft.slice(0, 160));
+      } },
+    ] },
+  // Revisión del 10 Nov 2026 (E3, O3, V7): three things a person met as an error that was not theirs to fix.
+  { id: 'app-conexiones-integrante', persona: 'member', title: 'Integrante: «Conexiones» no muestra un error por un ticket que no administra',
+    goal: 'Conectar mi correo sin ver en rojo algo que no es mío (E3).',
+    steps: [
+      { say: 'Abro Conexiones', do: async c => { await c.go('/connections'); await c.seeRole('heading', 'Conexiones'); await c.wait(2500); } },
+      { say: 'Leo la página', do: async c => {
+        c.check('no hay un error del ticket de Mercado Público', !(await c.has(/No pudimos revisar tu ticket/)));
+        c.check('la tarjeta del ticket no se muestra a quien no administra Oportunidades', !(await c.page.getByText('Tu ticket personal para buscar licitaciones').first().isVisible().catch(() => false)));
+        c.check('lo suyo sigue ahí: conectar su correo', await c.has(/Gmail|Outlook/));
+      } },
+    ] },
+  { id: 'app-administracion-informe', persona: 'owner', title: 'Administración: el informe de uso abre y dice quién usó qué',
+    goal: 'Ver el uso del equipo sin «No pudimos abrir el informe» (O3).',
+    steps: [
+      { say: 'Abro Administración', do: async c => { await c.go('/dashboard/admin'); await c.see('Diego Fuentes'); } },
+      { say: 'Leo el informe', do: async c => {
+        c.check('el informe abrió', !(await c.has(/No pudimos abrir el informe/)));
+        c.check('cada persona tiene su fila', await c.has('Camila Torres') && await c.has('Diego Fuentes'));
+      } },
+    ] },
+  { id: 'app-contacto-ajeno', persona: 'owner', title: 'Un contacto del día que no es mío lleva al de hoy',
+    goal: 'Salir de un enlace vencido o ajeno hacia mi contacto de hoy, sin un «Reintentar» que no cambia nada (V7).',
+    steps: [
+      { say: 'Abro un enlace que no es mío', do: async c => { await c.go('/search/contactos/00000000-0000-4000-8000-00000000dead'); await c.see('No encontramos esos contactos'); } },
+      { say: 'Miro qué me ofrece', do: async c => {
+        c.check('ofrece mi contacto de hoy', await visible(c.page.getByRole('link', { name: 'Ver mi contacto de hoy' })));
+        c.check('no ofrece reintentar lo mismo', !(await c.page.getByRole('button', { name: 'Reintentar' }).first().isVisible().catch(() => false)));
       } },
     ] },
   { id: 'app-por-escribir-traer', persona: 'owner', title: 'Mirar «Por escribir» no mueve contactos; traerlos es una decisión',
