@@ -4,10 +4,17 @@ import type { StructuredEffort } from '@/ai/anthropic-json';
 import { COWORK_AGENT_ACTION } from '@/lib/cowork/contracts';
 import type { CoworkAnswer, CoworkObservation } from '@/lib/cowork/agent-loop';
 import { coworkWriterBlocks, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief } from '@/lib/cowork/writer';
+import { coworkVoicePass } from '@/lib/server/cowork/writer-voice';
 
 /** The Writer and the Reviewer write the emails of a turn (plan 2, G1). Off, the coordinator writes them as before. */
 export function coworkWriterEnabled(env: Record<string, string | undefined> = process.env) {
   return env.COWORK_WRITER_ENABLED === 'true';
+}
+
+/** The voice pass over the Writer's emails in the chat (writer-voice.ts). Off, the emails are the Writer's, as before. It needs the
+ * ledger's «voice» role (migration 20261111220000); without it every reservation is refused and the emails stay as they are. */
+export function coworkVoicePassEnabled(env: Record<string, string | undefined> = process.env) {
+  return env.COWORK_VOICE_PASS_ENABLED === 'true';
 }
 
 /** COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick their models; COWORK_MODEL by default. COWORK_WRITER_FIX_MODEL is the
@@ -48,6 +55,10 @@ const CALLS = {
   writer: { maxOutputTokens: 6000, timeoutMs: 30_000, minimumMs: 15_000 },
   reviewer: { maxOutputTokens: 1500, timeoutMs: 15_000, minimumMs: 6_000 },
 } as const;
+/** One call of the voice pass: what the ledger reserves for the role (20261111220000). An email takes one, two when the first is turned back. */
+const VOICE = { maxOutputTokens: 1500, timeoutMs: 15_000, minimumMs: 8_000 } as const;
+/** The pass starts only with room for a call and its second try. */
+const VOICE_MS = VOICE.minimumMs * 2;
 /** A review and one correction take a reviewer call and a writer call. */
 const REVIEW_MS = CALLS.reviewer.minimumMs + CALLS.writer.minimumMs;
 /** The Writer's streamed answer, read as a coordinator answer so the live draft shows it. */
@@ -71,7 +82,9 @@ export function coworkWriterTurn(deps: {
   userContext: ({ fullName?: string | null } & Record<string, unknown>) | null;
   signal: AbortSignal;
   authorize: () => Promise<void>;
-  reserve: (role: 'writer' | 'reviewer') => Promise<string | undefined>;
+  reserve: (role: 'writer' | 'reviewer' | 'voice') => Promise<string | undefined>;
+  /** The voice pass over what the Writer wrote, and the person's own emails it takes its shape from («Tu voz»). Absent, there is none. */
+  voice?: { samples: () => Promise<string[]> };
   generate: Generate;
   recordUsage: (reservationId: string | undefined, telemetry: StructuredTelemetry) => Promise<unknown>;
   record: (event: { action: typeof COWORK_AGENT_ACTION; input: ''; result: CoworkAgentStep }) => Promise<void>;
@@ -81,6 +94,36 @@ export function coworkWriterTurn(deps: {
   efforts?: CoworkWriterEfforts;
   onCall?: (call: { model: string; durationMs: number }) => void;
 }) {
+  /** Each email said again in the voice of the person who sends it, under the ledger's «voice» role. Whatever fails, the Writer's emails stand. */
+  const voicePassed = async (output: Awaited<ReturnType<typeof runCoworkWriter>>, brief: CoworkWriteBrief, observations: CoworkObservation[]) => {
+    if (deps.timeLeft() < VOICE_MS) return output;
+    try {
+      deps.liveDraft?.adjust?.();
+      const chosen = coworkWriterCallModel(brief.kind, 'writer', true, deps.models, deps.efforts);
+      return await coworkVoicePass(output, {
+        request: deps.request, brief, userContext: deps.userContext, observations, signal: deps.signal,
+        ownSamples: await deps.voice!.samples().catch(() => [] as string[]),
+        hasTime: () => deps.timeLeft() >= VOICE_MS,
+        generate: (async (call: { schema: z.ZodTypeAny; systemPrompt?: string; prompt: string }) => {
+          const left = deps.timeLeft();
+          if (left < VOICE.minimumMs) throw new Error('Cowork turn time exhausted');
+          deps.signal.throwIfAborted();
+          await deps.authorize();
+          const reservationId = await deps.reserve('voice');
+          const result = await deps.generate({
+            schema: call.schema, systemPrompt: call.systemPrompt || '', prompt: call.prompt, provider: 'openai', openAiModel: chosen.model, allowDefaultModelFallback: false,
+            maxAttempts: 1, timeoutMs: Math.min(VOICE.timeoutMs, left), maxOutputTokens: VOICE.maxOutputTokens, signal: deps.signal, reasoningEffort: chosen.effort,
+          });
+          await deps.recordUsage(reservationId, result.telemetry);
+          deps.onCall?.({ model: result.telemetry.modelName, durationMs: result.telemetry.durationMs });
+          return result;
+        }) as never,
+      });
+    } catch (error) {
+      if (deps.signal.aborted) throw error;
+      return output;
+    }
+  };
   return async (brief: CoworkWriteBrief, observations: CoworkObservation[]): Promise<CoworkAnswer> => {
     // The Reviewer often changes the emails (7 of the 10 written in production between 1 and 20 Oct): they show once, when final.
     deps.liveDraft?.holdFromNow?.();
@@ -117,6 +160,7 @@ export function coworkWriterTurn(deps: {
       onAdjust: () => deps.liveDraft?.adjust?.(),
       canReview: () => deps.timeLeft() >= REVIEW_MS,
     });
-    return { reply: output.reply, document: null, question: output.question, blocks: coworkWriterBlocks(output), suggestions: output.suggestions };
+    const voiced = deps.voice ? await voicePassed(output, brief, observations) : output;
+    return { reply: voiced.reply, document: null, question: voiced.question, blocks: coworkWriterBlocks(voiced), suggestions: voiced.suggestions };
   };
 }

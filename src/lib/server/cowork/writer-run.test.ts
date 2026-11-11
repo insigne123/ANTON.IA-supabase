@@ -14,14 +14,21 @@ const draft = {
 };
 const brief: CoworkWriteBrief = { kind: 'email', recipients: ['Felipe'], objective: 'Una reunión', angle: null, tone: null, steps: null, notes: null, findings: null };
 
-function harness(replies: unknown[], timeLeft = () => 90_000, adjust = true, efforts?: Parameters<typeof coworkWriterTurn>[0]['efforts']) {
+function harness(replies: unknown[], timeLeft = () => 90_000, adjust = true, efforts?: Parameters<typeof coworkWriterTurn>[0]['efforts'],
+  voice?: { samples?: string[]; refused?: boolean }) {
   const log: string[] = [];
   const pushed: string[] = [];
   const options: Array<{ timeoutMs: number; maxOutputTokens: number; openAiModel?: string; streamed: boolean; effort?: string }> = [];
   const write = coworkWriterTurn({
     request: 'escríbele a Felipe', userContext: { fullName: 'Nicolás Yarur' }, signal: new AbortController().signal,
     authorize: async () => {},
-    reserve: async role => { log.push(`reserve:${role}`); return `call-${role}`; },
+    reserve: async role => {
+      log.push(`reserve:${role}`);
+      // A ledger that does not know the voice role yet (before migration 20261111220000) refuses it.
+      if (role === 'voice' && voice?.refused) throw new Error('No se pudo reservar presupuesto para continuar este trabajo.');
+      return `call-${role}`;
+    },
+    ...(voice ? { voice: { samples: async () => voice.samples || [] } } : {}),
     generate: async call => {
       options.push({ timeoutMs: call.timeoutMs, maxOutputTokens: call.maxOutputTokens, openAiModel: call.openAiModel, streamed: Boolean(call.onPartial), effort: call.reasoningEffort });
       const reply = replies.shift();
@@ -141,4 +148,36 @@ test('a sequence may be drafted by its own model, while its correction stays on 
   const plain = coworkWriterModels({ COWORK_MODEL: 'base', COWORK_WRITER_FIX_MODEL: 'fixer' });
   assert.deepEqual(coworkWriterCallModel('sequence', 'writer', false, plain), { model: 'base', effort: undefined });
   assert.deepEqual(coworkWriterCallModel('sequence', 'writer', true, plain), { model: 'fixer', effort: undefined });
+});
+
+// The voice pass in the chat (writer-voice.ts): an email long enough to have a voice, and the same email as the person would say it.
+const spoken = 'Hola Felipe,\n\nEn seguridad privada, cuando entra un grupo de guardias nuevos, cada antecedente pendiente es un guardia que no toma su turno.\n\n¿Cuántos ingresos revisan al mes?\n\nSaludos,\nNicolás Yarur';
+const spokenDraft = { ...draft, blocks: [{ ...draft.blocks[0], body: spoken }] };
+const voiced = { subject: 'Antecedentes en minutos', paragraphs: ['En seguridad privada, cuando te entra un grupo de guardias nuevos, cada antecedente que te falta es un guardia que no toma su turno.'] };
+
+test('with the voice pass, each email is said again under the ledger\'s voice role, between the same greeting, question and signature', async () => {
+  const h = harness([spokenDraft, { verdict: 'ok', issues: [] }, voiced], () => 90_000, true, undefined, { samples: ['Hola Pedro, te cuento que partimos el lunes con la faena y quedo atenta a lo que necesites para los turnos.'] });
+  const answer = await h.write(brief, []);
+  const body = (answer.blocks?.[0] as { body: string }).body;
+  assert.equal(body, spoken.replace('cuando entra un grupo de guardias nuevos, cada antecedente pendiente es', 'cuando te entra un grupo de guardias nuevos, cada antecedente que te falta es'));
+  assert.deepEqual(h.log.slice(-3), ['adjust', 'reserve:voice', 'usage:call-voice']);
+  assert.deepEqual(h.options.at(-1), { timeoutMs: 15_000, maxOutputTokens: 1500, openAiModel: 'writer-model', streamed: false, effort: undefined });
+  assert.equal(answer.reply, draft.reply);
+});
+
+test('a ledger that refuses the voice role, a turn without time and a turn without the pass leave the Writer\'s emails', async () => {
+  const refused = harness([spokenDraft, { verdict: 'ok', issues: [] }, voiced], () => 90_000, true, undefined, { refused: true });
+  assert.equal(((await refused.write(brief, [])).blocks?.[0] as { body: string }).body, spoken);
+  assert.ok(refused.log.includes('reserve:voice'));
+  assert.ok(!refused.log.includes('usage:call-voice'));
+
+  // Time for the Writer and the Reviewer, and none left for the pass.
+  let calls = 0;
+  const late = harness([spokenDraft, { verdict: 'ok', issues: [] }, voiced], () => { calls += 1; return calls <= 4 ? 90_000 : 9_000; }, true, undefined, {});
+  assert.equal(((await late.write(brief, [])).blocks?.[0] as { body: string }).body, spoken);
+  assert.ok(!late.log.includes('reserve:voice'));
+
+  const off = harness([spokenDraft, { verdict: 'ok', issues: [] }]);
+  assert.equal(((await off.write(brief, [])).blocks?.[0] as { body: string }).body, spoken);
+  assert.ok(!off.log.includes('reserve:voice'));
 });

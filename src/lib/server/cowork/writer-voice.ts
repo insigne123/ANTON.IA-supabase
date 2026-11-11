@@ -9,8 +9,9 @@
  * or the turn has no time left. The question an email closes with is the Writer's most checked sentence and never reaches the pass: it
  * goes back under the rewrite as it was (6 fictional requests, 11 Nov 2026: «¿Cuánto les toma hoy…?» came back as «¿Cuánto te toma…?»).
  *
- * It runs where the Writer works in the background (the morning contact, src/lib/server/lead-drops.ts). In the chat every model call of a
- * turn is reserved in the ledger, which gives the Writer two (cowork_reserve_model_call): the pass needs room of its own there first.
+ * It runs where the Writer works in the background (the morning contact, src/lib/server/lead-drops.ts) and in the chat
+ * (src/lib/server/cowork/writer-run.ts), where every call of a turn is reserved in the ledger: there the pass has its own role, «voice»,
+ * with its own room (cowork_reserve_model_call, migration 20261111220000).
  */
 import type { CoworkBlock } from '@/lib/cowork/contracts';
 import { coworkDraftIssues, coworkRunContext, coworkWriterBlocks, coworkWriterPasted, type CoworkWriterOutput, type WriterInput } from '@/lib/cowork/writer';

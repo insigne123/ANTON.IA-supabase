@@ -47,7 +47,8 @@ import { coworkWorkspaceEnabled, loadCoworkWorkspace } from './workspace';
 import { loadCoworkPreviousVersions } from './previous-versions';
 import { reserveCoworkModelCall } from './model-budget';
 import { coworkAnswerHoldEnabled, coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
-import { coworkWriterEfforts, coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
+import { coworkVoicePassEnabled, coworkWriterEfforts, coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
+import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
 import { COWORK_JUDGE_HELD_TIMEOUT_MS, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
 import { coworkJevShadow, coworkReviewEngine } from '@/lib/cowork/review-engine';
 import { coworkSearchDefaults } from '@/lib/cowork/search-scope';
@@ -440,6 +441,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // The product the person asked to promote in this conversation goes with the emails (Plan 5, decision 3).
         userContext: userContext && threadMemory?.memory?.offer ? { ...userContext, offerInPlay: threadMemory.memory.offer } : userContext,
         reserve: role => reserveCoworkModelCall(client, run.id, run.lease_token, role),
+        // Each email in the voice of the person who sends it, from their own emails when they chose some («Tu voz»).
+        ...(coworkVoicePassEnabled() ? { voice: { samples: () => voiceSamplesFor({ ...scope, client }) } } : {}),
         generate: generateStructuredWithTelemetry,
         recordUsage: (reservationId, callTelemetry) => recordCoworkModelUsage(client, reservationId, run.lease_token, callTelemetry),
         record: recordEvent, liveDraft,
