@@ -190,7 +190,8 @@ export default function CRMPage() {
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
                         <DocumentTitle title="Pipeline" />
-                        <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground sm:text-[2rem]">Pipeline</h1>
+                        {/* On a phone the top bar already says «Pipeline»: here it stays for screen readers only (V5). */}
+                        <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground max-md:sr-only sm:text-[2rem]">Pipeline</h1>
                         <p className="mt-0.5 text-sm text-foreground/70">Prioriza tus contactos y mueve cada uno a su siguiente etapa.</p>
                         <p className="mt-1 flex items-center gap-1.5 text-xs text-foreground/70">
                             <Sparkles className="h-3.5 w-3.5" />

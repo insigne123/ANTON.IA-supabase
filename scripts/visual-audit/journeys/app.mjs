@@ -199,7 +199,10 @@ export default () => [
     steps: [
       { say: 'Abro Perfil', do: async c => {
         await c.go('/profile'); await c.see('Viene de la ficha de la empresa');
-        c.check('dice quién la revisó', await c.has(/La revisó Camila Torres/));
+        // The reviewer's name arrives with the profile, a moment after the first line: wait for it as a person would read on.
+        c.check('dice quién la revisó', await c.see(/La revisó Camila Torres/).then(() => true, () => false));
+        // The page starts as the editable profile and becomes this one when the company's profile arrives: let it settle before looking at what is gone.
+        await c.wait(600);
         c.check('lo de la empresa no se edita aquí', !(await c.page.locator('textarea#services').count()) && !(await c.page.locator('input#companyName').count()));
         c.check('mi nombre sí', await c.page.locator('input#name').isEditable().catch(() => false));
         c.check('no ofrece completar con IA lo que ya está en la ficha', !(await c.page.locator('#profile-ai-title').count()));
