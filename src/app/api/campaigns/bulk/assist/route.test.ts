@@ -72,7 +72,7 @@ test('the follow-ups of a first email and one instruction for the whole sequence
   const followUps = await exports.POST({ json: async () => ({ mode: 'follow_ups', objective: 'Reunión', relationship: 'never_contacted', first, followUpDelays: [3] }) });
   assert.equal(followUps.messages.length, 1);
   assert.deepEqual(calls.slice(0, 3).map(call => call[0]), ['auth', 'budget', 'voice']);
-  assert.deepEqual(calls[2][1], { userId: 'user', organizationId: 'org' }, 'the samples are the signed-in person\'s');
+  assert.deepEqual({ ...calls[2][1] }, { userId: 'user', organizationId: 'org' }, 'the samples are the signed-in person\'s');
   assert.deepEqual(calls[3][1].first, first);
   assert.equal(calls[3][1].recipients, 2, 'without a count, the follow-ups are for several people');
   assert.deepEqual(calls[3][1].voiceSamples, ['Hola Pedro, te cuento que partimos el lunes con la faena.'], 'and the follow-ups are written from them');
