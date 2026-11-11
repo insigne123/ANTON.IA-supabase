@@ -92,7 +92,13 @@ test('a rewrite may change how an email sounds, never what it says', () => {
   assert.match(voiceFactsChanged('Hola {{nombre}}, te escribo por {{empresa}}.', 'Hola {{nombre}}, te escribo por tu empresa.') || '', /variables/);
   assert.match(voiceFactsChanged('Puedes agendar aquí: https://agenda.example/ana', 'Puedes agendar cuando quieras.') || '', /enlace/);
   assert.match(voiceFactsChanged('Le escribo por la fiscalización que anunció la Dirección del Trabajo.', 'Te escribo por la fiscalización que anunció la Dirección del Trabajo.') || '', /usted/);
-  assert.match(voiceFactsChanged('Te escribo por la apertura de marzo.', 'Me dirijo a usted por la apertura de marzo.') || '', /tutea/);
+  assert.match(voiceFactsChanged('Te escribo por la apertura de marzo.', 'Me dirijo a usted por la apertura de marzo.') || '', /no trata de usted/);
+  // An email that marks neither treatment: the rewrite may not pick the other one, and the caller's word decides which is the other.
+  const plural = 'Con dos tiendas nuevas antes de diciembre, cada turno necesita su equipo completo.';
+  assert.match(voiceFactsChanged(plural, 'Con dos tiendas nuevas antes de diciembre, usted tendrá que armar cada turno.') || '', /no trata de usted/);
+  assert.equal(voiceFactsChanged(plural, 'Con dos tiendas nuevas antes de diciembre, te va a tocar armar cada turno.'), null);
+  assert.match(voiceFactsChanged(plural, 'Con dos tiendas nuevas antes de diciembre, te va a tocar armar cada turno.', { treatment: 'usted' }) || '', /no tutees/);
+  assert.equal(voiceFactsChanged(plural, 'Con dos tiendas nuevas antes de diciembre, usted tendrá que armar cada turno.', { treatment: 'usted' }), null);
   for (const name of ['Dotal', 'Turnia', 'Selecta', 'Lampa']) assert.ok(VOICE_SAMPLE_NAMES.includes(name), name);
 });
 

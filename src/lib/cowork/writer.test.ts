@@ -1288,6 +1288,13 @@ test('an email in English or Portuguese greets and closes in that language', asy
   assert.match(coworkGreetingInLanguage(nehal), /^Hi Nehal,/);
   const spanish = 'Hola José,\n\nCuando se acumulan postulantes, revisarlos uno por uno deja la vacante abierta.\n\nSaludos,\nNicolás Yarur';
   assert.equal(coworkGreetingInLanguage(spanish), spanish);
+  // «semana» is Spanish too: it used to turn these into «Olá …, Atenciosamente,» (19 morning contacts between 16 Oct and 11 Nov 2026).
+  for (const week of ['Hola Rodrigo,\n\nCuando abren dos tiendas el mismo mes, cada turno necesita su equipo completo.\n\n¿Te sirve verlo 15 minutos esta semana?\n\nSaludos,\nCarla Soto',
+    'Hola {{nombre}},\n\nCuando una tienda refuerza el equipo antes de un fin de semana de alta afluencia, el informe deja a la vista los resultados.\n\nSaludos,\nTomás Rivas',
+    'Hola Ana,\n\nEste mes nos encargamos de la dotación: mira servipro.com y cuéntame.\n\n¿Lo vemos esta semana?\n\nSaludos,\nCarla']) {
+    assert.equal(coworkGreetingInLanguage(week), week);
+  }
+  assert.match(coworkGreetingInLanguage('Hola Rui,\n\nVocê tem 15 minutos hoje?\n\nSaludos,\nCarla'), /^Olá Rui,[\s\S]*Atenciosamente,\nCarla$/);
   const formal = 'Estimado Rodrigo Pérez:\n\nEn seguridad privada, revisar antecedentes uno por uno deja turnos sin cubrir.\n\nSaludos,\nNicolás Yarur';
   assert.equal(coworkGreetingInLanguage(formal), formal.replace('Saludos,', 'Saludos cordiales,'));
 });

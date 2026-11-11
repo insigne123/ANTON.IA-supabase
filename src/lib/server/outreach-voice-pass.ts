@@ -175,7 +175,7 @@ export async function voicePass(input: VoicePassInput): Promise<VoicePassResult>
     const recipient = firstName(input.recipient.firstName);
     // «Hola Felipe, / Felipe, vi que…»: the greeting already names them (4 of 24 rewrites of the first bench run).
     const namedTwice = recipient.length >= 2 && new RegExp(`^${recipient.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,`, 'iu').test(after);
-    feedback = voiceFactsChanged(before, after, { names, questions: input.questions, words: input.words })
+    feedback = voiceFactsChanged(before, after, { names, questions: input.questions, words: input.words, treatment: input.treatment })
       || (tellsAfter > tellsBefore ? 'Quedó con más marcas de plantilla que el original.' : null)
       || (lifted && !voiceSharedPhrase(before, lifted) ? `Copiaste una frase del ejemplo («${lifted}»): dilo con tus palabras.` : null)
       || (fromGuide && !voiceSharedPhrase(before, fromGuide) ? `Copiaste palabras de la guía («${fromGuide}») que el correo no decía: quítalas.` : null)

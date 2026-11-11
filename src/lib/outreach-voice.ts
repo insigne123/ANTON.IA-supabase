@@ -372,7 +372,8 @@ export function properNames(value: string): string[] {
 }
 
 const TUTEO = /\b(?:tu|tus|te|ti|contigo|tienes|puedes|quieres|necesitas)\b/;
-const USTED = /\b(?:usted|le escribo|le parece|le acomoda|le sirve|le dejo|le agrego|le cuento|su equipo)\b/;
+// «su equipo» is not here: it is as often the company's («cada turno necesita su equipo completo», read as usted on 11 Nov 2026).
+const USTED = /\b(?:usted|le escribo|le parece|le acomoda|le sirve|le serviria|le dejo|le agrego|le cuento|le comparto|le propongo|le interesa)\b/;
 
 /** The treatment an email already uses: «usted» only when it is marked and nothing tutea. */
 export function voiceTreatmentOf(text: string): VoiceTreatment {
@@ -385,6 +386,8 @@ export type VoiceKeep = {
   names?: string[];
   questions?: { min: number; max: number };
   words?: { min: number; max: number };
+  /** The treatment the caller knows the email has. Without it, the one its own words mark. */
+  treatment?: VoiceTreatment;
 };
 
 /**
@@ -406,8 +409,11 @@ export function voiceFactsChanged(before: string, after: string, keep: VoiceKeep
   if (links(before) !== links(after)) return 'Cambiaste un enlace: va tal cual.';
   const beforeText = plain(before);
   const afterText = plain(after);
-  if (USTED.test(beforeText) && !TUTEO.test(beforeText) && TUTEO.test(afterText)) return 'El correo trata de usted: no tutees.';
-  if (TUTEO.test(beforeText) && !/\busted\b/.test(beforeText) && /\busted\b/.test(afterText)) return 'El correo tutea: no pases a usted.';
+  // An email may mark neither («¿Cuántos puestos proyectan?»): the rewrite still may not pick the other treatment (11 Nov 2026: «Hola
+  // Rodrigo» came back with «proyecta usted», and «Estimado Jorge Araya» with «evalúas»).
+  const formal = keep.treatment ? keep.treatment === 'usted' : USTED.test(beforeText) && !TUTEO.test(beforeText);
+  if (formal && !TUTEO.test(beforeText) && TUTEO.test(afterText)) return 'El correo trata de usted: no tutees.';
+  if (!formal && !/\busted\b/.test(beforeText) && /\busted\b/.test(afterText)) return 'El correo no trata de usted: no pases a usted.';
   const questions = (after.match(/\?/g) || []).length;
   if (keep.questions && (questions < keep.questions.min || questions > keep.questions.max)) {
     return keep.questions.max === 0 ? 'El correo no lleva preguntas: el pedido se agrega después.' : `El correo lleva ${keep.questions.min === keep.questions.max ? keep.questions.min : `de ${keep.questions.min} a ${keep.questions.max}`} pregunta, al final.`;
