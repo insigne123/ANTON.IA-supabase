@@ -13,7 +13,17 @@ const payloadSchema=z.object({facts:z.array(fact),credits:z.array(z.object({orga
   cohort:z.array(z.object({organizationId:uuid,userId:nullableUuid,recipientKey:z.string(),sentAt:z.string(),replyAt:z.string().nullable(),intent:z.string().nullable(),reliable:z.boolean(),interestedAt:z.string().nullable().optional(),interestReliable:z.boolean().optional()})),
   pending:z.array(z.object({organizationId:uuid,userId:nullableUuid,kind:z.string(),count:z.number().int().nonnegative(),href:z.string().optional()})),
   captureFrom:z.string().nullable(),journalFrom:z.string().nullable(),legacyReplies:z.number().int().nonnegative()});
-function dataRows(result:{data:any;error:any}){if(result.error)throw new AdminDashboardAuthError('No pudimos cargar el alcance del informe.',503);return result.data||[];}
+/**
+ * Why the report could not be built, for the server log: the step and the kind of failure (a database code, the fields of
+ * a payload that does not match), never a value, since a row may carry customer data. The person still reads one plain line.
+ */
+export function usageFailureCause(error:unknown):string{
+  if(error instanceof z.ZodError)return 'payload '+error.issues.slice(0,5).map(issue=>`${issue.path.join('.')||'(root)'}:${issue.code}`).join(', ');
+  if(error&&typeof error==='object'&&'code' in error)return `database ${String((error as {code?:unknown}).code||'unknown').slice(0,40)}`;
+  return error instanceof Error?error.name:typeof error;
+}
+const logStep=(step:string,error:unknown)=>console.warn('[admin-usage]',step,'failed:',usageFailureCause(error));
+function dataRows(result:{data:any;error:any},step='scope'){if(result.error){logStep(step,result.error);throw new AdminDashboardAuthError('No pudimos cargar el alcance del informe.',503);}return result.data||[];}
 // Metadata rosters are keyset-paged, not silently truncated at a thousand accounts.
 async function roster(client:any,table:string,select:string,column:string,scope:string[]|null,secondary?:string){
   const all:any[]=[];let cursor:string|null=null,secondCursor:string|null=null;
@@ -21,7 +31,7 @@ async function roster(client:any,table:string,select:string,column:string,scope:
     if(secondary)query=query.order(secondary,{ascending:true});
     if(scope)query=query.in(table==='organizations'?'id':'organization_id',scope);
     if(cursor)query=secondary?query.or(`${column}.gt.${cursor},and(${column}.eq.${cursor},${secondary}.gt.${secondCursor})`):query.gt(column,cursor);
-    const rows=dataRows(await query);all.push(...rows);if(rows.length<500)break;
+    const rows=dataRows(await query,table);all.push(...rows);if(rows.length<500)break;
     const next=String(rows.at(-1)[column]),nextSecond=secondary?String(rows.at(-1)[secondary]):null;
     if(!uuid.safeParse(next).success||secondary&&!uuid.safeParse(nextSecond).success||next===cursor&&nextSecond===secondCursor)throw new AdminDashboardAuthError('No pudimos completar el informe.',503);cursor=next;secondCursor=nextSecond;
   }return all;
@@ -40,7 +50,7 @@ export async function loadAdminUsage(access:UsageAccess,query:UsageQuery,now=new
   const assignments=(ids.length?await roster(client,'organization_reporting_group_members','user_id,organization_id,group_id,unassigned_at','group_id',ids,'user_id'):[]).filter(a=>!a.unassigned_at);
   const filtered=members.filter((m:any)=>(!query.userId||m.user_id===query.userId)&&(!query.groupId||assignments.some((a:any)=>a.user_id===m.user_id&&a.organization_id===m.organization_id&&a.group_id===query.groupId)));
   const identities=await client.rpc('admin_usage_member_names_v1',{p_orgs:ids});
-  if(identities.error&&!['PGRST202','42883'].includes(identities.error.code))throw new AdminDashboardAuthError('No pudimos cargar las personas del informe.',503);
+  if(identities.error&&!['PGRST202','42883'].includes(identities.error.code)){logStep('member names',identities.error);throw new AdminDashboardAuthError('No pudimos cargar las personas del informe.',503);}
   const identity=new Map<string,any>((identities.data||[]).map((user:any)=>[String(user.id),user]));
   const people:UsagePerson[]=filtered.map((m:any)=>{
     const user=identity.get(m.user_id);return {id:m.user_id,organizationId:m.organization_id,
@@ -51,7 +61,7 @@ export async function loadAdminUsage(access:UsageAccess,query:UsageQuery,now=new
   const raw=await client.rpc('admin_usage_report_v1',{p_orgs:ids,p_from:previous.from,p_to:query.to,p_user:query.userId||null,p_group:query.groupId||null,
     p_horizon:query.horizon,p_legacy:access.platform&&selected==='all'&&!query.groupId});
   const missing=raw.error&&['PGRST202','PGRST205','42883','42P01'].includes(raw.error.code);
-  if(raw.error&&!missing)throw new AdminDashboardAuthError('No pudimos actualizar el informe. Intenta nuevamente.',503);
+  if(raw.error&&!missing){logStep('report',raw.error);throw new AdminDashboardAuthError('No pudimos actualizar el informe. Intenta nuevamente.',503);}
   const payload=missing?{facts:[],credits:[],cohort:[],pending:[],captureFrom:null,journalFrom:null,legacyReplies:0}:payloadSchema.parse(raw.data);
   const allowed=new Set(ids);
   for(const row of [...payload.facts,...payload.cohort,...payload.pending])if(!allowed.has(row.organizationId)||query.userId&&row.userId!==query.userId)

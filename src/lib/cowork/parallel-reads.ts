@@ -3,7 +3,8 @@ import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from './domain-
 import { coworkMetricQuery } from './metric-period';
 
 const TEXT_ACTIONS = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'site.read', 'leads.count', 'compliance.obligation', 'files.read', 'icp.analyze', 'leads.recommend'];
-const UUID_ACTIONS = ['leads.get', 'research.get_existing', 'crm.get_lead', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'compliance.check', 'draft.get',
+/** The reads that take one id. Their capabilities declare a uuid input (read-capabilities.ts), so every path asks for an id. */
+export const COWORK_ID_READS = ['leads.get', 'research.get_existing', 'crm.get_lead', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'compliance.check', 'draft.get',
   'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan', ...COWORK_DOMAIN_ENTITY_READS];
 const FIXED_ACTIONS = ['metrics.overview', 'metrics.rates', 'metrics.diagnose', 'metrics.channels', 'metrics.incidents', 'deliverability.bounces', 'deliverability.sender', 'compliance.law', 'app.context', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get',
   'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'replies.attention', 'replies.stalled', ...COWORK_DOMAIN_FIXED_READS];
@@ -28,7 +29,7 @@ export const coworkReadTaskSchema = z.object({
   // dropped instead of rejecting the decision: the model kept resending it
   // until the run failed, and metrics.rates already returns 7 and 30 days.
   if (FIXED_ACTIONS.includes(task.action)) return task.input === '' ? task : { ...task, input: '' };
-  if (UUID_ACTIONS.includes(task.action) && !z.string().uuid().safeParse(task.input).success) {
+  if (COWORK_ID_READS.includes(task.action) && !z.string().uuid().safeParse(task.input).success) {
     context.addIssue({ code: 'custom', path: ['input'], message: 'A saved contact UUID is required' });
     return z.NEVER;
   }

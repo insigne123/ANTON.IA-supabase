@@ -6,6 +6,7 @@ import { opportunityDb } from './workspace-store';
 import { assertOpportunityAdmin } from './workspace-access';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { criteriaSchema, captureOpportunityLinkedIn, captureOpportunityTenders, evaluateOpportunityBatch } from './workspace-sources';
+import { AFTERNOON_RETRY_HOUR, requeueFailedCompraAgil } from './source-health';
 import { discoverySources, readSearchSettings } from '@/lib/commercial-opportunities/search-settings';
 import { runOpportunityResearch, runOpportunityChat } from './workspace-research';
 import { applyAutomaticMove, runPipelineReview } from './workspace-pipeline';
@@ -38,6 +39,9 @@ export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope:
   const kinds = discoveryKinds(context, clock.day);
   for (const kind of kinds) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind, dedupe_key: `${prefix}:${kind}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
+  // In the afternoon, today's Compra Ágil searches that Mercado Público failed get one more round (source-health.ts). Best
+  // effort: a failed read here never stops the rest of the day's work.
+  if (!manual && clock.hour >= AFTERNOON_RETRY_HOUR) await requeueFailedCompraAgil(client, scope.organizationId, prefix).catch(() => 0);
   // What happened to the tenders presented (workspace-results.ts): once a day, whatever the offer says.
   opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind: 'evaluate', dedupe_key: `results:${clock.day}`, payload: { results: true } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));

@@ -113,10 +113,12 @@ export default () => [
         c.check('el aviso quedó apagado', (c.table('opportunity_company_context')[0]?.admin_settings?.searches?.[0]?.notify || ['x']).length === 0);
       } },
     ] },
+  // «Prepara tu empresa» lives inside «Tu empresa» since the audit of Oportunidades (O3): above the list only what is failing.
   { id: 'admin-preparar-empresa', persona: 'owner', title: 'Administrador: «Prepara tu empresa» lleva a subir los documentos', goal: 'Saber qué falta para postular bien y llegar a donde se sube.',
     steps: [
-      { say: 'Abro Oportunidades y leo «Prepara tu empresa»', do: async c => {
-        await c.go('/opportunities'); await c.see('Prepara tu empresa');
+      { say: 'Abro Oportunidades y entro a «Tu empresa»', do: async c => {
+        await c.go('/opportunities'); await c.see('Gestionar oportunidades');
+        await c.click(/^Tu empresa$/); await c.see('Prepara tu empresa');
         c.check('dice cuántos documentos faltan', await shows(c, /0 de 5\. Falta: Certificado F30,/));
       } },
       { say: 'Pulso «Subir documentos»', do: async c => { await c.click('Subir documentos'); await c.see('Documentos de la empresa'); } },
@@ -192,19 +194,21 @@ export default () => [
         c.check('la decisión se dice una vez, no también como novedad', !(await c.page.getByText(/^Decisión pedida:/).first().isVisible().catch(() => false)));
       } },
       { say: 'Pulso Responder', do: async c => {
-        await c.click('Responder'); await c.see('Pide una decisión'); await c.wait(400);
+        // By its exact text: the menu's «Conversaciones · 3 por responder» also says «responder», and here it is the label of the whole row.
+        await c.click({ text: /^Responder$/ }); await c.see('Pide una decisión'); await c.wait(400);
         c.check('se abre en la caja para responder', (await c.page.evaluate(() => document.activeElement?.id).catch(() => null)) === 'decision-reply');
         c.check('mientras se gestiona, «Cómo postular» es la acción principal', (await applyIsMain(c)) === true);
       } },
       { say: 'Escribo mi respuesta', do: async c => { await c.fill('Tu respuesta', 'Sí, ofrécelo como opcional con el 12 % extra.'); } },
       { say: 'Envío la respuesta', do: async c => {
-        await c.click('Responder'); await c.wait(1500);
+        await c.click({ name: /^Responder$/ }); await c.wait(1500);
         c.check('la respuesta quedó en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(2) && /Respuesta a la decisión/.test(row.body)));
       } },
     ] },
   { id: 'admin-hoy', persona: 'owner', title: 'Administrador: «Hoy» dice qué espera su respuesta y qué cierra sin equipo', goal: 'Saber desde el inicio qué hacer en Oportunidades.', passWrites: [],
     steps: [
-      { say: 'Abro Hoy', do: async c => { await c.go('/dashboard'); await c.see('Lo que te espera'); } },
+      // With something first («Lo primero»), the rest of the day is titled «Después»; without it, «Lo que te espera».
+      { say: 'Abro Hoy', do: async c => { await c.go('/dashboard'); await c.see(/^(Después|Lo que te espera)$/); } },
       { say: 'Leo la tarjeta de Oportunidades', do: async c => {
         await c.see('Esperan tu respuesta'); await c.see('Diego pide una decisión');
         await c.see('Cierran esta semana y nadie las trabaja');

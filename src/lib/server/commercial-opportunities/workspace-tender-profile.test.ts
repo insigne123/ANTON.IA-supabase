@@ -160,7 +160,7 @@ test('the daily screening reads the profile: an unknown is a question, not a dis
   const { evaluateOpportunityBatch } = await load(`export { evaluateOpportunityBatch } from './src/lib/server/commercial-opportunities/workspace-sources';`, {
     './mercado-publico': 'export async function listOpenLicitaciones(){ return [] }',
     './tickets': 'export async function resolveTicketForOrganization(){ return null }',
-    './compra-agil': 'export class CompraAgilError extends Error {} export async function searchCompraAgil(){ return [] } export function compraAgilQuery(){ return "" }',
+    './compra-agil': 'export class CompraAgilError extends Error {} export const SMALL_PAGE_SIZE = 10; export async function searchCompraAgil(){ return [] } export function compraAgilQuery(){ return "" }',
   });
   const rows = [{ id: 'o1', organization_id: 'org', kind: 'tender', title: 'Aseo Hospital de Puerto Montt', company_name: 'Servicio de Salud', deadline_at: null, data: { profileRevision: 3, contentHash: 'h', source: 'tenders', description: 'Exige ISO 9001' } }];
   const context = { offer: 'Aseo hospitalario', services: ['Aseo'], exclusions: [], priority: 'balanced', revision: 3 };
@@ -181,7 +181,7 @@ test('the administrator\'s own rules leave a tender out before the AI reads it, 
   const { evaluateOpportunityBatch } = await load(`export { evaluateOpportunityBatch } from './src/lib/server/commercial-opportunities/workspace-sources';`, {
     './mercado-publico': 'export async function listOpenLicitaciones(){ return [] }',
     './tickets': 'export async function resolveTicketForOrganization(){ return null }',
-    './compra-agil': 'export class CompraAgilError extends Error {} export async function searchCompraAgil(){ return [] } export function compraAgilQuery(){ return "" }',
+    './compra-agil': 'export class CompraAgilError extends Error {} export const SMALL_PAGE_SIZE = 10; export async function searchCompraAgil(){ return [] } export function compraAgilQuery(){ return "" }',
   });
   const row = (id: string, amount: number | null, company: string, items: unknown[] = []) => ({ id, organization_id: 'org', kind: 'tender', title: `Aseo ${id}`, company_name: company, amount, currency: 'CLP', deadline_at: null,
     data: { profileRevision: 3, contentHash: `h-${id}`, source: 'tenders', description: 'Aseo', observed: { items } } });

@@ -117,7 +117,7 @@ export function providerAlertEmail(provider: AlertProvider, level: Exclude<Alert
 }
 
 /** The last alert told about this service, or its last top-up. */
-async function lastAlert(client: SupabaseClient, provider: AlertProvider) {
+async function lastAlert(client: SupabaseClient, provider: AlertProvider | `opportunities:${string}`) {
   const { data, error } = await client.from('antonia_provider_usage_snapshots').select('usage,captured_at')
     .eq('provider', provider).eq('source', 'provider_alert').order('captured_at', { ascending: false }).limit(1).maybeSingle();
   if (error) throw error;
@@ -126,7 +126,7 @@ async function lastAlert(client: SupabaseClient, provider: AlertProvider) {
   return { level: level in RANK ? level : 'ok' as AlertLevel, at: Date.parse(String(data.captured_at)) };
 }
 
-async function keep(client: SupabaseClient, provider: AlertProvider, usage: Record<string, unknown>, now: Date) {
+async function keep(client: SupabaseClient, provider: AlertProvider | `opportunities:${string}`, usage: Record<string, unknown>, now: Date) {
   const { error } = await client.from('antonia_provider_usage_snapshots').insert({
     provider, scope_type: 'team', provider_account_id: null, provider_user_id: null, cycle_start: null, cycle_end: usage.renewsAt ?? null,
     source: 'provider_alert', request_id: randomUUID(), captured_at: now.toISOString(), usage,
@@ -136,7 +136,7 @@ async function keep(client: SupabaseClient, provider: AlertProvider, usage: Reco
 
 type Email = ReturnType<typeof providerAlertEmail>;
 /** Through Resend when it is set up; else, or when Resend does not take it (and always for Resend's own), from the recipient's mailbox. */
-async function deliver(client: SupabaseClient, provider: AlertProvider, to: string, email: Email, deps: { fetch: Fetch; env: Env }) {
+async function deliver(client: SupabaseClient, provider: AlertProvider | `opportunities:${string}`, to: string, email: Email, deps: { fetch: Fetch; env: Env }) {
   if (provider !== 'resend' && resendSender(deps.env)) {
     const sent = await sendReportEmail(client, { userId: '', to, ...email }, deps);
     if (sent.ok) return sent;
@@ -158,6 +158,30 @@ async function tell(client: SupabaseClient, provider: AlertProvider, level: Excl
   if (sentTo) await keep(client, provider, { level, ...info, alertSentTo: sentTo }, deps.now ?? new Date());
   const failed = results.find(result => !result.ok);
   return { sentTo, ...(failed && 'error' in failed ? { error: failed.error } : {}) };
+}
+
+/**
+ * A source of «Oportunidades» that stopped bringing results (source-health.ts): the same recipients and the same record as a
+ * balance alert, with its own words. Told once while it lasts; a day with results is noted so the next silence is told again.
+ */
+export async function reportSourceSilence(client: SupabaseClient, source: string, silent: boolean, email: Email | null, detail: Record<string, unknown>, deps: Deps = {}) {
+  const key = `opportunities:${source}` as const;
+  const now = deps.now ?? new Date();
+  const last = await lastAlert(client, key);
+  if (!silent || !email) {
+    if (!silent && last && last.level !== 'ok') await keep(client, key, { level: 'ok', ...detail }, now);
+    return { source, silent, alert: null };
+  }
+  if (last && last.level !== 'ok') return { source, silent, alert: null };
+  const env = deps.env ?? process.env;
+  const recipients = providerAlertRecipients(env);
+  if (!recipients.length) return { source, silent, alert: { sentTo: 0, error: 'Falta PROVIDER_ALERT_EMAILS.' } };
+  const results = [];
+  for (const to of recipients) results.push(await deliver(client, key, to, email, { fetch: deps.fetch ?? fetch, env }));
+  const sentTo = results.filter(result => result.ok).length;
+  if (sentTo) await keep(client, key, { level: 'empty', ...detail, alertSentTo: sentTo }, now);
+  const failed = results.find(result => !result.ok);
+  return { source, silent, alert: { sentTo, ...(failed && 'error' in failed ? { error: failed.error } : {}) } };
 }
 
 /** A reading of the balance: tells a shortage worse than the last one told, and notes a top-up so the next one is told. */

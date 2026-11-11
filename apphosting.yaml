@@ -388,7 +388,8 @@ env:
   - variable: APIFY_TOKEN
     secret: APIFY_TOKEN
     availability: [RUNTIME]
-  # Correo cuando al plan de Apify le quedan US$0,10 o menos, y otro cuando se acaba: una vez por ciclo cada uno.
+  # Correo cuando al plan de Apify le queda menos de dos días de gasto al ritmo del ciclo (y nunca menos de este piso de
+  # US$0,10), y otro cuando se acaba: una vez por ciclo cada uno.
   # Lo revisa cada hora apolloUsageTick (src/lib/server/apify-credit.ts); sale por Resend.
   - variable: APIFY_LOW_CREDIT_USD
     value: "0.1"

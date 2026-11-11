@@ -58,7 +58,7 @@ function makeActions({ page, supabase, state }) {
   const locate = (target, scope = page) => {
     // Only what is on screen: a person never clicks the desktop version of a control the phone hides.
     const seen = locator => locator.filter({ visible: true }).first();
-    if (typeof target === 'string') return seen(scope.getByRole('button', { name: asName(target) }).or(scope.getByRole('link', { name: asName(target) })).or(scope.getByRole('tab', { name: asName(target) })));
+    if (typeof target === 'string' || target instanceof RegExp) return seen(scope.getByRole('button', { name: asName(target) }).or(scope.getByRole('link', { name: asName(target) })).or(scope.getByRole('tab', { name: asName(target) })));
     if (target.text) return seen(scope.getByText(asName(target.text)));
     if (target.label) return seen(scope.getByLabel(asName(target.label)));
     if (target.placeholder) return seen(scope.getByPlaceholder(asName(target.placeholder)));

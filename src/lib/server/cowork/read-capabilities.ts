@@ -25,10 +25,12 @@ export function coworkReadCapabilities(
   scope: Scope,
 ): readonly CoworkCapability[] {
   const textInput = z.string().max(200);
-  const extended = (name: CoworkExtendedReadAction, description: string): CoworkCapability => ({
+  // A read by id says so in its input: the harness then asks the model for «id» instead of a free «consulta».
+  const idInput = z.string().uuid();
+  const extended = (name: CoworkExtendedReadAction, description: string, input: z.ZodType<string> = textInput): CoworkCapability => ({
     name, version: 1, effect: 'read',
     description,
-    input: textInput, output: z.unknown(),
+    input, output: z.unknown(),
     execute: input => queryCoworkExtendedReads(client, scope, name, input as string),
   });
   return [
@@ -88,13 +90,15 @@ export function coworkReadCapabilities(
     {
       name: 'leads.get', version: 1, effect: 'read',
       description: 'Contacto guardado propio por UUID',
-      input: textInput, output: z.unknown(),
+      // An id, said as one: with a text input the harness offered «consulta» and the model wrote {"leadId":"…"} into it,
+      // which the read refused (7 failed reads of research.get_existing, 4 to 9 Nov 2026).
+      input: idInput, output: z.unknown(),
       execute: input => queryCoworkLeads(client, scope, 'leads.get', input as string),
     },
     {
       name: 'research.get_existing', version: 1, effect: 'read',
       description: 'Investigación guardada de un contacto propio por UUID',
-      input: textInput, output: z.unknown(),
+      input: idInput, output: z.unknown(),
       execute: input => readCoworkResearch(client, scope, input as string),
     },
     {
@@ -143,7 +147,7 @@ export function coworkReadCapabilities(
       execute: () => readCoworkLinkedinJobs(client, scope),
     },
     extended('crm.search', 'CRM del equipo (toda la organización) que coincide con un texto'),
-    extended('crm.get_lead', 'Ficha CRM con historial de contactados, por UUID'),
+    extended('crm.get_lead', 'Ficha CRM con historial de contactados, por UUID', idInput),
     {
       name: 'compliance.check', version: 1, effect: 'read', description: 'Política transversal persona/cuenta antes de contactar, por UUID',
       input: z.string().uuid(), output: z.unknown(), execute: input => readComplianceCheck(client, scope, input as string),
@@ -218,10 +222,10 @@ export function coworkReadCapabilities(
       input: z.string().uuid(), output: z.unknown(), execute: input => readMeetingChain(client, scope, input as string),
     },
     extended('contacted.search', 'Historial de contactados del equipo que coincide con un texto, o enviados en un período («últimos 7 días», «esta semana», «este mes»); vacío lista los últimos 20'),
-    extended('contacted.timeline', 'Historial de envíos de un contacto por UUID de ficha'),
+    extended('contacted.timeline', 'Historial de envíos de un contacto por UUID de ficha', idInput),
     extended('metrics.overview', 'Métricas de la organización de los últimos 7 días, sin entrada'),
     extended('app.context', 'Conexiones de correo, volúmenes y oferta (de Perfil o de la organización), sin entrada'),
-    extended('draft.get', 'Versión vigente de un borrador propio con su hash de contenido, por UUID'),
+    extended('draft.get', 'Versión vigente de un borrador propio con su hash de contenido, por UUID', idInput),
     extended('campaigns.list', 'Campañas propias con estado y destinatarios, y cuántas hay por estado (byStatus, ya contadas), sin entrada'),
     extended('files.list', 'Archivos subidos (nombre, trabajo, tamaño), sin contenido'),
     {

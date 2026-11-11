@@ -156,3 +156,34 @@ test('without an Apify token there is nothing to check', async () => {
   assert.deepEqual(await checkApifyCredit(db.client, { fetch: apify(5, 0).fetch, env: {} }), { provider: 'apify', skipped: 'APIFY_TOKEN' });
   assert.equal(db.inserted.length, 0);
 });
+
+test('low means less than two days at the pace of the cycle, said in the email, and never under the configured floor', async () => {
+  const { checkApifyCredit, dailyPaceUsd, lowCreditThresholdUsd, apifyAlertEmail } = await load();
+  const cycle = { cycleStart: '2026-10-03T00:00:00.000Z', cycleEnd: '2026-11-03T03:00:00.000Z' };
+  // Five days in, US$4.00 used: a day costs US$0.80, so US$1.60 is the margin.
+  const now = new Date('2026-10-08T00:00:00.000Z');
+  assert.equal(dailyPaceUsd({ usedUsd: 4, ...cycle }, now), 0.8);
+  assert.equal(lowCreditThresholdUsd({ usedUsd: 4, ...cycle }, 0.1, now), 1.6);
+  assert.equal(lowCreditThresholdUsd({ usedUsd: 0, ...cycle }, 0.1, now), 0.1, 'nothing used yet: the floor');
+  assert.equal(lowCreditThresholdUsd({ usedUsd: 4, cycleStart: null }, 0.1, now), 0.1, 'no cycle to measure: the floor');
+  assert.equal(lowCreditThresholdUsd({ usedUsd: 0.9, ...cycle }, 0.1, new Date('2026-10-03T06:00:00.000Z')), 1.8, 'the first hours count as one day');
+  assert.equal(lowCreditThresholdUsd({ usedUsd: 4, ...cycle }, 3, now), 3, 'a higher configured floor wins');
+
+  // US$1.00 left of US$5.00 on that day: the old threshold (US$0.10) said nothing; now it warns with a day to spare.
+  const api = apify(5, 4);
+  const db = database();
+  const result = await checkApifyCredit(db.client, { fetch: api.fetch, env, now });
+  assert.deepEqual(result.alert, { level: 'low', sentTo: 1 });
+  assert.equal(api.emails()[0].body.subject, 'A Apify le quedan US$1,00');
+  assert.match(api.emails()[0].body.text, /quedan US\$1,00\. Al ritmo de este ciclo \(US\$0,80 al día\) alcanza para cerca de un día\./);
+  assert.equal(db.inserted[0].usage.level, 'low');
+
+  // US$2.50 left at the same pace is three days: nothing to tell yet.
+  const calm = apify(6.5, 4);
+  assert.equal((await checkApifyCredit(database().client, { fetch: calm.fetch, env, now })).level, 'ok');
+  assert.equal(calm.emails().length, 0);
+  // A paid plan with weeks left says nothing about days.
+  assert.doesNotMatch(apifyAlertEmail('low', { maxUsd: 49, usedUsd: 40, leftUsd: 9, ...cycle }, null, 0.5).text, /Al ritmo/);
+  assert.match(apifyAlertEmail('low', { maxUsd: 5, usedUsd: 3.4, leftUsd: 1.6, ...cycle }, null, 0.8).text, /alcanza para cerca de 2 días\./);
+  assert.match(apifyAlertEmail('low', { maxUsd: 5, usedUsd: 4.9, leftUsd: 0.1, ...cycle }, null, 0.8).text, /alcanza para menos de un día\./);
+});

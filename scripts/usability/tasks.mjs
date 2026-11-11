@@ -69,7 +69,7 @@ export function TASKS(ctx, { fixtures }) {
       },
     },
     {
-      id: 'buscar', module: 'Prospectar', title: 'Encontrar 10 prospectos y guardarlos', persona: 'member', start: '/dashboard', ideal: 5,
+      id: 'buscar', module: 'Prospectar', title: 'Encontrar 10 prospectos y guardarlos', persona: 'member', start: '/dashboard', ideal: 6,
       // A new person's first try, a job title alone, does not search: the screen asks for a company filter (see the report).
       // The path measured is the one the screen offers: a starting point, which fills titles and industries.
       steps: [
@@ -80,6 +80,8 @@ export function TASKS(ctx, { fixtures }) {
         { target: { role: 'button', name: 'Buscar contactos' } },
         { target: { role: 'button', name: 'Marcar todos' } },
         { target: { role: 'button', name: /^Guardar \d+$/ } },
+        // Saving contacts without email offers to look for it right there; the goal here is only to keep them.
+        { target: { role: 'button', name: 'Guardar sin buscar' } },
       ],
       mocks: [{
         url: '**/api/leads/search', method: 'POST',
@@ -95,8 +97,9 @@ export function TASKS(ctx, { fixtures }) {
     },
     {
       id: 'importar', module: 'Contactos', title: 'Subir un archivo de contactos', dataset: 'empty', start: '/dashboard', ideal: 4,
+      // «Por completar» became part of «Por escribir» (Oct 2026): the import starts from there.
       steps: [
-        { menu: 'Por completar' },
+        { menu: 'Por escribir' },
         { target: { role: 'link', name: 'Importar lista' } },
         { target: { role: 'button', name: 'Elegir archivo' }, upload: path.join(fixtures, 'prospectos.csv') },
         { target: { role: 'button', name: 'Revisar contactos' } },
@@ -105,12 +108,14 @@ export function TASKS(ctx, { fixtures }) {
       done: page => page.getByRole('heading', { name: /^Importaste \d+ contactos?$/ }).waitFor({ timeout: 15000 }),
     },
     {
-      id: 'enriquecer', module: 'Contactos', title: 'Buscar el correo de un contacto', start: '/dashboard', ideal: 4,
+      id: 'enriquecer', module: 'Contactos', title: 'Buscar el correo de un contacto', start: '/dashboard', ideal: 1,
+      // Since «Recomendados para ti» (3 Nov 2026) the saved contacts without an email are in «Hoy», each with its own
+      // «Buscar correo · 1 crédito»; «Por completar», where this started, no longer exists. The ones without email come after
+      // the ones ready to write to, so the list may need «Ver N más» first. One contact costs one credit and is not confirmed
+      // (only the batch «Buscar el correo de N» asks first).
       steps: [
-        { menu: 'Por completar' },
-        { target: { role: 'checkbox', name: 'Seleccionar a Florencia Sepúlveda' } },
-        { target: { role: 'button', name: /^Buscar correo \(\d+\)$/ } },
-        { target: { role: 'button', name: 'Completar datos', within: { role: 'dialog' } } },
+        { target: { role: 'button', name: /^Ver \d+ más$/ }, optional: true },
+        { target: { role: 'button', name: /^Buscar el correo de .+, 1 crédito$/ } },
       ],
       mocks: [{
         url: '**/api/opportunities/enrich-apollo', method: 'POST',
@@ -122,7 +127,7 @@ export function TASKS(ctx, { fixtures }) {
           usage: { consumed: (body?.leads || []).length },
         }),
       }],
-      done: page => page.getByText('Búsqueda de correo lista').first().waitFor({ timeout: 15000 }),
+      done: page => page.getByText('Datos de contacto listos').first().waitFor({ timeout: 15000 }),
     },
     {
       id: 'responder', module: 'Seguimiento', title: 'Responder a quien te escribió', start: '/dashboard', ideal: 4,
@@ -166,7 +171,9 @@ export function TASKS(ctx, { fixtures }) {
         { target: { role: 'button', name: 'Buscar con filtros' } },
         { target: { role: 'button', name: 'Seleccionar todos' }, skipIf: async page => /\b[1-9]\d* seleccionados?\b/.test(await page.getByRole('status').filter({ hasText: 'seleccionado' }).first().innerText({ timeout: 2000 })) },
         { target: { role: 'button', name: 'Continuar a correos' } },
-        { target: { label: '¿Cuántos seguimientos quieres?' }, choose: '1' },
+        // A list that opens, not a native select: opening it and choosing are two clicks.
+        { target: { label: '¿Cuántos seguimientos quieres?' } },
+        { target: { role: 'option', name: 'Correo inicial + 1 seguimiento' } },
         { target: { label: 'Asunto' }, fill: 'Una idea para tu equipo de personas' },
         { target: { label: 'Correo' }, fill: 'Hola {{lead.firstName}}, vi que están contratando. ¿Te sirve conversar 15 minutos?' },
         { target: { role: 'button', name: 'Seguimiento 1', within: { role: 'group', name: 'Correos de la secuencia' } } },
@@ -180,7 +187,8 @@ export function TASKS(ctx, { fixtures }) {
         { url: '**/api/campaigns/bulk', method: 'POST', respond: body => ({ campaign: campaignFrom(body, 'draft') }) },
         { url: '**/api/campaigns/bulk/usab-camp-1', method: 'POST', respond: body => ({ campaign: { ...lastCampaign, status: body?.action === 'approve' ? 'approved' : lastCampaign.status, approved_at: body?.action === 'approve' ? new Date().toISOString() : null, revision: 2 } }) },
       ],
-      done: page => page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 }),
+      // Once approved the campaign opens as the active one: «Aprobada el 10 nov · desde tu Gmail».
+      done: page => page.getByText(/^Aprobada el /).first().waitFor({ timeout: 10000 }),
     },
     {
       // The same campaign by the main path of the email step (Plan 12, 7): the AI writes the initial email and its follow-up
@@ -206,12 +214,15 @@ export function TASKS(ctx, { fixtures }) {
         { url: '**/api/campaigns/bulk/assist', method: 'POST', respond: { messages: [
           { subject: 'Una idea para tu equipo de personas', body: 'Hola {{nombre}}, vi que en {{empresa}} están contratando. ¿Te sirve conversar 15 minutos esta semana?', delayDays: 0 },
           { subject: 'Retomo mi correo anterior', body: 'Hola {{nombre}}, ¿pudiste verlo? Si te sirve, te muestro AXIS en 15 minutos.', delayDays: 3 },
+          // A campaign starts with three follow-ups (6 Nov 2026): the sequence the AI returns has to be complete.
+          { subject: 'Un dato que puede servirte', body: 'Hola {{nombre}}, otras empresas de tu rubro revisan cada candidato en minutos. ¿Lo vemos?', delayDays: 4 },
+          { subject: 'Cierro el tema por ahora', body: 'Hola {{nombre}}, no insisto más. Si más adelante te sirve, aquí estoy.', delayDays: 5 },
         ] } },
         { url: '**/api/campaigns/bulk', method: 'POST', respond: body => ({ campaign: campaignFrom(body, 'draft') }) },
         { url: '**/api/campaigns/bulk/usab-camp-1', method: 'POST', respond: body => ({ campaign: { ...lastCampaign, status: body?.action === 'approve' ? 'approved' : lastCampaign.status, approved_at: body?.action === 'approve' ? new Date().toISOString() : null, revision: 2 } }) },
       ],
       done: async (page, { calls }) => {
-        await page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 });
+        await page.getByText(/^Aprobada el /).first().waitFor({ timeout: 10000 });
         // The AI got the offer from «Perfil» and what the person added.
         const objective = calls.find(call => call.url.endsWith('/api/campaigns/bulk/assist'))?.body?.objective || '';
         if (!/^Ofrecemos: /.test(objective) || !/reunión de 15 minutos/.test(objective)) throw new Error('el objetivo no partió de la oferta de Perfil');
@@ -221,7 +232,8 @@ export function TASKS(ctx, { fixtures }) {
       id: 'oportunidades', module: 'Prospectar', title: 'Ver las licitaciones', start: '/dashboard', ideal: 2,
       steps: [
         { menu: 'Oportunidades' },
-        { target: { role: 'tab', name: /Licitaciones y Compra Ágil/ } },
+        // The tab is «Mercado público» since the audit of Oportunidades (it was «Licitaciones y Compra Ágil»).
+        { target: { role: 'tab', name: /Mercado público/ } },
       ],
       done: page => page.getByRole('tabpanel').first().waitFor({ timeout: 10000 }),
     },

@@ -172,7 +172,21 @@ async function runTask(browser, data, supabase, task, viewportName) {
       }
       // A step the screen already did for the person (a selection made for them) is not a step they take.
       if (step.skipIf && await step.skipIf(page).catch(() => false)) continue;
-      const target = step.menu ? { role: 'link', name: step.menu, exact: true, within: { role: 'navigation', name: 'Navegación principal' } } : step.target;
+      // A menu entry is found by its label; since Oct 2026 its name also carries what waits («Cowork 2 esperan tu aprobación»).
+      const menuName = step.menu ? new RegExp(`^${step.menu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\W|$)`) : null;
+      const target = step.menu ? { role: 'link', name: menuName, said: step.menu, within: { role: 'navigation', name: 'Navegación principal' } } : step.target;
+      // «Perfil» and «Firmas y estilo» live in «Configuración», which starts folded: the person opens the group first, one more click.
+      if (step.menu && !(await locate(page, target).isVisible().catch(() => false))) {
+        const nav = page.getByRole('navigation', { name: 'Navegación principal' }).locator('visible=true').last();
+        for (const group of await nav.locator('button[aria-expanded="false"]').all()) {
+          const screen = await readScreen(page);
+          const name = ((await group.innerText().catch(() => '')) || 'Grupo del menú').trim();
+          await group.click({ timeout: 5000 }).catch(() => {});
+          await page.waitForTimeout(250);
+          run.steps.push({ index, kind: 'click', name, ...screen, inView: true, ops: KLM.click() });
+          if (await locate(page, target).isVisible().catch(() => false)) break;
+        }
+      }
       const screen = await readScreen(page);
       const element = locate(page, target);
       // How long the person waits for the control to be there (data loading, a slow screen): part of what they feel.
@@ -243,6 +257,7 @@ async function runTask(browser, data, supabase, task, viewportName) {
 
 function describe(target) {
   if (!target) return '';
+  if (target.said) return target.said;
   if (target.label) return target.label;
   if (target.placeholder) return target.placeholder;
   if (target.text) return String(target.text);

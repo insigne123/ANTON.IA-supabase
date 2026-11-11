@@ -824,6 +824,22 @@ export function coworkCleanTitle(message: string, max = 90) {
   return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[,;:]$/u, '').trimEnd()}…`;
 }
 
+const GREETING = /^[\s¡¿]*(?:hola+|holi+|buenas|buen(?:os)? d[ií]as?|buenas (?:tardes|noches)|hey|hello|hi|al[oó]|qu[eé] tal|c[oó]mo est[aá]s?|c[oó]mo va)(?:[\s,;.!¡¿?]+(?:hola+|anton(?:\.?ia)?|cowork|buenas|buen(?:os)? d[ií]as?|buenas (?:tardes|noches)|qu[eé] tal|c[oó]mo est[aá]s?|c[oó]mo va))*[\s,;.!¡¿?]*$/iu;
+/** «Hola», «Buenos días, Anton»: a greeting names nothing, so a conversation that starts with one is named by what came next. */
+export function coworkIsGreeting(message: string) {
+  const text = coworkDisplayMessage(coworkMessageAttachments(message).text).replace(/\s+/g, ' ').trim();
+  return text.length > 0 && text.length <= 60 && GREETING.test(text);
+}
+
+const titleDay = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' }).replace('.', '');
+};
+const titleTime = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
+};
+
 /**
  * Collapses follow-up runs into conversations, newest activity first. The conversation is the run's root_run_id when the
  * server sends it (it holds even when the first run is older than the list), else the chain of parents; `titles` are the
@@ -846,19 +862,38 @@ export function groupCoworkThreads(runs: CoworkRun[], titles: Record<string, str
     groups.set(rootId, [...(groups.get(rootId) || []), run]);
   }
   const time = (value: string) => Date.parse(value) || 0;
-  return [...groups.entries()].map(([rootId, members]) => {
+  const summaries = [...groups.entries()].map(([rootId, members]) => {
     const chronological = members.slice().sort((a, b) => time(a.created_at) - time(b.created_at));
     const latest = chronological[chronological.length - 1];
-    const titled = chronological.find(run => !run.automatic) || chronological[0];
+    // The first thing the person asked for: a greeting on its own («hola») names nothing, so the next message does.
+    const own = chronological.filter(run => !run.automatic);
+    const titled = own.find(run => !coworkIsGreeting(run.message)) || own[0] || chronological[0];
     // A conversation a scheduled task started is named after the task, not after the first sentence of its request.
     const scheduled = coworkScheduledTitle(titled.message);
     return {
-      id: latest.id, rootId,
-      title: titles[rootId] || (scheduled ? `⏰ ${scheduled}` : coworkCleanTitle(titled.automatic ? 'Continuación de un trabajo anterior' : titled.message)),
-      status: latest.status, updatedAt: latest.created_at,
-      turns: chronological.filter(run => !run.automatic).length,
+      summary: {
+        id: latest.id, rootId,
+        title: titles[rootId] || (scheduled ? `⏰ ${scheduled}` : coworkCleanTitle(titled.automatic ? 'Continuación de un trabajo anterior' : titled.message)),
+        status: latest.status, updatedAt: latest.created_at,
+        turns: own.length,
+      } satisfies CoworkThreadSummary,
+      named: Boolean(titles[rootId]), startedAt: chronological[0].created_at,
     };
-  }).sort((a, b) => time(b.updatedAt) - time(a.updatedAt));
+  });
+  // Conversations that still share a name (six called «Hola» in one list, Nov 2026) are told apart by when they started:
+  // the day, and the time too when two started the same day. A name the person or Cowork gave is left as it is.
+  const sameTitle = new Map<string, typeof summaries>();
+  for (const item of summaries) if (!item.named) sameTitle.set(item.summary.title, [...(sameTitle.get(item.summary.title) || []), item]);
+  for (const group of sameTitle.values()) {
+    if (group.length < 2) continue;
+    const perDay = new Map<string, number>();
+    for (const item of group) perDay.set(titleDay(item.startedAt), (perDay.get(titleDay(item.startedAt)) || 0) + 1);
+    for (const item of group) {
+      const day = titleDay(item.startedAt);
+      if (day) item.summary.title = `${item.summary.title} · ${(perDay.get(day) || 0) > 1 ? `${day}, ${titleTime(item.startedAt)}` : day}`;
+    }
+  }
+  return summaries.map(item => item.summary).sort((a, b) => time(b.updatedAt) - time(a.updatedAt));
 }
 
 export function coworkDateBucket(value: string, now = new Date()): string {

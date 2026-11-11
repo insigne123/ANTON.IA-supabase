@@ -31,11 +31,14 @@ export async function createAntoniaException(supabase: any, input: CreateAntonia
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from('antonia_exceptions')
-    .insert(row)
-    .select('*')
-    .single();
+  const insert = (values: typeof row) => supabase.from('antonia_exceptions').insert(values).select('*').single();
+  let { data, error } = await insert(row);
+  // antonia_exceptions.lead_id references public.leads, and a contact of «Por escribir» (enriched_leads) carries its own id.
+  // The exception is what tells the team that someone answered, so it is kept without the link (the id stays in the payload)
+  // instead of being lost: 4 positive replies had no exception on 11 Nov 2026, the day their replies started being recorded.
+  if (String((error as any)?.code || '') === '23503' && row.lead_id) {
+    ({ data, error } = await insert({ ...row, lead_id: null, payload: { ...row.payload, leadRef: row.lead_id } }));
+  }
 
   if (!error) return { ...data, __meta: { created: true } };
 
