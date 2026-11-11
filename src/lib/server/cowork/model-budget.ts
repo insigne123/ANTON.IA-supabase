@@ -1,8 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** Roles the ledger budgets: the coordinator and the in-turn agents under the run's lease (a «delegate» is a sub-agent of the harness,
- * which has its own room in the turn: migration 20261023130000), and the specialists under their task's lease. */
-export type CoworkModelRole = 'coordinator' | 'writer' | 'reviewer' | 'judge' | 'delegate' | 'analyst' | 'researcher' | 'verifier';
+ * which has its own room in the turn: migration 20261023130000; «voice» is the voice pass over the Writer's emails, with its own room
+ * too: migration 20261111220000), and the specialists under their task's lease. A ledger that does not know «voice» yet refuses it,
+ * and the Writer's emails stay as they are: it never counts as the coordinator's. */
+export type CoworkModelRole = 'coordinator' | 'writer' | 'reviewer' | 'judge' | 'delegate' | 'voice' | 'analyst' | 'researcher' | 'verifier';
 
 const IN_TURN_AGENTS = new Set<CoworkModelRole>(['writer', 'reviewer', 'judge']);
 

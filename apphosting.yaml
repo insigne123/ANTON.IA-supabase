@@ -99,6 +99,12 @@ env:
   - variable: COWORK_WRITER_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Pasada de voz sobre los correos de la Redactora en el chat (11 nov 2026): cada correo se dice de nuevo como lo escribiría quien lo
+  # firma, desde sus propios correos si eligió algunos en «Tu voz». Usa el rol «voice» del registro (migración 20261111220000); sin esa
+  # migración las reservas se rechazan y los correos quedan como los escribió la Redactora. «false» la apaga.
+  - variable: COWORK_VOICE_PASS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Plan 12: consultas ofrecidas en el turno y tableros/gráficos en el lienzo.
   # Sin migración adicional; cowork-artifacts privado verificado el 6 oct 2026.
   - variable: COWORK_OFFERED_READS_ENABLED
