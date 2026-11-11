@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { DocumentTitle } from '@/components/document-title';
+import { DocumentTitle, ShellTitle } from '@/components/document-title';
 
 type PageHeaderProps = {
   title: string;
@@ -23,6 +23,7 @@ export function PageHeader({ title, description, eyebrow, count, back, actions, 
   return (
     <header className="mb-5 flex flex-col gap-4 border-b border-border/60 pb-5 lg:flex-row lg:items-end lg:justify-between">
       <DocumentTitle title={title} />
+      <ShellTitle title={title} />
       <div className="min-w-0 space-y-1.5">
         {back && (
           <Link
@@ -34,7 +35,8 @@ export function PageHeader({ title, description, eyebrow, count, back, actions, 
           </Link>
         )}
         {eyebrow && <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">{eyebrow}</p>}
-        <h1 className="flex flex-wrap items-baseline gap-x-2.5 text-2xl font-semibold tracking-[-0.025em] text-foreground sm:text-[2rem]">
+        {/* On a phone the top bar already says the title: here it stays for screen readers only. */}
+        <h1 className="flex flex-wrap items-baseline gap-x-2.5 text-2xl font-semibold tracking-[-0.025em] text-foreground max-md:sr-only sm:text-[2rem]">
           <span className="min-w-0 break-words">{title}</span>
           {typeof count === 'number' && <span className="text-base font-medium tabular-nums text-muted-foreground sm:text-lg">{count.toLocaleString('es-CL')}</span>}
         </h1>

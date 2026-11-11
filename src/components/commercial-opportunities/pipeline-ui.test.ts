@@ -20,6 +20,8 @@ const dependencies: Record<string, unknown> = {
   '@/components/ui/button': { Button: ({ asChild, variant, size, ...props }: any) => React.createElement('button', props) },
   '@/components/initials-avatar': { InitialsAvatar: ({ name }: { name: string }) => React.createElement('span', { 'data-avatar': name }) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
+  // On the server nothing is measured: the row has no fade until the browser says it scrolls.
+  '@/hooks/use-scroll-edge-fade': { useScrollEdgeFade: () => [() => {}, undefined] },
   '@/lib/commercial-opportunities/pipeline': pipeline,
   '@/lib/commercial-opportunities/priority': priority,
   '@/lib/commercial-opportunities/progress': progress,

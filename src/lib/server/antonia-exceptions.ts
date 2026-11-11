@@ -32,12 +32,20 @@ export async function createAntoniaException(supabase: any, input: CreateAntonia
   };
 
   const insert = (values: typeof row) => supabase.from('antonia_exceptions').insert(values).select('*').single();
-  let { data, error } = await insert(row);
   // antonia_exceptions.lead_id references public.leads, and a contact of «Por escribir» (enriched_leads) carries its own id.
   // The exception is what tells the team that someone answered, so it is kept without the link (the id stays in the payload)
   // instead of being lost: 4 positive replies had no exception on 11 Nov 2026, the day their replies started being recorded.
-  if (String((error as any)?.code || '') === '23503' && row.lead_id) {
-    ({ data, error } = await insert({ ...row, lead_id: null, payload: { ...row.payload, leadRef: row.lead_id } }));
+  const withoutLead = { ...row, lead_id: null, payload: { ...row.payload, leadRef: row.lead_id } };
+  // Asked first, so the usual case is one clean insert: a refused one stays in the database log as an error, once per reply.
+  let saved = true;
+  if (row.lead_id) {
+    const lead = await supabase.from('leads').select('id').eq('id', row.lead_id).maybeSingle();
+    saved = Boolean(lead.error) || Boolean(lead.data);
+  }
+  let { data, error } = await insert(saved ? row : withoutLead);
+  // The lead was deleted between the two, or could not be looked up: the same answer, one try later.
+  if (saved && String((error as any)?.code || '') === '23503' && row.lead_id) {
+    ({ data, error } = await insert(withoutLead));
   }
 
   if (!error) return { ...data, __meta: { created: true } };

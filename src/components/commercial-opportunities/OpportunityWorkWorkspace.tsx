@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, RotateCcw, Settings, Sparkles, UploadCloud, Users, X, Bell } from 'lucide-react';
+import { Archive, ArrowLeft, ChevronDown, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, RotateCcw, Settings, Sparkles, UploadCloud, Users, X, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ActionBar } from '@/components/ui/action-bar';
 import { SegmentedTabs, tabPanelProps } from '@/components/ui/segmented-tabs';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { PageHeader } from '@/components/page-header';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
@@ -869,7 +870,8 @@ export function OpportunityWorkWorkspace() {
       </div>
     </article>;
   };
-  const title = admin ? 'Gestionar oportunidades' : 'Mis oportunidades asignadas';
+  // The page is called as the menu calls it (review of 10 Nov 2026, V3); whose list it is goes in the line below.
+  const title = 'Oportunidades';
   const item = detail?.item;
   const signal = isSignalKind(item?.kind);
   // The parts of this opportunity. A link to one it does not have (a LinkedIn signal has no «Cómo postular») opens the report.
@@ -930,26 +932,35 @@ export function OpportunityWorkWorkspace() {
         <p className="text-sm text-muted-foreground">Quedan en «Documentos» y la IA los lee. Un ZIP se abre solo.</p>
       </div>
     </div>}
-    {!selected && <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{admin ? 'Hallazgos y oportunidades recibidas, con un equipo y una siguiente acción.' : 'Tus asignaciones, el equipo de trabajo y lo que hay que hacer después.'}</p></div>
-      {/* «Cargar oportunidad» is anyone's (2 Nov 2026): a member who brings one becomes its responsible person. «Tu empresa» stays an administrator's. */}
-      <div className="flex flex-wrap gap-2">{admin ? <Button variant="outline" onClick={openContext}><Settings className="mr-2 h-4 w-4" />Tu empresa</Button> : null}<Button variant={admin ? 'default' : 'outline'} onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setDuplicates([]); setCreateMode('upload'); setPrefill({ status: 'idle' }); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button></div>
-    </header>}
+    {!selected && <PageHeader title={title} description={admin ? 'Hallazgos y oportunidades recibidas, con un equipo y una siguiente acción.' : 'Tus asignaciones, el equipo de trabajo y lo que hay que hacer después.'}
+      actions={<>
+        {/* «Tu empresa», «Qué buscamos» and «Ficha para licitaciones» are the three things an administrator sets up: one menu (V3). */}
+        {admin ? <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline"><Settings className="mr-2 h-4 w-4" aria-hidden="true" />Configurar<ChevronDown className="ml-1.5 h-4 w-4 text-muted-foreground" aria-hidden="true" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuItem onSelect={openContext}>Tu empresa</DropdownMenuItem>
+            {overview?.context && ((overview.context as any).criteria?.postQueries?.length || (overview.context as any).criteria?.keywords?.length) ? <DropdownMenuItem onSelect={openCriteria}>Qué buscamos</DropdownMenuItem> : null}
+            {overview?.context ? <DropdownMenuItem onSelect={() => setProfileOpen(true)}>Ficha para licitaciones</DropdownMenuItem> : null}
+          </DropdownMenuContent></DropdownMenu> : null}
+        {admin && overview?.context && overview.sourceStatus.automation ? <Button variant="outline" disabled={busy || searching.length > 0} onClick={() => void discover()}>{searching.length ? 'Buscando…' : 'Actualizar oportunidades'}</Button> : null}
+        {/* «Cargar oportunidad» is anyone's (2 Nov 2026): a member who brings one becomes its responsible person. */}
+        <Button variant={admin ? 'default' : 'outline'} onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setDuplicates([]); setCreateMode('upload'); setPrefill({ status: 'idle' }); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button>
+      </>} />}
     {problem && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm"><p>{problem}</p><Button size="sm" variant="outline" onClick={() => { setProblem(''); void load(); if (selected) void loadDetail(selected); }}>Reintentar</Button></div>}
     {/* A notice floats at the bottom instead of pushing the page down (it moved «← Oportunidades» ≈46 px). */}
     {feedback && <div role="status" className="fixed inset-x-4 bottom-6 z-50 mx-auto flex w-fit max-w-xl items-center gap-3 rounded-xl border bg-background/95 px-4 py-3 text-sm shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2">
       <span>{feedback}</span>{undo ? <Button type="button" size="sm" variant="ghost" className="h-7 shrink-0" onClick={() => { const action = undo; setFeedback(''); action.run(); }}>{undo.label}</Button> : null}</div>}
     {!overview && !problem && <div role="status" className="rounded-xl border p-8"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando oportunidades…</div>}
     {overview && !selected && <>
-      {/* The offer confirmed is a status, not a task: one quiet line with its three small actions. Without it, asking to confirm it is the card. */}
-      {admin && overview.context && <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><span>Oferta compartida confirmada · Búsqueda diaria {(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} ·</span>
-          <span className="inline-flex items-center gap-2"><span className="tabular-nums">US${cents(overview.budget.spent)} de US${overview.budget.cap} este mes</span>
+      {/* The state of the daily search in one line that opens (V3): what it is doing, and inside, the offer and the month's AI budget. A source that fails has its own line below. */}
+      {admin && overview.context && <details className="group text-xs text-muted-foreground">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+          <span>Búsqueda diaria {(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'}</span>
+          {searching.length ? <span role="status" className="inline-flex items-center gap-1.5">· <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />Buscando en {sourceNames(searching)}…</span> : null}
+          <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" /></summary>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1"><span>La oferta de tu empresa está confirmada ·</span>
+          <span className="inline-flex items-center gap-2"><span className="tabular-nums">La IA lleva US${cents(overview.budget.spent)} de US${overview.budget.cap} este mes</span>
             <span role="progressbar" aria-label="Presupuesto del mes usado" aria-valuemin={0} aria-valuemax={overview.budget.cap} aria-valuenow={Number(overview.budget.spent.toFixed(2))} className="h-1 w-16 overflow-hidden rounded-full bg-muted">
-              <span className={cn('block h-full rounded-full', overview.budget.spent / overview.budget.cap >= 0.9 ? 'bg-destructive' : 'bg-primary/70')} style={{ width: `${Math.min(100, (overview.budget.spent / overview.budget.cap) * 100)}%` }} /></span></span>
-          {searching.length ? <span role="status" className="inline-flex items-center gap-1.5">· <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />Buscando en {sourceNames(searching)}…</span> : null}</div>
-        <div className="-ml-3 flex flex-wrap items-center sm:ml-0">{(overview.context as any).criteria?.postQueries?.length || (overview.context as any).criteria?.keywords?.length ? <Button variant="ghost" size="sm" onClick={openCriteria}>Qué buscamos</Button> : null}
-          <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>Ficha para licitaciones</Button>
-          {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy || searching.length > 0} onClick={() => void discover()}>{searching.length ? 'Buscando…' : 'Actualizar oportunidades'}</Button> : null}</div></div>}
+              <span className={cn('block h-full rounded-full', overview.budget.spent / overview.budget.cap >= 0.9 ? 'bg-destructive' : 'bg-primary/70')} style={{ width: `${Math.min(100, (overview.budget.spent / overview.budget.cap) * 100)}%` }} /></span></span></div></details>}
       {/* Audit O3: above the list only a source that is failing; the full state of the search and «Prepara tu empresa» are in «Tu empresa». */}
       {admin && overview.context && overview.health && overview.health.sources.some(item => item.state !== 'ok') ? <SearchHealthLine health={overview.health} /> : null}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>

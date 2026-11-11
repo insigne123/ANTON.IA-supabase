@@ -41,7 +41,7 @@ export default () => [
   // ─── Administrator ───────────────────────────────────────────────────────────────────────────────────────────────────────
   { id: 'admin-descartar', persona: 'owner', title: 'Administrador: «No es para nosotros» desde el embudo, y deshacerlo', goal: 'Sacar la compra de Maipú de las recomendadas con su motivo, y arrepentirse.', passWrites: [BULK],
     steps: [
-      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); } },
       { say: 'Elijo la etapa Recomendadas', do: async c => { await c.click({ text: 'Recomendadas' }); await c.see('Compra Ágil: personal administrativo de apoyo'); } },
       { say: 'Pulso «No es para nosotros» en la tarjeta de Maipú', do: async c => { await open(c, 'Compra Ágil: personal administrativo de apoyo', 'No es para nosotros'); await c.seeRole('dialog', /No es para nosotros/); } },
       { say: 'Elijo el motivo y archivo', do: async c => {
@@ -64,7 +64,7 @@ export default () => [
         const told = await c.page.getByText(/1 de 2 búsquedas respondieron/i).first().waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
         c.check('dice qué fuente no respondió y por qué', told, await c.page.locator('p', { hasText: 'Última búsqueda' }).first().innerText().catch(() => ''));
       } },
-      { say: 'Pulso «Qué buscamos»', do: async c => { await c.click('Qué buscamos'); await c.seeRole('dialog', /Qué buscamos/); await c.see('Fuentes'); } },
+      { say: 'Pulso «Qué buscamos»', do: async c => { await c.click('Configurar'); await c.click({ role: 'menuitem', name: 'Qué buscamos' }); await c.seeRole('dialog', /Qué buscamos/); await c.see('Fuentes'); } },
       { say: 'Apago LinkedIn', do: async c => {
         await c.click({ role: 'switch', name: 'Publicaciones de LinkedIn' });
         c.check('sin LinkedIn no pide búsquedas de publicaciones', !(await c.has('Búsquedas de publicaciones')));
@@ -117,8 +117,8 @@ export default () => [
   { id: 'admin-preparar-empresa', persona: 'owner', title: 'Administrador: «Prepara tu empresa» lleva a subir los documentos', goal: 'Saber qué falta para postular bien y llegar a donde se sube.',
     steps: [
       { say: 'Abro Oportunidades y entro a «Tu empresa»', do: async c => {
-        await c.go('/opportunities'); await c.see('Gestionar oportunidades');
-        await c.click(/^Tu empresa$/); await c.see('Prepara tu empresa');
+        await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/);
+        await c.click('Configurar'); await c.click({ role: 'menuitem', name: /^Tu empresa$/ }); await c.see('Prepara tu empresa');
         c.check('dice cuántos documentos faltan', await shows(c, /0 de 5\. Falta: Certificado F30,/));
       } },
       { say: 'Pulso «Subir documentos»', do: async c => { await c.click('Subir documentos'); await c.see('Documentos de la empresa'); } },
@@ -142,7 +142,7 @@ export default () => [
     ] },
   { id: 'admin-filtros-url', persona: 'owner', title: 'Administrador: los filtros viven en la dirección y «Atrás» vuelve al anterior', goal: 'Compartir «Por revisar» de la Lista y volver al filtro de antes.', passWrites: [],
     steps: [
-      { say: 'Abro Oportunidades y paso a la Lista', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); await c.click({ role: 'tab', name: 'Lista' }); await c.wait(800); } },
+      { say: 'Abro Oportunidades y paso a la Lista', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); await c.click({ role: 'tab', name: 'Lista' }); await c.wait(800); } },
       { say: 'Elijo «Por revisar»', do: async c => {
         await c.click({ role: 'button', name: /^Por revisar/ }); await c.wait(800);
         const url = new URL(c.page.url());
@@ -155,7 +155,7 @@ export default () => [
     ] },
   { id: 'admin-asignar', persona: 'owner', title: 'Administrador: asignar una recomendada a Diego desde el embudo', goal: 'Que Diego tenga la Compra Ágil de Maipú con su objetivo, sin salir de la lista.', passWrites: [ACTIONS],
     steps: [
-      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); } },
       { say: 'Elijo la etapa Recomendadas', do: async c => { await c.click({ text: 'Recomendadas' }); await c.see('Compra Ágil: personal administrativo de apoyo'); } },
       { say: 'Pulso Asignar en la tarjeta de Maipú', do: async c => { await open(c, 'Compra Ágil: personal administrativo de apoyo', 'Asignar'); await c.seeRole('dialog', /Asignar/); } },
       { say: 'Toco a Diego', do: async c => { await c.click({ role: 'button', name: /Diego Fuentes/ }); } },
@@ -173,7 +173,7 @@ export default () => [
         c.check('Diego es parte del equipo', c.table('opportunity_participants').some(row => row.opportunity_id === opp(9) && row.user_id === '00000000-0000-4000-8000-000000000012'));
         c.check('el objetivo quedó escrito', /precio por persona/.test(workOf(c, 9)?.objective || ''));
         c.check('la próxima acción quedó para mañana', Boolean(workOf(c, 9)?.due_at), `due_at: ${workOf(c, 9)?.due_at}`);
-        c.check('sigue en la lista, sin abrir la oportunidad', await c.has('Gestionar oportunidades'));
+        c.check('sigue en la lista, sin abrir la oportunidad', await c.page.getByRole('heading', { name: /^Oportunidades$/ }).first().isVisible().catch(() => false));
       } },
     ] },
   { id: 'admin-asignar-detalle', persona: 'owner', title: 'Administrador: asignar desde la oportunidad abierta', goal: 'Lo mismo, para quien ya la abrió a leerla.', passWrites: [ACTIONS],
@@ -188,7 +188,7 @@ export default () => [
     ] },
   { id: 'admin-decision', persona: 'owner', title: 'Administrador: responder la decisión que pidió Diego', goal: 'Contestar si se ofrece el módulo opcional.', passWrites: [ACTIONS, NOTIFY],
     steps: [
-      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); } },
       { say: 'Veo en «Novedades» que la decisión espera mi respuesta', do: async c => {
         await c.see('Esperan tu respuesta'); await c.see('Diego pide una decisión');
         c.check('la decisión se dice una vez, no también como novedad', !(await c.page.getByText(/^Decisión pedida:/).first().isVisible().catch(() => false)));
@@ -220,7 +220,7 @@ export default () => [
     ] },
   { id: 'admin-presentada', persona: 'owner', title: 'Administrador: marcar una oportunidad como presentada', goal: 'Que la invitación de aseo pase a «Presentada».', passWrites: [ACTIONS],
     steps: [
-      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); } },
       { say: 'Elijo En preparación', do: async c => { await c.click({ text: 'En preparación' }); await c.see('Invitación a cotizar: aseo industrial para planta de producción'); } },
       { say: 'Abro la invitación de aseo', do: async c => { await open(c, 'Invitación a cotizar: aseo industrial para planta de producción', 'Abrir'); await c.see(/^(Asignar|Cambiar) equipo$/); } },
       { say: 'Cambio la etapa a Presentada', do: async c => {
@@ -326,7 +326,7 @@ export default () => [
   { id: 'miembro-mis-tareas', persona: 'member', title: 'Integrante: «Mis tareas» de todas sus oportunidades, y marcar una hecha', goal: 'Ver qué tiene vencido y despacharlo sin abrir cada licitación.', passWrites: [ACTIONS, NOTIFY],
     steps: [
       { say: 'Abro Oportunidades', do: async c => {
-        await c.go('/opportunities'); await c.see('Mis oportunidades asignadas');
+        await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/);
         c.check('«Mis tareas» dice cuántas tiene', await shows(c, /^Mis tareas\s*3/));
       } },
       { say: 'Pulso «Mis tareas»', do: async c => {
@@ -412,7 +412,7 @@ export default () => [
     ] },
   { id: 'miembro-urgente', persona: 'member', title: 'Integrante: abrir lo más urgente y empezar a gestionarlo', goal: 'Empezar la licitación de guardias, que cierra mañana.', passWrites: [ACTIONS, NOTIFY],
     steps: [
-      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Mis oportunidades asignadas'); } },
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); } },
       { say: 'Veo qué cierra primero', do: async c => {
         const first = await c.page.locator('h3, h2').filter({ hasText: /Servicio de guardias de seguridad/ }).first().isVisible().catch(() => false);
         c.check('lo más urgente se ve sin buscar', first);
@@ -497,7 +497,7 @@ export default () => [
     ] },
   { id: 'miembro-movil', persona: 'member', viewport: 'phone', title: 'Integrante en el móvil: ver y empezar lo urgente', goal: 'Lo mismo que en el computador, con el pulgar.', passWrites: [ACTIONS, NOTIFY],
     steps: [
-      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Mis oportunidades asignadas'); } },
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); } },
       { say: 'Abro la urgente', do: async c => { await open(c, 'Servicio de guardias de seguridad para 12 sucursales', 'Abrir y trabajar'); await c.see('Empezar a gestionarla'); } },
       { say: 'Empiezo a gestionarla', do: async c => {
         await c.click('Empezar a gestionarla'); await c.wait(1200);
@@ -514,7 +514,7 @@ export default () => [
     ] },
   { id: 'admin-movil', persona: 'owner', viewport: 'phone', title: 'Administrador en el móvil: ver el embudo y abrir una', goal: 'Revisar qué hay recomendado desde el teléfono.',
     steps: [
-      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('heading', /^Oportunidades$/); } },
       { say: 'Elijo Recomendadas', do: async c => { await c.click({ text: 'Recomendadas' }); await c.see('Compra Ágil: personal administrativo de apoyo'); } },
       { say: 'Abro la compra de Maipú', do: async c => { await open(c, 'Compra Ágil: personal administrativo de apoyo', 'Abrir'); await c.see('Asignar equipo'); } },
       { say: 'Miro las secciones de la oportunidad', do: async c => {

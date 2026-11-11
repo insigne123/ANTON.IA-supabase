@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
+import { useShellTitle } from '@/lib/shell-title';
+
 import { AppSidebar } from '@/components/app-sidebar';
 import { PageHelpButton } from '@/components/help/PageHelp';
 import Logo from '@/components/logo';
@@ -43,7 +45,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const paletteAccess = useMemo(() => ({ opportunities: access.opportunities, cowork: access.cowork,
     admin: adminUsage || Boolean(organizationId) && (organizationRole === 'owner' || organizationRole === 'admin') }),
   [access.opportunities, access.cowork, adminUsage, organizationId, organizationRole]);
-  const screenLabel = navLabelFor(pathname);
+  // The open page's own title when it gives one («Tu semana»), else the menu entry it belongs to.
+  const pageTitle = useShellTitle();
+  const screenLabel = pageTitle ?? navLabelFor(pathname);
   // Cowork takes the whole height: on a computer its header carries the menu, the help and the theme instead of this bar.
   const immersive = isImmersiveScreen(pathname);
   const chrome = useMemo(() => (immersive ? { start: <SidebarTrigger />, end: <><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></> } : null),

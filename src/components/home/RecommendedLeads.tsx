@@ -123,7 +123,7 @@ export function RecommendedLeads() {
                   {excludedLine(data) ? <span className="text-muted-foreground" title={data.competitorCompanies?.length ? `Competencia: ${data.competitorCompanies.join(', ')}` : undefined}> · se omiten {excludedLine(data)}</span> : null}
                 </p>
                 {batch.length > 0 ? (
-                  <Button size="sm" className="h-8 shrink-0 self-start sm:self-auto" disabled={busy !== null} onClick={() => void lookUp(batch, 'batch')}>
+                  <Button size="sm" variant="outline" className="h-8 shrink-0 self-start sm:self-auto" disabled={busy !== null} onClick={() => void lookUp(batch, 'batch')}>
                     {busy === 'batch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Mail className="h-3.5 w-3.5" aria-hidden="true" />}
                     {busy === 'batch' ? 'Buscando correos…' : emailLookupLabel(batch.length)}
                   </Button>

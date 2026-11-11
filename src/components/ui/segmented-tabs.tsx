@@ -4,6 +4,7 @@
 // scrolls sideways instead of wrapping, and keeps the selected tab in view. The page renders the panel with `tabPanelProps`.
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import { useScrollEdgeFade } from '@/hooks/use-scroll-edge-fade';
 
 /** `after` follows the count: a mark such as a dot that something is late, with its words for a screen reader. */
 export type SegmentedTab<T extends string> = { value: T; label: React.ReactNode; icon?: React.ReactNode; count?: number | null; after?: React.ReactNode };
@@ -46,6 +47,8 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, label, 
     if (start < row.scrollLeft) row.scrollLeft = Math.max(0, start - 16);
     else if (end > row.scrollLeft + row.clientWidth) row.scrollLeft = end - row.clientWidth + 16;
   }, [value]);
+  // On a phone the row scrolls: its edge fades where more tabs wait.
+  const [fadeRef, fade] = useScrollEdgeFade<HTMLDivElement>();
   const keyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
     const next = nextTabIndex(event.key, index, tabs.length);
     if (next === null) return;
@@ -53,7 +56,7 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, label, 
     onChange(tabs[next].value);
     buttons.current.get(tabs[next].value)?.focus();
   };
-  return <div ref={list} role="tablist" aria-label={label} aria-orientation="horizontal"
+  return <div ref={node => { list.current = node; fadeRef(node); }} role="tablist" aria-label={label} aria-orientation="horizontal" style={fade}
     className={cn(LIST[variant], 'overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className)}>
     {tabs.map((tab, index) => {
       const selected = tab.value === value;
