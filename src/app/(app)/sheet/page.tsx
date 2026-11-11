@@ -49,6 +49,7 @@ import { downloadCsv, toCsv } from '@/lib/csv';
 import { exportToPdf, exportToXlsx } from '@/lib/sheet-export';
 import { supabase } from '@/lib/supabase';
 import { loadUnifiedRows, unifiedFailureText } from '@/lib/unified-sheet-data';
+import { onePerPerson } from '@/lib/unified-sheet-people';
 import { defaultColumns } from '@/lib/unified-sheet-storage';
 import type { CustomData } from '@/lib/services/unified-sheet-service';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
@@ -228,7 +229,8 @@ export default function SheetPage() {
         setLoadError('No pudimos cargar la hoja. Revisa tu conexión e inténtalo de nuevo.');
         return;
       }
-      setRows(data.filter((row) => row.kind !== 'opportunity'));
+      // One row per person, the furthest along (V6): someone already in conversation is not also offered «Preparar correo».
+      setRows(onePerPerson(data.filter((row) => row.kind !== 'opportunity')));
       setPartialError(failed.length ? `${unifiedFailureText(failed)} Lo que ves puede estar incompleto.` : null);
     } catch (error) {
       console.error('[sheet] load error', error);

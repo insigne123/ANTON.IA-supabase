@@ -71,9 +71,20 @@ export function TodayPanel({ afterPrimary }: { afterPrimary?: (primary: TodayPri
             <CardDescription className="text-sm">{data.primary.description}</CardDescription>
           </CardHeader>
           <CardContent>
+            {data.primary.choices?.length ? (
+              // Connecting leaves the app for the provider's sign-in: plain links, the first one the main action.
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {data.primary.choices.map((choice, index) => (
+                  <Button key={choice.href} asChild size="lg" variant={index === 0 ? 'default' : 'outline'} className="w-full sm:w-auto">
+                    <a href={choice.href}>{choice.label}<ArrowRight className="h-4 w-4" aria-hidden="true" /></a>
+                  </Button>
+                ))}
+              </div>
+            ) : (
             <Button asChild size="lg" className="w-full sm:w-auto">
               <Link href={data.primary.href}>{data.primary.cta}<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
             </Button>
+            )}
           </CardContent>
         </Card>
 

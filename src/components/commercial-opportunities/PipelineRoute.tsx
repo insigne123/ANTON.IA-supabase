@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { useScrollEdgeFade } from '@/hooks/use-scroll-edge-fade';
 
 export type PipelineStop = { id: string; label: string; hint: string; count: number; urgent?: number; icon: ReactNode };
 
@@ -28,9 +29,11 @@ export function urgentLabel(urgent: number) {
  * stacking six rows.
  */
 export function PipelineRoute({ stops, selected, onSelect }: { stops: PipelineStop[]; selected: string | null; onSelect: (id: string) => void }) {
+  // On a phone the stages are one row that scrolls: its edge fades where more of them wait.
+  const [fadeRef, fade] = useScrollEdgeFade<HTMLOListElement>();
   return (
     <nav aria-label="Etapas de las oportunidades">
-      <ol style={{ '--stops': stops.length } as CSSProperties}
+      <ol ref={fadeRef} style={{ '--stops': stops.length, ...fade } as CSSProperties}
         className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] md:mx-0 md:grid md:overflow-visible md:px-0 md:[grid-template-columns:repeat(var(--stops),minmax(0,1fr))] [&::-webkit-scrollbar]:hidden">
         {stops.map((stop, index) => {
           const active = selected === stop.id;

@@ -1,4 +1,4 @@
-// «Gestionar oportunidades» (the workspace, OPPORTUNITIES_WORKSPACE_ENABLED): what a team has done with the opportunities of
+// «Oportunidades» (the workspace, OPPORTUNITIES_WORKSPACE_ENABLED): what a team has done with the opportunities of
 // fixtures/opportunities.mjs. An administrator (the owner) sees the whole pipeline; a member sees only what was assigned to them
 // (opportunity_participants), as opportunity_workspace_list and opportunity_can_read decide in the database; the stand-ins for
 // those two functions are below and follow the SQL.

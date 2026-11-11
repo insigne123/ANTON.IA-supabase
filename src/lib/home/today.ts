@@ -24,7 +24,8 @@ export type TodayQueueItem = {
 };
 
 /** `queueId`: the pending item the step is, which then leaves the list below it so it is not said twice (APP-01). */
-export type TodayPrimary = { title: string; description: string; href: string; cta: string; queueId?: string };
+/** `choices`: when the step is to pick one of several ways (connect Outlook or Gmail), each with where it starts; the card shows them instead of `cta`. */
+export type TodayPrimary = { title: string; description: string; href: string; cta: string; queueId?: string; choices?: Array<{ label: string; href: string }> };
 
 export type TodayPlan = {
   setup: TodaySetupStep[];
@@ -127,11 +128,19 @@ export function buildTodayPlan(input: TodayInput): TodayPlan {
   return { setup, setupDone, primary, queue: queue.filter(item => item.id !== primary.queueId).slice(0, QUEUE_LIMIT) };
 }
 
+/** Where each mailbox starts its connection, the same links as «Conexiones»: one click less than going there first. */
+export const MAIL_CONNECT_CHOICES = [{ label: 'Conectar Outlook', href: '/api/auth/connect/azure' }, { label: 'Conectar Gmail', href: '/api/auth/connect/google' }];
+
 /** One clear next step: people waiting for an answer beat everything; then what blocks sending; then writing; then finding. */
 function primaryAction(input: TodayInput, setup: TodaySetupStep[], queue: TodayQueueItem[]): TodayPrimary {
   const firstUrgent = queue.find((item) => item.urgent) || queue.find((item) => item.kind === 'reply');
   if (firstUrgent) return { title: firstUrgent.title, description: firstUrgent.description, href: firstUrgent.href, cta: 'Abrir conversación', queueId: firstUrgent.id };
-  const blocking = setup.find((step) => !step.done && (step.id === 'profile' || step.id === 'mail'));
+  const pending = setup.filter((step) => !step.done && (step.id === 'profile' || step.id === 'mail'));
+  // Whoever already keeps contacts needs the mailbox before the profile: without it nothing is sent and no reply is read. In
+  // GrupoExpro 14 people searched and saved without it, and only 3 ever opened the page where it is connected (review of 10 Nov 2026, E2).
+  const mail = pending.find((step) => step.id === 'mail');
+  const blocking = (input.counts.saved + input.counts.withEmail > 0 && mail) || pending[0];
+  if (blocking?.id === 'mail') return { title: blocking.title, description: blocking.description, href: blocking.href, cta: blocking.cta, choices: MAIL_CONNECT_CHOICES };
   if (blocking) return { title: blocking.title, description: blocking.description, href: blocking.href, cta: blocking.cta };
   const commitment = queue.find((item) => item.kind === 'commitment');
   if (commitment) return { title: commitment.title, description: commitment.description, href: commitment.href, cta: 'Abrir conversación', queueId: commitment.id };

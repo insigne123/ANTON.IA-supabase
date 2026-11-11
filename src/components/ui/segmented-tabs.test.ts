@@ -9,7 +9,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const require = createRequire(import.meta.url);
 const compiled = ts.transpileModule(await readFile(new URL('./segmented-tabs.tsx', import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-const dependencies: Record<string, unknown> = { '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') } };
+const dependencies: Record<string, unknown> = {
+  '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
+  // On the server nothing is measured: the row has no fade until the browser says it scrolls.
+  '@/hooks/use-scroll-edge-fade': { useScrollEdgeFade: () => [() => {}, undefined] },
+};
 const exports: any = {};
 new Function('require', 'exports', compiled)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports);
 const { SegmentedTabs, nextTabIndex, tabPanelProps } = exports;

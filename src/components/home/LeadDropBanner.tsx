@@ -63,6 +63,6 @@ export function LeadDropBanner({ quietProfile = false }: { quietProfile?: boolea
       ? `${drop.total === 1 ? 'Un contacto nuevo' : `${drop.total} contactos nuevos`} para ti, con correo verificado. Guardarlos no gasta créditos.`
       : `Te ${drop.left === 1 ? 'falta guardar 1' : `faltan guardar ${drop.left}`} de ${drop.total}.`}</p>;
   return <Banner accent text={text}>
-    <Button asChild size="sm" className="w-full justify-between"><Link href={dropHref(drop.id)}>Ver y guardar<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link></Button>
+    <Button asChild size="sm" variant="outline" className="w-full justify-between"><Link href={dropHref(drop.id)}>Ver y guardar<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link></Button>
   </Banner>;
 }

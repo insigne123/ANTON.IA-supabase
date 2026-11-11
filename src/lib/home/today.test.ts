@@ -104,3 +104,24 @@ test('a first call with its result is a first contact too, for whoever works by 
   assert.equal(step({ saved: 3, withEmail: 2, readyToWrite: 2, sent: 1 }).done, true);
   assert.equal(step({ saved: 0, withEmail: 0, readyToWrite: 0, sent: 0 }).title, 'Haz tu primer contacto');
 });
+
+test('whoever already keeps contacts connects the mailbox before the profile, right from «Hoy» (review of 10 Nov 2026, E2)', () => {
+  // Nothing saved yet: the offer first, as before.
+  const fresh = buildTodayPlan(base({ profile: { companyName: '', hasOffer: false }, mailProviders: [] }));
+  assert.equal(fresh.primary.href, '/profile');
+  assert.equal(fresh.primary.choices, undefined);
+  // Contacts saved, no mailbox and no profile: the mailbox is what stops the work.
+  const searching = buildTodayPlan(base({ profile: { companyName: '', hasOffer: false }, mailProviders: [], counts: { saved: 9, withEmail: 3, readyToWrite: 3, sent: 0 } }));
+  assert.equal(searching.primary.title, 'Conecta tu correo');
+  assert.deepEqual(searching.primary.choices, [
+    { label: 'Conectar Outlook', href: '/api/auth/connect/azure' },
+    { label: 'Conectar Gmail', href: '/api/auth/connect/google' },
+  ], 'the buttons start the connection: no detour through «Conexiones»');
+  // With the mailbox connected the profile is next, with its one button.
+  const connected = buildTodayPlan(base({ profile: { companyName: '', hasOffer: false }, counts: { saved: 9, withEmail: 3, readyToWrite: 3, sent: 0 } }));
+  assert.equal(connected.primary.href, '/profile');
+  assert.equal(connected.primary.choices, undefined);
+  // Someone waiting for an answer still goes first.
+  const waiting = buildTodayPlan(base({ mailProviders: [], counts: { saved: 9, withEmail: 3, readyToWrite: 3, sent: 0 }, replies: [{ id: 'c-1', name: 'Ana Pérez', company: 'Ripley', intent: null, repliedAt: NOW.toISOString() }] }));
+  assert.equal(waiting.primary.cta, 'Abrir conversación');
+});
