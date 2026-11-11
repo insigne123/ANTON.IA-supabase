@@ -47,6 +47,7 @@
     "db:reset": "npx --no-install supabase db reset --local",
     "db:lint": "npx --no-install supabase db lint --local --level error",
     "db:test": "npx --no-install supabase test db --local",
+    "db:parity:update": "node scripts/schema-parity.mjs",
     "db:types": "npx --no-install supabase gen types typescript --local > src/lib/database.types.ts",
     "db:push:dry-run": "node scripts/supabase-nonprod.mjs db push --linked --dry-run",
     "db:push:nonprod": "node scripts/supabase-nonprod.mjs db push --linked --yes",

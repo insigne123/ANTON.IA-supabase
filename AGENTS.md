@@ -24,6 +24,7 @@ La direccion visual de esta app es la que resulte mas intuitiva y util para el o
 - Antes de escribir, revisa el SQL y ejecuta las validaciones proporcionales disponibles. No repitas suites ya aprobadas si el cambio posterior no afecta su superficie.
 - Aplica una sola migracion pequena y forward-only por vez. Verifica inmediatamente esquema, RLS y logs antes de continuar con app, Functions o feature flags.
 - Nunca ejecutes `reset`, seeds ni suites de prueba contra produccion.
+- Despues de aplicar una migracion en produccion, y en cada despliegue, ejecuta alli `supabase/schema-parity/production-check.sql` (solo lectura): debe devolver cero filas. Si la migracion cambia el esquema, actualiza la huella con `npm run db:parity:update` sobre la base local.
 - Si falta autenticacion del MCP, usa `opencode mcp auth supabase-production`; nunca guardes tokens en el repositorio.
 
 ## Modelos de IA
