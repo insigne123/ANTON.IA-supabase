@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import * as crypto from 'node:crypto';
 import ts from 'typescript';
 import {normalizeLinkedinProfileUrl} from '@/lib/linkedin-url';
+import {profileTargetId} from '@/lib/server/profile-target';
 import {hybridFieldPlan} from '@/lib/server/microworlds/fulfillment';
 import type {CachedContact} from '@/lib/server/microworlds/contracts';
 import * as allocation from '@/lib/apollo-credit-allocation';
@@ -31,6 +32,10 @@ function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boole
     'node:crypto':crypto,
     'next/server':{NextResponse:{json:(body:unknown,init?:ResponseInit)=>Response.json(body,init)}},
     '@/lib/linkedin-url':{normalizeLinkedinProfileUrl},
+    '@/lib/server/profile-target':{profileTargetId},
+    // No match is held in these runs: a refusal as someone else is covered in identity-reviews.test.ts and apollo.test.ts.
+    '@/lib/server/identity-reviews':{holdIdentityReview:async()=>null,publicIdentityReview:(row:unknown)=>row,decideIdentityReview:async()=>({review:null,profile:null})},
+    '@/lib/server/apollo-provider/apollo':{heldMatchOf:()=>null},
     '@/lib/server/lead-identity':{applyEnrichedIdentity:async()=>{},identityFromProvider:(value:any)=>value},
     '@/lib/server/antonia-event-ledger':{safeAppendAntoniaEvent:async()=>{}},
     '@/lib/server/request-auth':{requireSessionOrTrustedInternalRequest:async()=>({source:'session',user:{id:'me',email:'me@demo.test'},organizationId:'org'}),requestAuthErrorResponse:()=>null},

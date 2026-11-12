@@ -14,6 +14,7 @@ import type {
 import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { linkedinProfilesMatch, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { identityReviewFrom, type IdentityReviewView } from '@/lib/search/identity-review';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { enrichmentRefusalMessage } from '@/lib/apollo-credit-allocation';
 import {readCachedAuthScope} from '@/lib/auth-scope-cache';
@@ -203,7 +204,9 @@ export async function searchLinkedInProfileLead(
   const result = await requestProfile({ revealEmail, revealPhone });
   let enriched = result.enriched?.[0] as any;
   if (enriched?.errorCode === 'APOLLO_PERSON_IDENTITY_MISMATCH') {
-    throw new ProfileSearchProblemError('identity_mismatch', 'No pudimos confirmar que el perfil devuelto corresponda a la URL solicitada. No mostraremos datos de otra persona.');
+    // Whom Apollo found waits for the person to say whether it is the same person (IdentityReviewCard).
+    throw new ProfileSearchProblemError('identity_mismatch', 'No pudimos confirmar que el perfil devuelto corresponda a la URL solicitada. No mostraremos datos de otra persona.',
+      identityReviewFrom(enriched.identityReview));
   }
   if (enriched?.linkedinUrl && !linkedinProfilesMatch(enriched.linkedinUrl, linkedinUrl)) {
     throw new ProfileSearchProblemError('identity_mismatch', 'El proveedor devolvió un perfil distinto al solicitado. No mostraremos datos de otra persona.');
@@ -453,3 +456,28 @@ export type {
   LeadsSearchParams,
   LinkedInProfileSearchRequest,
 };
+
+
+const IDENTITY_REVIEW_PATH = '/api/leads/identity-reviews';
+
+/** Whom Apollo found for a refused profile search and the AI's verdict on it (asked once, on the first look). */
+export async function fetchIdentityReview(id: string, signal?: AbortSignal): Promise<IdentityReviewView> {
+  const res = await authenticatedApiFetch(`${IDENTITY_REVIEW_PATH}/${encodeURIComponent(id)}`, { method: 'GET', signal });
+  const body = await res.json().catch(() => null);
+  const review = identityReviewFrom(body?.review);
+  if (!res.ok || !review) throw new Error(String(body?.error || 'IDENTITY_REVIEW_UNAVAILABLE'));
+  return review;
+}
+
+/**
+ * «Es la misma persona» (same) or «No es» (different). With «same», the search's result: the person Apollo found with the contact it
+ * already gave, as a profile search shows it.
+ */
+export async function decideIdentityReview(id: string, decision: 'same' | 'different', requestedLinkedinUrl: string): Promise<{ review: IdentityReviewView | null; lead: Lead | null }> {
+  const res = await authenticatedApiFetch(`${IDENTITY_REVIEW_PATH}/${encodeURIComponent(id)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(String(body?.error || 'IDENTITY_REVIEW_UNAVAILABLE'));
+  return { review: identityReviewFrom(body?.review), lead: body?.profile ? toProfileLead(body.profile, requestedLinkedinUrl) : null };
+}

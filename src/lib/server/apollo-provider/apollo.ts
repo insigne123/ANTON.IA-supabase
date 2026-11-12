@@ -18,6 +18,33 @@ type ApolloRequestOptions = {
   acceptErrorPayload?: boolean;
 };
 
+/**
+ * The person Apollo answered when the match was refused as someone else (url_differs, url_missing, slug_name_conflict): what a search
+ * result shows of them, and the contact Apollo already charged for. Carried on the error, never enumerable, so a log of the error never
+ * prints it; the enrichment keeps it for the person who searched to review (src/lib/server/identity-reviews.ts).
+ */
+export type HeldApolloMatch = {
+  candidate: {
+    apolloId: string | null; fullName: string | null; firstName: string | null; lastName: string | null; title: string | null;
+    headline: string | null; linkedinUrl: string | null; organizationName: string | null; organizationDomain: string | null;
+    organizationIndustry: string | null; photoUrl: string | null; city: string | null; state: string | null; country: string | null;
+    seniority: string | null;
+  };
+  contact: { email: string | null; emailStatus: string | null; primaryPhone: string | null; phoneNumbers: unknown[] };
+  /** Apollo's own certainty about its match (high, medium, low), when it said it. */
+  confidence: string | null;
+};
+
+export function heldMatchOf(error: unknown): HeldApolloMatch | null {
+  const held = error && typeof error === 'object' ? (error as { heldMatch?: unknown }).heldMatch : null;
+  return held && typeof held === 'object' ? held as HeldApolloMatch : null;
+}
+
+export function holdMatchOn<T extends Error>(error: T, held: HeldApolloMatch | null): T {
+  if (held) Object.defineProperty(error, 'heldMatch', { value: held, enumerable: false, configurable: true });
+  return error;
+}
+
 export class ApolloGatewayError extends Error {
   constructor(
     readonly status: 429 | 502 | 503 | 504,
@@ -721,8 +748,23 @@ async function matchApolloPerson(input: EnrichmentInput, apiKey: string, config:
     const requested = normalizeLinkedinProfileUrl(input.lead.linkedinUrl);
     // Apollo's own certainty (high, medium, low), kept with the refusal so a too-strict check can be told from a real one.
     const confidence = firstText(asRecord(payload.person)?.match_confidence)?.toLowerCase().replace(/[^a-z]/g, '').slice(0, 12);
-    const refused = (reason: string) => new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH',
-      confidence ? `${reason}:${confidence}` : reason);
+    // Whom Apollo found, held with the refusal: the person who searched can still say it is the same person.
+    const held: HeldApolloMatch = {
+      candidate: {
+        apolloId: lead.apollo_id || lead.source_provider_id || null, fullName: lead.name || null, firstName: lead.first_name || null,
+        lastName: lead.last_name || null, title: lead.title || null, headline: lead.headline || null, linkedinUrl: lead.linkedin_url || null,
+        organizationName: lead.organization_name || null, organizationDomain: lead.organization_domain || null,
+        organizationIndustry: lead.organization_industry || null, photoUrl: lead.photo_url || null, city: lead.city || null,
+        state: lead.state || null, country: lead.country || null, seniority: lead.seniority || null,
+      },
+      contact: {
+        email: input.revealEmail ? lead.email || null : null, emailStatus: input.revealEmail ? lead.email_status || null : null,
+        primaryPhone: input.revealPhone ? lead.primary_phone || null : null, phoneNumbers: input.revealPhone ? phoneNumbers : [],
+      },
+      confidence: confidence || null,
+    };
+    const refused = (reason: string) => holdMatchOn(new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH',
+      confidence ? `${reason}:${confidence}` : reason), reason === 'url_unreadable' ? null : held);
     // Same slug ignoring case and accents; without a returned address, only a personal slug fully contained in the
     // returned name vouches for the person.
     const sameProfile = lead.linkedin_url

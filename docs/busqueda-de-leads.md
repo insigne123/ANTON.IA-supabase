@@ -66,21 +66,21 @@ La misma consulta de la línea base: proporción de callbacks de perfil por `ter
 
 ## 12 de noviembre de 2026: cargos por lo que significan y «0 = todos»
 
-**Por qué:** Brysa buscó «coordinador de gestión de riesgo en incendio» en Colbún y no apareció nadie. Sí apareció cuando escribió el cargo tal como lo tenía la persona en LinkedIn: «Coordinador Gestión Riesgo Incendios».
+**Por qué:** un cliente buscó «coordinador de gestión de riesgo en incendio» en una empresa de energía y no apareció nadie. Sí apareció cuando escribió el cargo tal como lo tenía la persona en LinkedIn: «Coordinador Gestión Riesgo Incendios».
 
 **Cómo busca Apollo un cargo** (probado con su búsqueda gratuita):
 - encuentra a la persona si su título tiene las palabras pedidas seguidas y escritas igual;
 - las tildes y el plural cuentan;
 - sus «cargos similares» son sinónimos de cargos comunes y no cubren otra forma de escribir un cargo poco común.
 
-| Pedido a Apollo en Colbún | Personas |
+| Pedido a Apollo en esa empresa | Personas |
 |---|---|
 | «coordinador gestion riesgo incendio» | 0 |
 | «coordinador incendios» | 0 |
 | «gestion riesgo» (sin tilde) | 0 |
-| «incendios» | 1 (él) |
-| «riesgo incendios» | 1 (él) |
-| «riesgo» o «riesgos» | 13, él primero |
+| «incendios» | 1 (la persona buscada) |
+| «riesgo incendios» | 1 (la persona buscada) |
+| «riesgo» o «riesgos» | 13, la persona buscada primero |
 
 **Qué cambia** (`src/lib/server/search/title-ai.ts`, `src/lib/server/search/company-people-ai.ts` y `src/app/api/leads/search/route.ts`):
 1. **Búsqueda en una empresa** (contactos de una empresa marcada en «Filtros», o la pestaña «Empresa»):
@@ -104,3 +104,22 @@ La misma consulta de la línea base: proporción de callbacks de perfil por `ter
 5. **«0 = todos»:** en «Máximo de resultados» y en «Contactos por empresa», 0 trae a todos, hasta 1.000 personas (10 páginas de la búsqueda gratuita). Cada página pedida a Apollo es de 100 personas, para que ninguna se repita entre páginas.
 
 **Pruebas:** `title-ai.test.ts`, `company-people-ai.test.ts` y las páginas de Apollo en `apollo.test.ts`.
+
+## 12 de noviembre de 2026: «¿Es la misma persona?»
+
+**Por qué:** en 30 días, 14 búsquedas por perfil terminaron en «El proveedor devolvió a otra persona» porque Apollo respondió con otra dirección de LinkedIn (`url_differs`), casi siempre con certeza alta. Muchas veces era la misma persona, que había cambiado su dirección. El crédito ya estaba cobrado y la pantalla no mostraba nada.
+
+**Qué cambia** (`src/lib/server/identity-reviews.ts`, `src/app/api/leads/identity-reviews/[id]/route.ts` y `src/components/search/IdentityReviewCard.tsx`):
+1. **Se guarda a quién encontró Apollo.** Cuando responde con otra dirección, la app guarda por 7 días su nombre, cargo, empresa, foto y dirección de LinkedIn en `apollo_identity_reviews` (solo el servidor la lee, y solo para quien buscó). El correo queda cifrado y no llega a la pantalla.
+2. **La pantalla pregunta «¿Es la misma persona?».** Muestra a la persona encontrada y dos enlaces: el perfil que pegó el usuario y el que encontró Apollo.
+3. **La IA aconseja** (Claude Haiku). Compara:
+   - los nombres que se leen en las dos direcciones y el nombre devuelto;
+   - el cargo y la empresa devueltos con lo que la web muestra del perfil pegado (una búsqueda `site:linkedin.com/in/<dirección>`);
+   - la certeza que informó Apollo.
+
+   Responde «misma», «probable», «dudosa» u «otra», con hasta cinco señales. El correo nunca va al modelo. Si la IA falla, una regla local compara los nombres.
+4. **La persona decide.**
+   - «Es la misma persona»: se muestra el contacto que ya estaba pagado, sin otro crédito, y la dirección pegada queda asociada a esa persona de Apollo. La próxima búsqueda de esa dirección ya no pregunta.
+   - «No es»: el contacto guardado se borra.
+
+**Pruebas:** `identity-reviews.test.ts`, el caso nuevo de `apollo.test.ts` y el recorrido `scripts/visual-audit/journeys/perfil-linkedin.mjs`.

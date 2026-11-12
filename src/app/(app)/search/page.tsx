@@ -50,6 +50,8 @@ import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { companyProfileService } from '@/lib/services/company-profile-service';
 import { FilterRelaxHint } from '@/components/search/SearchGuidance';
 import { ProfileSearchProblemAlert } from '@/components/search/ProfileSearchProblemAlert';
+import { IdentityReviewCard } from '@/components/search/IdentityReviewCard';
+import type { IdentityReviewView } from '@/lib/search/identity-review';
 import {
   ProfileSearchProblemError, profileProblemFromMessage, profileSearchMessage, profileSearchPersonHint, profileUrlProblem,
   type ProfileSearchAction, type ProfileSearchMessage,
@@ -134,6 +136,8 @@ export default function SearchPage() {
   const [profileOnlyRetry, setProfileOnlyRetry] = useState(false);
   // A LinkedIn profile search problem with its next step (src/lib/search/profile-search-outcome.ts).
   const [profileProblem, setProfileProblem] = useState<ProfileSearchMessage | null>(null);
+  // A profile Apollo answered with someone at another LinkedIn address: the person decides whether it is the same person.
+  const [identityReview, setIdentityReview] = useState<IdentityReviewView | null>(null);
   // The person a failed profile search was looking for, shown while searching for them by company.
   const [companySearchHint, setCompanySearchHint] = useState('');
   const { toast } = useToast();
@@ -714,6 +718,7 @@ export default function SearchPage() {
     companyPeopleAbortRef.current?.abort();
     setError('');
     setProfileProblem(null);
+    setIdentityReview(null);
     setCompanySearchHint('');
     setFilterStep('filters');
     setCompanies([]);
@@ -773,6 +778,7 @@ export default function SearchPage() {
     }
     setError('');
     setProfileProblem(null);
+    setIdentityReview(null);
     if (field === 'searchMode' && value !== 'company_name') setCompanySearchHint('');
     setProfileOnlyRetry(false);
     if (field === 'searchMode') {
@@ -1214,6 +1220,7 @@ export default function SearchPage() {
     setPageIndex(0);
     setError('');
     setProfileProblem(null);
+    setIdentityReview(null);
     setProfileOnlyRetry(false);
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
@@ -1285,6 +1292,7 @@ export default function SearchPage() {
       const problem = error instanceof ProfileSearchProblemError ? error.problem : profileProblemFromMessage(error?.message);
       if (error.name !== 'AbortError' && (filters.searchMode === 'linkedin_profile' || problem === 'session_expired' || problem === 'organization_access')) {
         setProfileProblem(profileSearchMessage(problem, { url: filters.linkedinUrl }));
+        setIdentityReview(error instanceof ProfileSearchProblemError && problem === 'identity_mismatch' ? error.review ?? null : null);
       } else if (error.name !== 'AbortError') {
         // Leads Finder answers in words meant for people; Apollo's codes go through the usual translation.
         const friendlyMessage = error instanceof LeadsFinderClientError ? error.message : getFriendlySearchErrorMessage(error.message);
@@ -1338,6 +1346,7 @@ export default function SearchPage() {
     companyPeopleAbortRef.current?.abort();
     setError('');
     setProfileProblem(null);
+    setIdentityReview(null);
     setFilterStep('filters');
     setCompanies([]);
     setCompanyWindows({});
@@ -1368,6 +1377,8 @@ export default function SearchPage() {
       }).finally(() => window.location.assign('/login?next=%2Fsearch'));
     } else if (action === 'fix_url') {
       setProfileProblem(null);
+      setIdentityReview(null);
+    setIdentityReview(null);
       window.requestAnimationFrame(() => {
         const input = document.getElementById('linkedinUrl') as HTMLInputElement | null;
         input?.focus();
@@ -2503,7 +2514,23 @@ export default function SearchPage() {
                   : 'Aquí aparecerán las personas que encuentres.'}
         </p>
       </div>
-      {filters.searchMode === 'linkedin_profile' && profileProblem ? (
+      {filters.searchMode === 'linkedin_profile' && identityReview ? (
+        <IdentityReviewCard
+          key={identityReview.id}
+          review={identityReview}
+          onAccepted={(lead) => {
+            setIdentityReview(null);
+            setProfileProblem(null);
+            applySearchResult({
+              count: 1, leads_count: 1, leads: [lead], search_mode: 'linkedin_profile', enrichment_requested: true,
+              profile_tracking_ids: [lead.id], profile_pending: false,
+            } as LeadSearchResponse, 'linkedin_profile', { revealEmail: Boolean(lead.email) || filters.revealEmail, revealPhone: false });
+            toast({ title: 'Listo', description: `Te mostramos a ${lead.name || 'la persona'} con el contacto que ya habías pagado.` });
+          }}
+          onRejected={() => setIdentityReview(null)}
+          onDismiss={() => { setIdentityReview(null); setProfileProblem(null); }}
+        />
+      ) : filters.searchMode === 'linkedin_profile' && profileProblem ? (
         <ProfileSearchProblemAlert message={profileProblem} busy={isLoading} onAction={handleProfileProblemAction} onDismiss={() => setProfileProblem(null)} />
       ) : null}
       {searchError}

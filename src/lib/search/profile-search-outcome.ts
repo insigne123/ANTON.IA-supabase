@@ -1,4 +1,5 @@
 import { classifyLinkedinInput, getLinkedinProfileDisplayName } from '@/lib/linkedin-url';
+import type { IdentityReviewView } from '@/lib/search/identity-review';
 
 /**
  * What went wrong in a LinkedIn profile search, and what the person can do next. Every failure used to end in one generic
@@ -32,7 +33,7 @@ export type ProfileSearchMessage = {
 };
 
 export class ProfileSearchProblemError extends Error {
-  constructor(readonly problem: ProfileSearchProblem, message?: string) {
+  constructor(readonly problem: ProfileSearchProblem, message?: string, readonly review?: IdentityReviewView | null) {
     super(message || problem);
     this.name = 'ProfileSearchProblemError';
   }

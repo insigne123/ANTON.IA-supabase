@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { applyEnrichedIdentity, identityFromProvider } from '@/lib/server/lead-identity';
 
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { profileTargetId } from '@/lib/server/profile-target';
+import { decideIdentityReview, holdIdentityReview, publicIdentityReview } from '@/lib/server/identity-reviews';
 import {
   APOLLO_REQUESTED_FIELDS,
   type ApolloRequestedField,
@@ -19,6 +21,7 @@ import {
   assertApolloEnrichmentConfigured,
   submitApolloEnrichment,
 } from '@/lib/server/apollo-enrichment';
+import { heldMatchOf } from '@/lib/server/apollo-provider/apollo';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import {
   claimEnrichmentQuotaOperation,
@@ -139,10 +142,6 @@ function splitFullName(value: unknown) {
     firstName: parts[0] || '',
     lastName: parts.slice(1).join(' '),
   };
-}
-
-function profileTargetId(userId: string, organizationId: string, linkedinUrl: string) {
-  return `profile:${createHash('sha256').update(`${organizationId}\n${userId}\n${linkedinUrl}`).digest('hex')}`;
 }
 
 function parseFlag(raw: unknown, fallback: boolean) {
@@ -1312,6 +1311,23 @@ export async function POST(request: NextRequest) {
         }
         const partial=target.hybridHint?canonicalTargetResponse({row:await loadPersistedTarget({tableName,targetId:target.id,userId,organizationId}),
           target,revealEmail:revealEmail.value,revealPhone:revealPhone.value}):{};
+        // A profile search Apollo answered with someone at another LinkedIn address: whom it found waits for the person who searched to
+        // say whether it is the same person (identity-reviews.ts). Best effort: without it the search ends as before.
+        const held = error instanceof ApolloEnrichmentError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH' ? heldMatchOf(error) : null;
+        const requestedProfile = tableName === 'people_search_leads' ? normalizeLinkedin(target.lead.linkedinUrl) : '';
+        const reviewRow = held && requestedProfile ? await holdIdentityReview(getSupabaseAdminClient() as any, {
+          organizationId, userId, requestedLinkedinUrl: requestedProfile, held, reason: error instanceof ApolloEnrichmentError ? error.reason : null,
+        }).catch(() => null) : null;
+        // The address already resolved to this same Apollo person for this person (a match before, or «Es la misma persona»): it is
+        // not asked again, the answer stands as the search's result.
+        const known = reviewRow && held && target.boundPersonId && held.candidate.apolloId === target.boundPersonId
+          ? await decideIdentityReview(getSupabaseAdminClient() as any, { id: reviewRow.id, organizationId, userId, decision: 'same' })
+            .then((decided) => decided.profile).catch(() => null)
+          : null;
+        if (known) {
+          enriched.push({ ...known, clientRef: target.clientRef });
+          continue;
+        }
         enriched.push({
           id: target.id,
           clientRef: target.clientRef,
@@ -1320,6 +1336,7 @@ export async function POST(request: NextRequest) {
           enrichmentStatus: 'failed',
           errorCode: error instanceof ApolloEnrichmentError ? error.code : 'APOLLO_ENRICHMENT_FAILED',
           ...partial,
+          ...(reviewRow ? { identityReview: publicIdentityReview(reviewRow) } : {}),
         });
       }
     }
