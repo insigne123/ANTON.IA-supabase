@@ -806,3 +806,50 @@ test('a LinkedIn phone lookup that finds nobody, or whose phone step answers ano
     assert.equal(calls, 2);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('«0 = todos» reads the next pages of a hundred until it is enough or Apollo has no more; without it, one page as before', async () => {
+  const requests: URL[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    const page = Number(url.searchParams.get('page'));
+    const perPage = Number(url.searchParams.get('per_page'));
+    const start = (page - 1) * perPage;
+    return Response.json({ people: Array.from({ length: Math.max(0, Math.min(perPage, 250 - start)) }, (_, index) => (
+      { id: `p${start + index}`, first_name: 'Ana', title: 'Jefe de Emergencias', organization: { name: 'Co' } }
+    )) });
+  };
+  try {
+    const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
+    const pages = (urls: URL[]) => urls.map((url) => [url.searchParams.get('page'), url.searchParams.get('per_page')]);
+    const all = validateLeadSearchInput({ provider: 'apollo', search_mode: 'batch', titles: ['Jefe de Emergencias'], all_results: true }, config);
+    assert.ok(all.ok);
+    if (!all.ok) return;
+    assert.equal(all.value.maxResults, 1_000);
+    const everyone = await executeProviderLeadSearch(all.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
+    // The third page comes short: Apollo has no more, and nobody is read twice.
+    assert.deepEqual(pages(requests), [['1', '100'], ['2', '100'], ['3', '100']]);
+    assert.equal(everyone.leads.length, 250);
+    assert.equal(new Set(everyone.leads.map((lead: { id: string }) => lead.id)).size, 250);
+
+    // A number that is not a multiple of a hundred still reads pages of a hundred, and keeps only what was asked.
+    requests.length = 0;
+    const some = validateLeadSearchInput({ provider: 'apollo', search_mode: 'batch', titles: ['Jefe de Emergencias'], all_results: true, max_results: 150 }, config);
+    assert.ok(some.ok);
+    if (!some.ok) return;
+    const part = await executeProviderLeadSearch(some.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
+    assert.deepEqual(pages(requests), [['1', '100'], ['2', '100']]);
+    assert.deepEqual(part.leads.map((lead: { id: string }) => lead.id), Array.from({ length: 150 }, (_, index) => `p${index}`));
+
+    requests.length = 0;
+    const capped = validateLeadSearchInput({ provider: 'apollo', search_mode: 'batch', titles: ['Jefe de Emergencias'], max_results: 1_000 }, config);
+    assert.ok(capped.ok);
+    if (!capped.ok) return;
+    assert.equal(capped.value.maxResults, 100);
+    await executeProviderLeadSearch(capped.value, config, { APOLLO_API_KEY: 'apollo-test-key' });
+    assert.deepEqual(pages(requests), [['1', '100']]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -147,6 +147,10 @@ export const N8NRequestItemSchema = z.object({
   enrich: z.boolean().optional().default(false),
 
   max_results: z.number().int().positive().max(5000).optional(),
+  /** «0 = todos»: up to ALL_SEARCH_RESULTS instead of one page. */
+  all_results: z.boolean().optional(),
+  /** Titles by what they mean (src/lib/server/search/title-ai.ts); false asks Apollo with the titles as written, as before. */
+  ai_titles: z.boolean().optional(),
 }).superRefine((value, ctx) => {
   const hasTitles = Array.isArray(value.titles) ? value.titles.length > 0 : value.titles.trim().length > 0;
   if (!hasTitles
@@ -247,6 +251,10 @@ export const CompanyPeopleSearchRequestSchema = z.object({
   perPage: perPageField,
   exclude_person_ids: z.array(z.string()).optional().default([]),
   excludePersonIds: z.array(z.string()).optional().default([]),
+  /** «0 = todos»: everyone at the company that matches, up to ALL_SEARCH_RESULTS, in one answer. */
+  all_results: z.boolean().optional(),
+  /** Titles by what they mean (src/lib/server/search/title-ai.ts); false asks Apollo with the titles as written, as before. */
+  ai_titles: z.boolean().optional(),
 }).superRefine((value, ctx) => {
   if (!value.organization_id && !value.organizationId && !value.selected_organization_id) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'organization_id es obligatorio', path: ['organization_id'] });
@@ -274,6 +282,10 @@ export const CompanyNameSearchRequestSchema = z.object({
   selected_organization_website: z.string().trim().optional(),
   selected_organization_industry: z.string().trim().optional(),
   selected_organization_size: z.number().nullable().optional(),
+  /** «0 = todos»: up to ALL_SEARCH_RESULTS instead of one page. */
+  all_results: z.boolean().optional(),
+  /** Titles by what they mean (src/lib/server/search/title-ai.ts); false asks Apollo with the titles as written, as before. */
+  ai_titles: z.boolean().optional(),
 }).superRefine((value, ctx) => {
   const domains = normalizeDomainList([
     ...(value.organization_domains || []),

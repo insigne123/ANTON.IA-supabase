@@ -1,3 +1,4 @@
+import { ALL_SEARCH_RESULTS } from '@/lib/search/limits';
 import { z } from 'zod';
 import type { GatewayConfig, LeadProvider } from './gateway';
 
@@ -212,6 +213,8 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
     // The BFF historically accepts up to 5,000. Keep that contract bounded,
     // then clamp provider work to the backend's stricter runtime cap below.
     max_results: z.number().int().min(1).max(5_000).optional(),
+    // «0 = todos» in the search: up to ALL_SEARCH_RESULTS, over the runtime cap of one page.
+    all_results: z.boolean().optional().default(false),
   }).strict().superRefine((input, context) => {
     if (input.search_mode === 'company_name'
       && !input.company_name
@@ -283,7 +286,9 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       personLocations: input.person_locations,
       employeeRanges: [...new Set([...input.employee_range, ...input.employee_ranges])],
       includeSimilarTitles: input.include_similar_titles,
-      maxResults: Math.min(input.max_results ?? input.per_page ?? 50, config.maxSearchResults),
+      maxResults: input.all_results
+        ? Math.min(input.max_results ?? ALL_SEARCH_RESULTS, ALL_SEARCH_RESULTS)
+        : Math.min(input.max_results ?? input.per_page ?? 50, config.maxSearchResults),
       page: boundedPage(input.page, 1),
       perPage: boundedPerPage(input.per_page ?? input.max_results, input.search_mode === 'organization_people' ? 50 : 25),
       organizationId: input.organization_id || input.selected_organization_id,

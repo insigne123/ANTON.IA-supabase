@@ -118,6 +118,7 @@ export function normalizeLeadForUI(raw: Lead, options?: {
     emailEnrichment: revealEmail && raw.email ? { enriched: true } : undefined,
     // Audit B2: Apollo says before any credit is spent whether it holds an email; «false» is kept too, so the list can say so.
     hasEmailOnFile: (raw as { has_email?: unknown }).has_email === true ? true : (raw as { has_email?: unknown }).has_email === false ? false : undefined,
+    ...titleMatchOf((raw as { title_match?: unknown }).title_match),
     // Only what the provider sent: the «probabilidad de calce» reads it, and a missing field stays out of the lead.
     ...(raw.headline?.trim() ? { headline: raw.headline.trim() } : {}),
     ...(raw.seniority?.trim() ? { seniority: raw.seniority.trim() } : {}),
@@ -358,4 +359,9 @@ export function hasBatchSearchFilters(filters: LeadSearchFilters) {
 export function emailFirst<T extends { email?: string | null; hasEmailOnFile?: boolean }>(leads: T[]): T[] {
   const rank = (lead: T) => (lead.email || lead.hasEmailOnFile === true ? 0 : lead.hasEmailOnFile === false ? 2 : 1);
   return leads.map((lead, index) => ({ lead, index })).sort((a, b) => rank(a.lead) - rank(b.lead) || a.index - b.index).map(item => item.lead);
+}
+
+/** The class of the title the search sends (`title_match`), when it is one the list shows. */
+function titleMatchOf(value: unknown): { titleMatch?: 'exact' | 'similar' | 'related' } {
+  return value === 'exact' || value === 'similar' || value === 'related' ? { titleMatch: value } : {};
 }

@@ -2,6 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse, after } from "next/server";
 import { normalizeDomainList } from "@/lib/domain";
+import { classifyTitles, expandTitleVariants, rankByTitle } from '@/lib/server/search/title-ai';
+import { companyPeopleByTitle } from '@/lib/server/search/company-people-ai';
 import {
   CompanyFilterSearchRequestSchema,
   CompanyNameSearchRequestSchema,
@@ -392,6 +394,74 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
   );
 }
 
+/**
+ * A search by company name with titles, by what the titles mean (title-ai.ts): the company found once (as before: several matches ask to
+ * choose one), then its people as companyPeopleByTitle reads them, exact first. Null when that cannot be done (Apollo failing, or domains
+ * typed with no Apollo company behind them): the search as before. The company search is never asked twice.
+ */
+async function companyNameByTitle(payload: Record<string, any>, asked: string[], limit: number, all: boolean) {
+  let organizationId = String(payload.selected_organization_id || '').trim();
+  let found: any = null;
+  if (!organizationId) {
+    // Only the company (one person read): its people come by title below.
+    const answer = await runLeadSearchInProcess({ ...payload, titles: [], all_results: false, max_results: 1 });
+    if (!answer.ok) return null;
+    if (answer.json?.requires_organization_selection || !Array.isArray(answer.json?.leads)) return answer.json;
+    found = answer.json;
+    organizationId = String(found?.selected_organization?.id || '').trim();
+    // Nobody there: said as is. Domains typed without a company: the search as before (by domain, no company search).
+    if (!organizationId) return found.leads.length ? null : found;
+  }
+  const answer = await companyPeopleByTitle({
+    base: {
+      provider: payload.provider, user_id: payload.user_id, search_mode: 'organization_people', organization_id: organizationId,
+      seniorities: payload.seniorities || [], person_locations: payload.person_locations || [], include_similar_titles: payload.include_similar_titles ?? true,
+    },
+    titles: asked, page: 1, perPage: limit, all, excludeIds: [], run: runLeadSearchInProcess,
+    cacheKey: JSON.stringify(['company_name', organizationId, asked.map((title) => title.toLowerCase()), payload.seniorities || []]),
+  });
+  if (!answer.ok) return null;
+  return {
+    ...answer.json, search_mode: 'company_name', company_name: payload.company_name || payload.selected_organization_name,
+    ...(found?.selected_organization ? { selected_organization: found.selected_organization } : {}),
+    organization_search_credits: Number(found?.organization_search_credits ?? 0),
+  };
+}
+
+/** A search answer from a list already built here (companyPeopleByTitle), shaped as callLeadSearchService answers, with each title's class. */
+function searchResponse(json: any, meta?: Record<string, unknown>) {
+  const normalized = normalizeLeadSearchResponse(json);
+  const matches = new Map<string, unknown>((Array.isArray(json?.leads) ? json.leads : []).map((lead: any) => [String(lead?.id || ''), lead?.title_match]));
+  const leads = normalized.leads.map((lead: any) => (matches.get(String(lead.id)) ? { ...lead, title_match: matches.get(String(lead.id)) } : lead));
+  return NextResponse.json({
+    ...normalized, leads, ...pickLeadSearchMeta(json),
+    ...(json?.title_matching ? { title_matching: json.title_matching } : {}),
+    ...(json?.title_strategy ? { title_strategy: json.title_strategy } : {}),
+    ...(Number.isFinite(Number(json?.people_scanned)) ? { people_scanned: Number(json.people_scanned) } : {}),
+    ...(meta || {}),
+  }, { status: 200 });
+}
+
+/**
+ * The people of a search by filters ordered by how their title matches the asked one (exact, similar, related), without those whose title has
+ * nothing to do with it. When the model and the local rule keep nobody, the answer as Apollo gave it.
+ */
+async function rankResponseByTitle(response: NextResponse, asked: string[]) {
+  try {
+    const body = await response.clone().json();
+    const leads = Array.isArray(body?.leads) ? body.leads : [];
+    if (!leads.length) return response;
+    const ranked = rankByTitle(leads, await classifyTitles(asked, leads.map((lead: any) => String(lead?.title || ''))));
+    if (!ranked.length) return response;
+    const out = NextResponse.json({ ...body, leads: ranked, count: ranked.length, title_matching: 'ai', title_hidden: leads.length - ranked.length },
+      { status: response.status });
+    response.headers.forEach((value, key) => { if (key.toLowerCase() !== 'content-length') out.headers.set(key, value); });
+    return out;
+  } catch {
+    return response;
+  }
+}
+
 export async function GET() {
   return NextResponse.json(
     { error: 'PROFILE_RECORD_FETCH_RETIRED', message: 'La lectura directa de registros del gateway fue retirada; usa la búsqueda in-process.' },
@@ -596,7 +666,7 @@ async function executeSearchPOST(req: NextRequest) {
           per_page: perPage,
           exclude_person_ids: excludePersonIds,
         };
-        let response = await callLeadSearchService(backendPayload, {
+        const searchMeta = {
           search_mode: 'company_people',
           organization_id: organizationIdValue,
           page,
@@ -606,7 +676,22 @@ async function executeSearchPOST(req: NextRequest) {
           providerDefault: providerDecision.defaultProvider,
           providerForcedReason: providerDecision.forcedProviderReason,
           fallbackApplied: false,
-        });
+        };
+        // Titles by what they mean (title-ai.ts): everyone at the company, each title classified, exact first; «0 = todos», everyone.
+        // When Apollo fails on the first page, the search as before.
+        const aiTitles = titles.length > 0 && peopleReq.ai_titles !== false;
+        let response: NextResponse;
+        if (aiTitles || peopleReq.all_results) {
+          const { titles: _titles, page: _page, per_page: _perPage, exclude_person_ids: _excluded, ...base } = backendPayload;
+          const answer = await companyPeopleByTitle({
+            base, titles: aiTitles ? titles : [], page, perPage, all: Boolean(peopleReq.all_results), excludeIds: excludePersonIds,
+            run: runLeadSearchInProcess,
+            cacheKey: JSON.stringify([organizationId, organizationIdValue, aiTitles ? titles.map((title) => title.toLowerCase()) : [], seniorities, personLocations]),
+          });
+          response = answer.ok ? searchResponse(answer.json, searchMeta) : await callLeadSearchService(backendPayload, searchMeta);
+        } else {
+          response = await callLeadSearchService(backendPayload, searchMeta);
+        }
         response = await excludeSavedSearchResults(response, organizationId!);
         if (mirrorDomain && response.ok) {
           try {
@@ -708,7 +793,7 @@ async function executeSearchPOST(req: NextRequest) {
           selected_organization_id: String(companyReq.selected_organization_id || '').trim() || undefined,
           selected_organization_name: String(companyReq.selected_organization_name || '').trim() || undefined,
         };
-        const response = await callLeadSearchService(companyPayload, {
+        const companyMeta = {
           search_mode: 'company_name',
           company_name: companyPayload.company_name || companyPayload.selected_organization_name,
           providerRequested: providerDecision.requestedProvider,
@@ -716,7 +801,14 @@ async function executeSearchPOST(req: NextRequest) {
           providerDefault: providerDecision.defaultProvider,
           providerForcedReason: providerDecision.forcedProviderReason,
           fallbackApplied: false,
-        });
+        };
+        const askedTitles = companyPayload.titles.map((title: unknown) => String(title || '').trim()).filter(Boolean);
+        const companyAnswer = askedTitles.length && companyReq.ai_titles !== false
+          ? await companyNameByTitle(companyPayload, askedTitles, companyReq.max_results ?? 25, Boolean(companyReq.all_results))
+          : null;
+        const response = companyAnswer
+          ? searchResponse(companyAnswer, companyMeta)
+          : await callLeadSearchService({ ...companyPayload, ...(companyReq.all_results ? { all_results: true } : {}) }, companyMeta);
         response.headers.set('x-search-mode', 'company_name');
         response.headers.set('x-provider-used', providerDecision.provider);
         response.headers.set('x-quota-count', String(quotaReservation.quota.count));
@@ -786,14 +878,20 @@ async function executeSearchPOST(req: NextRequest) {
       provider: providerDecision.provider,
       userId,
     });
+    // Titles by what they mean (title-ai.ts): the ways people write the asked title go to Apollo with it, and what comes back is
+    // classified and ordered, exact first. Without the model, the titles as written, as before.
+    const askedTitles = [...newPayload.titles];
+    const aiTitles = askedTitles.length > 0 && currentParams.ai_titles !== false;
+    if (aiTitles) newPayload.titles = await expandTitleVariants(askedTitles).catch(() => askedTitles);
 
-    const response = await callLeadSearchService(newPayload, {
+    let response = await callLeadSearchService(newPayload, {
       providerRequested: providerDecision.requestedProvider,
       providerUsed: providerDecision.provider,
       providerDefault: providerDecision.defaultProvider,
       providerForcedReason: providerDecision.forcedProviderReason,
       fallbackApplied,
     });
+    if (aiTitles && response.ok) response = await rankResponseByTitle(response, askedTitles);
     response.headers.set('x-provider-used', providerDecision.provider);
     response.headers.set('x-quota-count', String(quotaReservation.quota.count));
     response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));

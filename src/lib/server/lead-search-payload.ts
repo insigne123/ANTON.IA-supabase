@@ -28,5 +28,6 @@ export function buildBatchLeadSearchPayload(
     include_similar_titles: currentParams.include_similar_titles,
     employee_ranges: currentParams.employee_ranges,
     max_results: currentParams.max_results,
+    ...(currentParams.all_results ? { all_results: true } : {}),
   };
 }

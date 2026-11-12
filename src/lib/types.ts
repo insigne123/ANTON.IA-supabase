@@ -44,6 +44,8 @@ export interface ApifyLead {
 
 // Lo que tu UI consume
 export interface Lead {
+  /** How the title matches the searched one (src/lib/server/search/title-ai.ts): exact, similar or related. */
+  titleMatch?: 'exact' | 'similar' | 'related';
   id: string;
   userId?: string;
   organizationId?: string;
