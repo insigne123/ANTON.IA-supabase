@@ -28,3 +28,20 @@ El camino anterior (`native-research-report-synthesis/v8` y `v9`) dejó 118 info
 1. **Investigar mejor antes que escribir mejor.** Los avisos de cobertura (sin evidencia pública de la persona en 8 de 25, sitio oficial que responde 403 en 4 de 25, contenido genérico en 4 de 25) coinciden con lo que mide `docs/senales-de-la-investigacion-al-correo.md`: lo que separa un buen correo de uno flojo es la evidencia. El investigador de páginas con la web de Claude (PR 497, apagado) lee las páginas desde la infraestructura de Anthropic, no desde la nube de la app, que algunos sitios bloquean con 403; es una hipótesis que conviene probar con una cuenta antes de encender.
 2. **Decir por qué un borrador no sale.** Con 40 reintentos seguidos sobre una investigación, la persona debería ver «la evidencia de esta empresa no alcanza» y no un botón que reintenta.
 3. **Volver a investigar** los leads de las 17 investigaciones con cifras cortadas, cuando se despliegue el PR 508.
+
+## 12 de noviembre: por qué los primeros correos no salían, y el arreglo
+
+En los 30 días al 12 de noviembre, de 56 generaciones de primer correo se guardaron 14. Las otras 42 eran de seis investigaciones (cinco de una misma organización), y el código casi siempre era `unsupported_material_claim`: 118 veces, contra 4 de `personalization_invalid`. Los seguimientos y los cierres sí salían (26 de 30 y 13 de 19).
+
+Repetimos en local dos de esas investigaciones con el código de producción y el modelo real, sin base de datos ni envíos, y con los datos fuera del repositorio. Antes del arreglo se guardó 1 borrador de 7. Después, 14 de 14, casi todos al primer intento. Las dos fallaban por lo mismo: **el control de negaciones y condiciones miraba la evidencia completa**. Si la evidencia tenía un «no», un «sin» o un «podría» en cualquier parte, rechazaba toda oración que compartiera dos palabras con ella y no lo repitiera:
+
+- «organización **no** gubernamental (ONG)»: el «no» es parte del nombre, y cada oración sobre las campañas de la ONG se rechazaba por no decir «no»;
+- «a primera vista el caso **podría** parecer una cuestión procesal»: un comentario del autor, al lado del hecho («la Corte declaró inconstitucional…»), obligaba a la oración sobre el fallo a decir «podría».
+
+El mensaje que recibía el reintento, «La redacción elimina una condición o negación material de la evidencia», no decía qué oración ni qué parte de la evidencia. Por eso el reintento repetía el error y la persona volvía a intentar sin éxito.
+
+Lo que cambió (`src/lib/server/draft-preflight-v2.ts`, `src/lib/server/native-drafts.ts`):
+
+1. **La negación o la condición cuenta solo sobre lo que gobierna.** Se mira la cláusula de la evidencia que la oración usa, y solo las palabras que siguen al «no», «sin», «planea», «prevé» o «podría». Rechazar sigue siendo la regla cuando la oración afirma eso sin el calificativo: «Acme no opera sedes regionales» frente a «Acme opera sedes regionales». No cuentan «no obstante», «sin embargo» ni «no solo». Un plan dicho en futuro («abrirá una sede») sigue siendo un plan.
+2. **El mensaje dice qué oración y qué cláusula chocan**, y qué palabra conservar. Así el reintento puede corregirlo.
+3. **Si después del reintento lo único que falla es una o dos oraciones con una cifra o una afirmación sin respaldo, el borrador se guarda sin ellas**, siempre que lo que queda pase todos los controles de nuevo. Quitar una oración nunca agrega una afirmación. Si la cifra está en el asunto o en la oración en que se apoya el correo, el borrador sigue bloqueado. El intento queda registrado como válido con el código `claim_sentence_removed`.

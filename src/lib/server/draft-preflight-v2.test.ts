@@ -700,6 +700,49 @@ test('conditional and negative evidence cannot become an accomplished positive c
   }
 });
 
+test('a qualifier counts only over the words it governs: a name that carries a «no», an aside and a connector stop nothing', () => {
+  const claims = (statement: string, sentence: string) => {
+    const context = draftContextFixture();
+    context.evidence[0].statement = statement;
+    const output = validOutput();
+    return validateDraftPreflightV2(context, { ...output, body: output.body.replace('Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.', sentence) })
+      .issues.filter((issue) => issue.code === 'unsupported_material_claim');
+  };
+  // «organización no gubernamental (ONG)»: the «no» belongs to the name, and a sentence about the campaigns never asserts the contrary
+  // (a real research of 11 Nov 2026 turned back every first email for it).
+  assert.deepEqual(claims('Acme acompaña a cualquier organización no gubernamental (ONG) con campañas de operaciones para reducir trabajo manual.', 'Acme acompaña campañas de operaciones para reducir trabajo manual.'), []);
+  // An author's aside («a primera vista… podría parecer») hedges itself, not the fact next to it (a real research of 9 Nov 2026)…
+  const aside = 'Acme redujo el trabajo manual de sus equipos de operaciones en 2025. A primera vista el caso podría parecer una cuestión de software.';
+  assert.deepEqual(claims(aside, 'Acme redujo el trabajo manual de sus equipos de operaciones en 2025.'), []);
+  // …but asserting what it hedges drops the hedge, and the message names the clause so the retry can keep it.
+  const asserted = claims(aside, 'En Acme el caso fue una cuestión de software y de operaciones.');
+  assert.equal(asserted.length, 1);
+  assert.match(asserted[0].message, /podría parecer una cuestión de software/);
+  assert.match(asserted[0].message, /Conserva «podria»/);
+  // «No obstante» is a connector.
+  assert.deepEqual(claims('No obstante la temporada, Acme redujo el trabajo manual en operaciones.', 'Acme redujo el trabajo manual en operaciones.'), []);
+  // A plan said in the future is still a plan; said as done it is not.
+  assert.deepEqual(claims('Acme planea abrir una sede regional.', 'Acme abrirá una sede regional.'), []);
+  assert.equal(claims('Acme planea abrir una sede regional.', 'Acme abrió una sede regional.').length, 1);
+  assert.equal(claims('Acme no opera sedes regionales en el norte.', 'Acme opera sedes regionales en el norte.').length, 1);
+});
+
+test('a draft turned back only for a sentence the evidence does not back can go without it; one with any other issue cannot', async () => {
+  const { removableClaimSentencesV2, withoutSentencesV2 } = await import('./draft-preflight-v2');
+  const context = draftContextFixture();
+  const output = validOutput();
+  const body = output.body.replace('reducir trabajo manual.\n\nEn Northstar', 'reducir trabajo manual. Acme opera 16 sedes regionales.\n\nEn Northstar');
+  const result = validateDraftPreflightV2(context, { ...output, body });
+  const sentences = removableClaimSentencesV2(result.issues);
+  assert.deepEqual(sentences, ['Acme opera 16 sedes regionales.']);
+  const shorter = withoutSentencesV2(body, sentences!);
+  assert.equal(shorter, output.body);
+  assert.equal(validateDraftPreflightV2(context, { ...output, body: shorter }).valid, true);
+  // In the subject it cannot be taken out, and another issue next to it needs the draft written again.
+  assert.equal(removableClaimSentencesV2(validateDraftPreflightV2(context, { ...output, subject: 'Acme opera 16 sedes regionales' }).issues), null);
+  assert.equal(removableClaimSentencesV2(validateDraftPreflightV2(context, { ...output, subject: '{{company.name}}', body }).issues), null);
+});
+
 test('compact structure is a warning, not a waiver of factual or CTA gates', () => {
   const context = draftContextFixture();
   const output = validOutput();
