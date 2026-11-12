@@ -220,3 +220,42 @@ test('six a day with the model down: the customer\'s roles by their words, as a 
   assert.deepEqual(tables.lead_drops[0].items.map((item: any) => item.company).sort(), ['Falabella', 'Paris', 'Tottus'], 'everyone with an email the team does not have');
   assert.ok(tables.lead_drops[0].items.every((item: any) => !item.track));
 });
+
+test('each contact is researched before it is written: the brief is kept, its facts reach the Writer, and a research that fails leaves the contact as it came', async () => {
+  clearTitleAiCache();
+  const generate = fakeGenerate;
+  const { client, tables } = memory(seed(), unique);
+  // Two contacts, chosen by the words of their title (the finder's model is not what this test is about).
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0, generate: (async () => { throw new Error('down'); }) as any,
+    plan: { size: 2, weekdays: [1, 2, 3, 4, 5] } });
+  writerPrompts.length = 0;
+  const asked: any[] = [];
+  const research = async (input: any) => {
+    asked.push(input);
+    if (input.contact.company !== 'Falabella') throw new Error('the web is down');
+    return { domain: 'falabella.com', brief: { company: 'Vende vestuario y hogar en tiendas y en línea en Chile, Perú y Colombia.',
+      news: { text: 'Abrirá un centro de distribución en Santiago', date: '3 nov 2026', source: 'Diario Financiero', url: 'https://diario.example/falabella-cd' },
+      fit: 'Un centro nuevo suma cientos de ingresos que revisar antes de la temporada alta.', role: 'Responde por contratar a tiempo y sin sorpresas.',
+      opener: 'Pregúntale cómo van a revisar los antecedentes de quienes entren al centro nuevo.' } };
+  };
+  await writeDrop(client, tables.lead_drops[0], { generate, now: TUESDAY, research });
+  assert.equal(asked.length, 2, 'both contacts at once');
+  assert.deepEqual(asked[0].contact, { title: 'Gerente de Personas', company: asked[0].contact.company, domain: null, country: null, industry: 'Retail' });
+  assert.equal(asked[0].seller, null, 'a test user without a real id has no offer to read: the brief then says the company and its news only');
+  const items = tables.lead_drops[0].items as any[];
+  const falabella = items.find(item => item.company === 'Falabella');
+  const other = items.find(item => item.company !== 'Falabella');
+  assert.equal(falabella.brief.news.source, 'Diario Financiero');
+  assert.equal(falabella.summary, 'Vende vestuario y hogar en tiendas y en línea en Chile, Perú y Colombia.');
+  assert.deepEqual(falabella.research.slice(0, 2), ['Vende vestuario y hogar en tiendas y en línea en Chile, Perú y Colombia.', 'Abrirá un centro de distribución en Santiago (Diario Financiero, 3 nov 2026).']);
+  assert.equal(falabella.domain, 'falabella.com');
+  assert.equal(falabella.website, 'https://falabella.com');
+  assert.equal(other.brief, undefined);
+  assert.equal(other.domain, null);
+  assert.ok(other.draft && falabella.draft, 'both are written');
+  // The Writer opens with what the research found, and reads the company's facts.
+  const forFalabella = writerPrompts.find(prompt => JSON.stringify(prompt.observations).includes('Falabella'));
+  assert.equal(forFalabella.brief.angle, 'Para abrir: Pregúntale cómo van a revisar los antecedentes de quienes entren al centro nuevo. Por qué le sirve: Un centro nuevo suma cientos de ingresos que revisar antes de la temporada alta.');
+  assert.match(JSON.stringify(forFalabella.observations), /Abrirá un centro de distribución en Santiago \(Diario Financiero, 3 nov 2026\)/);
+  assert.equal(writerPrompts.find(prompt => !JSON.stringify(prompt.observations).includes('Falabella')).brief.angle, null);
+});

@@ -4,6 +4,7 @@ import { dayInZone } from '@/lib/admin/chile-time';
 import { DEFAULT_DROP_PLAN, dropDay } from '@/lib/lead-drops';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
 import { dropPlans, dropsEnabled, dropsMonthlyUsd, monthSpend, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
+import { dropBriefEnabled, researchDropContact } from '@/lib/server/lead-drop-research';
 import { canEmailEveryone, isTestAddress } from '@/lib/server/self-email';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
@@ -56,6 +57,8 @@ export async function POST(request: Request) {
   if (!dropDay(now) && ![...plans.values()].some(plan => dropDay(now, plan))) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
   const generate = (options: Parameters<Parameters<typeof writeDrop>[2]['generate']>[0]) =>
     generateStructured({ ...options, allowDefaultModelFallback: false, maxAttempts: 1 });
+  // The short research of each contact, from the web, before its emails are written (LEAD_DROPS_BRIEF=off leaves it out).
+  const research = dropBriefEnabled() ? (input: Parameters<typeof researchDropContact>[0]) => researchDropContact(input, { generate, now }) : undefined;
   const result = { written: 0, planned: 0, empty: 0, failed: 0, resting: 0, spentUsd: 0 };
 
   const writePending = async () => {
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
       let end = start + 1, contacts = rows[start].items.length;
       while (end < rows.length && end - start < PARALLEL && contacts + rows[end].items.length <= ROUND_CONTACTS) contacts += rows[end++].items.length;
       await Promise.all(rows.slice(start, end).map(async row => {
-        try { await writeDrop(admin, row, { generate, now, parallel: Math.max(3, Math.min(DROP_PARALLEL, row.items.length)) }); result.written++; }
+        try { await writeDrop(admin, row, { generate, now, research, parallel: Math.max(3, Math.min(DROP_PARALLEL, row.items.length)) }); result.written++; }
         catch { result.failed++; }
       }));
       start = end;

@@ -3,6 +3,7 @@ import { generateStructured } from '@/ai/openai-json';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { requireHomeAuth } from '@/lib/server/home-auth';
 import { LeadDropsError, pullDrop } from '@/lib/server/lead-drops';
+import { dropBriefEnabled, researchDropContact } from '@/lib/server/lead-drop-research';
 import { requestAuthErrorResponse } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
@@ -20,7 +21,9 @@ export async function POST(request: Request) {
     const { organizationId, user } = await requireHomeAuth(request);
     const generate = (options: Parameters<Parameters<typeof pullDrop>[2]['generate']>[0]) =>
       generateStructured({ ...options, allowDefaultModelFallback: false, maxAttempts: 1 });
-    const drop = await pullDrop(getSupabaseAdminClient(), { organizationId, userId: user.id }, { now: new Date(), generate });
+    const now = new Date();
+    const drop = await pullDrop(getSupabaseAdminClient(), { organizationId, userId: user.id }, { now, generate,
+      research: dropBriefEnabled() ? input => researchDropContact(input, { generate, now }) : undefined });
     return NextResponse.json(drop, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     return requestAuthErrorResponse(error) || handleAuthError(error instanceof LeadDropsError ? new AuthError(error.message, error.status) : error);

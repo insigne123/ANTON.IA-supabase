@@ -99,6 +99,19 @@ export type DropItem = {
   track?: 'explore';
   /** What the person said of this contact, with their reason: the finder learns from it. */
   feedback?: { useful: boolean; reason?: string | null; at: string };
+  /** The short research of the contact, read from the web before writing to it (server/lead-drop-research.ts). */
+  brief?: DropBrief;
+};
+/**
+ * Five lines for whoever sells, each one sentence: what the company does, what is happening there now (with the date and the source
+ * the search gave), why what the team sells helps it, what that role cares about and how to open. Any may be missing.
+ */
+export type DropBrief = {
+  company: string | null;
+  news: { text: string; date: string | null; source: string | null; url: string } | null;
+  fit: string | null;
+  role: string | null;
+  opener: string | null;
 };
 export type DropFollowUp = { day: number; subject: string; body: string };
 

@@ -23,6 +23,7 @@ import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { dropLessons, finderSearchTerms, scoreDropCandidates, type FinderLessons } from '@/lib/server/lead-drop-finder';
+import { briefNewsLine, type DropResearch, type DropResearchInput } from '@/lib/server/lead-drop-research';
 import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
 import { coworkVoicePass } from '@/lib/server/cowork/writer-voice';
@@ -546,9 +547,11 @@ const addressed = (name: string) => isMaskedName(name) ? name.split(' ')[0] : na
 async function draftFor(item: DropItem, userContext: Record<string, unknown> | null, generate: Generate, now: Date, ownSamples: string[] = []) {
   const name = addressed(item.name);
   const who = `${name}${item.title ? `, ${item.title}` : ''}${item.company ? ` en ${item.company}` : ''}`;
+  // What the research found to open with and why the offer helps this company: the Writer's angle, so the email is about them.
+  const angle = [item.brief?.opener ? `Para abrir: ${item.brief.opener}` : null, item.brief?.fit ? `Por qué le sirve: ${item.brief.fit}` : null].filter(Boolean).join(' ').slice(0, 400) || null;
   const brief: CoworkWriteBrief = {
     kind: 'sequence', recipients: [name], objective: `Primer correo de prospección para ${who}, y tres seguimientos si no responde.`,
-    angle: null, tone: null, steps: DROP_SEQUENCE_STEPS, notes: null, findings: null,
+    angle, tone: null, steps: DROP_SEQUENCE_STEPS, notes: null, findings: null,
   };
   const observations = [{ action: 'leads.recommend', input: '', result: { leads: [{ name, company: item.company || '', title: item.title, industry: item.industry,
     companySize: item.size, city: item.city, companyFacts: item.research } ] } }];
@@ -590,11 +593,14 @@ async function draftFor(item: DropItem, userContext: Record<string, unknown> | n
 }
 
 /**
- * Completes a pending drop: what each company does, why each contact is worth it for what the person sells (adviseOn) and a
- * first email with three follow-ups for each. A draft or advice that fails leaves the contact without it.
+ * Completes a pending drop: the short research of each contact (deps.research: what the company does and what is happening there now,
+ * from the web), why each contact is worth it for what the person sells (adviseOn) and a first email with three follow-ups for each,
+ * written with what the research found. A research, a draft or advice that fails leaves the contact without it.
  */
 export async function writeDrop(client: Client, drop: { id: string; organization_id: string; user_id: string; items: PendingItem[] }, deps: {
   generate: Generate; now: Date; parallel?: number;
+  /** The research of one contact (researchDropContact with the web); without it, the contacts are written as the search brought them. */
+  research?: (input: DropResearchInput) => Promise<DropResearch | null>;
 }) {
   const scope = { organizationId: drop.organization_id, userId: drop.user_id };
   const [userContext, about, ownSamples] = await Promise.all([
@@ -603,12 +609,36 @@ export async function writeDrop(client: Client, drop: { id: string; organization
     // «Tu voz»: the emails the person chose as samples of how they write, else their organization's voice examples.
     voiceSamplesFor({ ...scope, client }).catch(() => [] as string[]),
   ]);
+  // Every contact is researched at once: two searches, a page and a small model each, before anything is written about them.
+  const found = new Map<string, DropResearch>();
+  if (deps.research) {
+    const seller = userContext ? { company: userContext.companyName, offer: userContext.offer, services: userContext.services, proofPoints: userContext.proofPoints, sector: userContext.sector } : null;
+    await Promise.all(drop.items.map(async item => {
+      const result = await deps.research!({ organizationId: scope.organizationId, seller,
+        contact: { title: item.title, company: item.company, domain: item.domain, country: item.country, industry: item.industry } }).catch(() => null);
+      if (result) found.set(item.leadId, result);
+    }));
+  }
   // The description stays out of the saved drop: what reaches the person is its summary.
-  const items: DropItem[] = drop.items.map(({ description: _description, ...item }) => ({
-    ...item, summary: about.get(item.leadId) ?? null, research: about.has(item.leadId) ? [about.get(item.leadId)!, ...item.research].slice(0, 3) : item.research,
-  }));
+  const items: DropItem[] = drop.items.map(({ description: _description, ...item }) => {
+    const research = found.get(item.leadId);
+    const summary = research?.brief.company ?? about.get(item.leadId) ?? null;
+    const facts = [summary, research?.brief.news ? briefNewsLine(research.brief.news) : null, ...item.research].filter((fact): fact is string => Boolean(fact));
+    return {
+      ...item, summary, research: facts.filter((fact, index) => facts.indexOf(fact) === index).slice(0, 3),
+      ...(research ? { brief: research.brief } : {}),
+      // The site the research told from the company's name, when the search brought none.
+      ...(research?.domain && !item.domain ? { domain: research.domain, website: item.website ?? `https://${research.domain}` } : {}),
+    };
+  });
+  // The advice reads what the research found of each company, as it read the search's description.
+  const advised = drop.items.map(item => {
+    const brief = found.get(item.leadId)?.brief;
+    const known = [brief?.company, brief?.news ? briefNewsLine(brief.news) : null].filter(Boolean).join(' ');
+    return known && !item.description ? { ...item, description: known } : item;
+  });
   const parallel = Math.max(1, deps.parallel ?? 3);
-  const [advice] = await Promise.all([adviseOn(drop.items, userContext, deps.generate), (async () => {
+  const [advice] = await Promise.all([adviseOn(advised, userContext, deps.generate), (async () => {
     for (let start = 0; start < items.length; start += parallel) {
       await Promise.all(items.slice(start, start + parallel).map(async item => {
         const written = await draftFor(item, userContext as Record<string, unknown> | null, deps.generate, deps.now, ownSamples).catch(() => null);
@@ -706,7 +736,8 @@ const STALLED_MS = 4 * 60_000;
  * from «Hoy») answers «pending» instead of searching again: ask again. An «empty» one says why (emptyReason); without a
  * customer nothing is searched nor kept, so it is made once there is one.
  */
-export async function pullDrop(client: Client, scope: DropScope, deps: { now: Date; generate: Generate; search?: Search }) {
+export async function pullDrop(client: Client, scope: DropScope, deps: { now: Date; generate: Generate; search?: Search;
+  research?: (input: DropResearchInput) => Promise<DropResearch | null> }) {
   const today = dayInZone(deps.now);
   const teamPlan = await dropPlanFor(client, scope.organizationId);
   const read = async () => {
@@ -758,7 +789,7 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
     planned = true;
   }
   if (drop.status === 'pending' && drop.items.length && (planned || stalled(drop))) {
-    await writeDrop(client, drop, { generate: deps.generate, now: deps.now });
+    await writeDrop(client, drop, { generate: deps.generate, now: deps.now, research: deps.research, parallel: Math.max(3, Math.min(6, drop.items.length)) });
     drop = (await read()) || drop;
   }
   return { id: drop.id, status: drop.status, reason: drop.status === 'empty' ? emptyReason(drop.error, deps.now, teamPlan) : null };

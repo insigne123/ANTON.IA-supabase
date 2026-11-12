@@ -80,6 +80,29 @@ Con un contacto al día alcanzaba con tomar al primero cuyo cargo tuviera las pa
 - **Escribir tarda más:** un envío de 6 contactos son 24 correos. La corrida escribe los 6 a la vez y junta en una ronda hasta 8 contactos.
 - **Modelo:** `LEAD_DROPS_FINDER_MODEL` (por defecto, el de `LEAD_DROPS_RESEARCH_MODEL` o Haiku 5.5).
 
+### La investigación corta de cada contacto (`src/lib/server/lead-drop-research.ts`)
+
+La búsqueda gratuita de Apollo trae nombre, cargo y empresa, y nada más: ni rubro, ni sitio, ni descripción. Por eso los contactos llegaban sin una palabra sobre la empresa y sus correos se leían iguales para todos («Cuando una emergencia detiene una operación…»). Desde el 12 de noviembre, antes de escribir, cada contacto se investiga:
+
+1. **Dos búsquedas en la web** (Serper): la empresa, para encontrar su sitio y qué hace, y sus noticias. Se busca por el nombre sin su forma legal («Minera Andina», no «Minera Andina S.A.»).
+2. **La portada de su sitio**, cuando el sitio se reconoce por el nombre de la empresa entre los resultados. Directorios, redes sociales y diarios no cuentan como sitio.
+3. **Cinco líneas** que escribe un modelo chico (Claude Haiku), cada una de una frase, pensadas para leerse en un correo:
+   - qué hace la empresa;
+   - qué le está pasando ahora, con la fecha y el medio;
+   - por qué le sirve lo que vende el equipo;
+   - qué le importa a ese cargo;
+   - cómo abrir la conversación.
+
+- **La fecha y el medio de la noticia son los de la búsqueda, nunca del modelo.** El modelo solo elige cuál noticia sirve y dice qué pasó.
+- **Una noticia cuenta solo si habla de la empresa:** su nombre de una palabra, sus dos primeras palabras juntas o una primera palabra propia. «Cumbre andina de turismo» no es de Minera Andina. Las de más de 18 meses se descartan.
+- **Una línea con una cifra que la evidencia no trae se descarta**, igual que en las razones.
+- **Los correos usan lo encontrado:** qué hace la empresa y la noticia van como hechos de la empresa a la Redactora, y cómo abrir y por qué le sirve van como su ángulo. Las razones (`adviseOn`) también leen lo encontrado.
+- **Queda guardado** en `brief` de cada contacto. Si se reconoció el sitio y la búsqueda no lo traía, también quedan `domain` y `website`.
+- **Sin evidencia no hay investigación** y el contacto sigue como antes. Una búsqueda o un modelo que falla nunca detiene el envío.
+- **Costo:** dos búsquedas de Serper, una página y una llamada a Haiku por contacto; unos 3 a 5 segundos, todos los contactos de un envío a la vez.
+- **Apagar:** `LEAD_DROPS_BRIEF=off`.
+- **Medido el 12 de noviembre** con noticias públicas reales de una distribuidora de gas y un equipo que vende servicios de emergencia: eligió la noticia de su planta nueva de biogás (con su fecha y su medio), y propuso abrir preguntando cómo preparan la respuesta ante emergencias en esa planta.
+
 Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el calce, la redacción y el envío de la mañana son iguales con Apollo.
 
 **Por qué martes, miércoles y viernes por defecto:** son días de aviso. Los avisos van de martes a viernes porque el lunes es del informe semanal, y la regla es un correo por día. Desde el 12 de noviembre los días son de cada equipo (`organizations.lead_drop_weekdays`); `DROP_WEEKDAYS` (`src/lib/lead-drops.ts`) es solo el valor por defecto.
@@ -193,7 +216,7 @@ La preparación de la mañana es solo para quien recibirá el correo. Los demás
 - **Plan de Apify:** el de la cuenta es el gratuito, de US$5 al mes, y lo comparten Oportunidades y la búsqueda híbrida. Para todos los usuarios hace falta subir el tope y, probablemente, un plan pagado: es una aprobación pendiente.
 - **Modelos:**
   - la Redactora usa el modelo de Cowork (`COWORK_WRITER_MODEL` o `COWORK_MODEL`);
-  - el resumen de la empresa usa `LEAD_DROPS_RESEARCH_MODEL` (Haiku 5.5 por defecto).
+  - el resumen de la empresa, las razones y la investigación corta usan `LEAD_DROPS_RESEARCH_MODEL` (Haiku 5.5 por defecto).
 - **Apagar:** `LEAD_DROPS_ENABLED=off` lo detiene.
 
 ## Probar con una cuenta de prueba
@@ -219,6 +242,7 @@ La migración `20261020180000_lead_drops.sql` crea la tabla `lead_drops`, solo p
 | --- | --- |
 | Reglas (puro): días, tamaño, reparto, correo | `src/lib/lead-drops.ts` |
 | Buscador con IA para equipos con varios contactos al día | `src/lib/server/lead-drop-finder.ts` |
+| Investigación corta de cada contacto | `src/lib/server/lead-drop-research.ts` |
 | Preparación, redacción, guardado y PDF; desde «Hoy» (`pullStatus`, `pullDrop`, `homeDrop`) | `src/lib/server/lead-drops.ts` |
 | En el aviso de la mañana | `src/lib/daily-alerts.ts`, `src/lib/server/daily-alerts.ts` |
 | Adjuntos del correo | `src/lib/server/self-email.ts` |
