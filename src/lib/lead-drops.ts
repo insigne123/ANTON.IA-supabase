@@ -18,13 +18,30 @@ import { displayLeadName } from '@/lib/lead-name';
 export const DROP_SIZE = 1;
 /** Tuesday, Wednesday and Friday, in Chile: days of the morning alert, which carries it (Monday is the weekly report's). */
 export const DROP_WEEKDAYS = [2, 3, 5];
+/**
+ * What a team gets (organizations.lead_drop_size and lead_drop_weekdays, since 12 Nov 2026): how many contacts each person, and on
+ * which days, 1 (Monday) to 5 (Friday). Without anything said, one contact on Tuesdays, Wednesdays and Fridays, as before.
+ */
+export type DropPlan = { size: number; weekdays: number[] };
+export const DEFAULT_DROP_PLAN: DropPlan = { size: DROP_SIZE, weekdays: DROP_WEEKDAYS };
+export const MAX_DROP_SIZE = 10;
+/** A team's plan as its row says it; anything out of range falls back to the default, so a bad value never stops the drops. */
+export function dropPlanOf(row: { lead_drop_size?: unknown; lead_drop_weekdays?: unknown } | null | undefined): DropPlan {
+  const size = Number(row?.lead_drop_size);
+  const weekdays = Array.isArray(row?.lead_drop_weekdays)
+    ? [...new Set(row!.lead_drop_weekdays.map(Number).filter(day => Number.isInteger(day) && day >= 1 && day <= 5))].sort((a, b) => a - b) : [];
+  return {
+    size: Number.isInteger(size) && size >= 1 && size <= MAX_DROP_SIZE ? size : DEFAULT_DROP_PLAN.size,
+    weekdays: weekdays.length ? weekdays : DEFAULT_DROP_PLAN.weekdays,
+  };
+}
 const weekdayOf = (day: string) => new Date(`${day}T12:00:00.000Z`).getUTCDay();
-export const dropDay = (now: Date) => DROP_WEEKDAYS.includes(weekdayOf(dayInZone(now)));
+export const dropDay = (now: Date, plan: DropPlan = DEFAULT_DROP_PLAN) => plan.weekdays.includes(weekdayOf(dayInZone(now)));
 const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 /** «mañana», «el martes»: when the next drop comes, after today's. */
-export function nextDropDay(now: Date) {
+export function nextDropDay(now: Date, plan: DropPlan = DEFAULT_DROP_PLAN) {
   const today = weekdayOf(dayInZone(now));
-  const ahead = [1, 2, 3, 4, 5, 6, 7].find(days => DROP_WEEKDAYS.includes((today + days) % 7)) ?? 7;
+  const ahead = [1, 2, 3, 4, 5, 6, 7].find(days => plan.weekdays.includes((today + days) % 7)) ?? 7;
   return ahead === 1 ? 'mañana' : `el ${WEEKDAYS[(today + ahead) % 7]}`;
 }
 
@@ -77,6 +94,11 @@ export type DropItem = {
   keptLeadId?: string | null;
   /** Three follow-ups after the first email, by the same Writer, with the day each one goes (the first email is day 1). */
   followUps?: DropFollowUp[];
+  // Since 12 Nov 2026, for teams with more than one contact a day (the finder, server/lead-drop-finder.ts).
+  /** «explore»: a role next to the customer's, offered to learn whether it works; the rest are the customer's own roles. */
+  track?: 'explore';
+  /** What the person said of this contact, with their reason: the finder learns from it. */
+  feedback?: { useful: boolean; reason?: string | null; at: string };
 };
 export type DropFollowUp = { day: number; subject: string; body: string };
 
@@ -274,6 +296,12 @@ export function foreignDomain(domain: string | null | undefined, locations: stri
   return asked.size > 0 && !asked.has(own);
 }
 
+/** Who of a search may be offered at all: with an email, and nobody the team already has or got in an earlier drop. */
+export const usableDrops = (candidates: DropCandidate[], known: KnownPeople) => candidates.filter(item => item.hasEmail
+  && !known.leadIds.has(item.leadId)
+  && !(item.emailKey && known.emails.has(item.emailKey))
+  && !(item.linkedinKey && known.linkedins.has(item.linkedinKey)));
+
 /**
  * `size` contacts (DROP_SIZE) for each person of a group, different for each: only people with an email, none the team
  * already has or got in an earlier drop, no company from another country than the one asked, one per company for each person
@@ -289,10 +317,7 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
       return Math.max(0, ...titleWords.map(set => [...set].filter(word => words.has(word)).length / Math.max(1, set.size)));
     };
   };
-  const usable = candidates.filter(item => item.hasEmail
-    && !known.leadIds.has(item.leadId)
-    && !(item.emailKey && known.emails.has(item.emailKey))
-    && !(item.linkedinKey && known.linkedins.has(item.linkedinKey)));
+  const usable = usableDrops(candidates, known);
   const ranked = new Map(people.map(person => {
     const own = criteriaOf?.(person) ?? criteria;
     const closeness = closenessTo(own);
@@ -312,6 +337,56 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
         const pick = ranked.get(person)!.find(item => !taken.has(item.leadId) && !companies.has(companyOf(item)) && (!strict || !usedCompanies.has(companyOf(item))));
         if (!pick) continue;
         taken.add(pick.leadId); usedCompanies.add(companyOf(pick)); mine.push(pick);
+      }
+    }
+  }
+  return out;
+}
+
+/** What the finder makes of a candidate for one person: how its title relates to the customer's roles, and a score from 0 to 100. */
+export type DropScore = { titleClass: 'exact' | 'similar' | 'related'; score: number };
+/** How many of a drop are roles next to the customer's («explore»): none in a drop of one or two, about three in ten of a larger one. */
+export const exploreSlots = (size: number) => (size >= 3 ? Math.max(1, Math.round(size * 0.3)) : 0);
+
+/**
+ * `size` contacts for each person, by the finder's score instead of the words of the title (assignDrops): the customer's own roles
+ * first («exact» and «similar»), and the last slots (exploreSlots) for roles next to them («related»), so the team learns whether
+ * they work. The rest is as assignDrops: only people with an email, nobody the team has or got before, no company from another
+ * country, one per company for each person and, while there are enough, a company nobody else in the group got. Someone the finder
+ * left without a score is not offered. Each pick says whether it is an exploration.
+ */
+export function pickRankedDrops(candidates: DropCandidate[], people: string[], known: KnownPeople, size: number, deps: {
+  criteriaOf: (person: string) => DropCriteria;
+  scoreOf: (person: string, item: DropCandidate) => DropScore | null;
+}) {
+  const usable = usableDrops(candidates, known);
+  const lists = new Map(people.map(person => {
+    const own = deps.criteriaOf(person);
+    const scored = usable.filter(item => !foreignDomain(item.domain, own.locations))
+      .map(item => ({ item, score: deps.scoreOf(person, item) }))
+      .filter((entry): entry is { item: DropCandidate; score: DropScore } => Boolean(entry.score))
+      .sort((a, b) => b.score.score - a.score.score || a.item.leadId.localeCompare(b.item.leadId));
+    return [person, { core: scored.filter(entry => entry.score.titleClass !== 'related'), explore: scored.filter(entry => entry.score.titleClass === 'related') }];
+  }));
+  const companyOf = (item: DropCandidate) => fold(item.domain || item.company || item.leadId);
+  const taken = new Set<string>(), usedCompanies = new Set<string>();
+  const out = new Map<string, Array<DropCandidate & { track?: 'explore' }>>(people.map(person => [person, []]));
+  const exploring = exploreSlots(size);
+  for (const strict of [true, false]) {
+    for (let round = 0; round < size; round++) {
+      for (const person of people) {
+        const mine = out.get(person)!;
+        if (mine.length > round) continue;
+        const companies = new Set(mine.map(companyOf));
+        const free = (entry: { item: DropCandidate }) => !taken.has(entry.item.leadId) && !companies.has(companyOf(entry.item))
+          && (!strict || !usedCompanies.has(companyOf(entry.item)));
+        const { core, explore } = lists.get(person)!;
+        // The last slots explore; a list that ran out is filled from the other one.
+        const wanted = round >= size - exploring ? [explore, core] : [core, explore];
+        const pick = wanted[0].find(free) ?? wanted[1].find(free);
+        if (!pick) continue;
+        taken.add(pick.item.leadId); usedCompanies.add(companyOf(pick.item));
+        mine.push(pick.score.titleClass === 'related' ? { ...pick.item, track: 'explore' } : pick.item);
       }
     }
   }
@@ -338,13 +413,18 @@ export function tidyCompany(name: string | null | undefined) {
  * repeating the role the screen shows beside it. With the fit (dropFit), only the industry and the place that do match: a
  * company in «sector público» for a customer in retail is not a reason (it said so until 3 Nov 2026, next to a table that said «No calza»).
  */
-export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city'>, criteria: DropCriteria, fit?: DropFit[]) {
+export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city' | 'track'>, criteria: DropCriteria, fit?: DropFit[]) {
   const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo'
     : criteria.source === 'empresa' ? 'el cliente ideal de tu empresa' : 'los contactos que guarda tu equipo';
   const fits = (criterion: DropFit['criterion']) => {
     const entry = fit?.find(candidate => candidate.criterion === criterion);
     return !entry || entry.match === 'yes' || entry.match === 'partial';
   };
+  // A role next to the customer's (the finder's exploration): said as what it is, so nobody takes it for a mistake.
+  if (item.track === 'explore') {
+    const where = [item.industry && fits('Rubro') ? `en tu rubro objetivo (${item.industry.toLowerCase()})` : null, item.city && fits('Lugar') ? `en ${item.city}` : null].filter(Boolean).join(', ');
+    return `Su cargo es vecino a los que buscas${where ? `, ${where}` : ''}: te lo proponemos para probar si también te sirve.`;
+  }
   // The title is what the search asked for, similar titles included: our word match is no reason to doubt it.
   const matched = [item.title ? 'su cargo' : null, item.industry && fits('Rubro') ? `su rubro (${item.industry.toLowerCase()})` : null].filter(Boolean).join(' y ');
   return `Calza con ${source}${matched ? ` por ${matched}` : ''}${item.city && fits('Lugar') ? `, en ${item.city}` : ''}.`;

@@ -279,9 +279,10 @@ export const weeklyReportsTick = functions.scheduler.onSchedule({
 });
 
 // «Avisos»: Tuesday to Friday in the morning, one email per person and day only when there is something to do. The
-// later runs finish what the first left.
+// later runs finish what the first left. Mondays only carry «Contacto del día» to the teams that get it that day
+// (organizations.lead_drop_weekdays); for everyone else the route does nothing.
 export const dailyAlertsTick = functions.scheduler.onSchedule({
-    schedule: '0,30 8-9 * * 2-5',
+    schedule: '0,30 8-9 * * 1-5',
     timeZone: 'America/Santiago',
     retryCount: 0,
     timeoutSeconds: 300,
@@ -291,10 +292,11 @@ export const dailyAlertsTick = functions.scheduler.onSchedule({
     await invokeFirebaseSchedulerBridge({ name: 'daily-alerts', path: '/api/cron/daily-alerts', method: 'POST' });
 });
 
-// «Contacto del día»: Tuesdays, Wednesdays and Fridays before the alerts, which carry what is ready. Each run finishes
-// what the previous one left.
+// «Contacto del día»: before the alerts, which carry what is ready. Every working day, because each team has its own days
+// (organizations.lead_drop_weekdays; Tuesdays, Wednesdays and Fridays by default): the route does nothing on a day in
+// nobody's plan. Each run finishes what the previous one left.
 export const leadDropsTick = functions.scheduler.onSchedule({
-    schedule: '0,20,40 6-7 * * 2,3,5',
+    schedule: '0,20,40 6-7 * * 1-5',
     timeZone: 'America/Santiago',
     retryCount: 0,
     timeoutSeconds: 300,

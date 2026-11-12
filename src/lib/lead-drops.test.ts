@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropDay, dropEmailSection, dropFit, dropHref, dropSubject, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
+import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropDay, dropEmailSection, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -198,4 +198,59 @@ test('how a contact fits, criterion by criterion: by the words of the title and 
   assert.equal(placeLabel({ city: null, state: 'Valparaíso Region', country: null }), 'Región de Valparaíso');
   assert.deepEqual([seniorityLabel('manager'), seniorityLabel('c_suite'), departmentLabel('human_resources'), departmentLabel('field_sales'), seniorityLabel(null)],
     ['Gerencia o jefatura', 'Alta dirección', 'Recursos humanos', 'Field sales', null]);
+});
+
+test('a team\'s plan: how many contacts and on which days, and anything out of range falls back to one on Tuesdays, Wednesdays and Fridays', () => {
+  assert.deepEqual(dropPlanOf({ lead_drop_size: 6, lead_drop_weekdays: [5, 1, 2, 3, 4, 4] }), { size: 6, weekdays: [1, 2, 3, 4, 5] });
+  assert.deepEqual(dropPlanOf(null), DEFAULT_DROP_PLAN);
+  assert.deepEqual(dropPlanOf({ lead_drop_size: 0, lead_drop_weekdays: [] }), DEFAULT_DROP_PLAN);
+  assert.deepEqual(dropPlanOf({ lead_drop_size: 99, lead_drop_weekdays: [0, 6, 7] }), DEFAULT_DROP_PLAN, 'no weekends, no more than ten');
+  assert.deepEqual(dropPlanOf({ lead_drop_size: '3', lead_drop_weekdays: ['2', '4'] }), { size: 3, weekdays: [2, 4] }, 'as the database may send them');
+  const daily = dropPlanOf({ lead_drop_size: 6, lead_drop_weekdays: [1, 2, 3, 4, 5] });
+  // 19 Oct 2026 is a Monday; the 24th, a Saturday.
+  assert.deepEqual(['19', '20', '22', '24', '25'].map(day => dropDay(new Date(`2026-10-${day}T15:00:00.000Z`), daily)), [true, true, true, false, false]);
+  assert.deepEqual(['19', '22', '23', '24'].map(day => nextDropDay(new Date(`2026-10-${day}T15:00:00.000Z`), daily)), ['mañana', 'mañana', 'el lunes', 'el lunes']);
+});
+
+test('the finder\'s pick: the customer\'s own roles by score, and the last slots for roles next to them', () => {
+  assert.deepEqual([1, 2, 3, 6, 10].map(exploreSlots), [0, 0, 1, 2, 3]);
+  const scores = new Map<string, DropScore>();
+  const scored = (id: string, company: string, titleClass: DropScore['titleClass'], score: number, extra: Partial<DropCandidate> = {}) => {
+    const item = candidate(id, company, extra);
+    scores.set(item.leadId, { titleClass, score });
+    return item;
+  };
+  const pool = [
+    scored('1', 'Ripley', 'exact', 60), scored('2', 'Falabella', 'exact', 90), scored('3', 'Paris', 'similar', 80), scored('4', 'Lider', 'exact', 70),
+    scored('5', 'Tottus', 'similar', 50), scored('6', 'Jumbo', 'exact', 40), scored('7', 'Hites', 'related', 85), scored('8', 'Easy', 'related', 30),
+    scored('9', 'Sodimac', 'related', 55), scored('10', 'Falabella', 'exact', 88), scored('11', 'Corona', 'exact', 99, { hasEmail: false }),
+    candidate('12', 'Unimarc'), // nothing to do with the customer's roles: the finder gave it no score
+  ];
+  const deps = { criteriaOf: () => criteria, scoreOf: (_person: string, item: DropCandidate) => scores.get(item.leadId) ?? null };
+  const [mine] = [...pickRankedDrops(pool, ['ana'], none(), 6, deps).values()];
+  assert.deepEqual(mine.map(item => [item.company, item.track ?? 'core']),
+    [['Falabella', 'core'], ['Paris', 'core'], ['Lider', 'core'], ['Ripley', 'core'], ['Hites', 'explore'], ['Sodimac', 'explore']],
+    'four of the customer\'s roles by score, one per company, then the two best of the roles next to them');
+  assert.ok(!mine.some(item => item.company === 'Corona' || item.company === 'Unimarc'), 'nobody without an email, nobody without a score');
+
+  // Two people share the pool in turns: nobody twice, and a company only once while there are others.
+  const shared = pickRankedDrops(pool, ['ana', 'leo'], none(), 3, deps);
+  const all = [...shared.values()].flat();
+  assert.equal(new Set(all.map(item => item.leadId)).size, 6);
+  assert.equal(new Set(all.map(item => item.company)).size, 6);
+  assert.deepEqual([...shared.values()].map(items => items.filter(item => item.track === 'explore').length), [1, 1], 'each one\'s last slot explores');
+
+  // Without roles next to the customer's, the exploring slots are filled with its own; without its own, with what there is.
+  const onlyCore = pickRankedDrops(pool.filter(item => scores.get(item.leadId)?.titleClass !== 'related'), ['ana'], none(), 6, deps);
+  assert.deepEqual(onlyCore.get('ana')!.map(item => [item.company, item.track]),
+    [['Falabella', undefined], ['Paris', undefined], ['Lider', undefined], ['Ripley', undefined], ['Tottus', undefined], ['Jumbo', undefined]]);
+  const onlyRelated = pickRankedDrops(pool.filter(item => scores.get(item.leadId)?.titleClass === 'related'), ['ana'], none(), 2, deps);
+  assert.deepEqual(onlyRelated.get('ana')!.map(item => [item.company, item.track]), [['Hites', 'explore'], ['Sodimac', 'explore']]);
+});
+
+test('a role next to the customer\'s says so, instead of «calza por su cargo»', () => {
+  assert.equal(whyText({ title: 'Jefe de Operaciones', industry: 'Retail', city: 'Santiago', track: 'explore' }, criteria),
+    'Su cargo es vecino a los que buscas, en tu rubro objetivo (retail), en Santiago: te lo proponemos para probar si también te sirve.');
+  assert.equal(whyText({ title: 'Jefe de Operaciones', industry: null, city: null, track: 'explore' }, criteria),
+    'Su cargo es vecino a los que buscas: te lo proponemos para probar si también te sirve.');
 });

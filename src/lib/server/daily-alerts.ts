@@ -5,7 +5,7 @@ import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
 import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
-import { dropPdf } from '@/lib/server/lead-drops';
+import { dropPdf, dropPlanFor } from '@/lib/server/lead-drops';
 import { readWaitingOnAdmins } from '@/lib/server/commercial-opportunities/workspace-waiting';
 import { groupCoworkThreads } from '@/lib/cowork/presentation';
 import { readSearchHealth } from '@/lib/server/commercial-opportunities/workspace-source-health';
@@ -289,6 +289,11 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   send: SendSelf; appUrl: string; now?: Date; opportunities: 'none' | 'mine' | 'manager'; goalReminders: boolean;
   /** The person's last sign-in (auth), to tell how long they have been away (U5). */
   lastSignInAt?: string | null;
+  /**
+   * A day without alerts (Monday) for a team with contacts that day: the alert goes only with them. Until they are ready nothing
+   * is kept, so a later run tries again and tomorrow's alert still reads from the last one sent.
+   */
+  requireDrop?: boolean;
 }) {
   const now = deps.now ?? new Date();
   const today = dayInZone(now);
@@ -298,9 +303,12 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   if (last.data?.alert_date === today) return { status: 'already_sent' as const };
   const floor = now.getTime() - 4 * 86_400_000;
   const since = new Date(last.data ? Math.max(Date.parse(last.data.created_at), floor) : now.getTime() - 86_400_000).toISOString();
+  // The team's plan says which days carry contacts (dropPlanFor): one on Tuesdays, Wednesdays and Fridays unless it says more.
+  const todayDrop = dropPlanFor(client as any, scope.organizationId).then(plan => dropDay(now, plan) ? readTodayDrop(client, scope, today) : null);
+  if (deps.requireDrop && !(await todayDrop)) return { status: 'quiet' as const };
   const [facts, drop] = await Promise.all([
     readAlertFacts(client, scope, { now, since, opportunities: deps.opportunities, lastSignInAt: deps.lastSignInAt }),
-    dropDay(now) ? readTodayDrop(client, scope, today) : Promise.resolve(null),
+    todayDrop,
   ]);
   facts.drop = drop;
   // A goal that is behind alone is worth an email in one workspace only: whoever belongs to several gets it from one.

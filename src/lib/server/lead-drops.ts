@@ -8,9 +8,9 @@ import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/li
 import { renderPdf } from '@/lib/documents/render-pdf';
 import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
-  DROP_SIZE, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, groupDropPeople, needsLookup, nextDropDay,
-  personDropCriteria, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropFollowUp, type DropItem,
-  type IcpDeclared, type KnownPeople,
+  DEFAULT_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, groupDropPeople, needsLookup, nextDropDay,
+  personDropCriteria, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, type DropCandidate, type DropCriteria,
+  type DropFollowUp, type DropItem, type DropPlan, type DropScore, type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
 import { isMaskedName } from '@/lib/lead-name';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
@@ -22,6 +22,7 @@ import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
+import { dropLessons, finderSearchTerms, scoreDropCandidates, type FinderLessons } from '@/lib/server/lead-drop-finder';
 import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
 import { coworkVoicePass } from '@/lib/server/cowork/writer-voice';
@@ -40,6 +41,23 @@ type Generate = (options: { schema: z.ZodTypeAny; systemPrompt: string; prompt: 
 
 export class LeadDropsError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
+}
+
+/**
+ * What each team gets (organizations.lead_drop_size and lead_drop_weekdays): how many contacts a person and on which days. A team
+ * without a row, or a database that does not have the columns yet, gets the default (one contact on Tuesdays, Wednesdays and Fridays).
+ */
+export async function dropPlans(client: Client, organizationIds?: string[]): Promise<Map<string, DropPlan>> {
+  const plans = new Map<string, DropPlan>();
+  let query: any = client.from('organizations').select('id,lead_drop_size,lead_drop_weekdays');
+  if (organizationIds) query = query.in('id', organizationIds.slice(0, 500));
+  const result: any = await query.limit(5000);
+  if (result.error) return plans;
+  for (const row of result.data || []) plans.set(String(row.id), dropPlanOf(row));
+  return plans;
+}
+export async function dropPlanFor(client: Client, organizationId: string): Promise<DropPlan> {
+  return (await dropPlans(client, [organizationId])).get(organizationId) ?? DEFAULT_DROP_PLAN;
 }
 
 const DAY = 86_400_000;
@@ -168,9 +186,11 @@ export function apolloDropEntries(people: unknown[]): VaultEntry[] {
   });
 }
 
-/** Apollo's free people search, for a drop: up to 100 people, at no cost. */
+/** How many people one Apollo search of a drop may bring: three pages of a hundred (the finder's first search), each a free call. */
+const APOLLO_DROP_SEARCH_MAX = 300;
+/** Apollo's free people search, for a drop: a page of up to 100 people, or the next ones too when more are asked, at no cost. */
 export const searchApolloDrops: Search = async input => {
-  const found: any = await executeProviderLeadSearch({ ...input, provider: 'apollo' as LeadSearchInput['provider'], maxResults: Math.min(100, input.maxResults) }, getGatewayConfig());
+  const found: any = await executeProviderLeadSearch({ ...input, provider: 'apollo' as LeadSearchInput['provider'], maxResults: Math.min(APOLLO_DROP_SEARCH_MAX, input.maxResults) }, getGatewayConfig());
   return { results: apolloDropEntries(Array.isArray(found?.leads) ? found.leads : []), costUsd: 0 };
 };
 
@@ -212,7 +232,7 @@ const customerOf = ({ byId, team, savedRows, company }: Team) => companyDropCrit
 /** A person's customer: their «Perfil»'s, else the company's. */
 const customerFor = (team: Team, userId: string, company: DropCriteria | null = customerOf(team)) => personDropCriteria(declaredOf(team.byId.get(userId)), company);
 /** How many a search asks for: twice what the group needs and some more (some are known already, some have no email), ten at least. */
-const searchCount = (people: number) => Math.max(10, Math.min(100, people * DROP_SIZE * 2 + 5));
+const searchCount = (people: number, size = DEFAULT_DROP_PLAN.size) => Math.max(10, Math.min(100, people * size * 2 + 5));
 
 /**
  * Audit B3 (1 Nov 2026): of 109 «Contacto del día» sent in 30 days, 14 were opened. Whoever left the last six unopened (two weeks of
@@ -268,10 +288,45 @@ const NOBODY = 'La búsqueda no encontró personas con correo verificado para es
 /** A drop that came empty for lack of a customer: nothing was searched, so it is made again once there is one. */
 const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.status === 'empty' && !Array.isArray((drop.criteria as DropCriteria | null)?.titles);
 
+// ─── The finder: teams with several contacts a day (lead-drop-finder.ts) ───────────────────────────────────────────
+
+/** What the finder's first search asks for, and each of its two extra ones (the roles as people write them, the words of their area). */
+const FINDER_BASE = 300;
+const FINDER_EXTRA = 100;
+const criteriaKey = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort().join(',')).join('|');
+
+/** What the team did with the contacts of its drops of the last six months (dropLessons); nothing when it cannot be read. */
+async function readDropLessons(client: Client, organizationId: string, now: Date): Promise<FinderLessons> {
+  const since = new Date(now.getTime() - 180 * DAY).toISOString().slice(0, 10);
+  const rows: any = await client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since).limit(2000);
+  return dropLessons(rows.error ? [] : rows.data || []);
+}
+
+/**
+ * The finder's choice for a group: every usable candidate scored for each person's customer (one scoring per different customer,
+ * with what that person sells), then the picker by score with its slots for roles next to the customer's.
+ */
+async function finderPicks(client: Client, organizationId: string, input: {
+  candidates: DropCandidate[]; members: string[]; known: KnownPeople; size: number; own: (userId: string) => DropCriteria; lessons: FinderLessons; generate?: Generate;
+}) {
+  const usable = usableDrops(input.candidates, input.known);
+  const scores = new Map<string, Map<string, DropScore>>();
+  const customers = new Map<string, { criteria: DropCriteria; userId: string }>();
+  for (const userId of input.members) if (!customers.has(criteriaKey(input.own(userId)))) customers.set(criteriaKey(input.own(userId)), { criteria: input.own(userId), userId });
+  await Promise.all([...customers].map(async ([key, { criteria, userId }]) => {
+    const context = await loadCoworkUserContext(client, { organizationId, userId }, { memories: false, mailbox: false });
+    const seller = context ? { company: context.companyName, offer: context.offer, services: context.services, differentiators: context.differentiators, sector: context.sector } : null;
+    scores.set(key, await scoreDropCandidates({ candidates: usable, criteria, seller, lessons: input.lessons, generate: input.generate }).catch(() => new Map<string, DropScore>()));
+  }));
+  const scoreOf = (userId: string, leadId: string) => scores.get(criteriaKey(input.own(userId)))?.get(leadId) ?? null;
+  const picks = pickRankedDrops(usable, input.members, input.known, input.size, { criteriaOf: input.own, scoreOf: (userId, item) => scoreOf(userId, item.leadId) });
+  return { picks, scoreOf };
+}
+
 /**
  * Plans today's drops of an organization for the people given: each person's customer (their «Perfil»'s, else the company's),
  * one Leads Finder search per group of people with similar customers (groupDropPeople, at most dropsMaxGroups), a different
- * contact for each person (DROP_SIZE) chosen by their own customer, kept in the vault and in a «pending» drop that `writeDrop`
+ * contact for each person (as many as the team's plan says) chosen by their own customer, kept in the vault and in a «pending» drop that `writeDrop`
  * completes. Without a customer to go by, or when the month's budget ran out, each gets an «empty» drop with the reason, so
  * later runs do not try again.
  */
@@ -279,9 +334,16 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   now: Date; search?: Search; budgetUsd: number; spentUsd: number; usdPerLead?: number; provider?: 'apollo' | 'apify';
   /** Today's rows exist already, «pending» and empty, taken by `pullDrop` before searching: they are completed, not added. */
   claimed?: boolean;
+  /** What the team gets (dropPlanFor); read here when the caller did not. */
+  plan?: DropPlan;
+  /** The model the finder asks (a team with several contacts a day); the default one when the caller gives none. */
+  generate?: Generate;
 }) {
   const today = dayInZone(deps.now);
+  const plan = deps.plan ?? await dropPlanFor(client, organizationId);
   const apollo = (deps.provider ?? dropsProvider()) === 'apollo';
+  // Several contacts a day: the finder searches more ways, scores each candidate and keeps some slots to explore (lead-drop-finder.ts).
+  const finder = apollo && plan.size > 1;
   const search = deps.search ?? (apollo ? searchApolloDrops : searchLeadsFinder);
   const usdPerLead = deps.usdPerLead ?? (apollo ? 0 : leadsFinderUsdPerLead());
   const team = await teamOf(client, organizationId);
@@ -294,10 +356,11 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const groups = groupDropPeople(people.filter(userId => own.get(userId)).map(userId => ({ id: userId, criteria: own.get(userId)! })), dropsMaxGroups());
 
   const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
+  const lessons = finder && groups.length ? await readDropLessons(client, organizationId, deps.now) : { liked: [], disliked: [] };
   let spent = deps.spentUsd;
   for (const { criteria, people: members } of groups) {
     // Apollo's search is free: as many as one page brings, so the days ahead still find people the team does not have.
-    const count = apollo ? 100 : searchCount(members.length);
+    const count = apollo ? (finder ? FINDER_BASE : 100) : searchCount(members.length, plan.size);
     if (overBudget(spent, count, usdPerLead, deps.budgetUsd)) {
       for (const userId of members) results.push({ userId, status: 'empty', error: NO_BUDGET, criteria: own.get(userId)! });
       continue;
@@ -323,20 +386,50 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     }
     spent += found.costUsd;
     const entries = new Map<string, VaultEntry>(found.results.map(entry => [entry.lead.id, entry]));
-    const assigned = assignDrops(found.results.map(candidateOf), members, known, criteria, DROP_SIZE, userId => own.get(userId)!);
+    let scoreOf: (userId: string, leadId: string) => DropScore | null = () => null;
+    let assigned: Map<string, Array<DropCandidate & { track?: 'explore' }>>;
+    if (finder) {
+      // The same customer asked two more ways (free): its roles as people write them, and the words of their area as a title.
+      const terms = await finderSearchTerms(criteria, deps.generate).catch(() => ({ titles: [] as string[], keywords: [] as string[] }));
+      const extra = await Promise.all([
+        terms.titles.length ? search(searchInput({ ...criteria, titles: terms.titles }, FINDER_EXTRA), searchDeps(FINDER_EXTRA)).catch(() => null) : null,
+        terms.keywords.length ? search({ ...searchInput({ ...criteria, titles: terms.keywords }, FINDER_EXTRA), includeSimilarTitles: false }, searchDeps(FINDER_EXTRA)).catch(() => null) : null,
+      ]);
+      for (const more of extra) for (const entry of more?.results || []) if (!entries.has(entry.lead.id)) { entries.set(entry.lead.id, entry); narrowIds.add(entry.lead.id); }
+      // Too few people the team does not have yet: the titles and places only, before choosing, so the score reads them all at once.
+      const needed = members.length * plan.size * 3;
+      if (usableDrops([...entries.values()].map(candidateOf), known).length < needed) {
+        const wider = await search(searchInput(criteria, FINDER_BASE, true), searchDeps(FINDER_BASE)).catch(() => null);
+        for (const entry of wider?.results || []) if (!entries.has(entry.lead.id)) entries.set(entry.lead.id, entry);
+      }
+      found = { ...found, results: [...entries.values()] };
+      const chosen = await finderPicks(client, organizationId, { candidates: found.results.map(candidateOf), members, known, size: plan.size,
+        own: userId => own.get(userId)!, lessons, generate: deps.generate });
+      assigned = chosen.picks;
+      scoreOf = chosen.scoreOf;
+      // Whoever the score left with nobody (the model down, or no title it knows) gets them as a team of one contact does, by the words of the title.
+      const without = members.filter(userId => !(assigned.get(userId) || []).length);
+      if (without.length) {
+        const taken = new Set([...assigned.values()].flat().map(pick => pick.leadId));
+        const plain = assignDrops(found.results.map(candidateOf).filter(item => !taken.has(item.leadId)), without, known, criteria, plan.size, userId => own.get(userId)!);
+        for (const [userId, picks] of plain) if (picks.length) assigned.set(userId, picks);
+      }
+    } else {
+      assigned = assignDrops(found.results.map(candidateOf), members, known, criteria, plan.size, userId => own.get(userId)!);
+    }
     // Plan de uso A5 (audit B3): the same search every day ends up bringing only people already known; 29 drops came empty that
     // way at the end of October. Then once more, wider: the titles and places only, and further down the list (three times as
     // many). Each contact's fit (dropFit) shows what no longer matches, the industry or the size. A failure leaves it as before.
     const waiting = members.filter(userId => !(assigned.get(userId) || []).length);
     const deeper = Math.min(LEADS_FINDER_MAX_PER_RUN, count * 3);
-    if (waiting.length && found.results.length && deeper > count && !overBudget(spent, deeper, usdPerLead, deps.budgetUsd)) {
+    if (!finder && waiting.length && found.results.length && deeper > count && !overBudget(spent, deeper, usdPerLead, deps.budgetUsd)) {
       try {
         const wider = await search(searchInput(criteria, deeper, true), searchDeps(deeper));
         spent += wider.costUsd;
         found = { ...found, costUsd: found.costUsd + wider.costUsd };
         const taken = new Set([...assigned.values()].flat().map(pick => pick.leadId));
         for (const entry of wider.results) if (!entries.has(entry.lead.id)) entries.set(entry.lead.id, entry);
-        const more = assignDrops(wider.results.map(candidateOf).filter(item => !taken.has(item.leadId)), waiting, known, criteria, DROP_SIZE, userId => own.get(userId)!);
+        const more = assignDrops(wider.results.map(candidateOf).filter(item => !taken.has(item.leadId)), waiting, known, criteria, plan.size, userId => own.get(userId)!);
         for (const [userId, picks] of more) if (picks.length) assigned.set(userId, picks);
       } catch {
         // The wider search failed: those people keep the empty drop and its reason, as before.
@@ -359,7 +452,10 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         const kept = keptBySearch(criteria, mine, narrowIds.has(pick.leadId));
         // One industry searched by its tag and none said: it is that one.
         const person = !shown.industry && kept.industry && mine.industries.length === 1 ? { ...shown, industry: capitalize(mine.industries[0]) } : shown;
-        const fit = searchedFit(dropFit(person, mine, wanted => Boolean(actorIndustry) && leadsFinderIndustry(wanted) === actorIndustry), kept);
+        // The finder read the title by what it means: «Prevencionista de Riesgos» is the role asked as «Jefe de Prevención», whatever its words.
+        const titleClass = scoreOf(userId, pick.leadId)?.titleClass;
+        const fit = searchedFit(dropFit(person, mine, wanted => Boolean(actorIndustry) && leadsFinderIndustry(wanted) === actorIndustry), kept)
+          .map(entry => entry.criterion === 'Cargo' && titleClass && entry.match !== 'unknown' ? { ...entry, match: titleClass === 'related' ? 'partial' as const : 'yes' as const } : entry);
         return { ...person, why: whyText(person, mine, fit), research: researchFacts({ ...person, about: null }), draft: null, fit, description: about };
       }) });
     }
@@ -573,7 +669,7 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
   const today = Boolean(last) && String(last!.drop_date) === dayInZone(now);
   if (today && last!.status === 'pending') return 'preparing';
   const fresh = !last || withoutCustomer(last);
-  if (!fresh && (today || !dropDay(now))) return null;
+  if (!fresh && (today || !dropDay(now, await dropPlanFor(client, scope.organizationId)))) return null;
   if (!customerFor(await teamOf(client, scope.organizationId), scope.userId)) return 'profile';
   const usdPerLead = dropUsdPerLead();
   if (usdPerLead > 0 && overBudget(await monthSpend(client, now), searchCount(1), usdPerLead, dropsMonthlyUsd())) return null;
@@ -593,12 +689,12 @@ export async function homeDrop(client: Client, scope: DropScope, now: Date) {
 }
 
 /** Why a drop came empty, said to the person, and the button to «Perfil» when completing the customer helps. */
-export function emptyReason(error: string | null, now: Date): { title: string; text: string; profile: string | null } {
+export function emptyReason(error: string | null, now: Date, plan: DropPlan = DEFAULT_DROP_PLAN): { title: string; text: string; profile: string | null } {
   if (error === NO_CUSTOMER) return { title: 'Falta tu cliente ideal', text: 'Con él elegimos tu contacto: a quién le vendes, en qué rubro y dónde. Toma un minuto en «Perfil».', profile: 'Completar mi cliente ideal' };
   if (error === NO_BUDGET) return { title: 'Por este mes no quedan contactos', text: 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes. Mientras, puedes buscar con tus filtros.', profile: null };
   if (error === TOO_FEW) return { title: 'Esta vez no hubo un contacto nuevo', text: 'Tu equipo ya tiene a muchos de los que calzan con tu cliente ideal. Sumar cargos, rubros o lugares trae contactos nuevos.', profile: 'Ampliar mi cliente ideal' };
   if (error === NOBODY) return { title: 'Esta vez no encontramos a nadie', text: 'Con tu cliente ideal no encontramos personas con correo. Sumar cargos o lugares en «Perfil» ayuda.', profile: 'Ampliar mi cliente ideal' };
-  return { title: 'La búsqueda no respondió', text: `Esta vez no pudimos traer tu contacto. El próximo llega ${nextDropDay(now)}; mientras, puedes buscar con tus filtros.`, profile: null };
+  return { title: 'La búsqueda no respondió', text: `Esta vez no pudimos traer tu contacto. El próximo llega ${nextDropDay(now, plan)}; mientras, puedes buscar con tus filtros.`, profile: null };
 }
 
 /** A pending drop nobody finished writing in this time (the request that planned it died) is written by the next one. */
@@ -612,6 +708,7 @@ const STALLED_MS = 4 * 60_000;
  */
 export async function pullDrop(client: Client, scope: DropScope, deps: { now: Date; generate: Generate; search?: Search }) {
   const today = dayInZone(deps.now);
+  const teamPlan = await dropPlanFor(client, scope.organizationId);
   const read = async () => {
     const result: any = await client.from('lead_drops').select('id,organization_id,user_id,status,criteria,items,error,created_at,updated_at')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).eq('drop_date', today).maybeSingle();
@@ -622,7 +719,8 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
   const stalled = (row: { created_at: string; updated_at: string }) => deps.now.getTime() - Date.parse(row.updated_at || row.created_at) > STALLED_MS;
   const plan = async () => {
     await planOrganizationDrops(client, scope.organizationId, [scope.userId], {
-      now: deps.now, search: deps.search, budgetUsd: dropsMonthlyUsd(), spentUsd: await monthSpend(client, deps.now), claimed: true,
+      now: deps.now, search: deps.search, budgetUsd: dropsMonthlyUsd(), spentUsd: await monthSpend(client, deps.now), claimed: true, plan: teamPlan,
+      generate: deps.generate,
     });
     const row = await read();
     if (!row) throw new LeadDropsError('No pudimos preparar tu contacto del día.', 503);
@@ -634,12 +732,12 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
   let planned = false;
   if (!drop || withoutCustomer(drop)) {
     const offer = await pullStatus(client, scope, deps.now);
-    if (offer === 'profile') return { id: null, status: 'empty', reason: emptyReason(NO_CUSTOMER, deps.now) };
+    if (offer === 'profile') return { id: null, status: 'empty', reason: emptyReason(NO_CUSTOMER, deps.now, teamPlan) };
     if (offer !== 'first' && offer !== 'today') {
       const usdPerLead = dropUsdPerLead();
       const broke = dropsEnabled() && usdPerLead > 0 && overBudget(await monthSpend(client, deps.now), searchCount(1), usdPerLead, dropsMonthlyUsd());
       throw new LeadDropsError(!dropsEnabled() ? 'El contacto del día está en pausa.'
-        : broke ? 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes.' : `Tu próximo contacto llega ${nextDropDay(deps.now)}.`, 409);
+        : broke ? 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes.' : `Tu próximo contacto llega ${nextDropDay(deps.now, teamPlan)}.`, 409);
     }
     if (drop) {
       const removed = await client.from('lead_drops').delete().eq('id', drop.id).eq('status', 'empty');
@@ -663,7 +761,7 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
     await writeDrop(client, drop, { generate: deps.generate, now: deps.now });
     drop = (await read()) || drop;
   }
-  return { id: drop.id, status: drop.status, reason: drop.status === 'empty' ? emptyReason(drop.error, deps.now) : null };
+  return { id: drop.id, status: drop.status, reason: drop.status === 'empty' ? emptyReason(drop.error, deps.now, teamPlan) : null };
 }
 
 /**

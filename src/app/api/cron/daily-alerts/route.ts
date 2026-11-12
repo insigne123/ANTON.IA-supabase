@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { alertDay, managesOpportunityAlert } from '@/lib/daily-alerts';
+import { dropDay } from '@/lib/lead-drops';
+import { dropPlans } from '@/lib/server/lead-drops';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { deliverDailyAlert, readAlertsEmail } from '@/lib/server/daily-alerts';
@@ -19,14 +21,20 @@ const PARALLEL = 4;
  * person with the alerts on, in each of their organizations, the day's alert when there is something concrete to do,
  * from the Yago address through Resend, their own mailbox or the reports mailbox (sendReportEmail). Whoever cannot get it
  * is skipped, and so are test addresses: their alert would only be written to fail. Every run takes the next batch; what already has an alert today is skipped. DAILY_ALERTS=off stops them.
+ *
+ * Mondays belong to the weekly report, so nobody gets an alert then, except the teams whose «Contacto del día» comes on
+ * Mondays too (organizations.lead_drop_weekdays, 12 Nov 2026): their people get it once their contacts are ready, and only then.
  */
 export async function POST(request: Request) {
   if (!isFirebaseSchedulerRequest(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const headers = firebaseSchedulerResponseHeaders();
   const now = new Date();
   if (process.env.DAILY_ALERTS === 'off') return NextResponse.json({ skipped: 'off' }, { headers });
-  if (!alertDay(now)) return NextResponse.json({ skipped: 'not_alert_day' }, { headers });
   const admin = getSupabaseAdminClient();
+  const regular = alertDay(now);
+  // Not a day of alerts: only the teams with contacts today, and only to carry them.
+  const withContacts = regular ? null : new Set([...(await dropPlans(admin))].filter(([, plan]) => dropDay(now, plan)).map(([organizationId]) => organizationId));
+  if (withContacts && !withContacts.size) return NextResponse.json({ skipped: 'not_alert_day' }, { headers });
   const today = dayInZone(now);
   const [members, done, tokens]: any[] = await Promise.all([
     admin.from('organization_members').select('organization_id,user_id,role,created_at').order('created_at').limit(5000),
@@ -47,7 +55,8 @@ export async function POST(request: Request) {
   // Whoever belongs to several workspaces hears about a goal that is behind from the first one they joined.
   const home = new Map<string, string>();
   for (const row of members.data || []) if (!home.has(String(row.user_id))) home.set(String(row.user_id), String(row.organization_id));
-  const queue = ((members.data || []) as any[]).filter(row => on.has(String(row.user_id)) && !alerted.has(`${row.organization_id}:${row.user_id}`));
+  const queue = ((members.data || []) as any[]).filter(row => on.has(String(row.user_id)) && !alerted.has(`${row.organization_id}:${row.user_id}`)
+    && (!withContacts || withContacts.has(String(row.organization_id))));
   // Who can assign on Oportunidades in each workspace: its owners and administrators.
   const admins = new Map<string, Set<string>>();
   for (const row of members.data || []) {
@@ -76,6 +85,7 @@ export async function POST(request: Request) {
         opportunities: !mayOpportunities ? 'none' : manager ? 'manager' : 'mine',
         goalReminders: home.get(scope.userId) === scope.organizationId,
         lastSignInAt: (data?.user as { last_sign_in_at?: string | null } | undefined)?.last_sign_in_at ?? null,
+        requireDrop: !regular,
       });
       if (outcome.status === 'already_sent') result.already++;
       else result[outcome.status]++;
