@@ -53,7 +53,7 @@ test('a company of up to 300 people is read whole and the exact person comes fir
 test('a larger company is read by the titles and the words of their area, in at most five calls', async () => {
   clearCompanyPeopleCache(); clearTitleAiCache();
   const calls: Array<Record<string, unknown>> = [];
-  // 991 people, the one asked for on page 9 of everyone, as at Colbún on 12 Nov 2026.
+  // 991 people, the one asked for on page 9 of everyone, as in the case of 12 Nov 2026.
   const people = company(991, { 870: 'Coordinador Gestión Riesgo Incendios', 400: 'Brigadista Incendios Forestales' });
   const answer = await companyPeopleByTitle({
     base: { organization_id: 'org-big', include_similar_titles: true }, titles: asked, page: 1, perPage: 50, all: false, excludeIds: [],

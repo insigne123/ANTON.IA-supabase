@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   ApolloGatewayError,
+  heldMatchOf,
   executeApolloEnrichment,
   executeApolloOrganizationEnrichment,
   getApolloApiKey,
@@ -852,4 +853,44 @@ test('«0 = todos» reads the next pages of a hundred until it is enough or Apol
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('a match refused as someone else carries whom Apollo found, out of what a log prints', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const logged: string[] = [];
+  console.warn = (...values: unknown[]) => { logged.push(JSON.stringify(values)); };
+  const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/ana-perez-soto-1a2b3c4d' },
+    reveal_email: true, reveal_phone: false, enrichment_level: 'basic' });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  try {
+    globalThis.fetch = async () => Response.json({ person: {
+      id: 'apollo-1', name: 'Ana María Pérez Soto', first_name: 'Ana María', last_name: 'Pérez Soto', title: 'Jefa de Prevención de Riesgos',
+      linkedin_url: 'http://www.linkedin.com/in/ana-maria-perez-soto-123456789', email: 'ana.perez@energiadelsur.example', email_status: 'verified',
+      match_confidence: 'high', organization: { name: 'Energía del Sur', primary_domain: 'energiadelsur.example' },
+    } });
+    let caught: unknown = null;
+    await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig()).catch((error) => { caught = error; });
+    assert.ok(caught instanceof ApolloGatewayError);
+    assert.equal((caught as ApolloGatewayError).code, 'APOLLO_PERSON_IDENTITY_MISMATCH');
+    assert.equal((caught as ApolloGatewayError).reason, 'url_differs:high');
+    const held = heldMatchOf(caught);
+    assert.equal(held?.candidate.fullName, 'Ana María Pérez Soto');
+    assert.equal(held?.candidate.apolloId, 'apollo-1');
+    assert.equal(held?.candidate.organizationName, 'Energía del Sur');
+    assert.equal(held?.contact.email, 'ana.perez@energiadelsur.example');
+    assert.equal(held?.confidence, 'high');
+    // Neither the error as a log would print it nor the warning carries the person.
+    assert.ok(!JSON.stringify(caught).includes('ana.perez@') && !JSON.stringify({ ...(caught as object) }).includes('Ana'));
+    assert.ok(logged.every((line) => !line.includes('ana.perez@') && !line.includes('Ana María')));
+
+    // Without the email asked, none is held.
+    const quiet = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/ana-perez-soto-1a2b3c4d' },
+      reveal_email: false, reveal_phone: false, enrichment_level: 'basic', match_only: true });
+    assert.ok(quiet.ok);
+    if (!quiet.ok) return;
+    await executeApolloEnrichment(quiet.value, 'test-key', getGatewayConfig()).catch((error) => { caught = error; });
+    assert.equal(heldMatchOf(caught)?.contact.email, null);
+  } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
 });

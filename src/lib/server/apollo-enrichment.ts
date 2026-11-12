@@ -3,6 +3,8 @@ import {
   executeApolloEnrichment,
   getApolloApiKey,
   getApolloWebhookResult,
+  heldMatchOf,
+  holdMatchOn,
 } from './apollo-provider/apollo';
 import { consumeEndpointRateLimit, getGatewayConfig } from './apollo-provider/gateway';
 import { validateEnrichmentInput } from './apollo-provider/validation';
@@ -171,7 +173,8 @@ export async function submitApolloEnrichment(input: {
   } catch (error) {
     if (error instanceof ApolloEnrichmentError) throw error;
     if (error instanceof ApolloGatewayError) {
-      throw new ApolloEnrichmentError(providerStatus(error), error.code, isUnknownProviderCode(error.code), error.reason);
+      // Whom Apollo found when it was refused as someone else goes on, never enumerable (apollo.ts, HeldApolloMatch).
+      throw holdMatchOn(new ApolloEnrichmentError(providerStatus(error), error.code, isUnknownProviderCode(error.code), error.reason), heldMatchOf(error));
     }
     if ((error as { name?: string } | null)?.name === 'TimeoutError') {
       throw new ApolloEnrichmentError(504, 'APOLLO_GATEWAY_TIMEOUT', true);
