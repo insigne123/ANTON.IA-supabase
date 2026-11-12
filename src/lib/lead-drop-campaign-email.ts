@@ -13,6 +13,8 @@ export type DropCampaignEmailInput = {
   mailbox: string | null;
   /** The person's own name, for the greeting. */
   name?: string | null;
+  /** The drop's page that needs no session (server/lead-drop-link.ts), in place of the app's: the email is then all the person needs. */
+  link?: string | null;
   now?: Date;
 };
 
@@ -29,7 +31,7 @@ export function dropCampaignEmail(item: DropItem, input: DropCampaignEmailInput)
   if (!messages.length) return null;
   const now = input.now ?? new Date();
   const base = input.appUrl.replace(/\/$/, '');
-  const link = `${base}${dropHref(input.dropId)}?c=${encodeURIComponent(item.leadId)}`;
+  const link = `${input.link || `${base}${dropHref(input.dropId)}`}?c=${encodeURIComponent(item.leadId)}`;
   const settings = `${base}/dashboard?vista=semana`;
   const contact = dropName(item);
   const role = [item.title, item.company].filter(Boolean).join(' · ');
@@ -39,6 +41,7 @@ export function dropCampaignEmail(item: DropItem, input: DropCampaignEmailInput)
   const found = `Encontramos el correo de ${contact}: ${input.contactEmail}.`;
   const next = input.mailbox
     ? `Esta es la campaña que le escribimos. Si te parece, apruébala: sale desde tu ${input.mailbox} y se detiene si responde.`
+    : input.link ? 'Esta es la campaña que le escribimos. Para aprobarla, conecta tu Gmail u Outlook ahí mismo: es una sola vez.'
     : 'Esta es la campaña que le escribimos. Para aprobarla, conecta Gmail u Outlook en «Conexiones».';
   const emails = messages.map((message, index) => ({
     label: index === 0 ? 'Primer correo · sale al aprobar' : `Seguimiento ${index}${days[index] ? ` · ${days[index]}` : ''}, si no responde`,

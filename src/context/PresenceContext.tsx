@@ -22,7 +22,9 @@ const PresenceContext = createContext<PresenceContextType>({ onlineUsers: [] });
 
 export function PresenceProvider({ children }: { children: React.ReactNode }) {
     const { user, organizationId } = useAuth();
-    const pathname = usePathname();
+    // A «Contacto del día» opened from an email carries its signed link in the address: teammates see the place, never the link.
+    const rawPathname = usePathname();
+    const pathname = rawPathname?.startsWith('/contactos/') ? '/contactos' : rawPathname;
     const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
     const orgId = organizationId;
     const pathnameRef = useRef(pathname);

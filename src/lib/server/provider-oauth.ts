@@ -4,9 +4,12 @@ import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { tokenService } from '@/lib/services/token-service';
 
-type Provider = 'google' | 'azure';
-type OAuthAttempt = { state: string; verifier: string; userId: string; redirectUri: string; createdAt: number };
+export type Provider = 'google' | 'azure';
+/** `link`: started from a «Contacto del día» email, without a session (provider-oauth-link.ts): the signed link names the person. */
+export type OAuthAttempt = { state: string; verifier: string; userId: string; redirectUri: string; createdAt: number; link?: string };
 const MAX_AGE = 600;
+export const oauthCookie = (provider: Provider) => `provider_oauth_${provider}`;
+export const oauthBase = (req: NextRequest) => new URL(process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).origin;
 
 export function oauthConfig(provider: Provider) {
   const tenant = encodeURIComponent(process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common');
@@ -37,31 +40,31 @@ export function readOAuthAttempt(raw: string | undefined, state: string | null, 
   } catch { return null; }
 }
 
-export async function startProviderOAuth(req: NextRequest, provider: Provider) {
-  const config = oauthConfig(provider);
-  const base = new URL(process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).origin;
-  const failure = (error: string) => NextResponse.redirect(new URL(`${config.page}?error=${error}`, base));
-  // The callback must return to the same host that owns the session and attempt cookies.
-  // App Hosting terminates HTTPS before Next. Headers may confirm the configured host,
-  // but must never supply an OAuth redirect destination.
+/**
+ * The callback must return to the same host that owns the session and attempt cookies.
+ * App Hosting terminates HTTPS before Next. Headers may confirm the configured host,
+ * but must never supply an OAuth redirect destination.
+ */
+export function offCanonicalHost(req: NextRequest, base: string) {
   const canonicalHost = new URL(base).host;
   const servesCanonicalHost = [req.headers.get('host'), req.headers.get('x-forwarded-host')].includes(canonicalHost);
-  if (req.nextUrl.origin !== base && !servesCanonicalHost) return NextResponse.redirect(new URL(req.nextUrl.pathname, base));
-  const supabase = createRouteHandlerClient({ cookies });
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return failure('session_expired');
-  if (!config.clientId || !config.clientSecret) return failure('configuration_missing');
+  return req.nextUrl.origin !== base && !servesCanonicalHost;
+}
 
+/** The way to the provider's consent, with the attempt kept in a cookie that only this server's callback reads. */
+export function beginProviderOAuth(provider: Provider, base: string, userId: string, link?: string) {
+  const config = oauthConfig(provider);
   const attempt: OAuthAttempt = {
     state: randomBytes(32).toString('base64url'),
     verifier: randomBytes(32).toString('base64url'),
-    userId: user.id,
+    userId,
     redirectUri: `${base}/api/auth/callback/${provider}`,
     createdAt: Date.now(),
+    ...(link ? { link } : {}),
   };
   const url = new URL(config.authorize);
   url.search = new URLSearchParams({
-    client_id: config.clientId, redirect_uri: attempt.redirectUri, response_type: 'code',
+    client_id: config.clientId || '', redirect_uri: attempt.redirectUri, response_type: 'code',
     scope: config.scope, state: attempt.state,
     code_challenge: createHash('sha256').update(attempt.verifier).digest('base64url'),
     code_challenge_method: 'S256',
@@ -69,16 +72,53 @@ export async function startProviderOAuth(req: NextRequest, provider: Provider) {
   }).toString();
   const response = NextResponse.redirect(url);
   response.headers.set('Cache-Control', 'no-store');
-  response.cookies.set(`provider_oauth_${provider}`, JSON.stringify(attempt), {
+  response.cookies.set(oauthCookie(provider), JSON.stringify(attempt), {
     httpOnly: true, secure: base.startsWith('https:'), sameSite: 'lax', path: '/api/auth', maxAge: MAX_AGE,
   });
   return response;
 }
 
+export async function startProviderOAuth(req: NextRequest, provider: Provider) {
+  const config = oauthConfig(provider);
+  const base = oauthBase(req);
+  const failure = (error: string) => NextResponse.redirect(new URL(`${config.page}?error=${error}`, base));
+  if (offCanonicalHost(req, base)) return NextResponse.redirect(new URL(req.nextUrl.pathname, base));
+  const supabase = createRouteHandlerClient({ cookies });
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return failure('session_expired');
+  if (!config.clientId || !config.clientSecret) return failure('configuration_missing');
+  return beginProviderOAuth(provider, base, user.id);
+}
+
+/** The code for a refresh token with the permissions the app needs, or why it could not be had. Throws when the provider cannot be reached. */
+export async function exchangeProviderCode(provider: Provider, attempt: OAuthAttempt, code: string): Promise<{ refreshToken: string } | { error: string }> {
+  const config = oauthConfig(provider);
+  if (!config.clientId || !config.clientSecret) return { error: 'configuration_missing' };
+  const result = await fetch(config.token, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    signal: AbortSignal.timeout(20_000),
+    body: new URLSearchParams({
+      code, client_id: config.clientId, client_secret: config.clientSecret,
+      redirect_uri: attempt.redirectUri, grant_type: 'authorization_code', code_verifier: attempt.verifier,
+      ...(provider === 'azure' ? { scope: config.scope } : {}),
+    }),
+  });
+  const tokens = await result.json();
+  if (!result.ok) return { error: 'token_exchange_failed' };
+  if (typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) return { error: 'no_refresh_token' };
+  // Partial consent must not replace a previously usable automation credential.
+  const scopes = new Set(String(tokens.scope || '').toLowerCase().split(/\s+/));
+  const required = provider === 'google'
+    ? ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
+    : ['mail.send', 'mail.read'];
+  if (!required.every((scope) => scopes.has(scope) || scopes.has(`https://graph.microsoft.com/${scope}`))) return { error: 'missing_permissions' };
+  return { refreshToken: tokens.refresh_token };
+}
+
 export async function finishProviderOAuth(req: NextRequest, provider: Provider) {
   const config = oauthConfig(provider);
-  const base = new URL(process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).origin;
-  const cookieName = `provider_oauth_${provider}`;
+  const base = oauthBase(req);
+  const cookieName = oauthCookie(provider);
   const finish = (params: Record<string, string>) => {
     const url = new URL(config.page, base);
     url.search = new URLSearchParams(params).toString();
@@ -96,28 +136,9 @@ export async function finishProviderOAuth(req: NextRequest, provider: Provider) 
     if (req.nextUrl.searchParams.has('error')) return finish({ error: 'consent_denied' });
     const code = req.nextUrl.searchParams.get('code');
     if (!code) return finish({ error: 'no_code' });
-    if (!config.clientId || !config.clientSecret) return finish({ error: 'configuration_missing' });
-    const result = await fetch(config.token, {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      signal: AbortSignal.timeout(20_000),
-      body: new URLSearchParams({
-        code, client_id: config.clientId, client_secret: config.clientSecret,
-        redirect_uri: attempt.redirectUri, grant_type: 'authorization_code', code_verifier: attempt.verifier,
-        ...(provider === 'azure' ? { scope: config.scope } : {}),
-      }),
-    });
-    const tokens = await result.json();
-    if (!result.ok) return finish({ error: 'token_exchange_failed' });
-    if (typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) return finish({ error: 'no_refresh_token' });
-    // Partial consent must not replace a previously usable automation credential.
-    const scopes = new Set(String(tokens.scope || '').toLowerCase().split(/\s+/));
-    const required = provider === 'google'
-      ? ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
-      : ['mail.send', 'mail.read'];
-    if (!required.every((scope) => scopes.has(scope) || scopes.has(`https://graph.microsoft.com/${scope}`))) {
-      return finish({ error: 'missing_permissions' });
-    }
-    const saveError = await tokenService.saveToken(supabase, provider === 'google' ? 'google' : 'outlook', tokens.refresh_token);
+    const exchanged = await exchangeProviderCode(provider, attempt, code);
+    if ('error' in exchanged) return finish({ error: exchanged.error });
+    const saveError = await tokenService.saveToken(supabase, provider === 'google' ? 'google' : 'outlook', exchanged.refreshToken);
     return finish(saveError ? { error: 'db_save_failed' } : { connected: 'true' });
   } catch {
     return finish({ error: 'exchange_failed' });

@@ -92,6 +92,8 @@ export type DropItem = {
   provider?: 'apollo';
   /** The saved contact it became while its email was looked up: `savedLeadId` comes once it is in «Por escribir». */
   keptLeadId?: string | null;
+  /** Its email lookup asked from the person's inbox (server/lead-drop-mail.ts): which try it is, when, and whether the last one found nothing. */
+  lookup?: { attempt: number; at: string; missed?: boolean };
   /** Three follow-ups after the first email, by the same Writer, with the day each one goes (the first email is day 1). */
   followUps?: DropFollowUp[];
   // Since 12 Nov 2026, for teams with more than one contact a day (the finder, server/lead-drop-finder.ts).
@@ -104,7 +106,7 @@ export type DropItem = {
   /** The person changed the emails by hand: what goes out is theirs. */
   edited?: boolean;
   /** The campaign the person approved for this contact («Aprobar y programar», server/lead-drop-campaign.ts): its emails go out from their mailbox. */
-  campaign?: { id: string; provider: 'google' | 'outlook'; approvedAt: string };
+  campaign?: { id: string; provider: 'google' | 'outlook'; approvedAt: string; /** Stopped by the person from their inbox (server/lead-drop-mail.ts). */ pausedAt?: string | null };
   /** When the campaign went to the person's inbox to read, once its email was found (server/lead-drop-campaign.ts, mailDropCampaign). */
   campaignMailedAt?: string;
 };
@@ -589,10 +591,10 @@ export const dropHref = (dropId: string) => `/search/contactos/${encodeURICompon
  * The drop's part of the email: each contact as a block (name, role and company, why), the button to see them and a note on
  * the PDF. With `heading: false` (the drop is all the email has) the title and its lead are left out.
  */
-export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean; now?: Date } = {}) {
-  const link = `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
+export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean; now?: Date; /** The page that needs no session (server/lead-drop-link.ts), in place of the app's. */ link?: string | null } = {}) {
+  const link = options.link || `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
   // Several contacts (a team's plan): each with its campaign ready to approve, and its own way in.
-  if (items.length > 1) return campaignEmailSection(items, link, options);
+  if (items.length > 1) return campaignEmailSection(items, link, { ...options, open: Boolean(options.link) });
   const one = items.length === 1;
   const heading = options.heading !== false;
   // Found with Apollo (since 3 Nov 2026), the email is looked up on saving: the email does not promise it is ready.
@@ -632,8 +634,8 @@ const firstLines = (body: string, max: number) => { const flat = body.replace(/\
 export const dropEmailPreview = (text: string, item: Pick<DropItem, 'name' | 'company' | 'title'>) => text
   .replace(/\{\{\s*nombre\s*\}\}/g, dropName(item).split(' ')[0] || '').replace(/\{\{\s*empresa\s*\}\}/g, item.company || '').replace(/\{\{\s*cargo\s*\}\}/g, item.title || '');
 /** Where the morning email sends for one contact: its card on the drop's page, and its email looked up on arrival when it still has none. */
-export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'provider' | 'savedLeadId'>) =>
-  `${link}?c=${encodeURIComponent(item.leadId)}${needsLookup(item) ? '&enriquecer=1' : ''}`;
+export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'provider' | 'savedLeadId'>, open = false) =>
+  `${link}?c=${encodeURIComponent(item.leadId)}${needsLookup(item) && !open ? '&enriquecer=1' : ''}`;
 
 /**
  * The block of a drop of several contacts (12 Nov 2026): one card each, short enough to read on a phone. Why it is worth it, what is
@@ -641,7 +643,7 @@ export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'p
  * and first lines, and when each follow-up would go if it started today. One button per contact, to its card: «Enriquecer y revisar»
  * looks its email up on arrival (1 credit) and shows the campaign to change or approve. The emails in full go in the PDF.
  */
-function campaignEmailSection(items: DropItem[], link: string, options: { heading?: boolean; now?: Date }) {
+function campaignEmailSection(items: DropItem[], link: string, options: { heading?: boolean; now?: Date; /** The link opens without a session: every step is a button on that page, never the arrival. */ open?: boolean }) {
   const heading = options.heading !== false;
   const now = options.now ?? new Date();
   const lookup = items.some(item => needsLookup(item));
@@ -657,7 +659,7 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
       followUps: days.length ? `${days.length === 1 ? 'Seguimiento' : `${days.length} seguimientos`} si no responde: ${listed(days)}.` : null } : null;
     // The step each contact is at: its email still to look up, its campaign to approve, already going, or (the email came with the search) to save.
     const action = needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
-    return { item, why, news, opener, campaign, href: dropContactHref(link, item), action };
+    return { item, why, news, opener, campaign, href: dropContactHref(link, item, options.open), action };
   });
   const note = [lookup ? 'Enriquecer busca su correo y usa 1 crédito por contacto.' : dropCostNote(items),
     ...(written ? ['Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde.', 'Los correos completos van en el PDF adjunto.'] : [])].join(' ');

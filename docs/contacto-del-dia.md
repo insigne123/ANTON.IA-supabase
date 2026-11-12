@@ -120,7 +120,7 @@ Pedido del dueño: «que le entreguemos toda la campaña lista para aprobar», q
   - «Ver su campaña», si ya está aprobada.
 - Los correos completos van en el PDF adjunto. Con un solo contacto el correo es el de antes.
 
-**El botón del correo** lleva a la tarjeta de ese contacto (`?c=<id>`). Si todavía no tiene correo, el enlace además pide buscarlo al llegar (`&enriquecer=1`).
+**El botón del correo** lleva a la tarjeta de ese contacto (`?c=<id>`). Desde el 13 de noviembre abre la página que no pide sesión (más abajo, «todo desde el correo»); lo que sigue es cómo funciona cuando el servidor no puede firmar enlaces y el botón abre la app. Si todavía no tiene correo, el enlace además pide buscarlo al llegar (`&enriquecer=1`).
 
 - La búsqueda es la misma que hace el botón de la página, con la sesión de la persona y para un contacto suyo. Un lector de correo que sigue el enlace sin sesión no gasta nada.
 - Al llegar, la dirección pierde esos parámetros: volver a la página no pide otra búsqueda.
@@ -162,6 +162,43 @@ Pedido del dueño: «que le entreguemos toda la campaña lista para aprobar», q
 
 - Con contactos de Apollo no promete correo: «6 contactos nuevos para ti, cada uno con su campaña lista. Ver el correo de cada uno usa 1 crédito.», y después «Te quedan 4 contactos de 6 por revisar». El botón dice «Revisar mis contactos». Antes decía «con correo verificado. Guardarlos no gasta créditos», que solo es cierto con Leads Finder.
 - Lo que ofrece cuando no hay envío habla del plan del equipo: «Hoy te tocan 6 contactos nuevos…», «…cada día hábil te elegimos 6 contactos nuevos». Con el plan por defecto, los textos de siempre.
+
+### Desde el 13 de noviembre: todo desde el correo, sin iniciar sesión (varios contactos al día)
+
+Pedido del dueño: «la idea es que le lleguen al mail sin siquiera necesidad de estar entrando a la app, que el usuario no tenga que aprender nada de la app, que solo le lleguen y lo ocupe», «que pueda hacer todo desde Gmail o Outlook». Hasta el 12 de noviembre cada botón del correo abría la app y pedía iniciar sesión.
+
+**Qué cambia para la persona.** Los botones del correo de la mañana y del correo «Campaña lista para aprobar» abren una página propia, `/contactos/<enlace>`, sin sesión, sin menú y sin nombrar partes de la app. Ahí están sus contactos del día, una tarjeta por cada uno (la misma `DropContactCard`), y cada paso es un botón:
+
+1. **«Enriquecer · 1 crédito»** busca el correo de trabajo del contacto. Encontrado, la tarjeta muestra la dirección y llega el correo «Campaña lista para aprobar».
+2. **«Conectar Gmail» / «Conectar Outlook»**, solo la primera vez: el consentimiento de Google o Microsoft, y de vuelta a la misma página. No pasa por «Conexiones».
+3. **«Aprobar y programar»**: la campaña sale desde su propio Gmail u Outlook; las respuestas le llegan ahí.
+4. **«Detener la campaña» / «Reanudar la campaña»**, desde la misma tarjeta: quien aprueba con un toque en un correo la detiene igual.
+5. «Editar los correos» y «Me sirve / No me sirve» funcionan como en la app.
+
+Solo aplica a envíos de **varios contactos** (el plan de un equipo). Con un contacto, los correos siguen abriendo la app como antes.
+
+**El enlace** (`src/lib/server/lead-drop-link.ts`) es lo que permite actuar sin sesión, así que vale lo que vale el correo:
+
+- **Qué es:** 48 caracteres que nombran un solo envío y la hora en que vence, sellados con HMAC-SHA256 bajo una clave propia derivada del secreto del servidor (`LEAD_DROPS_LINK_SECRET`, o `INTERNAL_API_SECRET`, o la clave de servicio). No sirve como ninguna otra firma, y ninguna otra firma sirve como enlace.
+- **A quién representa:** a la persona dueña de ese envío, mientras siga en ese equipo (`resolveDropLink`). Nunca a otra persona ni a otro envío.
+- **Vence a los 14 días.** Un enlace vencido o ajeno muestra una página que lo dice y ofrece entrar a la app.
+- **Abrir el enlace no hace nada.** Los lectores de correo siguen los enlaces para revisarlos: ninguna búsqueda, aprobación ni detención ocurre al llegar. Todo es un botón de la página, que envía un POST con el enlace (`POST /api/lead-drops/link`). Por eso el botón del correo ya no pide enriquecer al llegar (sin `&enriquecer=1`).
+- **Quien tenga el correo puede actuar por la persona** en ese envío: ver sus contactos, gastar sus créditos de enriquecer y aprobar sus campañas. La página lo dice («no lo reenvíes»). Es el costo de no pedir sesión.
+- **No se filtra:** la página no se indexa y no entrega su dirección a los sitios que enlaza (`referrer: no-referrer`); la presencia del equipo ve «/contactos», nunca el enlace.
+
+**Enriquecer sin navegador** (`enrichDropLead` en `src/lib/server/lead-drop-mail.ts`). En la app, el navegador guarda el contacto, llama a la búsqueda y lo ata al envío. Desde el correo lo hace el servidor, en ese orden y con las mismas piezas:
+
+- la búsqueda es la ruta de la app (`/api/opportunities/enrich-apollo`), pedida por el servidor a nombre de esa persona: mismo cupo diario, misma cuota de créditos del equipo, mismo registro;
+- **un segundo toque no cobra dos veces:** la operación se llama como el envío y el contacto (`lead-drop:<envío>:<contacto>:email:<intento>`), y la ruta responde lo que ya hizo. Solo una búsqueda que terminó sin correo, que fue rechazada o que nunca respondió (15 minutos) deja que el siguiente toque empiece otra;
+- **lo que puede pasar se dice tal cual:** encontrado (con el crédito usado), sin correo, todavía buscando (la página pregunta de nuevo cada 5 segundos, un minuto), sin cupo o sin créditos del equipo (con las palabras de la app);
+- solo el correo: desde un correo nunca se busca un teléfono.
+
+**Conectar el correo desde el enlace** (`src/lib/server/provider-oauth-link.ts`). Es el mismo flujo OAuth de «Conexiones» (mismos permisos, misma dirección de retorno, PKCE), con dos diferencias:
+
+- la persona la nombra el enlace firmado, no una sesión; se revisa al empezar y de nuevo al volver, así que la cookie del intento nunca decide para quién es el buzón;
+- **solo conecta quien no tiene ningún buzón:** un enlace nunca reemplaza el Gmail u Outlook que ya envía.
+
+**Lo que sigue necesitando la app:** cambiar el buzón con que se envía, ver las respuestas clasificadas y las campañas en detalle, y apagar los avisos («Tu semana»).
 
 Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el calce, la redacción y el envío de la mañana son iguales con Apollo.
 
@@ -310,4 +347,5 @@ La migración `20261020180000_lead_drops.sql` crea la tabla `lead_drops`, solo p
 | Cron | `src/app/api/cron/lead-drops/route.ts`, `functions/index.ts` (`leadDropsTick`) |
 | API | `src/app/api/lead-drops/[id]` (leer y guardar), `[id]/pdf`, `latest` y `now` (hacer el de hoy) |
 | Pantalla | `src/app/(app)/search/contactos/[id]/page.tsx`, `src/components/lead-drops/LeadDropFlow.tsx`, `DropContactCard.tsx` (varios contactos) |
+| Desde el correo, sin sesión: enlace firmado, acciones del servidor, página y conexión del buzón | `src/lib/server/lead-drop-link.ts`, `src/lib/server/lead-drop-mail.ts`, `src/app/api/lead-drops/link/route.ts`, `src/app/contactos/[token]/page.tsx`, `src/components/lead-drops/DropMailFlow.tsx`, `src/lib/server/provider-oauth-link.ts` |
 | «Hoy» | `src/components/home/LeadDropBanner.tsx` |

@@ -55,7 +55,7 @@ export type AlertFacts = {
   /** Days since the person last signed in or did something recorded (plan de uso U5); null or absent when unknown. */
   idleDays?: number | null;
   /** Today's «Contacto del día», when it is ready. */
-  drop?: { id: string; items: DropItem[] } | null;
+  drop?: { id: string; items: DropItem[]; /** The page of the drop that needs no session, when it has one (server/lead-drop-link.ts). */ link?: string | null } | null;
   /** Conversations of Cowork whose proposal waits for the person (COW-04): every day while they wait, as the decisions above. */
   coworkApprovals?: number;
   /**
@@ -326,7 +326,7 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
   const settings = link('/dashboard?vista=semana');
   const greeting = name ? `Hola, ${name}` : 'Hola';
   const lines = drop?.items.length ? alert.lines.filter(line => line.kind !== 'drop') : alert.lines;
-  const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base, { heading: lines.length > 0 }) : null;
+  const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base, { heading: lines.length > 0, link: drop.link }) : null;
   const intro = lines.length || !section ? 'Esto te espera hoy en ANTON.IA' : drop!.items.length === 1 ? 'Tu contacto del día ya está listo' : 'Tus contactos del día ya están listos';
   const text = [
     `${greeting}. ${intro}${lines.length ? ':' : '.'}`, '',

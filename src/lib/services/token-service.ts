@@ -7,12 +7,17 @@ export const tokenService = {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { message: 'No user found in session' };
 
+        return this.saveTokenFor(user.id, provider, refreshToken, expiresAt);
+    },
+
+    /** The same, for a person the server already knows without a session (a mailbox connected from a signed email link, provider-oauth-link.ts). */
+    async saveTokenFor(userId: string, provider: 'google' | 'outlook', refreshToken: string, expiresAt?: Date) {
         const encryptedRefreshToken = encryptStoredToken(refreshToken);
 
         const { error } = await getSupabaseAdminClient()
             .from('provider_tokens')
             .upsert({
-                user_id: user.id,
+                user_id: userId,
                 provider,
                 refresh_token: encryptedRefreshToken,
                 expires_at: expiresAt?.toISOString(),

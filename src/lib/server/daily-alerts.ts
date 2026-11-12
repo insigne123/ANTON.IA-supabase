@@ -3,6 +3,7 @@ import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
 import { BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
+import { dropLinkUrl } from '@/lib/server/lead-drop-link';
 import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
 import { dropPdf, dropPlanFor } from '@/lib/server/lead-drops';
@@ -328,9 +329,11 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const to = String(profile.data?.email || '').trim();
   if (!readAlertsEmail(profile.data?.signatures) || !to) return { status: 'stored' as const };
   // Today's contacts go in the same email, with their research and first emails in a PDF.
+  // A drop of several contacts is used from the inbox: its links open a page of its own, without signing in (lead-drop-link.ts).
+  const open = drop && drop.items.length > 1 ? dropLinkUrl(deps.appUrl, drop.id, { now }) : null;
   const attachments = drop ? [{ filename: `contacto-del-dia-${today}.pdf`, contentType: 'application/pdf',
-    content: await dropPdf(drop.items, { name: facts.name, date: today, link: `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
-  const sent = await deps.send({ userId: scope.userId, to, ...alertEmail(alert, facts.name, deps.appUrl, drop), ...(attachments ? { attachments } : {}) });
+    content: await dropPdf(drop.items, { name: facts.name, date: today, link: open || `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
+  const sent = await deps.send({ userId: scope.userId, to, ...alertEmail(alert, facts.name, deps.appUrl, drop && open ? { ...drop, link: open } : drop), ...(attachments ? { attachments } : {}) });
   const at = new Date().toISOString();
   await client.from('daily_alerts').update(sent.ok ? { status: 'sent', emailed_at: at, email_error: null } : { status: 'failed', email_error: sent.error.slice(0, 300) }).eq('id', stored.data.id);
   if (sent.ok && drop) await client.from('lead_drops').update({ status: 'sent', emailed_at: at, updated_at: at }).eq('id', drop.id).eq('status', 'ready');

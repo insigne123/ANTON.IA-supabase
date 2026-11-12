@@ -125,6 +125,11 @@ test('once its email is found, the campaign goes to the person\'s inbox to read:
   // «Enriquecer» asked again, or the page linking twice: no second email.
   assert.deepEqual(await mailDropCampaign(client, scope, DROP, LEAD, deps), { sent: false, reason: 'not_due' });
   assert.equal(sent.length, 1);
+  // With a secret to sign with, the button opens the drop's own page, which needs no session (lead-drop-link.ts).
+  const open = seed({ savedLeadId: 'e-1' });
+  await mailDropCampaign(open.client, scope, DROP, LEAD, { ...deps, env: { INTERNAL_API_SECRET: 'a-secret-for-tests' } });
+  assert.match(sent[1].html, new RegExp(`href="https://app\\.ejemplo\\.cl/contactos/[A-Za-z0-9_-]{48}\\?c=${LEAD}"`));
+  assert.ok(!sent[1].html.includes('/search/contactos/') && !sent[1].text.includes('/search/contactos/'));
 
   const none = async (seeded: ReturnType<typeof seed>, reason: string, extra: Record<string, unknown> = {}) => {
     const before = sent.length;
