@@ -320,7 +320,9 @@ test('enrichment mode cannot be forged or made inconsistent with requested field
 });
 
 test('profile enrichment has stable targets and recoverable idempotent replays', () => {
-  assert.match(enrichmentRoute, /function profileTargetId[\s\S]*createHash\('sha256'\)/);
+  // The target id lives beside the route since the identity review needs it too (identity-reviews.ts).
+  assert.match(readFileSync('src/lib/server/profile-target.ts', 'utf8'), /function profileTargetId[\s\S]*createHash\('sha256'\)/);
+  assert.match(enrichmentRoute, /import \{ profileTargetId \} from '@\/lib\/server\/profile-target'/);
   assert.match(enrichmentRoute, /from\('people_search_leads'\)[\s\S]*\.eq\('user_id', input\.userId\)[\s\S]*\.eq\('organization_id', input\.organizationId\)/);
   assert.match(enrichmentRoute, /async function operationTargets/);
   assert.match(enrichmentRoute, /target_table', input\.tableName/);
