@@ -385,14 +385,18 @@ async function searchPeople(params: {
   const people = new Map<string, NonNullable<ReturnType<typeof mapPerson>>>();
   const industryFilters = resolveApolloIndustryFilters(params.input.industryKeywords);
 
-  for (const organizationIds of organizationIdChunks) {
-    const remaining = params.input.maxResults - people.size;
-    if (remaining <= 0) break;
+  // «0 = todos» asks for more than one page: the next pages of the same query, until it is enough or Apollo has no more. Every page
+  // is then of a hundred, so page N starts where page N-1 ended.
+  const firstPage = Math.min(500, Math.max(1, params.input.page || 1));
+  const pages = Math.max(1, Math.ceil(params.input.maxResults / 100));
+  const perPage = pages > 1 ? 100 : Math.min(100, params.input.maxResults);
+  for (const organizationIds of organizationIdChunks) for (let page = firstPage; page < firstPage + pages && page <= 500; page++) {
+    if (params.input.maxResults - people.size <= 0) break;
 
     const query = new URLSearchParams();
-    query.set('per_page', String(Math.min(100, remaining)));
+    query.set('per_page', String(perPage));
     // «Traer más» asks for the next page of the same query; every other caller sends page 1.
-    query.set('page', String(Math.min(500, Math.max(1, params.input.page || 1))));
+    query.set('page', String(page));
     appendAll(query, 'person_titles[]', params.input.titles);
     if (params.input.titles.length > 0) query.set('include_similar_titles', String(params.input.includeSimilarTitles));
     appendAll(query, 'person_seniorities[]', params.input.seniorities);
@@ -416,6 +420,8 @@ async function searchPeople(params: {
       if (person && !people.has(person.id)) people.set(person.id, person);
       if (people.size >= params.input.maxResults) break;
     }
+    // A page short of what was asked is the last one Apollo has.
+    if (payload.people.length < perPage) break;
   }
 
   return [...people.values()];

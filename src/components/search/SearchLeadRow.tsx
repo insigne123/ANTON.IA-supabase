@@ -57,7 +57,10 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
           {/* flex-1: the name takes the room the marks leave, instead of shrinking to nothing beside «Guardado». */}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{lead.name}</p>
-            <p className="truncate text-sm text-foreground/70" title={lead.title || undefined}>{lead.title}</p>
+            <p className="flex min-w-0 items-center gap-1.5 text-sm text-foreground/70">
+              <span className="truncate" title={lead.title || undefined}>{lead.title}</span>
+              {lead.titleMatch ? <TitleMatchBadge match={lead.titleMatch} /> : null}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {fit}
@@ -71,4 +74,17 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
       </div>
     </div>
   );
+}
+
+const TITLE_MATCH_TEXT = { exact: 'Cargo exacto', similar: 'Cargo similar', related: 'Cargo relacionado' } as const;
+const TITLE_MATCH_HINT = {
+  exact: 'Es el cargo que buscaste, aunque esté escrito distinto.',
+  similar: 'Hace lo mismo con otro nombre o un nivel parecido.',
+  related: 'Un área vecina que suele decidir o influir en la misma compra.',
+} as const;
+
+/** How the person's title matches the searched one, as the AI classified it (src/lib/server/search/title-ai.ts). */
+function TitleMatchBadge({ match }: { match: keyof typeof TITLE_MATCH_TEXT }) {
+  return <Badge variant={match === 'exact' ? 'success' : match === 'similar' ? 'info' : 'neutral'} className="shrink-0 px-1.5 py-0 text-[11px] font-normal"
+    title={TITLE_MATCH_HINT[match]}>{TITLE_MATCH_TEXT[match]}</Badge>;
 }

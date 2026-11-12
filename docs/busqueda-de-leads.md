@@ -63,3 +63,44 @@ La misma consulta de la línea base: proporción de callbacks de perfil por `ter
 - `src/lib/leads-client.test.ts`: no encontrado, caída sin reintento, Sales Navigator sin llamada y tildes.
 - `src/lib/server/apollo-provider/apollo.test.ts`: tildes y dirección vacía.
 - `scripts/test-search-guidance-ui.mjs`: DOM; corre dentro de `test:unit` mediante `__tests__/search-guidance-ui.test.mjs`.
+
+## 12 de noviembre de 2026: cargos por lo que significan y «0 = todos»
+
+**Por qué:** Brysa buscó «coordinador de gestión de riesgo en incendio» en Colbún y no apareció nadie. Sí apareció cuando escribió el cargo tal como lo tenía la persona en LinkedIn: «Coordinador Gestión Riesgo Incendios».
+
+**Cómo busca Apollo un cargo** (probado con su búsqueda gratuita):
+- encuentra a la persona si su título tiene las palabras pedidas seguidas y escritas igual;
+- las tildes y el plural cuentan;
+- sus «cargos similares» son sinónimos de cargos comunes y no cubren otra forma de escribir un cargo poco común.
+
+| Pedido a Apollo en Colbún | Personas |
+|---|---|
+| «coordinador gestion riesgo incendio» | 0 |
+| «coordinador incendios» | 0 |
+| «gestion riesgo» (sin tilde) | 0 |
+| «incendios» | 1 (él) |
+| «riesgo incendios» | 1 (él) |
+| «riesgo» o «riesgos» | 13, él primero |
+
+**Qué cambia** (`src/lib/server/search/title-ai.ts`, `src/lib/server/search/company-people-ai.ts` y `src/app/api/leads/search/route.ts`):
+1. **Búsqueda en una empresa** (contactos de una empresa marcada en «Filtros», o la pestaña «Empresa»):
+   - si la empresa tiene hasta 300 personas en Apollo, se leen todas (de 1 a 3 llamadas);
+   - si tiene más, se buscan dos cosas:
+     - el cargo escrito de las formas que usa la gente (1 llamada);
+     - las palabras de su área, como «riesgo», «riesgos» o «incendios» (hasta 3 llamadas). En Codelco, «seguridad», «salud», «medio ambiente», «incendios» y «riesgos» suman 214 personas;
+   - son a lo más 5 llamadas por empresa. La búsqueda de personas de Apollo no cobra créditos, pero la cuenta completa tiene 200 llamadas por minuto.
+2. **Búsqueda por filtros:** al cargo pedido se suman las formas en que la gente lo escribe, con un máximo de 20 cargos por búsqueda, que es el límite que acepta el gateway.
+3. **Clasificación:** la IA (Claude Haiku) clasifica cada título encontrado:
+   - «Cargo exacto»: el mismo cargo, aunque esté escrito distinto;
+   - «Cargo similar»: la misma función con un nivel parecido;
+   - «Cargo relacionado»: un área vecina que decide o influye en la misma compra;
+   - sin relación: no se muestra.
+
+   Primero aparecen los exactos, después los similares y al final los relacionados. Cada fila lleva su etiqueta.
+4. **Si la IA falla:**
+   - una regla local reconoce el cargo pedido aunque esté escrito sin preposiciones, sin tildes, en plural o en femenino;
+   - esa regla solo puede subir lo que dijo el modelo, nunca bajarlo;
+   - las formas de escribir el cargo y las clasificaciones se guardan un día, para no preguntar dos veces.
+5. **«0 = todos»:** en «Máximo de resultados» y en «Contactos por empresa», 0 trae a todos, hasta 1.000 personas (10 páginas de la búsqueda gratuita). Cada página pedida a Apollo es de 100 personas, para que ninguna se repita entre páginas.
+
+**Pruebas:** `title-ai.test.ts`, `company-people-ai.test.ts` y las páginas de Apollo en `apollo.test.ts`.

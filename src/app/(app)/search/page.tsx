@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { safeAvatarUrl } from '@/lib/avatar';
+import { ALL_SEARCH_RESULTS } from '@/lib/search/limits';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -110,6 +111,13 @@ function searchFitLead(lead: UILaed): LeadFitLead {
   };
 }
 function currentCompanySignature(criteria:typeof DEFAULT_FILTERS){return criteria.searchMode==='company_name'?JSON.stringify({mode:'company',name:criteria.companyName.trim().toLowerCase(),domains:splitDomainInput(criteria.companyDomains).sort()}):companyFilterSignature(criteria);}
+
+/** The number typed in a result-count field: 0 is «todos»; empty or not a number, the default; never above 100 a page. */
+function resultCountInput(value: string, fallback: number) {
+  const number = Number(value);
+  if (value.trim() === '' || !Number.isFinite(number)) return fallback;
+  return Math.min(100, Math.max(0, Math.floor(number)));
+}
 
 export default function SearchPage() {
   const router = useRouter();
@@ -273,7 +281,8 @@ export default function SearchPage() {
       titles: splitTitlesInput(filters.title),
       seniorities: Array.isArray(filters.seniorities) ? filters.seniorities : [],
       personLocations: filters.searchMode==='company_name'?[]:splitFilterInput(filters.personLocation),
-      leadsPerCompany: Math.min(100, Math.max(1, Number(filters.maxResults) || 50)),
+      // «0 = todos»: everyone at each company (up to ALL_SEARCH_RESULTS), in one answer.
+      leadsPerCompany: Number(filters.maxResults) === 0 ? 0 : Math.min(100, Math.max(1, Number(filters.maxResults) || 50)),
     };
   };
 
@@ -370,7 +379,8 @@ export default function SearchPage() {
       person_locations: personLocations,
       include_similar_titles: true,
       page,
-      per_page: perPage,
+      per_page: perPage || 100,
+      ...(perPage === 0 ? { all_results: true } : {}),
       exclude_person_ids: [],
     }, signal, opportunityOrigin.current);
     const rawLeads = Array.isArray((result as any)?.leads) ? (result as any).leads : [];
@@ -387,7 +397,7 @@ export default function SearchPage() {
       leads: fresh.map((raw: any) => normalizeLeadForUI(raw, { revealEmail: true, revealPhone: false, organization })),
       totalEntries: (result as any)?.total_entries as number | undefined,
       totalPages: (result as any)?.total_pages as number | undefined,
-      hasMore: page < 500 && (typeof result.total_entries === 'number' ? page * perPage < result.total_entries : Number(result.raw_count ?? rawLeads.length) >= perPage),
+      hasMore: perPage > 0 && page < 500 && (typeof result.total_entries === 'number' ? page * perPage < result.total_entries : Number(result.raw_count ?? rawLeads.length) >= perPage),
       buffer:undefined,
     };
   };
@@ -1235,7 +1245,7 @@ export default function SearchPage() {
           organization_domains: organizationDomains,
           seniorities: filters.seniorities,
           titles: splitTitlesInput(filters.title),
-          max_results: Math.max(1, Number(filters.maxResults) || 25),
+          ...(Number(filters.maxResults) === 0 ? { all_results: true } : { max_results: Math.max(1, Number(filters.maxResults) || 25) }),
           selected_organization_id: organization?.id,
           selected_organization_name: organization?.name,
         }, abortRef.current.signal);
@@ -1261,7 +1271,9 @@ export default function SearchPage() {
           max_org_pages: 1,
           max_people_pages_per_chunk: 1,
           enrich: false,
-          max_results: Math.max(1, Math.min(100, Number(filters.maxResults) || 25)),
+          ...(Number(filters.maxResults) === 0
+            ? { max_results: ALL_SEARCH_RESULTS, all_results: true }
+            : { max_results: Math.max(1, Math.min(100, Number(filters.maxResults) || 25)) }),
         }];
         result = await searchLeads(payload, abortRef.current.signal);
       }
@@ -2021,7 +2033,8 @@ export default function SearchPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="maxResults">Máximo de resultados</Label>
-              <Input id="maxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 25)))} />
+              <Input id="maxResults" type="number" min={0} max={100} aria-describedby="maxResultsHelp" value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', resultCountInput(event.target.value, 25))} />
+              <p id="maxResultsHelp" className="text-xs text-foreground/70">{`Escribe 0 para traer a todos (hasta ${ALL_SEARCH_RESULTS.toLocaleString('es-CL')}).`}</p>
             </div>
             <div className="md:col-span-2 lg:col-span-1">
               <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
@@ -2116,8 +2129,8 @@ export default function SearchPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="filterMaxResults">Contactos por empresa</Label>
-            <Input id="filterMaxResults" type="number" min={1} max={100} aria-describedby="filterMaxResultsHelp" value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 50)))} />
-            <p id="filterMaxResultsHelp" className="text-xs text-foreground/70">Cuántos traer de cada empresa marcada. Puedes pedir más después.</p>
+            <Input id="filterMaxResults" type="number" min={0} max={100} aria-describedby="filterMaxResultsHelp" value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', resultCountInput(event.target.value, 50))} />
+            <p id="filterMaxResultsHelp" className="text-xs text-foreground/70">{`Cuántos traer de cada empresa marcada; 0 trae a todos (hasta ${ALL_SEARCH_RESULTS.toLocaleString('es-CL')}). Puedes pedir más después.`}</p>
           </div>
         </div>
       </div>
@@ -2217,7 +2230,7 @@ export default function SearchPage() {
             {isLoadingCompanies ? 'Buscando empresas…' : companies.length > 0 ? `${companies.length.toLocaleString('es-CL')} empresas` : 'Empresas'}
           </h2>
           <p className="text-sm text-foreground/70" role="status" aria-live="polite">
-            Marca las que te interesan; en cada una buscaremos hasta {leadsPerCompany} contactos.
+            {leadsPerCompany === 0 ? 'Marca las que te interesan; en cada una buscaremos a todos los contactos.' : `Marca las que te interesan; en cada una buscaremos hasta ${leadsPerCompany} contactos.`}
             {companiesTotalEntries ? ` Hay unas ${companiesTotalEntries.toLocaleString('es-CL')} en total.` : ''}
           </p>
         </div>
@@ -2759,7 +2772,7 @@ export default function SearchPage() {
                 {resultsView === 'companies' && companies.length > 0 ? (
                   <ResultsActionBar
                     label={`${selectedCompanyIds.size} de ${companies.length} empresas marcadas`}
-                    hint={selectedCompanyIds.size === 0 ? 'Marca al menos una para buscar contactos.' : `Buscaremos hasta ${leadsPerCompany} contactos en cada una.`}
+                    hint={selectedCompanyIds.size === 0 ? 'Marca al menos una para buscar contactos.' : leadsPerCompany === 0 ? 'Buscaremos a todos los contactos de cada una.' : `Buscaremos hasta ${leadsPerCompany} contactos en cada una.`}
                   >
                     <Button type="button" disabled={isLoadingCompanyPeople || selectedCompanyIds.size === 0} onClick={() => void handleSearchCompanyPeople()}>
                       {isLoadingCompanyPeople ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
