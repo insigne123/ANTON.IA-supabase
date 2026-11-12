@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropDay, dropEmailSection, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -166,7 +166,12 @@ test('the email table escapes what came from outside and links to the drop', () 
   assert.doesNotMatch(bare.html, /Contacto del día|Tu contacto de hoy, con su correo listo/);
   assert.doesNotMatch(bare.text, /^Tu contacto de hoy/);
   assert.match(bare.html, />Ver y guardar</);
-  assert.match(dropEmailSection([item, item], 'drop-1', 'https://app.antonia.ai/').html, />Ver y guardar los 2</);
+  // Several: a card each with its own way in (below), and one link to all of them. Their email came with the search, so each is to save.
+  const two = dropEmailSection([item, { ...item, leadId: 'lf_2' }], 'drop-1', 'https://app.antonia.ai/');
+  assert.match(two.html, /href="https:\/\/app\.antonia\.ai\/search\/contactos\/drop-1\?c=lf_2"[^>]*>Ver y guardar<\/a>/);
+  assert.match(two.html, />Ver los 2 juntos</);
+  assert.match(two.text, /^2 contactos nuevos para ti:/);
+  assert.match(two.text, /Guardarlos no gasta créditos\.$/);
   assert.equal(dropSubject([item]), 'Tu contacto de hoy: Gerente en R&R');
   assert.equal(dropSubject([{ title: null, company: null }]), 'Tu contacto de hoy');
   assert.equal(dropSubject([item, item]), '2 contactos nuevos para ti');
@@ -253,4 +258,51 @@ test('a role next to the customer\'s says so, instead of «calza por su cargo»'
     'Su cargo es vecino a los que buscas, en tu rubro objetivo (retail), en Santiago: te lo proponemos para probar si también te sirve.');
   assert.equal(whyText({ title: 'Jefe de Operaciones', industry: null, city: null, track: 'explore' }, criteria),
     'Su cargo es vecino a los que buscas: te lo proponemos para probar si también te sirve.');
+});
+
+test('a contact\'s emails as a campaign sends them: the first at once, each follow-up so many days after the one before', () => {
+  const draft = { subject: 'Brigadas', body: 'Hola' };
+  const followUps = [{ day: 3, subject: 'Uno', body: 'A' }, { day: 7, subject: 'Dos', body: 'B' }, { day: 11, subject: 'Tres', body: 'C' }];
+  assert.deepEqual(dropCampaignMessages({ draft, followUps }).map(message => message.delayDays), [0, 2, 4, 4]);
+  assert.deepEqual(dropCampaignMessages({ draft, followUps: [{ day: 1, subject: 'Uno', body: 'A' }, { day: 1, subject: 'Dos', body: 'B' }] }).map(message => message.delayDays), [0, 1, 1],
+    'never two the same day, whatever the Writer said');
+  assert.deepEqual(dropCampaignMessages({ draft: null, followUps }), []);
+  // Thursday 12 Nov 2026, late in Chile: the day is Chile's.
+  assert.deepEqual(dropSchedule({ draft, followUps }, new Date('2026-11-13T02:30:00.000Z')), ['2026-11-12', '2026-11-14', '2026-11-18', '2026-11-22']);
+  assert.deepEqual(['2026-11-12', '2026-11-14', '2026-12-01'].map(shortDay), ['jue 12 nov', 'sáb 14 nov', 'mar 1 dic']);
+});
+
+test('the email of several contacts: a card each with why, what is happening, how to open and its campaign, and its own way in', () => {
+  const base = (id: string, name: string, company: string, extra: Record<string, unknown> = {}) => ({ ...candidate(id, company), name, title: 'Gerente HSE', why: 'Calza con tu cliente ideal por su cargo.',
+    research: [], provider: 'apollo' as const, draft: { subject: 'Brigadas en <faena>', body: `Hola {{nombre}},\n\n${'¿Cómo cubren los turnos de noche? '.repeat(12)}` },
+    followUps: [{ day: 3, subject: 'Uno', body: 'A' }, { day: 7, subject: 'Dos', body: 'B' }], ...extra });
+  const items = [
+    base('1', 'Pedro Ar***a', 'Minera Andina', { reasons: ['Una razón de antes.'], approach: 'Un abordaje de antes.',
+      brief: { company: 'Produce cobre.', fit: 'Una planta nueva suma áreas que proteger.', role: 'Responde por la seguridad.', opener: 'Pregúntale por la planta nueva.',
+        news: { text: 'Anunció una planta concentradora nueva.', date: '3 nov 2026', source: 'Diario Financiero', url: 'https://diario.example/planta' } } }),
+    base('2', 'Luisa Soto', 'Puerto Sur', { track: 'explore' as const, savedLeadId: 'e-2', reasons: ['Su cargo decide la contratación de brigadas.'] }),
+    base('3', 'Ana Rojas', 'Forestal Sur', { savedLeadId: 'e-3', campaign: { id: 'c-1', provider: 'google' as const, approvedAt: '2026-11-12T12:00:00Z' }, draft: null, followUps: [] }),
+  ];
+  const section = dropEmailSection(items as any, 'drop-1', 'https://app.test/', { now: new Date('2026-11-12T12:00:00.000Z') });
+  assert.equal(section.link, 'https://app.test/search/contactos/drop-1');
+  assert.equal(dropContactHref(section.link, items[0] as any), 'https://app.test/search/contactos/drop-1?c=lf_000000000000000000000001&enriquecer=1');
+  // The text version, as a phone's preview reads it.
+  assert.match(section.text, /^3 contactos nuevos para ti, cada uno con su campaña lista:\n\nPedro A\., Gerente HSE en Minera Andina\nPor qué: Una planta nueva suma áreas que proteger\.\nAhora: Anunció una planta concentradora nueva \(Diario Financiero, 3 nov 2026\)\.\nCómo abrir: Pregúntale por la planta nueva\.\nPrimer correo: «Brigadas en <faena>»\. Hola Pedro, ¿Cómo cubren/,
+    'the preview reads as the contact would get it: their first name, not «{{nombre}}»');
+  assert.match(section.text, /2 seguimientos si no responde: sáb 14 nov y mié 18 nov\.\nEnriquecer y revisar · 1 crédito: https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000001&enriquecer=1/);
+  assert.match(section.text, /Luisa Soto, Gerente HSE en Puerto Sur \(para explorar\)\nPor qué: Su cargo decide la contratación de brigadas\.\nPrimer correo:[\s\S]*Revisar y aprobar: https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000002\n/,
+    'with its email already: no lookup asked, and the step is to approve');
+  assert.match(section.text, /Ana Rojas, Gerente HSE en Forestal Sur\nPor qué: Calza con tu cliente ideal por su cargo\.\nVer su campaña: /);
+  assert.match(section.text, /Verlos todos: https:\/\/app\.test\/search\/contactos\/drop-1\nEnriquecer busca su correo y usa 1 crédito por contacto\. Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde\. Los correos completos van en el PDF adjunto\.$/);
+  // The preview is cut at a word, and what came from outside is escaped.
+  const preview = section.text.match(/Primer correo: «[^»]*»\. ([^\n]*)/)![1];
+  assert.ok(preview.length <= 151 && preview.endsWith('…'));
+  assert.match(section.html, /Brigadas en &lt;faena&gt;/);
+  assert.doesNotMatch(section.html, /<faena>/);
+  assert.equal((section.html.match(/Campaña lista<\/p>/g) || []).length, 2, 'the one without emails has no campaign block');
+  assert.match(section.html, /href="https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000001&amp;enriquecer=1"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
+  assert.match(section.html, /· para explorar/);
+  assert.match(section.html, /Ver los 3 juntos/);
+  // Inside another alert the heading is the alert's.
+  assert.doesNotMatch(dropEmailSection(items as any, 'drop-1', 'https://app.test', { heading: false }).html, /<h2/);
 });

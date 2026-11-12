@@ -615,6 +615,12 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
 /** «el lun 16, el vie 20 y el mar 24 nov» would repeat the month: «lun 16 nov, vie 20 nov y mar 24 nov», joined as a sentence. */
 const listed = (values: string[]) => values.length <= 1 ? values.join('') : `${values.slice(0, -1).join(', ')} y ${values[values.length - 1]}`;
 const firstLines = (body: string, max: number) => { const flat = body.replace(/\s+/g, ' ').trim(); return flat.length > max ? `${flat.slice(0, max).replace(/\s+\S*$/, '')}…` : flat; };
+/**
+ * An email as its reader would get it, to read before it goes: «{{nombre}}» as the first name, «{{empresa}}» and «{{cargo}}» as the
+ * contact's (the campaign fills them the same way when it sends). What is kept and changed is the text with its variables.
+ */
+export const dropEmailPreview = (text: string, item: Pick<DropItem, 'name' | 'company' | 'title'>) => text
+  .replace(/\{\{\s*nombre\s*\}\}/g, dropName(item).split(' ')[0] || '').replace(/\{\{\s*empresa\s*\}\}/g, item.company || '').replace(/\{\{\s*cargo\s*\}\}/g, item.title || '');
 /** Where the morning email sends for one contact: its card on the drop's page, and its email looked up on arrival when it still has none. */
 export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'provider' | 'savedLeadId'>) =>
   `${link}?c=${encodeURIComponent(item.leadId)}${needsLookup(item) ? '&enriquecer=1' : ''}`;
@@ -629,18 +635,22 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   const heading = options.heading !== false;
   const now = options.now ?? new Date();
   const lookup = items.some(item => needsLookup(item));
-  const lead = `${items.length} contactos nuevos para ti, cada uno con su campaña lista`;
+  const written = items.some(item => item.draft);
+  const lead = `${items.length} contactos nuevos para ti${written ? ', cada uno con su campaña lista' : ''}`;
   const cards = items.map(item => {
     const brief = item.brief;
     const why = brief?.fit || item.reasons?.[0] || item.why;
     const news = brief?.news ? `${brief.news.text.replace(/[.\s]+$/, '')}${[brief.news.source, brief.news.date].some(Boolean) ? ` (${[brief.news.source, brief.news.date].filter(Boolean).join(', ')})` : ''}.` : null;
     const opener = brief?.opener || item.approach || null;
     const days = dropSchedule(item, now).slice(1).map(shortDay);
-    const campaign = item.draft ? { subject: item.draft.subject, preview: firstLines(item.draft.body, 220),
+    const campaign = item.draft ? { subject: dropEmailPreview(item.draft.subject, item), preview: firstLines(dropEmailPreview(item.draft.body, item), 150),
       followUps: days.length ? `${days.length === 1 ? 'Seguimiento' : `${days.length} seguimientos`} si no responde: ${listed(days)}.` : null } : null;
-    return { item, why, news, opener, campaign, href: dropContactHref(link, item), action: needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : 'Revisar y aprobar' };
+    // The step each contact is at: its email still to look up, its campaign to approve, already going, or (the email came with the search) to save.
+    const action = needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
+    return { item, why, news, opener, campaign, href: dropContactHref(link, item), action };
   });
-  const note = `${lookup ? 'Enriquecer busca su correo y usa 1 crédito por contacto. ' : ''}Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde. Los correos completos van en el PDF adjunto.`;
+  const note = [lookup ? 'Enriquecer busca su correo y usa 1 crédito por contacto.' : dropCostNote(items),
+    ...(written ? ['Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde.', 'Los correos completos van en el PDF adjunto.'] : [])].join(' ');
   const text = [
     ...(heading ? [`${lead}:`] : []),
     ...cards.flatMap(({ item, why, news, opener, campaign, href, action }) => [

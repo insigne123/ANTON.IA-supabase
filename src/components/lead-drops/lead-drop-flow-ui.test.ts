@@ -30,7 +30,12 @@ const shared = {
   'next/link': { __esModule: true, default: ({ href, children, ...props }: any) => React.createElement('a', { href, ...props }, children) },
   '@/lib/lead-drops': leadDrops,
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
+  // The fields of the card as the browser has them, so a test can type in them.
+  '@/components/ui/input': { Input: (props: any) => React.createElement('input', props) },
+  '@/components/ui/textarea': { Textarea: (props: any) => React.createElement('textarea', props) },
+  '@/components/ui/label': { Label: (props: any) => React.createElement('label', props) },
 };
+const contactCard = await component('./DropContactCard.tsx', shared);
 let home: any = null;
 const { LeadDropBanner } = await component('../home/LeadDropBanner.tsx', { ...shared, './usePersonalHome': { usePersonalHome: () => ({ data: home }) } });
 let answers: Array<{ status: number; body: unknown }> = [];
@@ -38,12 +43,15 @@ let answers: Array<{ status: number; body: unknown }> = [];
 let auth: { organizationId: string | null; loading: boolean; refreshOrganization: () => Promise<void> } = { organizationId: 'org-1', loading: false, refreshOrganization: async () => {} };
 let gate: Promise<void> | null = null;
 const calls: string[] = [];
+/** What each POST carried, in order. */
+const bodies: any[] = [];
 // «Enriquecer y guardar» of an Apollo contact: the saved contact it became and what the lookup found, as the browser sees them.
 let savedLeads: any[] = [];
 let lookups: Array<{ leads: any[]; lookups: Record<string, string> }> = [];
 let completion: any = { moved: [], notFound: [], expired: 0, failures: [], consumed: 0, markedNotFound: true };
 const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
   ...shared,
+  './DropContactCard': contactCard,
   '@/lib/supabase-service': { supabaseService: { getLeads: async () => savedLeads } },
   '@/lib/leads-workspace/complete-contacts': {
     completeSavedContacts: async (leads: any[], chosen: Record<string, string>) => { lookups.push({ leads, lookups: chosen }); return completion; },
@@ -54,6 +62,7 @@ const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
   '@/components/page-header': { PageHeader: ({ title, description }: any) => React.createElement('header', null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
   '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
     calls.push(`${init?.method || 'GET'} ${path}`);
+    if (init?.body) bodies.push(JSON.parse(String(init.body)));
     if (gate) await gate;
     const answer = answers.shift() || { status: 500, body: { error: 'sin respuesta' } };
     return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
@@ -76,8 +85,8 @@ const drop = { id: 'drop-1', date: '2026-10-21', criteria: { titles: ['Gerente d
   items: [{ leadId: 'lf_1', name: 'Ana Pérez', title: 'Gerente de Personas', company: 'Ripley', domain: null, industry: 'Retail', size: null, city: 'Santiago',
     hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana' } }] };
 
-async function open(dropId: string, options: { motion?: boolean; played?: boolean } = {}) {
-  const dom = new JSDOM('<div id="root"></div>', { url: 'https://app.test/search/contactos/nuevo' });
+async function open(dropId: string, options: { motion?: boolean; played?: boolean; url?: string } = {}) {
+  const dom = new JSDOM('<div id="root"></div>', { url: options.url || 'https://app.test/search/contactos/nuevo' });
   // Reduced motion by default: once they arrive the contacts show at once, without the playback.
   (dom.window as any).matchMedia = () => ({ matches: !options.motion });
   if (options.played) dom.window.localStorage.setItem('anton:drop-played:drop-1', '1');
@@ -303,4 +312,132 @@ test('a failed read keeps «Reintentar»; without the organization the page says
   assert.equal(refreshed, 2);
   assert.deepEqual(calls, []);
   auth = { organizationId: 'org-1', loading: false, refreshOrganization: async () => {} };
+});
+
+// ─── Several contacts: a card each, to review and act on (DropContactCard) ───────────────────────────────────────────
+
+const followUps = [{ day: 3, subject: 'Re: brigadas', body: 'Hola {{nombre}}, ¿lo vemos?' }, { day: 7, subject: 'Planes de emergencia', body: 'Hola {{nombre}}, otra idea.' }];
+const apolloItem = (n: number, extra: Record<string, unknown> = {}) => ({ ...drop.items[0], leadId: `6accdbfcd5f5d80001cf69${String(n).padStart(2, '0')}`, name: `Persona${n} Ap***${n}`, company: `Minera ${n}`,
+  provider: 'apollo', research: [], draft: { subject: 'Brigadas en faena', body: 'Hola {{nombre}},\n\n¿Cómo cubren los turnos de noche?' }, followUps,
+  reasons: ['Su cargo decide la contratación de brigadas.'], fit: [{ criterion: 'Cargo', theirs: 'Gerente HSE', wanted: 'Gerente HSE', match: 'yes' }], ...extra });
+const brief = { company: 'Produce cobre en dos faenas del norte.', news: { text: 'Anunció una planta concentradora nueva.', date: '3 nov 2026', source: 'Diario Financiero', url: 'https://diario.example/planta' },
+  fit: 'Una planta nueva suma áreas que proteger.', role: 'Responde por la seguridad de las faenas.', opener: 'Pregúntale cómo cubrirán la planta nueva.' };
+const several = () => ({ ...drop, items: [apolloItem(1, { brief }), apolloItem(2, { track: 'explore', savedLeadId: 'e-2', name: 'Luisa Soto' })] });
+const cardOf = (page: Awaited<ReturnType<typeof open>>, index: number) => page.dom.window.document.querySelectorAll('article')[index] as HTMLElement;
+const within = (root: HTMLElement, label: string | RegExp) => [...root.querySelectorAll('button')].find(button => (typeof label === 'string' ? button.textContent === label : label.test(button.textContent || '')))!;
+const press = async (page: Awaited<ReturnType<typeof open>>, target: Element) => { await act(async () => { target.dispatchEvent(new page.dom.window.MouseEvent('click', { bubbles: true })); }); await page.settle(); };
+
+test('several contacts: each card says why, what is happening at the company and how to open, with one step at a time', async () => {
+  answers = [{ status: 200, body: several() }];
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    assert.equal(page.dom.window.document.querySelectorAll('article').length, 2);
+    const first = cardOf(page, 0), second = cardOf(page, 1);
+    assert.match(first.textContent || '', /Persona1 A\.[\s\S]*Por qué te lo recomendamos[\s\S]*Una planta nueva suma áreas que proteger\.[\s\S]*Responde por la seguridad de las faenas\.[\s\S]*Su cargo decide/);
+    assert.match(first.textContent || '', /Sobre Minera 1[\s\S]*Produce cobre en dos faenas del norte\.[\s\S]*Ahora: Anunció una planta concentradora nueva\.[\s\S]*Diario Financiero, 3 nov 2026/);
+    assert.equal(first.querySelector('a[href="https://diario.example/planta"]')?.getAttribute('rel'), 'noopener noreferrer');
+    assert.match(first.textContent || '', /Cómo abrir[\s\S]*Pregúntale cómo cubrirán la planta nueva\./);
+    // Without its email yet: the step is to look it up. With it: to approve its campaign.
+    assert.ok(within(first, 'Enriquecer · 1 crédito'));
+    assert.equal(within(first, 'Aprobar y programar'), undefined);
+    assert.ok(within(second, 'Aprobar y programar'));
+    assert.match(second.textContent || '', /Para explorar[\s\S]*En «Por escribir»[\s\S]*Sale desde tu Gmail u Outlook\. Se detiene si responde\./);
+    // The campaign is one row until asked for: three emails, with the day each would go.
+    assert.match(within(first, /Campaña lista/).textContent || '', /Campaña lista · 3 correos, del /);
+    assert.doesNotMatch(first.textContent || '', /¿Cómo cubren los turnos de noche\?/);
+    await press(page, within(first, /Campaña lista/));
+    assert.match(first.textContent || '', /Primer correo · [\s\S]*Asunto: Brigadas en faena[\s\S]*¿Cómo cubren los turnos de noche\?[\s\S]*Seguimiento 1 · [\s\S]*si no responde[\s\S]*Re: brigadas[\s\S]*Seguimiento 2/);
+    await press(page, within(first, 'Cómo calza con tu cliente ideal'));
+    assert.match(first.textContent || '', /Cargo[\s\S]*Calza[\s\S]*Buscas: Gerente HSE/);
+    assert.doesNotMatch(first.textContent || '', /¿Cómo cubren los turnos de noche\?/, 'one section open at a time');
+  } finally { await close(page); }
+});
+
+test('«Aprobar y programar» starts the contact\'s campaign and says from which mailbox and when each email goes', async () => {
+  bodies.length = 0;
+  answers = [{ status: 200, body: several() }];
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    const campaign = { id: '11111111-1111-4111-8111-111111111111', provider: 'google', approvedAt: '2026-11-13T12:00:00.000Z' };
+    answers = [{ status: 200, body: { items: several().items.map((item, index) => index === 1 ? { ...item, campaign } : item), campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-15', '2026-11-19'] } }];
+    await press(page, within(cardOf(page, 1), 'Aprobar y programar'));
+    assert.deepEqual(bodies.at(-1), { action: 'approve', leadId: '6accdbfcd5f5d80001cf6902' });
+    assert.match(page.text(), /Campaña de Luisa Soto programada desde Gmail: el primer correo sale en unos minutos y los seguimientos el dom 15 nov y el jue 19 nov\. Se detiene si responde\./);
+    const second = cardOf(page, 1);
+    assert.match(second.textContent || '', /Campaña en curso/);
+    assert.equal(second.querySelector('a[href="/campaigns?campaign=11111111-1111-4111-8111-111111111111"]')?.textContent, 'Ver la campaña');
+    assert.equal(within(second, 'Aprobar y programar'), undefined);
+    await press(page, within(second, /Su campaña/));
+    assert.match(second.textContent || '', /La campaña ya está en curso: para cambiar sus correos o pausarla, ábrela en «Campañas»\./);
+    assert.equal(within(second, 'Editar los correos'), undefined);
+    // What the campaign refuses is said as it says it.
+    answers = [{ status: 409, body: { error: 'Primero enriquece el contacto: necesitamos su correo para programar la campaña.' } }];
+  } finally { await close(page); }
+});
+
+test('the emails are changed in place, and «No me sirve» asks why', async () => {
+  bodies.length = 0;
+  answers = [{ status: 200, body: several() }];
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    const first = cardOf(page, 0);
+    await press(page, within(first, /Campaña lista/));
+    await press(page, within(first, 'Editar los correos'));
+    const subject = first.querySelector('input') as HTMLInputElement;
+    assert.equal(subject.value, 'Brigadas en faena');
+    assert.equal(first.querySelectorAll('textarea').length, 3, 'the first email and both follow-ups');
+    // Typing is tried in drop-contact-card.test.ts (this file loads React before there is a page, so it hears no typing): here, what is sent and shown.
+    const edited = several().items.map((item, index) => index === 0 ? { ...item, edited: true, draft: { ...item.draft, subject: 'Turnos de noche en faena' } } : item);
+    answers = [{ status: 200, body: { items: edited } }];
+    await act(async () => { first.querySelector('form')!.dispatchEvent(new page.dom.window.Event('submit', { bubbles: true, cancelable: true })); });
+    await page.settle();
+    assert.equal(bodies.at(-1).action, 'edit');
+    assert.deepEqual(bodies.at(-1).emails.draft, { subject: 'Brigadas en faena', body: 'Hola {{nombre}},\n\n¿Cómo cubren los turnos de noche?' });
+    assert.deepEqual(bodies.at(-1).emails.followUps.map((step: any) => Object.keys(step)), [['subject', 'body'], ['subject', 'body']], 'the days are not the person\'s to change');
+    assert.match(page.text(), /Guardamos tus cambios en los correos de Persona1 A\./);
+    assert.match(cardOf(page, 0).textContent || '', /Asunto: Turnos de noche en faena/);
+    assert.equal(cardOf(page, 0).querySelector('form'), null);
+
+    // «No me sirve» asks why, in one click.
+    await press(page, within(cardOf(page, 0), 'No me sirve'));
+    assert.ok(within(cardOf(page, 0), 'El cargo no decide'));
+    answers = [{ status: 200, body: { items: edited.map((item, index) => index === 0 ? { ...item, feedback: { useful: false, reason: 'El cargo no decide', at: '2026-11-13T12:00:00Z' } } : item) } }];
+    await press(page, within(cardOf(page, 0), 'El cargo no decide'));
+    assert.deepEqual(bodies.at(-1), { action: 'feedback', leadId: '6accdbfcd5f5d80001cf6901', feedback: { useful: false, reason: 'El cargo no decide' } });
+    assert.match(cardOf(page, 0).textContent || '', /Dijiste que no te sirve \(el cargo no decide\): lo tendremos en cuenta\./);
+    answers = [{ status: 200, body: { items: edited } }];
+    await press(page, within(cardOf(page, 1), 'Me sirve'));
+    assert.deepEqual(bodies.at(-1), { action: 'feedback', leadId: '6accdbfcd5f5d80001cf6902', feedback: { useful: true, reason: null } });
+  } finally { await close(page); }
+});
+
+test('opened from the morning email on one contact: its email is looked up at once, and the address forgets the request', async () => {
+  bodies.length = 0; lookups = []; savedLeads = [{ id: 'saved-1' }];
+  completion = { moved: [{ id: 'saved-1', email: 'p1@minera1.cl' }], notFound: [], expired: 0, failures: [], consumed: 1, markedNotFound: true };
+  const linkedItems = several().items.map((item, index) => index === 0 ? { ...item, savedLeadId: 'e-1', name: 'Pedro Araya' } : item);
+  answers = [{ status: 200, body: several() }, { status: 200, body: { keptLeadId: 'saved-1', savedLeadId: null, items: several().items } }, { status: 200, body: { linked: true, savedLeadId: 'e-1', items: linkedItems } }];
+  const page = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?c=6accdbfcd5f5d80001cf6901&enriquecer=1' });
+  try {
+    await page.settle();
+    await page.settle();
+    assert.deepEqual(bodies.slice(0, 2), [{ action: 'keep', leadId: '6accdbfcd5f5d80001cf6901' }, { action: 'link', leadId: '6accdbfcd5f5d80001cf6901' }]);
+    assert.equal(lookups.length, 1, 'one lookup, for the contact the email named');
+    assert.equal(page.dom.window.location.search, '', 'coming back to this address does not ask again');
+    assert.match(page.text(), /Listo: ya tienes su correo y quedó en «Por escribir»\. Se descontó 1 crédito de ANTON\.IA\./);
+    // The contact the email named opens on its campaign, now ready to approve.
+    assert.match(cardOf(page, 0).textContent || '', /Pedro Araya[\s\S]*¿Cómo cubren los turnos de noche\?/);
+    assert.ok(within(cardOf(page, 0), 'Aprobar y programar'));
+  } finally { await close(page); }
+  // A link without the request only brings the contact into view.
+  bodies.length = 0;
+  answers = [{ status: 200, body: several() }];
+  const plain = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?c=6accdbfcd5f5d80001cf6901' });
+  try {
+    await plain.settle();
+    assert.equal(bodies.length, 0);
+    assert.equal(plain.dom.window.location.search, '');
+  } finally { await close(plain); }
 });

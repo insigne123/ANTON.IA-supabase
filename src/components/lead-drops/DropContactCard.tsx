@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { dropName, dropSchedule, needsLookup, placeLabel, shortDay, type DropFit, type DropItem } from '@/lib/lead-drops';
+import { dropEmailPreview, dropName, dropSchedule, needsLookup, placeLabel, shortDay, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
 
 /** What the card asks its page to do with the contact: each answers when done, and the page shows what happened. */
@@ -47,7 +47,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
   const [copied, setCopied] = useState<number | null>(null);
   const Heading = heading;
 
-  const emails: Email[] = item.draft ? [item.draft, ...(item.followUps || [])] : [];
+  // To read and to copy, each email as the contact would get it (their name in place of «{{nombre}}»); to change, the text with its variables.
+  const emails: Email[] = (item.draft ? [item.draft, ...(item.followUps || [])] : []).map(email => ({ subject: dropEmailPreview(email.subject, item), body: dropEmailPreview(email.body, item) }));
   // The day each email goes: from the day the campaign started, or from today while it is only a proposal.
   const days = dropSchedule(item, item.campaign ? new Date(item.campaign.approvedAt) : new Date());
   const brief = item.brief;

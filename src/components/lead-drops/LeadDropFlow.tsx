@@ -89,7 +89,6 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   /** The drop is not this person's or is no longer there: asking again answers the same, so the way out is today's contact. */
   const [missing, setMissing] = useState(false);
   const [step, setStep] = useState(0);
-  const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
