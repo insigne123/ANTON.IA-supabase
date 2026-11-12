@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -310,4 +310,24 @@ test('the email of several contacts: a card each with why, what is happening, ho
   assert.match(section.html, /Ver los 3 juntos/);
   // Inside another alert the heading is the alert's.
   assert.doesNotMatch(dropEmailSection(items as any, 'drop-1', 'https://app.test', { heading: false }).html, /<h2/);
+});
+
+test('a line for whoever sells says what is known, never what the search did not find', () => {
+  // As a real run wrote them on 12 Nov 2026: the model talking about its own sources.
+  assert.equal(withoutSourceTalk('Minera Andina procesa cobre; no hay evidencia disponible sobre dónde opera.'), 'Minera Andina procesa cobre.');
+  assert.equal(withoutSourceTalk('Podría apoyar la continuidad de sus operaciones de procesamiento con prevención y respuesta ante emergencias, aunque la evidencia no detalla sus riesgos ni faenas.'),
+    'Podría apoyar la continuidad de sus operaciones de procesamiento con prevención y respuesta ante emergencias.');
+  assert.equal(withoutSourceTalk('Desde Sustentabilidad puede influir en la gestión ambiental y de concesiones, aunque su alcance sobre emergencias operacionales no está especificado.'),
+    'Desde Sustentabilidad puede influir en la gestión ambiental y de concesiones.');
+  // Nothing worth reading before it: the whole line goes.
+  assert.equal(withoutSourceTalk('No hay información sobre la empresa.'), null);
+  assert.equal(withoutSourceTalk('Opera; se desconoce dónde.'), null);
+  assert.equal(withoutSourceTalk('Sin datos suficientes para decir qué hace.'), null);
+  // What says something stays as it is, with its own «aunque», its «pero» and its semicolons.
+  for (const line of ['Gas del Sur distribuye gas licuado y gas natural en Chile, Perú y Colombia, para hogares, comercios e industrias.',
+    'Opera dos faenas en Antofagasta; la segunda partió este año, aunque todavía a media capacidad.',
+    'Responde por la seguridad de las faenas, pero no decide las compras.',
+    'Entrega evidencia digital de cada inspección a sus clientes.']) assert.equal(withoutSourceTalk(line), line);
+  assert.equal(withoutSourceTalk(''), null);
+  assert.equal(withoutSourceTalk(null), null);
 });

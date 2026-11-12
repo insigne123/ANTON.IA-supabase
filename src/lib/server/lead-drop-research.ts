@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { DropBrief } from '@/lib/lead-drops';
+import { withoutSourceTalk, type DropBrief } from '@/lib/lead-drops';
 import { fetchCompanyHomePage } from '@/lib/server/native-research';
 import { searchSerper, type SerperSearchItem } from '@/lib/server/serper-search';
 
@@ -123,7 +123,8 @@ const BRIEF_PROMPT = [
   '(«responde por…», nunca «respondes por…»). Recibes lo que vende (vendedor), a quién le va a escribir (contacto: su cargo y su',
   'empresa) y la evidencia encontrada en la web: la portada del sitio de la empresa (sitio), resultados de búsqueda (resultados) y noticias numeradas',
   '(noticias). Usa solo esa evidencia: no inventes cifras, clientes, proyectos, fechas ni hechos, y no uses lo que sabes de la empresa si la evidencia',
-  'no lo dice. Un campo sin evidencia suficiente va en null.',
+  'no lo dice. Un campo sin evidencia suficiente va en null. Di solo lo que se sabe: nunca hables de la evidencia, de lo que falta ni de lo que no',
+  'se sabe («no hay evidencia…», «la evidencia no detalla…», «no se especifica…»).',
   '- «empresa»: qué hace la empresa y dónde opera, como lo diría alguien que la conoce.',
   '- «novedad»: la noticia que más sirve para abrir una conversación sobre lo que vende el vendedor (un proyecto, una expansión, una inversión, un',
   '  incidente, una fiscalización, un cambio de dueños o de plana). «n» es su número y «texto» dice qué pasó, sin la fecha ni el medio (se agregan',
@@ -180,7 +181,8 @@ export async function researchDropContact(input: DropResearchInput, deps: DropRe
   if (!parsed?.success) return null;
   // A figure that is not in the evidence is the model's, not a fact: that line is left out rather than shown.
   const grounded = (line: string) => (line.match(/\d+(?:[.,]\d+)*/g) || []).every(figure => prompt.includes(figure));
-  const line = (value: string | null, max: number) => { const said = clip(String(value || '').replace(/^[\s\-–•*·]+/, ''), max + 1); return said && said.length <= max && grounded(said) ? said : null; };
+  // And what the model says of its own sources («…; no hay evidencia sobre dónde opera») is not for the person: that clause is left out.
+  const line = (value: string | null, max: number) => { const said = clip(String(value || '').replace(/^[\s\-–•*·]+/, ''), max + 1); return said && said.length <= max && grounded(said) ? withoutSourceTalk(said) : null; };
   const chosen = parsed.data.novedad ? fresh[parsed.data.novedad.n] : null;
   const happened = chosen ? line(parsed.data.novedad!.texto, 280) : null;
   const brief: DropBrief = {
