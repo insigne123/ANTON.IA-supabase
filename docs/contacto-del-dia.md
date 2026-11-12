@@ -141,11 +141,27 @@ Pedido del dueño: «que le entreguemos toda la campaña lista para aprobar», q
 
 - **Desde qué correo:** el que la persona eligió en «Conexiones», o el único conectado. Funciona igual con Gmail y con Outlook. Sin ninguno conectado, lo dice y no crea nada.
 - **Cuándo sale cada correo:** el primero con la siguiente pasada de envíos (cada 5 minutos); cada seguimiento, tantos días después del anterior como dijo la Redactora (días 1, 3, 7 y 11 → esperas de 2, 4 y 4 días).
+  - **Ningún seguimiento cae en fin de semana:** el que tocaría un sábado o un domingo pasa al lunes, y el siguiente mantiene su distancia desde ahí (`dropCampaignMessages` con la fecha de inicio). Aprobada un viernes 13, los seguimientos salen el lunes 16, el viernes 20 y el martes 24.
+  - Las fechas que muestran el correo de la mañana, la tarjeta y el correo «Campaña lista» se calculan igual, contando desde el día en que se miran; las definitivas son las del día en que se aprueba.
 - **Se detiene** ante respuesta, baja o rebote, como toda campaña. Desde «Campañas» se pausa o se cambia.
 - **`{{nombre}}`, `{{empresa}}` y `{{cargo}}`** se reemplazan por los datos del contacto ya enriquecido.
 - **Pedirla dos veces no la duplica:** el mismo contacto del mismo envío es siempre la misma campaña.
 - **Lo que la campaña rechaza se dice tal cual:** un contacto ya contactado, dado de baja o de un dominio excluido.
 - **Requisitos:** el contacto en «Por escribir» con su correo (después de «Enriquecer») y `BULK_CAMPAIGNS_ENABLED=true`.
+
+**El correo «Campaña lista para aprobar»** (`mailDropCampaign` en `src/lib/server/lead-drop-campaign.ts`, texto en `src/lib/lead-drop-campaign-email.ts`). Pedido del dueño: que al enriquecer desde el correo «le llegue el mail de contacto inicial junto con los mails que se van a mandar de seguimiento».
+
+- **Cuándo sale:** apenas se encuentra el correo del contacto («Enriquecer», desde el correo de la mañana o desde la página). Una vez por contacto (`campaignMailedAt`), y solo en envíos de varios contactos, que es donde la tarjeta tiene «Aprobar y programar».
+- **Qué trae:** el correo encontrado, desde qué buzón saldría la campaña (o que falta conectar uno), el primer correo y cada seguimiento completos, como los leería el contacto, con el día en que saldría cada uno, y el botón «Revisar y aprobar».
+- **No aprueba nada por sí solo:** el botón lleva a la tarjeta, donde está «Aprobar y programar». Un lector de correo que abre enlaces no puede echar a andar una campaña.
+- **A quién no le llega:** a quien apagó los correos de la app en «Tu semana», no tiene dirección o tiene una de prueba. Un envío que falla no se reintenta solo; la campaña sigue en la página.
+- **Va después de responder** (`after` en la ruta): enriquecer no espera al correo.
+- **Apagar:** `LEAD_DROPS_CAMPAIGN_EMAIL=off`.
+
+**«Hoy» con varios contactos** (`LeadDropBanner`, `latestDrop` y `homeDrop`):
+
+- Con contactos de Apollo no promete correo: «6 contactos nuevos para ti, cada uno con su campaña lista. Ver el correo de cada uno usa 1 crédito.», y después «Te quedan 4 contactos de 6 por revisar». El botón dice «Revisar mis contactos». Antes decía «con correo verificado. Guardarlos no gasta créditos», que solo es cierto con Leads Finder.
+- Lo que ofrece cuando no hay envío habla del plan del equipo: «Hoy te tocan 6 contactos nuevos…», «…cada día hábil te elegimos 6 contactos nuevos». Con el plan por defecto, los textos de siempre.
 
 Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el calce, la redacción y el envío de la mañana son iguales con Apollo.
 
@@ -287,7 +303,7 @@ La migración `20261020180000_lead_drops.sql` crea la tabla `lead_drops`, solo p
 | Reglas (puro): días, tamaño, reparto, correo | `src/lib/lead-drops.ts` |
 | Buscador con IA para equipos con varios contactos al día | `src/lib/server/lead-drop-finder.ts` |
 | Investigación corta de cada contacto | `src/lib/server/lead-drop-research.ts` |
-| Editar los correos, «me sirve / no me sirve» y «Aprobar y programar» | `src/lib/server/lead-drop-campaign.ts` |
+| Editar los correos, «me sirve / no me sirve», «Aprobar y programar» y el correo «Campaña lista para aprobar» | `src/lib/server/lead-drop-campaign.ts`, `src/lib/lead-drop-campaign-email.ts` |
 | Preparación, redacción, guardado y PDF; desde «Hoy» (`pullStatus`, `pullDrop`, `homeDrop`) | `src/lib/server/lead-drops.ts` |
 | En el aviso de la mañana | `src/lib/daily-alerts.ts`, `src/lib/server/daily-alerts.ts` |
 | Adjuntos del correo | `src/lib/server/self-email.ts` |

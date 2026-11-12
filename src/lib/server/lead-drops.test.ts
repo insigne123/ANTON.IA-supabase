@@ -408,6 +408,22 @@ test('«Hoy» keeps the contact left to save, until a new one is due', async () 
   assert.deepEqual(await homeDrop(client, ANA, FRIDAY), { drop: null, pull: 'today' }, 'the new one does not wait for the old one to be saved');
 });
 
+test('«Hoy» for a team with a plan of its own: what it is offered says how many and how often, and several Apollo contacts promise no email', async () => {
+  const data = seed();
+  const apollo = (index: number, extra: Record<string, unknown> = {}) => ({ ...contact, leadId: `6accdbfcd5f5d80001cf69${10 + index}`, provider: 'apollo', draft: { subject: 'Hola', body: 'Hola {{nombre}}' }, ...extra });
+  data.lead_drops = [dropRow({ status: 'sent', items: [apollo(1, { savedLeadId: 'e-1' }), apollo(2), apollo(3, { draft: null })] })];
+  const { client } = memory({ ...data, organizations: [{ id: ORG, lead_drop_size: 6, lead_drop_weekdays: [1, 2, 3, 4, 5] }] }, unique);
+  // Tuesday's is still there on Wednesday morning... and a Thursday is a day of this team's: today's is offered instead.
+  const kept = await latestDrop(client, ANA, THURSDAY);
+  assert.deepEqual([kept?.total, kept?.left, kept?.lookup, kept?.campaigns], [3, 2, true, true]);
+  assert.deepEqual(await homeDrop(client, ANA, THURSDAY), { drop: null, pull: 'today', plan: { size: 6, days: 5 } });
+  // A drop whose contacts came with their email (Leads Finder) says nothing of credits.
+  const finder = seed();
+  finder.lead_drops = [dropRow({ status: 'sent', items: [{ ...contact, leadId: 'lf_1' }, { ...contact, leadId: 'lf_2' }] })];
+  const plain = await latestDrop(memory(finder, unique).client, ANA, THURSDAY);
+  assert.deepEqual([plain?.total, plain?.lookup, plain?.campaigns], [2, undefined, undefined]);
+});
+
 test('an industry the actor does not know is left out, and nobody found means one broader search, then saying so', async () => {
   const data = seed();
   data.profiles = [profile('u-ana', { targetRoles: 'Gerente de Personas', targetIndustries: 'Retail, Seguridad privada, Cosas varias', targetCompanySize: '51-200' }), profile('u-leo'), profile('u-sin')];

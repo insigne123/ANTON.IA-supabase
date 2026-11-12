@@ -81,6 +81,25 @@ test('«Hoy» shows the contact of the day, offers today\'s, the way back to it,
   assert.match(render({ drop: { id: 'd-1', dropDate: '2026-10-20', total: 5, left: 2 }, pull: null }), /Te faltan guardar 2 de 5/);
 });
 
+test('«Hoy» for a team with several contacts a day: no email is promised before it is looked up, and the offers say how many', () => {
+  const render = (data: unknown) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner)); };
+  const several = { id: 'd-6', dropDate: '2026-11-13', total: 6, left: 6, lookup: true, campaigns: true, next: { name: 'Pedro Ar***a', company: 'Minera Andina', why: 'Calza.', lookup: true } };
+  const fresh = render({ drop: several, pull: null });
+  assert.match(fresh, /6 contactos nuevos para ti, cada uno con su campaña lista\. Ver el correo de cada uno usa 1 crédito\.[\s\S]*href="\/search\/contactos\/d-6"[^>]*>Revisar mis contactos/);
+  assert.doesNotMatch(fresh, /correo verificado|no gasta créditos/, 'found with Apollo, its email is still to look up');
+  assert.match(render({ drop: { ...several, left: 1 }, pull: null }), /Te queda 1 contacto de 6 por revisar\. Ver el correo de cada uno usa 1 crédito\./);
+  assert.match(render({ drop: { ...several, left: 4, campaigns: undefined }, pull: null }), /Te quedan 4 contactos de 6 por revisar/);
+  // The offers, with the team's plan: six every working day.
+  const plan = { size: 6, days: 5 };
+  assert.match(render({ drop: null, pull: 'today', plan }), /Hoy te tocan 6 contactos nuevos, cada uno con por qué te lo recomendamos y su campaña lista\.[\s\S]*href="\/search\/contactos\/nuevo"[^>]*>Ver mis contactos de hoy/);
+  assert.match(render({ drop: null, pull: 'first', plan }), /6 contactos nuevos elegidos con tu cliente ideal[\s\S]*Ver mis primeros contactos/);
+  assert.match(render({ drop: null, pull: 'preparing', plan }), /Estamos preparando tus 6 contactos de hoy[\s\S]*Ver cómo va/);
+  assert.match(render({ drop: null, pull: 'profile', plan }), /Cuéntanos a quién le vendes y cada día hábil te elegimos 6 contactos nuevos\.[\s\S]*Completar mi cliente ideal/);
+  assert.match(render({ drop: null, pull: 'profile', plan: { size: 3, days: 2 } }), /y 2 días a la semana te elegimos 3 contactos nuevos/);
+  // Without a plan of its own, as always.
+  assert.match(render({ drop: null, pull: 'today', plan: { size: 1, days: 3 } }), /Hoy te toca un contacto nuevo/);
+});
+
 const drop = { id: 'drop-1', date: '2026-10-21', criteria: { titles: ['Gerente de Personas'], industries: ['Retail'], locations: ['Chile'], sizes: [], source: 'perfil' },
   items: [{ leadId: 'lf_1', name: 'Ana Pérez', title: 'Gerente de Personas', company: 'Ripley', domain: null, industry: 'Retail', size: null, city: 'Santiago',
     hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana' } }] };
@@ -361,10 +380,10 @@ test('«Aprobar y programar» starts the contact\'s campaign and says from which
   try {
     await page.settle();
     const campaign = { id: '11111111-1111-4111-8111-111111111111', provider: 'google', approvedAt: '2026-11-13T12:00:00.000Z' };
-    answers = [{ status: 200, body: { items: several().items.map((item, index) => index === 1 ? { ...item, campaign } : item), campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-15', '2026-11-19'] } }];
+    answers = [{ status: 200, body: { items: several().items.map((item, index) => index === 1 ? { ...item, campaign } : item), campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-16', '2026-11-20'] } }];
     await press(page, within(cardOf(page, 1), 'Aprobar y programar'));
     assert.deepEqual(bodies.at(-1), { action: 'approve', leadId: '6accdbfcd5f5d80001cf6902' });
-    assert.match(page.text(), /Campaña de Luisa Soto programada desde Gmail: el primer correo sale en unos minutos y los seguimientos el dom 15 nov y el jue 19 nov\. Se detiene si responde\./);
+    assert.match(page.text(), /Campaña de Luisa Soto programada desde Gmail: el primer correo sale en unos minutos y los seguimientos el lun 16 nov y el vie 20 nov\. Se detiene si responde\./);
     const second = cardOf(page, 1);
     assert.match(second.textContent || '', /Campaña en curso/);
     assert.equal(second.querySelector('a[href="/campaigns?campaign=11111111-1111-4111-8111-111111111111"]')?.textContent, 'Ver la campaña');

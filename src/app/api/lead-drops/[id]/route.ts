@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { requireHomeAuth } from '@/lib/server/home-auth';
 import { LeadDropsError, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
-import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
+import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, mailDropCampaign, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
 import { requestAuthErrorResponse } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
@@ -58,7 +58,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json(await keepDropLead(auth, admin, id.data, body.data.leadId), { headers: noStore });
     }
     if (body.data.action === 'link') {
-      return NextResponse.json(await linkDropLead(admin, scope, id.data, body.data.leadId), { headers: noStore });
+      const leadId = body.data.leadId;
+      const linked = await linkDropLead(admin, scope, id.data, leadId);
+      // With its email found, the campaign goes to the person's inbox to read (once, and only in a drop of several contacts).
+      if (linked.linked) after(() => mailDropCampaign(admin, scope, id.data, leadId).catch(() => null));
+      return NextResponse.json(linked, { headers: noStore });
     }
     if (body.data.action === 'edit') {
       return NextResponse.json(await editDropEmails(admin, scope, id.data, body.data.leadId, body.data.emails), { headers: noStore });

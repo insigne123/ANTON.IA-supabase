@@ -267,8 +267,13 @@ test('a contact\'s emails as a campaign sends them: the first at once, each foll
   assert.deepEqual(dropCampaignMessages({ draft, followUps: [{ day: 1, subject: 'Uno', body: 'A' }, { day: 1, subject: 'Dos', body: 'B' }] }).map(message => message.delayDays), [0, 1, 1],
     'never two the same day, whatever the Writer said');
   assert.deepEqual(dropCampaignMessages({ draft: null, followUps }), []);
-  // Thursday 12 Nov 2026, late in Chile: the day is Chile's.
-  assert.deepEqual(dropSchedule({ draft, followUps }, new Date('2026-11-13T02:30:00.000Z')), ['2026-11-12', '2026-11-14', '2026-11-18', '2026-11-22']);
+  // With the day it starts, no follow-up falls on a weekend: from a Friday, the one of two days later waits for Monday, and the
+  // next ones keep their distance from it; from a Monday, the one that would fall on Sunday.
+  assert.deepEqual(dropCampaignMessages({ draft, followUps }, new Date('2026-11-13T15:00:00.000Z')).map(message => message.delayDays), [0, 3, 4, 4]);
+  assert.deepEqual(dropCampaignMessages({ draft, followUps }, new Date('2026-11-16T15:00:00.000Z')).map(message => message.delayDays), [0, 2, 5, 4]);
+  assert.deepEqual(dropSchedule({ draft, followUps }, new Date('2026-11-16T15:00:00.000Z')), ['2026-11-16', '2026-11-18', '2026-11-23', '2026-11-27']);
+  // Thursday 12 Nov 2026, late in Chile: the day is Chile's, and Saturday's follow-up goes on Monday.
+  assert.deepEqual(dropSchedule({ draft, followUps }, new Date('2026-11-13T02:30:00.000Z')), ['2026-11-12', '2026-11-16', '2026-11-20', '2026-11-24']);
   assert.deepEqual(['2026-11-12', '2026-11-14', '2026-12-01'].map(shortDay), ['jue 12 nov', 'sáb 14 nov', 'mar 1 dic']);
 });
 
@@ -289,7 +294,7 @@ test('the email of several contacts: a card each with why, what is happening, ho
   // The text version, as a phone's preview reads it.
   assert.match(section.text, /^3 contactos nuevos para ti, cada uno con su campaña lista:\n\nPedro A\., Gerente HSE en Minera Andina\nPor qué: Una planta nueva suma áreas que proteger\.\nAhora: Anunció una planta concentradora nueva \(Diario Financiero, 3 nov 2026\)\.\nCómo abrir: Pregúntale por la planta nueva\.\nPrimer correo: «Brigadas en <faena>»\. Hola Pedro, ¿Cómo cubren/,
     'the preview reads as the contact would get it: their first name, not «{{nombre}}»');
-  assert.match(section.text, /2 seguimientos si no responde: sáb 14 nov y mié 18 nov\.\nEnriquecer y revisar · 1 crédito: https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000001&enriquecer=1/);
+  assert.match(section.text, /2 seguimientos si no responde: lun 16 nov y vie 20 nov\.\nEnriquecer y revisar · 1 crédito: https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000001&enriquecer=1/);
   assert.match(section.text, /Luisa Soto, Gerente HSE en Puerto Sur \(para explorar\)\nPor qué: Su cargo decide la contratación de brigadas\.\nPrimer correo:[\s\S]*Revisar y aprobar: https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000002\n/,
     'with its email already: no lookup asked, and the step is to approve');
   assert.match(section.text, /Ana Rojas, Gerente HSE en Forestal Sur\nPor qué: Calza con tu cliente ideal por su cargo\.\nVer su campaña: /);

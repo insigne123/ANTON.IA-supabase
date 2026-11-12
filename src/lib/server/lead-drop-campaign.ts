@@ -1,13 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { CampaignInputSchema, defaultAudience } from '@/lib/bulk-campaigns';
+import { dropCampaignEmail } from '@/lib/lead-drop-campaign-email';
 import { dropCampaignMessages, dropName, dropSchedule, type DropItem } from '@/lib/lead-drops';
 import { deterministicMessagingUuid } from '@/lib/messaging-contracts';
 import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { AuthError, type AuthContext } from '@/lib/server/auth-utils';
 import { reviewBulkCampaign, saveBulkCampaign } from '@/lib/server/bulk-campaigns';
+import { readAlertsEmail } from '@/lib/server/daily-alerts';
 import { LeadDropsError, readDrop, type DropScope } from '@/lib/server/lead-drops';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
+import { isTestAddress, sendReportEmail, type SelfEmail } from '@/lib/server/self-email';
 
 /**
  * What a person does with a contact of their «Contacto del día» besides saving it (12 Nov 2026, docs/contacto-del-dia.md): change its
@@ -84,7 +87,8 @@ export async function approveDropCampaign(auth: Pick<AuthContext, 'supabase' | '
     schedule: dropSchedule(item, new Date(campaign.approvedAt)) });
   if (item.campaign) return answer(drop.items, item.campaign);
   if (!(deps.enabled ?? process.env.BULK_CAMPAIGNS_ENABLED === 'true')) throw new LeadDropsError('Las campañas no están habilitadas en esta cuenta.', 409);
-  const messages = dropCampaignMessages(item);
+  // Counted from today, so a follow-up never falls on a weekend (dropCampaignMessages).
+  const messages = dropCampaignMessages(item, now);
   if (!messages.length) throw new LeadDropsError('Este contacto no tiene un correo escrito. Escríbele desde «Por escribir».', 409);
   if (!item.savedLeadId) throw new LeadDropsError('Primero enriquece el contacto: necesitamos su correo para programar la campaña.', 409);
   const saved: any = await client.from('enriched_leads').select('id,email').eq('id', item.savedLeadId).eq('organization_id', scope.organizationId).eq('user_id', scope.userId).maybeSingle();
@@ -118,4 +122,44 @@ export async function approveDropCampaign(auth: Pick<AuthContext, 'supabase' | '
   const campaign = { id: campaignId, provider: mailbox.resolved, approvedAt: now.toISOString() };
   const items = await writeItem(client, dropId, drop.items, leadId, entry => ({ ...entry, campaign }));
   return answer(items, campaign);
+}
+
+export type MailDeps = {
+  send?: (input: SelfEmail) => Promise<{ ok: boolean }>; mailbox?: ApproveDeps['mailbox'];
+  appUrl?: string; env?: Record<string, string | undefined>; now?: Date;
+};
+
+/**
+ * Once a contact's email is found («Enriquecer»), its campaign goes to the person's inbox to read: the first email and each follow-up
+ * in full, and the way to its card to approve or change it (lead-drop-campaign-email.ts). Once per contact, and only in a drop of
+ * several contacts, where the card has «Aprobar y programar». Nobody who turned the app's emails off in «Tu semana», has no address
+ * or has a test one gets it, and a send that fails is not tried again by itself. LEAD_DROPS_CAMPAIGN_EMAIL=off stops them all.
+ */
+export async function mailDropCampaign(client: Client, scope: DropScope, dropId: string, leadId: string, deps: MailDeps = {}) {
+  const env = deps.env ?? process.env;
+  const skipped = (reason: string) => ({ sent: false as const, reason });
+  if (env.LEAD_DROPS_CAMPAIGN_EMAIL === 'off') return skipped('off');
+  const { drop, item } = await itemOf(client, scope, dropId, leadId);
+  if (drop.items.length < 2) return skipped('single');
+  if (!item.draft || !item.savedLeadId || item.campaign || item.campaignMailedAt) return skipped('not_due');
+  const [saved, profile]: any[] = await Promise.all([
+    client.from('enriched_leads').select('email').eq('id', item.savedLeadId).eq('organization_id', scope.organizationId).eq('user_id', scope.userId).maybeSingle(),
+    client.from('profiles').select('email,full_name,signatures').eq('id', scope.userId).maybeSingle(),
+  ]);
+  const contactEmail = String(saved.data?.email || '').trim().toLowerCase();
+  if (!contactEmail) return skipped('no_contact_email');
+  const to = String(profile.data?.email || '').trim();
+  if (!to || isTestAddress(to) || !readAlertsEmail(profile.data?.signatures)) return skipped('unreachable');
+  const mailbox = await (deps.mailbox ?? readMailSenderPreference)(client, scope.userId).catch(() => ({ resolved: null }));
+  const email = dropCampaignEmail(item, {
+    dropId, contactEmail, mailbox: mailbox.resolved ? MAIL_PROVIDER_LABEL[mailbox.resolved] : null, name: String(profile.data?.full_name || ''),
+    appUrl: deps.appUrl ?? String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'), now: deps.now,
+  });
+  if (!email) return skipped('not_due');
+  const sent = await (deps.send ?? (input => sendReportEmail(client, input)))({ userId: scope.userId, to, subject: email.subject, html: email.html, text: email.text });
+  if (!sent.ok) return skipped('send_failed');
+  // Read again before the stamp: the person may have approved the campaign while the email went out, and that must not be undone.
+  const fresh = await readDrop(client, scope, dropId);
+  await writeItem(client, dropId, fresh.items, leadId, entry => ({ ...entry, campaignMailedAt: (deps.now ?? new Date()).toISOString() }));
+  return { sent: true as const };
 }
