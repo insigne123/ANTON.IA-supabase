@@ -441,6 +441,30 @@ test('native drafting permits one corrective generation pass, then persists a tr
   assert.deepEqual(fixture.metadata[0].claimIds, ['claim-acme-overview']);
 });
 
+test('a corrective retry that still claims what the evidence does not back is saved without that sentence, if the rest passes', async () => {
+  for (const where of ['body', 'subject'] as const) {
+    const fixture = dependencies();
+    let calls = 0;
+    fixture.value.generate = async ({ context }) => {
+      calls += 1;
+      const output = generated(context);
+      return where === 'body'
+        ? { ...output, body: output.body.replace('sin sumar puestos permanentes.', 'sin sumar puestos permanentes. Acme opera 16 sedes regionales.') }
+        : { ...output, subject: 'Acme opera 16 sedes regionales' };
+    };
+    const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
+    assert.equal(calls, 2);
+    assert.equal(result.status, where === 'body' ? 'drafted' : 'blocked', where);
+    if (result.status !== 'drafted') continue;
+    assert.ok(!result.draft.content.text?.includes('16 sedes'));
+    assert.match(result.draft.content.text || '', /sin sumar puestos permanentes\.\n\nEn Northstar/);
+    assert.deepEqual(fixture.attempts.map((attempt) => [attempt.attemptNo, attempt.passed, attempt.issueCodes]), [
+      [1, false, ['unsupported_material_claim']],
+      [2, true, ['claim_sentence_removed']],
+    ]);
+  }
+});
+
 test('generated company-definition opening triggers the bounded editorial rewrite before persistence', async () => {
   for (const repairSucceeds of [true, false]) {
     const snapshot = draftSnapshotFixture();
@@ -585,7 +609,7 @@ test('telemetry failures never block an otherwise valid draft', async () => {
   assert.equal(result.status, 'drafted');
 });
 
-test('synthetic Oscar-like agro-export HR draft stays editable with warnings; invented numbers still block', async () => {
+test('synthetic Oscar-like agro-export HR draft stays editable with warnings; an invented number never reaches it', async () => {
   // Synthetic fixture, not a reproduction of Oscar's live draft or screenshot.
   for (const inventedNumber of [false, true]) {
     const snapshot = draftSnapshotFixture();
@@ -633,11 +657,13 @@ En Northstar nos especializamos en seleccion de personal, facilitando el trabajo
       return output;
     };
     const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
-    assert.equal(result.status, inventedNumber ? 'blocked' : 'drafted', JSON.stringify(result));
+    // The invented figure is its own sentence: after the corrective retry the draft goes without it (removableClaimSentencesV2).
+    assert.equal(result.status, 'drafted', JSON.stringify(result));
     assert.equal(calls, inventedNumber ? 2 : 1);
-    assert.equal(fixture.persisted.length, inventedNumber ? 0 : 1);
-    assert.equal(fixture.metadata.length, inventedNumber ? 0 : 1);
+    assert.equal(fixture.persisted.length, 1);
+    assert.equal(fixture.metadata.length, 1);
     if (result.status === 'drafted') {
+      assert.doesNotMatch(result.draft.content.text || '', /300 toneladas/);
       assert.equal(result.draft.lifecycle, 'draft');
       assert.equal(result.draft.approval.status, 'pending');
       assert.equal(result.draft.approval.decidedBy, null);
@@ -647,8 +673,6 @@ En Northstar nos especializamos en seleccion de personal, facilitando el trabajo
       assert.ok(result.preflight.warnings.some((warning) => warning.includes('facilitando')));
       assert.match(result.draft.content.text || '', /facilitando/);
       assert.deepEqual(fixture.metadata[0].claimIds, ['claim-acme-overview']);
-    } else if (result.status === 'blocked') {
-      assert.ok(result.issues.some((issue) => issue.code === 'unsupported_material_claim'));
     }
   }
 });
@@ -978,7 +1002,7 @@ test('native drafting returns structured issues after two failed preflight gener
 });
 
 test('simulated numeric drafts accept supported paraphrase, fail closed twice, and recover on retry', async () => {
-  for (const mode of ['supported', 'unsupported-twice', 'recovery'] as const) {
+  for (const mode of ['supported', 'unsupported-twice', 'unsupported-anchor', 'recovery'] as const) {
     const snapshot = draftSnapshotFixture();
     snapshot.evidence.find((item) => item.id === 'evidence-acme')!.statement = 'Acme opera 16 sedes regionales para reducir trabajo manual en operaciones.';
     const fixture = dependencies(snapshot);
@@ -990,18 +1014,21 @@ test('simulated numeric drafts accept supported paraphrase, fail closed twice, a
         assert.ok(rewrite!.errors.some((error) => /1 FCL/.test(error)));
       }
       const output = generated(context);
-      const invented = mode === 'unsupported-twice' || (mode === 'recovery' && calls === 1);
+      const invented = mode === 'unsupported-twice' || mode === 'unsupported-anchor' || (mode === 'recovery' && calls === 1);
+      // In its own sentence the invented figure can be taken out; inside the sentence the email rests on, the email goes with it.
+      const anchor = mode === 'unsupported-anchor'
+        ? 'Acme opera 16 sedes y transporta 1 FCL para reducir trabajo manual en operaciones.'
+        : `Acme opera 16 sedes para reducir trabajo manual en operaciones.${invented ? ' Acme transporta 1 FCL.' : ''}`;
       return {
         ...output,
-        body: output.body.replace('Si Acme quiere reducir el trabajo manual de sus equipos de operaciones, hay una forma de partir sin sumar puestos permanentes.',
-          `Acme opera 16 sedes para reducir trabajo manual en operaciones.${invented ? ' Acme transporta 1 FCL.' : ''}`),
+        body: output.body.replace('Si Acme quiere reducir el trabajo manual de sus equipos de operaciones, hay una forma de partir sin sumar puestos permanentes.', anchor),
       };
     };
     const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
     assert.equal(calls, mode === 'supported' ? 1 : 2, mode);
-    assert.equal(result.status, mode === 'unsupported-twice' ? 'blocked' : 'drafted', JSON.stringify(result));
-    assert.equal(fixture.persisted.length, mode === 'unsupported-twice' ? 0 : 1);
-    assert.equal(fixture.metadata.length, mode === 'unsupported-twice' ? 0 : 1);
+    assert.equal(result.status, mode === 'unsupported-anchor' ? 'blocked' : 'drafted', `${mode} ${JSON.stringify(result)}`);
+    assert.equal(fixture.persisted.length, mode === 'unsupported-anchor' ? 0 : 1);
+    assert.equal(fixture.metadata.length, mode === 'unsupported-anchor' ? 0 : 1);
     assert.equal(fixture.releaseCount(), 1);
     if (result.status === 'blocked') {
       assert.equal(result.code, 'draft_preflight_failed');

@@ -54,6 +54,11 @@ export type DraftPreflightIssueV2 = {
     | 'tone_fragmento';
   message: string;
   location: 'subject' | 'body' | 'research';
+  /**
+   * The sentence of the body the issue is about, when taking it out answers it: a figure or a claim the evidence does not back. Without it the
+   * draft says less and nothing false (removableClaimSentencesV2).
+   */
+  sentence?: string;
 };
 
 export type DraftPreflightV2Result = {
@@ -691,6 +696,77 @@ function materialQuantities(sentence: string) {
   });
 }
 
+const excerptOf = (value: string, max = 160) => {
+  const clean = text(value);
+  return clean.length > max ? `${clean.slice(0, max - 3)}...` : clean;
+};
+
+// What turns a statement into its opposite or into a plan, and how a sentence keeps it. Only the words the qualifier governs count: «Acme no
+// opera en Perú» against «Acme opera en Perú». A statement scraped from a site carries qualifiers that govern something else, and checked as a
+// whole it turned back every sentence about it: «organización no gubernamental (ONG)» asked a draft about the ONG's campaigns for a «no»,
+// and «a primera vista el caso podría parecer una cuestión procesal», an author's aside, asked the ruling itself for a «podría» (two real
+// researches, 9 and 11 Nov 2026: 18 first emails turned back, none saved).
+const NEGATION_CUE = /\b(?:no|nunca|sin)\b/g;
+const CONDITION_CUE = /\b(?:planea|planean|preve|preven|proyecta|proyectan|siempre que|sujeto a|sujeta a|podria|podrian|si obtiene|si obtienen)\b/g;
+const NEGATION_KEPT = /\b(?:no|nunca|sin|ni|tampoco|jamas)\b/;
+// Words common in any sales email («puede», «busca», «va a») would keep every plan, so only the ones that say a plan or a condition count.
+const CONDITION_KEPT = /\b(?:planea\w*|planifica\w*|preve\w*|previst\w*|proyect\w*|espera\w*|podria\w*|podra\w*|contempla\w*|siempre que|sujet[oa]s? a|si (?:obtiene|obtienen|logra|logran|consigue|consiguen))\b/;
+// A plan said in the future («abrirá una sede») is still a plan, not a fact.
+const FUTURE_FORM = /(?:ara|era|ira|aran|eran|iran)$/;
+const QUALIFIER_SCOPE_WORDS = 6;
+const CONNECTOR_AFTER_NEGATION = /^(?:obstante|embargo|solo|solamente|duda|perjuicio|importar)$/;
+
+const stemOf = (term: string) => term.slice(0, 5);
+
+/** The clause of the evidence whose qualifier the sentence drops, if any: the sentence says what the qualifier governs, without it. */
+function droppedQualifier(statement: string, sentence: string, names: Set<string> = new Set()): { kind: 'negation' | 'condition'; cue: string; clause: string } | null {
+  const said = normalizeForMatch(sentence);
+  const saidWords = said.split(' ').filter(Boolean);
+  const saidTerms = new Set(materialPersonalizationTerms(sentence));
+  const says = (term: string) => saidWords.some((word) => word.startsWith(stemOf(term)));
+  for (const clause of text(statement).split(/(?<=[.!?;:])\s+|\s*[()[\]]\s*|\s+[—–]\s+/).map(text).filter(Boolean)) {
+    const normalized = normalizeForMatch(clause);
+    if (materialPersonalizationTerms(clause).filter((term) => saidTerms.has(term)).length < 2) continue;
+    for (const [kind, cue, kept] of [['negation', NEGATION_CUE, NEGATION_KEPT], ['condition', CONDITION_CUE, CONDITION_KEPT]] as const) {
+      if (kept.test(said)) continue;
+      for (const match of normalized.matchAll(cue)) {
+        const after = normalized.slice((match.index ?? 0) + match[0].length).trim().split(' ');
+        // «No obstante», «sin embargo», «no solo… sino»: connectors, not qualifiers.
+        if (kind === 'negation' && CONNECTOR_AFTER_NEGATION.test(after[0] || '')) continue;
+        // The names of the companies are what the clause is about, not what the qualifier governs.
+        const governed = materialPersonalizationTerms(after.slice(0, QUALIFIER_SCOPE_WORDS).join(' ')).filter((term) => !names.has(term));
+        const asserted = governed.filter(says);
+        if (!asserted.length) continue;
+        // «planea abrir» said as «abrirá»: the future keeps the plan.
+        if (kind === 'condition' && asserted.some((term) => saidWords.some((word) => word.startsWith(stemOf(term)) && FUTURE_FORM.test(word)))) continue;
+        return { kind, cue: match[0], clause };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The sentences a draft turned back only for what it claims can be taken out of it: every issue is a figure or a qualifier the evidence does
+ * not back, and each names a sentence of the body. Null when any issue is of another kind or is in the subject: then the draft must be written
+ * again. Taking them out never adds a claim; the shorter draft is checked again as a whole before it is kept.
+ */
+export function removableClaimSentencesV2(issues: DraftPreflightIssueV2[]): string[] | null {
+  if (!issues.length || issues.some((issue) => issue.code !== 'unsupported_material_claim' || issue.location !== 'body' || !issue.sentence)) return null;
+  const sentences = [...new Set(issues.map((issue) => issue.sentence as string))];
+  return sentences.length <= 2 ? sentences : null;
+}
+
+/** The body without those sentences, each paragraph as it was otherwise; a paragraph left empty goes. */
+export function withoutSentencesV2(body: string, sentences: string[]) {
+  const drop = new Set(sentences.map(text));
+  return String(body || '').replace(/\r\n?/g, '\n').split(/\n{2,}/).map((paragraph) => {
+    const parts = sentenceParts(paragraph);
+    if (!parts.some((part) => drop.has(part))) return paragraph.trim();
+    return parts.filter((part) => !drop.has(part)).join(' ');
+  }).filter(Boolean).join('\n\n');
+}
+
 export function draftContentFingerprintV2(subject: string, body: string) {
   return canonicalSha256({
     subject: normalizeForMatch(subject),
@@ -730,13 +806,14 @@ export function validateDraftPreflightV2(
   const body = text(output.body);
   const issues: DraftPreflightIssueV2[] = [];
   const warnings = context.warnings.slice(0, 100);
-  const add = (code: DraftPreflightIssueV2['code'], message: string, location: DraftPreflightIssueV2['location']) => {
+  const subjectSentences = new Set(sentenceParts(subject));
+  const add = (code: DraftPreflightIssueV2['code'], message: string, location: DraftPreflightIssueV2['location'], sentence?: string) => {
     const notice = options.editedByPerson ? PERSON_DECIDES[code] : undefined;
     if (notice) {
       if (!warnings.includes(notice)) warnings.push(notice);
       return;
     }
-    issues.push({ code, message, location });
+    issues.push({ code, message, location, ...(sentence && !subjectSentences.has(text(sentence)) ? { sentence: text(sentence) } : {}) });
   };
   const contentFingerprint = draftContentFingerprintV2(subject, body);
 
@@ -831,6 +908,7 @@ export function validateDraftPreflightV2(
   const sellerStatements = draftSellerStatementsV2(context.seller);
   const sellerNames = sellerSpeakingNames(context.seller);
   const recipientName = normalizeForMatch(context.company.name);
+  const companyTerms = new Set(materialPersonalizationTerms(`${context.company.name} ${context.seller.companyName}`));
   const materialContent = `${subject}\n\n${requiredCta ? rawBody.split(requiredCta).join(' ') : rawBody}`;
   const claimCheckContent = modelClosingQuestion ? materialContent.split(modelClosingQuestion).join(' ') : materialContent;
   // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.
@@ -892,19 +970,14 @@ export function validateDraftPreflightV2(
       if (!supported) {
         const start = Math.max(0, quantity.index - 100);
         const excerpt = `${start ? '...' : ''}${sentence.slice(start, start + 240)}${sentence.length > start + 240 ? '...' : ''}`;
-        add('unsupported_material_claim', `La cifra o su alcance no están respaldados para este sujeto: ${quantity.raw}. Oración (extracto limitado): ${JSON.stringify(excerpt)}`, 'body');
+        add('unsupported_material_claim', `La cifra o su alcance no están respaldados para este sujeto: ${quantity.raw}. Oración (extracto limitado): ${JSON.stringify(excerpt)}`, 'body', sentence);
       }
     }
+    if (sellerScoped) continue;
     for (const evidence of citedEvidence) {
-      const terms = materialPersonalizationTerms(evidence.statement);
-      const overlap = terms.filter((term) => materialPersonalizationTerms(sentence).includes(term)).length;
-      if (sellerScoped || overlap < 2) continue;
-      const source = normalizeForMatch(evidence.statement);
-      const conditional = /\b(?:planea|prev[eé]|proyecta|siempre que|sujeto a|podria|si obtiene)\b/;
-      const negative = /\b(?:no|nunca|sin)\b/;
-      if ((conditional.test(source) && !conditional.test(normalized))
-        || (negative.test(source) && !negative.test(normalized))) {
-        add('unsupported_material_claim', 'La redacción elimina una condición o negación material de la evidencia.', 'body');
+      const dropped = droppedQualifier(evidence.statement, sentence, companyTerms);
+      if (dropped) {
+        add('unsupported_material_claim', `La oración ${JSON.stringify(excerptOf(sentence))} afirma lo que la evidencia dice con ${dropped.kind === 'negation' ? 'una negación' : 'una condición'}: ${JSON.stringify(excerptOf(dropped.clause))}. Conserva «${dropped.cue}» o no lo afirmes.`, 'body', sentence);
       }
     }
   }

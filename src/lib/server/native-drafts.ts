@@ -46,6 +46,8 @@ import {
   repairCataloguedDraftPersonalizationV2,
   stripUnapprovedDraftCtasV2,
   validateDraftPreflightV2,
+  removableClaimSentencesV2,
+  withoutSentencesV2,
   type DraftPreflightIssueV2,
   type DraftPersonalizationProvenanceV2,
   type GeneratedOutreachV2,
@@ -739,12 +741,25 @@ function checkedGeneratedDraft(
   const read = (candidate: GeneratedOutreachFromDraftContextV2) => {
     const effective = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, candidate.body, requested) : context;
     const output = outputForPreflight(effective, candidate, ctaPolicy);
-    return { output, validation: validateDraftPreflightV2(effective, output, options) };
+    return { output, validation: validateDraftPreflightV2(effective, output, options), effective };
   };
   const voiced = read(generated);
-  if (voiced.validation.valid || !generated.beforeVoice) return { ...voiced, issueCodes: voiced.validation.issues.map((issue) => issue.code as string) };
-  const own = read({ ...generated, ...generated.beforeVoice });
-  return own.validation.valid ? { ...own, issueCodes: ['voice_reverted'] } : { ...voiced, issueCodes: voiced.validation.issues.map((issue) => issue.code as string) };
+  if (voiced.validation.valid) return { ...voiced, issueCodes: voiced.validation.issues.map((issue) => issue.code as string) };
+  const own = generated.beforeVoice ? read({ ...generated, ...generated.beforeVoice }) : null;
+  if (own?.validation.valid) return { ...own, issueCodes: ['voice_reverted'] };
+  // The corrective retry is the last call: when all that still stops it is a sentence that claims what the evidence does not back, the
+  // draft goes without that sentence, if what is left passes every check. Two real researches (9 and 11 Nov 2026) were turned back twice
+  // in a row for one such sentence, and the person tried again and again with no draft (removableClaimSentencesV2).
+  if (options?.retryAttempt) {
+    for (const [checked, codes] of [[voiced, ['claim_sentence_removed']], [own, ['voice_reverted', 'claim_sentence_removed']]] as const) {
+      const sentences = checked ? removableClaimSentencesV2(checked.validation.issues) : null;
+      if (!checked || !sentences) continue;
+      const output = { ...checked.output, body: withoutSentencesV2(checked.output.body, sentences) };
+      const validation = validateDraftPreflightV2(checked.effective, output, options);
+      if (validation.valid) return { output, validation, effective: checked.effective, issueCodes: [...codes] };
+    }
+  }
+  return { ...voiced, issueCodes: voiced.validation.issues.map((issue) => issue.code as string) };
 }
 
 export type NativeDraftAttemptStep = 'initial' | 'follow_up' | 'close';
