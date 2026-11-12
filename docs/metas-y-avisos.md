@@ -48,7 +48,7 @@ Cada persona tiene dos metas por semana, de lunes a domingo, hora de Chile:
 
 ### Cuándo llegan
 
-- **Cuándo:** de martes a viernes, entre 8:00 y 9:30 de Chile (`dailyAlertsTick`). El lunes no hay aviso: ese día llega el informe semanal.
+- **Cuándo:** de martes a viernes, entre 8:00 y 9:30 de Chile (`dailyAlertsTick`). El lunes no hay aviso: ese día llega el informe semanal. La única excepción, desde el 12 de noviembre, son los equipos cuyo «Contacto del día» también llega los lunes: reciben el aviso ese día solo cuando sus contactos están listos (`docs/contacto-del-dia.md`).
 - **Cuántos:** como máximo un correo por persona, workspace y día.
 - **Solo con algo concreto que hacer.** Lo que no cumple esta regla se guarda como «quiet» y no se envía.
 

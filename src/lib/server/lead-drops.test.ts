@@ -480,3 +480,27 @@ test('when the search brings only people the team has, it looks once more, wider
   await planOrganizationDrops(tight.client, ORG, ['u-ana'], { now: TUESDAY, search: search() as any, budgetUsd: 0.06, spentUsd: 0, usdPerLead: 0.0035 });
   assert.equal(calls.length, 1, 'without budget for it, no second search');
 });
+
+test('a team with contacts on Mondays: that day\'s alert goes only once they are ready, and waiting keeps nothing (12 nov)', async () => {
+  const MONDAY = new Date('2026-10-19T10:00:00.000Z'); // 07:00 in Chile
+  const plan = { size: 2, weekdays: [1, 2, 3, 4, 5] };
+  const { client, tables } = memory({ ...seed(), organizations: [{ id: ORG, lead_drop_size: 2, lead_drop_weekdays: [1, 2, 3, 4, 5] }] },
+    { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'], daily_alerts: ['organization_id', 'user_id', 'alert_date'] } });
+  const sent: any[] = [];
+  const deliver = (requireDrop: boolean) => deliverDailyAlert(client, { organizationId: ORG, userId: 'u-ana' }, {
+    send: async (input: any) => { sent.push(input); return { ok: true as const }; }, appUrl: 'https://app.antonia.ai', now: new Date('2026-10-19T11:30:00.000Z'),
+    opportunities: 'none', goalReminders: false, requireDrop,
+  });
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: MONDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, plan });
+  assert.equal(tables.lead_drops[0].items.length, 2, 'as many contacts as the team\'s plan says');
+  // 8:00: the contacts are still being written. Nothing is sent nor kept, so the 8:30 run tries again.
+  assert.deepEqual(await deliver(true), { status: 'quiet' });
+  assert.equal(tables.daily_alerts.length, 0);
+  assert.equal(sent.length, 0);
+  await writeDrop(client, tables.lead_drops[0], { generate: fakeGenerate, now: MONDAY });
+  assert.deepEqual(await deliver(true), { status: 'sent' });
+  assert.equal(sent[0].subject, '2 contactos nuevos para ti');
+  assert.equal(sent[0].attachments[0].filename, 'contacto-del-dia-2026-10-19.pdf');
+  assert.equal(tables.lead_drops[0].status, 'sent');
+  assert.deepEqual(await deliver(true), { status: 'already_sent' });
+});

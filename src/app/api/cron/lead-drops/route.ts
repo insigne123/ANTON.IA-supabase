@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { generateStructured } from '@/ai/openai-json';
 import { dayInZone } from '@/lib/admin/chile-time';
-import { dropDay } from '@/lib/lead-drops';
+import { DEFAULT_DROP_PLAN, dropDay } from '@/lib/lead-drops';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
-import { dropsEnabled, dropsMonthlyUsd, monthSpend, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
+import { dropPlans, dropsEnabled, dropsMonthlyUsd, monthSpend, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
+import { dropBriefEnabled, researchDropContact } from '@/lib/server/lead-drop-research';
 import { canEmailEveryone, isTestAddress } from '@/lib/server/self-email';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
@@ -19,10 +20,17 @@ const WORK_MS = 240_000;
  */
 const PARALLEL = 4;
 const ROUND_MS = 120_000;
+/**
+ * A team with several contacts a day (organizations.lead_drop_size, 12 Nov 2026) has drops of six or more: a round takes at most
+ * this many contacts (and PARALLEL drops), and a large drop writes all of its own at once, so it ends in one round too.
+ */
+const ROUND_CONTACTS = 8;
+const DROP_PARALLEL = 6;
 
 /**
- * «Contacto del día» (functions/index.ts, leadDropsTick, Tuesdays, Wednesdays and Fridays from 6:00 to 7:40 in Chile):
- * first finishes the drops an earlier run planned, then plans the missing ones, organization by organization, and writes
+ * «Contacto del día» (functions/index.ts, leadDropsTick, Monday to Friday from 6:00 to 7:40 in Chile): on the days of each
+ * team's plan (Tuesdays, Wednesdays and Fridays unless its row says otherwise; a day in nobody's plan does nothing), first
+ * finishes the drops an earlier run planned, then plans the missing ones, organization by organization, and writes
  * them while there is time. Only for whoever will get them by email (the alerts on, an address, and their own mailbox or the
  * reports mailbox), one drop per person in their team's workspace. The morning alert (8:00) carries what is ready.
  * LEAD_DROPS_ENABLED=off stops it. The search is Apollo's free one (LEAD_DROPS_PROVIDER=apify goes back to Leads Finder,
@@ -36,7 +44,6 @@ export async function POST(request: Request) {
   const headers = firebaseSchedulerResponseHeaders();
   const now = new Date();
   if (!dropsEnabled()) return NextResponse.json({ skipped: 'off' }, { headers });
-  if (!dropDay(now)) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
   const body = await request.json().catch(() => null) as { userIds?: unknown; organizationId?: unknown } | null;
   const only = Array.isArray(body?.userIds) ? new Set(body!.userIds.filter((id): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)).slice(0, 20)) : null;
   const pinned = only && typeof body?.organizationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.organizationId) ? body.organizationId : null;
@@ -44,8 +51,14 @@ export async function POST(request: Request) {
   const timeLeft = () => WORK_MS - (Date.now() - started);
   const admin = getSupabaseAdminClient();
   const today = dayInZone(now);
+  // Each team's days and contacts; a team without a row of its own has the default.
+  const plans = await dropPlans(admin);
+  const planOf = (organizationId: string) => plans.get(organizationId) ?? DEFAULT_DROP_PLAN;
+  if (!dropDay(now) && ![...plans.values()].some(plan => dropDay(now, plan))) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
   const generate = (options: Parameters<Parameters<typeof writeDrop>[2]['generate']>[0]) =>
     generateStructured({ ...options, allowDefaultModelFallback: false, maxAttempts: 1 });
+  // The short research of each contact, from the web, before its emails are written (LEAD_DROPS_BRIEF=off leaves it out).
+  const research = dropBriefEnabled() ? (input: Parameters<typeof researchDropContact>[0]) => researchDropContact(input, { generate, now }) : undefined;
   const result = { written: 0, planned: 0, empty: 0, failed: 0, resting: 0, spentUsd: 0 };
 
   const writePending = async () => {
@@ -53,11 +66,15 @@ export async function POST(request: Request) {
     if (pending.error) throw new Error('pending');
     // A row without contacts is being searched from «Hoy» (pullDrop): that request completes it.
     const rows = ((pending.data || []) as any[]).filter(row => Array.isArray(row.items) && row.items.length);
-    for (let start = 0; start < rows.length && timeLeft() > ROUND_MS; start += PARALLEL) {
-      await Promise.all(rows.slice(start, start + PARALLEL).map(async row => {
-        try { await writeDrop(admin, row, { generate, now }); result.written++; }
+    for (let start = 0; start < rows.length && timeLeft() > ROUND_MS;) {
+      // A round: up to PARALLEL drops and ROUND_CONTACTS contacts (one drop at least, however large).
+      let end = start + 1, contacts = rows[start].items.length;
+      while (end < rows.length && end - start < PARALLEL && contacts + rows[end].items.length <= ROUND_CONTACTS) contacts += rows[end++].items.length;
+      await Promise.all(rows.slice(start, end).map(async row => {
+        try { await writeDrop(admin, row, { generate, now, research, parallel: Math.max(3, Math.min(DROP_PARALLEL, row.items.length)) }); result.written++; }
         catch { result.failed++; }
       }));
+      start = end;
     }
   };
 
@@ -81,13 +98,13 @@ export async function POST(request: Request) {
         if (profiles.error) return NextResponse.json({ error: 'No pudimos leer a quién preparar.' }, { status: 503, headers });
         for (const row of profiles.data || []) if (only || (String(row.email || '').trim() && !isTestAddress(row.email) && readAlertsEmail(row.signatures))) reachable.add(String(row.id));
       }
-      // One drop per person, in the workspace of their team: the one with most people, or the first they joined.
+      // One drop per person, in the workspace of their team: of those with contacts today, the one with most people, or the first they joined.
       const size = new Map<string, number>();
       for (const row of members.data || []) size.set(String(row.organization_id), (size.get(String(row.organization_id)) || 0) + 1);
       const home = new Map<string, string>();
       for (const row of members.data || []) {
         const userId = String(row.user_id), org = String(row.organization_id);
-        if (!reachable.has(userId)) continue;
+        if (!reachable.has(userId) || !dropDay(now, planOf(org))) continue;
         if (pinned) { if (org === pinned) home.set(userId, org); continue; }
         const current = home.get(userId);
         if (!current || (size.get(org) || 0) > (size.get(current) || 0)) home.set(userId, org);
@@ -101,7 +118,7 @@ export async function POST(request: Request) {
       const budget = dropsMonthlyUsd();
       for (const [organizationId, people] of byOrg) {
         if (timeLeft() < 90_000) break;
-        const planned = await planOrganizationDrops(admin, organizationId, people, { now, budgetUsd: budget, spentUsd: spent });
+        const planned = await planOrganizationDrops(admin, organizationId, people, { now, budgetUsd: budget, spentUsd: spent, plan: planOf(organizationId), generate });
         spent += planned.spentUsd; result.spentUsd += planned.spentUsd; result.planned += planned.planned; result.empty += planned.empty;
       }
       await writePending();

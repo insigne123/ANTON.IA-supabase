@@ -41,13 +41,75 @@ Idea del dueño: «que se use Apollo para esto, buscar un lead no nos tiene cost
   - El único crédito es el de la persona, y solo si pulsa «Enriquecer y guardar · 1 crédito».
   - Con Leads Finder, el 10 de noviembre quedaron 2 personas sin contacto por «Se acabó el presupuesto del mes». Con Apollo ese presupuesto no aplica.
 
+## Desde el 12 de noviembre: cada equipo con su plan, y un buscador con IA para quien recibe varios
+
+Pedido del dueño: que un equipo reciba **6 contactos recomendados al día, de lunes a viernes**, y que el sistema los busque tan bien que el usuario «no tenga que ni pensar, que solo contacte».
+
+- **El plan es de cada equipo** (migración `20261112200000_organizations_lead_drop_plan.sql`):
+  - `organizations.lead_drop_size`: cuántos contactos recibe cada persona, de 1 a 10. Por defecto, 1.
+  - `organizations.lead_drop_weekdays`: qué días, de 1 (lunes) a 5 (viernes). Por defecto, martes, miércoles y viernes.
+  - Es parte de lo que el equipo contrató. Lo cambian el servidor y quien opera la base de datos; un disparador (`guard_organization_lead_drop_plan_v1`) rechaza el cambio de una persona del equipo, aunque sea dueña.
+  - Para dar a un equipo 6 contactos cada día hábil: `update organizations set lead_drop_size = 6, lead_drop_weekdays = '{1,2,3,4,5}' where id = '…'`.
+- **Las tareas programadas corren de lunes a viernes** y cada equipo recibe solo en sus días:
+  - `leadDropsTick` prepara los contactos de los equipos que tienen ese día en su plan. Un día que no está en el plan de nadie no hace nada.
+  - Quien está en dos equipos recibe en el más grande de los que tienen contactos ese día.
+  - `dailyAlertsTick` también corre el lunes, que sigue siendo del informe semanal: ese día solo escribe a los equipos con contactos el lunes, y solo cuando sus contactos están listos. Mientras no lo están no guarda nada, así la corrida siguiente lo intenta de nuevo.
+- **Con un contacto al día nada cambia.** El buscador con IA se usa solo cuando el plan pide más de uno (`plan.size > 1`) y la búsqueda es la de Apollo.
+
+### El buscador con IA (`src/lib/server/lead-drop-finder.ts`)
+
+Con un contacto al día alcanzaba con tomar al primero cuyo cargo tuviera las palabras del cliente ideal. Con seis al día eso se queda sin gente en una semana y no aprende. El buscador hace cuatro cosas, todas con la búsqueda gratuita de Apollo y un modelo chico (Claude Haiku):
+
+1. **Pregunta de más formas.** Además de los cargos del cliente ideal (hasta 300 personas), busca esos cargos como la gente los escribe («HR Manager», «Gerenta de Personas») y las palabras de su área como cargo («personas», «rrhh»), 100 de cada una. Si aun así quedan pocas personas nuevas, repite solo con cargos y lugares. Son de 3 a 8 llamadas gratis por grupo de personas con el mismo cliente ideal.
+2. **Lee cada cargo por lo que significa** (`classifyTitles`, el mismo clasificador de la búsqueda): mismo cargo, cargo parecido, cargo vecino o sin relación. Quien no tiene relación no se ofrece.
+3. **Pone dos notas a cada candidato**, de 0 a 10: cuánto decide ese cargo la compra de lo que vende el equipo, y cuánto necesitaría esa empresa lo que vende. El modelo recibe:
+   - lo que vende el equipo: la oferta, los servicios, los diferenciadores y el rubro de «Perfil» y de la «Ficha de la empresa»;
+   - el cliente ideal: cargos, rubros, lugares y tamaños;
+   - lo que el equipo hizo con contactos anteriores: los que guardó o marcó «me sirve» y los que marcó «no me sirve», con su motivo (`dropLessons`);
+   - de cada candidato, solo cargo, nivel, área, empresa, rubro, tamaño, lugar y descripción. Nunca el nombre.
+   El modelo lee el cargo completo y juzga la función real, no las palabras que comparte con el cliente ideal. Una nota de 2 o menos en cargo o en empresa deja fuera a la persona.
+   - **Medido el 12 de noviembre** con una página real de Apollo (32 personas, cargos de seguridad y operaciones en empresas chilenas de 1.001 a 5.000 personas) para un equipo que vende servicios de emergencia a minería, energía y forestal:
+     - arriba quedaron «Gerente HSE» y «Superintendente de Seguridad» de empresas de gas, minería y equipos mineros (93 a 97 puntos);
+     - quedaron fuera 10: «Gerente de Operaciones TI», «Gerente de Operaciones Financieras», «Gerente de Operaciones Inmobiliarias» y otros que la búsqueda por palabras ofrecía como calce exacto;
+     - como exploración salieron un jefe de mantención de una planta de celulosa y un encargado de protección industrial de un puerto.
+     - Con la primera versión de las instrucciones (notas de 0 a 5) el «Gerente de Operaciones Financieras» de una eléctrica empataba en el primer lugar: por eso la escala es de 0 a 10 y las instrucciones piden juzgar la función.
+4. **Elige con cupos para explorar** (`pickRankedDrops`): los mejores del cliente ideal y, en los últimos cupos, los mejores cargos vecinos, para aprender si también sirven. De 6 contactos, 4 son del cliente ideal y 2 son exploración (`exploreSlots`: 3 de cada 10). Se mantiene lo de siempre: solo personas con correo, nadie que el equipo ya tenga o haya recibido, uno por empresa.
+
+- **Un cargo vecino se dice como lo que es:** «Su cargo es vecino a los que buscas: te lo proponemos para probar si también te sirve». En la tabla de calce, su cargo dice «En parte».
+- **Si el modelo falla**, quedan los cargos que se reconocen por sus palabras, y quien se queda sin nadie recibe los contactos como un equipo de un contacto.
+- **Escribir tarda más:** un envío de 6 contactos son 24 correos. La corrida escribe los 6 a la vez y junta en una ronda hasta 8 contactos.
+- **Modelo:** `LEAD_DROPS_FINDER_MODEL` (por defecto, el de `LEAD_DROPS_RESEARCH_MODEL` o Haiku 5.5).
+
+### La investigación corta de cada contacto (`src/lib/server/lead-drop-research.ts`)
+
+La búsqueda gratuita de Apollo trae nombre, cargo y empresa, y nada más: ni rubro, ni sitio, ni descripción. Por eso los contactos llegaban sin una palabra sobre la empresa y sus correos se leían iguales para todos («Cuando una emergencia detiene una operación…»). Desde el 12 de noviembre, antes de escribir, cada contacto se investiga:
+
+1. **Dos búsquedas en la web** (Serper): la empresa, para encontrar su sitio y qué hace, y sus noticias. Se busca por el nombre sin su forma legal («Minera Andina», no «Minera Andina S.A.»).
+2. **La portada de su sitio**, cuando el sitio se reconoce por el nombre de la empresa entre los resultados. Directorios, redes sociales y diarios no cuentan como sitio.
+3. **Cinco líneas** que escribe un modelo chico (Claude Haiku), cada una de una frase, pensadas para leerse en un correo:
+   - qué hace la empresa;
+   - qué le está pasando ahora, con la fecha y el medio;
+   - por qué le sirve lo que vende el equipo;
+   - qué le importa a ese cargo;
+   - cómo abrir la conversación.
+
+- **La fecha y el medio de la noticia son los de la búsqueda, nunca del modelo.** El modelo solo elige cuál noticia sirve y dice qué pasó.
+- **Una noticia cuenta solo si habla de la empresa:** su nombre de una palabra, sus dos primeras palabras juntas o una primera palabra propia. «Cumbre andina de turismo» no es de Minera Andina. Las de más de 18 meses se descartan.
+- **Una línea con una cifra que la evidencia no trae se descarta**, igual que en las razones.
+- **Los correos usan lo encontrado:** qué hace la empresa y la noticia van como hechos de la empresa a la Redactora, y cómo abrir y por qué le sirve van como su ángulo. Las razones (`adviseOn`) también leen lo encontrado.
+- **Queda guardado** en `brief` de cada contacto. Si se reconoció el sitio y la búsqueda no lo traía, también quedan `domain` y `website`.
+- **Sin evidencia no hay investigación** y el contacto sigue como antes. Una búsqueda o un modelo que falla nunca detiene el envío.
+- **Costo:** dos búsquedas de Serper, una página y una llamada a Haiku por contacto; unos 3 a 5 segundos, todos los contactos de un envío a la vez.
+- **Apagar:** `LEAD_DROPS_BRIEF=off`.
+- **Medido el 12 de noviembre** con noticias públicas reales de una distribuidora de gas y un equipo que vende servicios de emergencia: eligió la noticia de su planta nueva de biogás (con su fecha y su medio), y propuso abrir preguntando cómo preparan la respuesta ante emergencias en esa planta.
+
 Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el calce, la redacción y el envío de la mañana son iguales con Apollo.
 
-**Por qué martes, miércoles y viernes:** son días de aviso. Los avisos van de martes a viernes porque el lunes es del informe semanal, y la regla es un correo por día. Cambiar los días es cambiar `DROP_WEEKDAYS` (`src/lib/lead-drops.ts`) y el horario de `leadDropsTick` (`functions/index.ts`).
+**Por qué martes, miércoles y viernes por defecto:** son días de aviso. Los avisos van de martes a viernes porque el lunes es del informe semanal, y la regla es un correo por día. Desde el 12 de noviembre los días son de cada equipo (`organizations.lead_drop_weekdays`); `DROP_WEEKDAYS` (`src/lib/lead-drops.ts`) es solo el valor por defecto.
 
 ## Cómo funciona
 
-1. **Preparación** (`leadDropsTick`, martes, miércoles y viernes de 06:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`):
+1. **Preparación** (`leadDropsTick`, de lunes a viernes de 06:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
    - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos y una dirección que no es de prueba, y a quien le llega el correo: con Resend, a todos; sin Resend, a quien tiene su Gmail u Outlook conectado (o con el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
    - **A quién buscar: el cliente ideal de cada persona** (desde el 29 de octubre):
      - el de su «Perfil», si lo declaró;
@@ -154,7 +216,7 @@ La preparación de la mañana es solo para quien recibirá el correo. Los demás
 - **Plan de Apify:** el de la cuenta es el gratuito, de US$5 al mes, y lo comparten Oportunidades y la búsqueda híbrida. Para todos los usuarios hace falta subir el tope y, probablemente, un plan pagado: es una aprobación pendiente.
 - **Modelos:**
   - la Redactora usa el modelo de Cowork (`COWORK_WRITER_MODEL` o `COWORK_MODEL`);
-  - el resumen de la empresa usa `LEAD_DROPS_RESEARCH_MODEL` (Haiku 5.5 por defecto).
+  - el resumen de la empresa, las razones y la investigación corta usan `LEAD_DROPS_RESEARCH_MODEL` (Haiku 5.5 por defecto).
 - **Apagar:** `LEAD_DROPS_ENABLED=off` lo detiene.
 
 ## Probar con una cuenta de prueba
@@ -164,7 +226,7 @@ Lo más simple es entrar con la cuenta de prueba en su propio workspace, con el 
 También hay una corrida manual, con el mismo secreto del scheduler. Prepara el contacto solo para quienes se nombran, reciban o no correos: `POST /api/cron/lead-drops` con `{ "userIds": ["…"], "organizationId": "…" }`.
 
 - **`organizationId` fija el workspace:** el contacto se hace ahí y solo para sus miembros. Así, una cuenta de prueba que también está en el workspace de un cliente nunca escribe en él.
-- **Días:** como la corrida programada, solo martes, miércoles y viernes.
+- **Días:** como la corrida programada, solo los días del plan de ese equipo (martes, miércoles y viernes si no dice otra cosa).
 
 ## Datos
 
@@ -179,6 +241,8 @@ La migración `20261020180000_lead_drops.sql` crea la tabla `lead_drops`, solo p
 | Pieza | Archivo |
 | --- | --- |
 | Reglas (puro): días, tamaño, reparto, correo | `src/lib/lead-drops.ts` |
+| Buscador con IA para equipos con varios contactos al día | `src/lib/server/lead-drop-finder.ts` |
+| Investigación corta de cada contacto | `src/lib/server/lead-drop-research.ts` |
 | Preparación, redacción, guardado y PDF; desde «Hoy» (`pullStatus`, `pullDrop`, `homeDrop`) | `src/lib/server/lead-drops.ts` |
 | En el aviso de la mañana | `src/lib/daily-alerts.ts`, `src/lib/server/daily-alerts.ts` |
 | Adjuntos del correo | `src/lib/server/self-email.ts` |

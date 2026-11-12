@@ -4,6 +4,7 @@ import test from 'node:test';
 import { dropEmailSection } from '@/lib/lead-drops';
 import { memory } from './goals-alerts-test-fixtures';
 import { apolloDropEntries, dropDocument, keepDropLead, latestDrop, linkDropLead, planOrganizationDrops, pullStatus, saveDropLeads, writeDrop } from './lead-drops';
+import { clearTitleAiCache } from './search/title-ai';
 
 // «Contacto del día» with Apollo's free search (3 Nov 2026): the default provider.
 delete process.env.LEAD_DROPS_PROVIDER;
@@ -148,4 +149,113 @@ test('«Hoy» offers today\'s contact though Leads Finder spent the month\'s bud
   const data = seed();
   data.lead_drops = [{ id: 'd-x', organization_id: 'org-otra', user_id: 'u-otro', drop_date: '2026-10-20', status: 'sent', criteria: {}, items: [], cost_usd: 5 }];
   assert.equal(await pullStatus(memory(data, unique).client, { organizationId: ORG, userId: 'u-ana' }, THURSDAY), 'first');
+});
+
+test('a team with six contacts a day: the customer asked three ways, every candidate scored for what the team sells, and two slots for roles next to the customer\'s', async () => {
+  clearTitleAiCache();
+  const searches: any[] = [];
+  const at = (n: number, title: string, company: string, extra: Record<string, unknown> = {}) => person(n, company, { title, ...extra });
+  const finderSearch = async (input: any) => {
+    searches.push(input);
+    const asked = input.titles.join('|');
+    const found = asked === 'Gerente de Personas'
+      ? input.industryKeywords.length
+        ? [at(1, 'Gerente de Personas', 'Ripley'), at(2, 'Gerente de Personas', 'Falabella'), at(3, 'Gerente de Personas', 'Paris'), at(4, 'Gerente de Personas', 'Lider'),
+          at(5, 'Diseñador Gráfico', 'Tottus'), at(6, 'Gerente de Operaciones', 'Jumbo'), at(7, 'Gerente de Personas', 'Hites', { has_email: false })]
+        : [at(12, 'Gerente de Personas', 'Sodimac'), at(1, 'Gerente de Personas', 'Ripley')]
+      : asked.includes('HR Manager') ? [at(8, 'HR Manager', 'Easy'), at(9, 'Head of People', 'Corona')]
+        : [at(10, 'Jefe de Relaciones Laborales', 'Unimarc'), at(11, 'Subgerente de Personas', 'Abcdin')];
+    return { results: apolloDropEntries(found), costUsd: 0 };
+  };
+  const classes: Record<string, string> = { 'HR Manager': 'exact', 'Head of People': 'similar', 'Gerente de Operaciones': 'related', 'Jefe de Relaciones Laborales': 'related', 'Subgerente de Personas': 'similar' };
+  const notes: Record<string, [number, number]> = { Ripley: [10, 10], Falabella: [10, 8], Paris: [10, 6], Easy: [10, 9], Corona: [8, 8], Abcdin: [6, 6], Sodimac: [10, 4], Jumbo: [6, 10], Unimarc: [4, 8] };
+  const scoring: any[] = [];
+  const generate = async (options: any) => {
+    const prompt = JSON.parse(options.prompt);
+    if (prompt.cargoBuscado) return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, match: classes[entry.cargo] ?? 'none' })) };
+    if (prompt.personas) { scoring.push(prompt); return { people: prompt.personas.flatMap((entry: any) => notes[entry.empresa] ? [{ i: entry.i, cargo: notes[entry.empresa][0], empresa: notes[entry.empresa][1] }] : []) }; }
+    return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, variants: ['HR Manager', 'Gerenta de Personas'], keywords: ['personas', 'rrhh'] })) };
+  };
+  // What the person sells is read as Cowork reads it, which takes a real user id.
+  const ANA = '00000000-0000-4000-8000-00000000000a';
+  const earlier = { organization_id: ORG, user_id: ANA, drop_date: '2026-10-16', status: 'sent', criteria: {}, items: [
+    { leadId: id(40), name: 'Antes', title: 'Gerente de Personas', industry: 'Retail', savedLeadId: 's-1' },
+    { leadId: id(41), name: 'Antes', title: 'Jefe de Bodega', industry: 'Logística', feedback: { useful: false, reason: 'no decide', at: '2026-10-16T12:00:00Z' } },
+  ] };
+  const base = seed();
+  const { client, tables } = memory({ ...base, organization_members: [{ organization_id: ORG, user_id: ANA, role: 'admin' }], profiles: [{ ...base.profiles[0], id: ANA }], lead_drops: [earlier] }, unique);
+  const planned = await planOrganizationDrops(client, ORG, [ANA], { now: TUESDAY, search: finderSearch as any, budgetUsd: 3, spentUsd: 0, generate: generate as any,
+    plan: { size: 6, weekdays: [1, 2, 3, 4, 5] } });
+  assert.equal(planned.planned, 1);
+  assert.deepEqual(searches.map(call => [call.titles.join('|'), call.maxResults, call.includeSimilarTitles, call.industryKeywords.length > 0]), [
+    ['Gerente de Personas', 300, true, true],
+    ['HR Manager|Gerenta de Personas', 100, true, true],
+    ['personas|rrhh', 100, false, true],
+    ['Gerente de Personas', 300, true, false],
+  ], 'the customer\'s roles, the ways people write them, the words of their area and, with few new people, the titles and places only');
+  const drop = tables.lead_drops.find((row: any) => row.drop_date === '2026-10-20');
+  assert.deepEqual(drop.items.map((item: any) => [item.company, item.title, item.track ?? 'core']), [
+    ['Ripley', 'Gerente de Personas', 'core'], ['Easy', 'HR Manager', 'core'], ['Falabella', 'Gerente de Personas', 'core'], ['Paris', 'Gerente de Personas', 'core'],
+    ['Jumbo', 'Gerente de Operaciones', 'explore'], ['Unimarc', 'Jefe de Relaciones Laborales', 'explore'],
+  ], 'the best four of the customer\'s roles, then the two best of the roles next to them; not the designer, nor Lider (the team has it), nor Hites (no email)');
+  const byCompany = (company: string) => drop.items.find((item: any) => item.company === company);
+  assert.equal(byCompany('Easy').fit.find((entry: any) => entry.criterion === 'Cargo').match, 'yes', '«HR Manager» is the role asked, whatever its words');
+  assert.equal(byCompany('Jumbo').fit.find((entry: any) => entry.criterion === 'Cargo').match, 'partial');
+  assert.match(byCompany('Jumbo').why, /^Su cargo es vecino a los que buscas/);
+  assert.match(byCompany('Ripley').why, /^Calza con tu cliente ideal por su cargo/);
+  // What the team sells and what it did with earlier contacts reach the score.
+  assert.equal(scoring.length, 1);
+  assert.equal(scoring[0].vendedor.oferta, 'AXIS consulta antecedentes laborales en el PJUD.');
+  assert.deepEqual(scoring[0].aprendizaje, { le_sirvieron: ['Gerente de Personas · Retail'], descarto: ['Jefe de Bodega · Logística (no decide)'] });
+  assert.ok(!scoring[0].personas.some((entry: any) => ['Lider', 'Hites'].includes(entry.empresa)), 'nobody the team has or without an email is scored');
+});
+
+test('six a day with the model down: the customer\'s roles by their words, as a team of one contact gets them', async () => {
+  clearTitleAiCache();
+  const down = async () => { throw new Error('down'); };
+  const { client, tables } = memory(seed(), unique);
+  const planned = await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0, generate: down as any,
+    plan: { size: 6, weekdays: [1, 2, 3, 4, 5] } });
+  assert.equal(planned.planned, 1);
+  assert.deepEqual(tables.lead_drops[0].items.map((item: any) => item.company).sort(), ['Falabella', 'Paris', 'Tottus'], 'everyone with an email the team does not have');
+  assert.ok(tables.lead_drops[0].items.every((item: any) => !item.track));
+});
+
+test('each contact is researched before it is written: the brief is kept, its facts reach the Writer, and a research that fails leaves the contact as it came', async () => {
+  clearTitleAiCache();
+  const generate = fakeGenerate;
+  const { client, tables } = memory(seed(), unique);
+  // Two contacts, chosen by the words of their title (the finder's model is not what this test is about).
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0, generate: (async () => { throw new Error('down'); }) as any,
+    plan: { size: 2, weekdays: [1, 2, 3, 4, 5] } });
+  writerPrompts.length = 0;
+  const asked: any[] = [];
+  const research = async (input: any) => {
+    asked.push(input);
+    if (input.contact.company !== 'Falabella') throw new Error('the web is down');
+    return { domain: 'falabella.com', brief: { company: 'Vende vestuario y hogar en tiendas y en línea en Chile, Perú y Colombia.',
+      news: { text: 'Abrirá un centro de distribución en Santiago', date: '3 nov 2026', source: 'Diario Financiero', url: 'https://diario.example/falabella-cd' },
+      fit: 'Un centro nuevo suma cientos de ingresos que revisar antes de la temporada alta.', role: 'Responde por contratar a tiempo y sin sorpresas.',
+      opener: 'Pregúntale cómo van a revisar los antecedentes de quienes entren al centro nuevo.' } };
+  };
+  await writeDrop(client, tables.lead_drops[0], { generate, now: TUESDAY, research });
+  assert.equal(asked.length, 2, 'both contacts at once');
+  assert.deepEqual(asked[0].contact, { title: 'Gerente de Personas', company: asked[0].contact.company, domain: null, country: null, industry: 'Retail' });
+  assert.equal(asked[0].seller, null, 'a test user without a real id has no offer to read: the brief then says the company and its news only');
+  const items = tables.lead_drops[0].items as any[];
+  const falabella = items.find(item => item.company === 'Falabella');
+  const other = items.find(item => item.company !== 'Falabella');
+  assert.equal(falabella.brief.news.source, 'Diario Financiero');
+  assert.equal(falabella.summary, 'Vende vestuario y hogar en tiendas y en línea en Chile, Perú y Colombia.');
+  assert.deepEqual(falabella.research.slice(0, 2), ['Vende vestuario y hogar en tiendas y en línea en Chile, Perú y Colombia.', 'Abrirá un centro de distribución en Santiago (Diario Financiero, 3 nov 2026).']);
+  assert.equal(falabella.domain, 'falabella.com');
+  assert.equal(falabella.website, 'https://falabella.com');
+  assert.equal(other.brief, undefined);
+  assert.equal(other.domain, null);
+  assert.ok(other.draft && falabella.draft, 'both are written');
+  // The Writer opens with what the research found, and reads the company's facts.
+  const forFalabella = writerPrompts.find(prompt => JSON.stringify(prompt.observations).includes('Falabella'));
+  assert.equal(forFalabella.brief.angle, 'Para abrir: Pregúntale cómo van a revisar los antecedentes de quienes entren al centro nuevo. Por qué le sirve: Un centro nuevo suma cientos de ingresos que revisar antes de la temporada alta.');
+  assert.match(JSON.stringify(forFalabella.observations), /Abrirá un centro de distribución en Santiago \(Diario Financiero, 3 nov 2026\)/);
+  assert.equal(writerPrompts.find(prompt => !JSON.stringify(prompt.observations).includes('Falabella')).brief.angle, null);
 });
