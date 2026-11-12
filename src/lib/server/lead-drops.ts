@@ -9,7 +9,7 @@ import { renderPdf } from '@/lib/documents/render-pdf';
 import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
   DEFAULT_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, groupDropPeople, needsLookup, nextDropDay,
-  personDropCriteria, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, type DropCandidate, type DropCriteria,
+  personDropCriteria, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria,
   type DropFollowUp, type DropItem, type DropPlan, type DropScore, type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
 import { isMaskedName } from '@/lib/lead-name';
@@ -499,7 +499,8 @@ const adviceSchema = z.object({ contacts: z.array(z.object({
 const ADVICE_PROMPT = 'Le explicas a un vendedor por qué le recomiendas cada contacto. Por cada uno: de 2 a 3 razones (reasons), una frase de hasta 200 caracteres cada una, '
   + 'que conecten lo que vende (seller) con el cargo, el área y la empresa del contacto: qué problema de esa persona resuelve, por qué su empresa lo necesitaría y '
   + 'por qué su cargo decide o influye en esa compra. Y una sugerencia breve de cómo abrir la conversación (approach), sin redactar el correo. Usa solo los datos dados: '
-  + 'no inventes cifras, clientes, noticias ni hechos de la empresa que su descripción no diga; lo que no se sabe se dice como lo que ese cargo suele resolver. '
+  + 'no inventes cifras, clientes, noticias ni hechos de la empresa que su descripción no diga; lo que no se sabe se dice como lo que ese cargo suele resolver, '
+  + 'sin decir que falta información ni que algo «no está especificado». '
   + 'No repitas como razón que calza por cargo, rubro o lugar: eso ya se muestra. Español de Chile, de tú al vendedor, sin adjetivos de marketing. Responde JSON conforme al contrato.';
 
 /**
@@ -527,7 +528,8 @@ async function adviseOn(items: PendingItem[], userContext: CoworkUserContext | n
   const known = prompt.replace(/"leadId":"[^"]*"/g, '');
   const grounded = (line: string) => (line.match(/\d+(?:[.,]\d+)*/g) || []).every(figure => known.includes(figure));
   // Without the bullet the model may write; a line too long to read at a glance is left out rather than cut.
-  const clean = (line: unknown, max: number) => { const value = text(String(line || '').replace(/^[\s\-–•*·]+/, ''), max + 1); return value.length <= max && grounded(value) ? value : ''; };
+  // Nor one that talks about what the data does not say («…, aunque su alcance no está especificado»): that clause is left out.
+  const clean = (line: unknown, max: number) => { const value = text(String(line || '').replace(/^[\s\-–•*·]+/, ''), max + 1); return value.length <= max && grounded(value) ? withoutSourceTalk(value) || '' : ''; };
   return new Map(((answer?.contacts || []) as Array<{ leadId: string; reasons: string[]; approach: string | null }>).map(entry => [entry.leadId, {
     reasons: (entry.reasons || []).map(line => clean(line, 280)).filter(Boolean).slice(0, 3),
     approach: clean(entry.approach, 360) || null,

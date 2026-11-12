@@ -102,3 +102,18 @@ test('without what the team sells, only what the company does and what is happen
   const found = await researchDropContact({ organizationId: 'org-1', contact, seller: null }, { generate, now: NOW, search: search as any, home: async () => null });
   assert.deepEqual(found?.brief, { company: 'Opera dos faenas de cobre.', news: null, fit: null, role: null, opener: null });
 });
+
+test('the brief says what is known: what the model says of its own sources is left out, and the prompt asks it not to', async () => {
+  const search = async (request: any) => ({ items: request.kind === 'organic' ? [item('Minera Andina', 'https://www.mineraandina.cl/', 'Minera Andina procesa cobre.')] : [] });
+  let asked = '';
+  const generate = async (options: any) => {
+    asked = options.systemPrompt;
+    return { empresa: 'Minera Andina procesa cobre; no hay evidencia disponible sobre dónde opera.', novedad: null,
+      porque: 'Sus faenas necesitan detección y extinción de incendios, aunque la evidencia no detalla sus riesgos.',
+      cargo: 'No se especifica de qué responde.', apertura: 'Pregúntale cómo protegen hoy sus faenas.' };
+  };
+  const found = await researchDropContact({ organizationId: 'org-1', contact, seller }, { generate, now: NOW, search: search as any, home: async () => null });
+  assert.deepEqual(found?.brief, { company: 'Minera Andina procesa cobre.', news: null, fit: 'Sus faenas necesitan detección y extinción de incendios.', role: null,
+    opener: 'Pregúntale cómo protegen hoy sus faenas.' });
+  assert.match(asked, /nunca hables de la evidencia, de lo que falta ni de lo que no/);
+});

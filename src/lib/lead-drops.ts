@@ -698,6 +698,26 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   return { text, html, link };
 }
 
+/**
+ * A line written for whoever sells says what is known, never what the search did not find: «…; no hay evidencia disponible sobre dónde
+ * opera» or «…, aunque la evidencia no detalla sus riesgos» is the model talking about its sources (seen on 12 Nov 2026, with a real
+ * run for a team's «Ficha»). That clause goes; the whole line too when nothing worth reading is left before it.
+ */
+const ABOUT_SOURCES = /(?:\b(?:la|hay|sin|segun|según) evidencia\b|\bno (?:se|esta|está|estan|están|queda|quedan) (?:especific|detall|indic|inform|aclar|precis|mencion|sabe|conoce)\w*|\bno hay (?:informacion|información|datos|antecedentes|detalles)\b|\bsin (?:informacion|información|datos|antecedentes) (?:disponibles?|suficientes?)\b|\bse desconoce\b)/i;
+export function withoutSourceTalk(line: string | null | undefined): string | null {
+  const said = String(line ?? '').trim();
+  if (!said) return null;
+  if (!ABOUT_SOURCES.test(said)) return said;
+  // The clauses of a sentence, as it joins them: «;», «, aunque…», «, pero…», «, si bien…».
+  const kept: string[] = [];
+  for (const clause of said.split(/\s*;\s*|,\s+(?=(?:aunque|pero|si bien)\b)/i)) {
+    if (ABOUT_SOURCES.test(clause)) break;
+    kept.push(clause);
+  }
+  const rest = kept.join('; ').replace(/[\s,;:.]+$/, '');
+  return rest.length >= 20 ? `${rest}.` : null;
+}
+
 /** «Tu contacto de hoy: Gerente de Personas en Ripley»; with more than one, how many. */
 export function dropSubject(items: Array<Pick<DropItem, 'title' | 'company'>>) {
   if (items.length !== 1) return `${items.length} contactos nuevos para ti`;
