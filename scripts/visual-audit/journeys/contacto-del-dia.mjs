@@ -77,7 +77,7 @@ async function answerSix(page) {
     if (body.action === 'approve') {
       const campaign = { id: '00000000-0000-4000-8000-00000000c001', provider: 'google', approvedAt: '2026-11-13T12:00:00.000Z' };
       change(() => ({ campaign }));
-      return route.fulfill(answered({ items, campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-15', '2026-11-19', '2026-11-23'] }));
+      return route.fulfill(answered({ items, campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-16', '2026-11-20', '2026-11-24'] }));
     }
     if (body.action === 'edit') change(item => ({ edited: true, draft: body.emails.draft, followUps: item.followUps.map((step, index) => ({ day: step.day, ...body.emails.followUps[index] })) }));
     if (body.action === 'feedback') change(() => ({ feedback: { ...body.feedback, at: '2026-11-13T12:00:00.000Z' } }));
@@ -110,7 +110,7 @@ const sixSteps = [
   { say: 'Apruebo y programo su campaña', do: async c => {
     await card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }).click();
     await c.see('Campaña de Paula Reyes programada desde Gmail');
-    c.check('dice cuándo salen los seguimientos', await c.has('los seguimientos el dom 15 nov, el jue 19 nov y el lun 23 nov'));
+    c.check('dice cuándo salen los seguimientos', await c.has('los seguimientos el lun 16 nov, el vie 20 nov y el mar 24 nov'));
     c.check('la tarjeta queda con su campaña en curso', await card(c, 'Paula Reyes').getByText('Campaña en curso').count() === 1);
     c.check('lleva a «Campañas»', await card(c, 'Paula Reyes').getByRole('link', { name: 'Ver la campaña' }).count() === 1);
   } },

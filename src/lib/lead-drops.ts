@@ -105,6 +105,8 @@ export type DropItem = {
   edited?: boolean;
   /** The campaign the person approved for this contact («Aprobar y programar», server/lead-drop-campaign.ts): its emails go out from their mailbox. */
   campaign?: { id: string; provider: 'google' | 'outlook'; approvedAt: string };
+  /** When the campaign went to the person's inbox to read, once its email was found (server/lead-drop-campaign.ts, mailDropCampaign). */
+  campaignMailedAt?: string;
 };
 /**
  * Five lines for whoever sells, each one sentence: what the company does, what is happening there now (with the date and the source
@@ -121,21 +123,29 @@ export type DropFollowUp = { day: number; subject: string; body: string };
 
 /**
  * The emails of a contact as a campaign sends them: the first at once, and each follow-up so many days after the one before
- * (bulk campaigns count from the previous send; the Writer names the day of each, the first being day 1). Empty without a first email.
+ * (bulk campaigns count from the previous send; the Writer names the day of each, the first being day 1). With `from`, the day the
+ * campaign starts, a follow-up that would fall on a Saturday or a Sunday waits for Monday: nobody follows up on a weekend, and the
+ * next one keeps its distance from it. Empty without a first email.
  */
-export function dropCampaignMessages(item: Pick<DropItem, 'draft' | 'followUps'>): Array<{ subject: string; body: string; delayDays: number }> {
+export function dropCampaignMessages(item: Pick<DropItem, 'draft' | 'followUps'>, from?: Date): Array<{ subject: string; body: string; delayDays: number }> {
   if (!item.draft) return [];
   let previous = 1;
+  let at = from ? Date.parse(`${dayInZone(from)}T12:00:00.000Z`) : null;
   return [{ subject: item.draft.subject, body: item.draft.body, delayDays: 0 }, ...(item.followUps || []).map(step => {
-    const delayDays = Math.max(1, Math.round(step.day) - previous);
+    let delayDays = Math.max(1, Math.round(step.day) - previous);
     previous += delayDays;
+    if (at !== null) {
+      const weekday = new Date(at + delayDays * 86_400_000).getUTCDay();
+      delayDays += weekday === 6 ? 2 : weekday === 0 ? 1 : 0;
+      at += delayDays * 86_400_000;
+    }
     return { subject: step.subject, body: step.body, delayDays };
   })];
 }
-/** The day each email of a contact would go out if the campaign started on `from` (yyyy-mm-dd, in Chile): «2026-11-13», «2026-11-15»… */
+/** The day each email of a contact would go out if the campaign started on `from` (yyyy-mm-dd, in Chile): «2026-11-13», «2026-11-16»… */
 export function dropSchedule(item: Pick<DropItem, 'draft' | 'followUps'>, from: Date): string[] {
   let at = Date.parse(`${dayInZone(from)}T12:00:00.000Z`);
-  return dropCampaignMessages(item).map(message => { at += message.delayDays * 86_400_000; return new Date(at).toISOString().slice(0, 10); });
+  return dropCampaignMessages(item, from).map(message => { at += message.delayDays * 86_400_000; return new Date(at).toISOString().slice(0, 10); });
 }
 const SHORT_WEEKDAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const SHORT_MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];

@@ -9,9 +9,13 @@ import { dropHref } from '@/lib/lead-drops';
 import { usePersonalHome } from './usePersonalHome';
 
 type Pull = 'first' | 'today' | 'preparing' | 'profile';
+type Plan = { size: number; days: number };
 type Response = {
-  drop: { id: string; dropDate: string; total: number; left: number; next?: { name: string; company: string | null; why: string; lookup?: boolean } } | null;
+  drop: { id: string; dropDate: string; total: number; left: number; lookup?: boolean; campaigns?: boolean;
+    next?: { name: string; company: string | null; why: string; lookup?: boolean } } | null;
   pull?: Pull | null;
+  /** The team's own plan, when it gets several contacts a day (organizations.lead_drop_size). */
+  plan?: Plan | null;
 };
 
 /** What «Hoy» offers when there is no contact to save (src/lib/server/lead-drops.ts, pullStatus). */
@@ -21,6 +25,14 @@ const OFFER: Record<Pull, { text: string; action: string; href: string }> = {
   preparing: { text: 'Estamos preparando tu contacto de hoy, con su investigación, un primer correo y sus seguimientos.', action: 'Ver cómo va', href: dropHref('nuevo') },
   profile: { text: 'Cuéntanos a quién le vendes y tres días a la semana te elegimos un contacto nuevo.', action: 'Completar mi cliente ideal', href: '/profile#icp-heading' },
 };
+/** The same offers for a team that gets several contacts a day: how many, and each with its campaign written. */
+function planOffer(pull: Pull, { size, days }: Plan): { text: string; action: string; href: string } {
+  const often = days >= 5 ? 'cada día hábil' : `${days} ${days === 1 ? 'día' : 'días'} a la semana`;
+  if (pull === 'first') return { ...OFFER.first, text: `${size} contactos nuevos elegidos con tu cliente ideal, cada uno con por qué te lo recomendamos y su campaña lista.`, action: 'Ver mis primeros contactos' };
+  if (pull === 'today') return { ...OFFER.today, text: `Hoy te tocan ${size} contactos nuevos, cada uno con por qué te lo recomendamos y su campaña lista.`, action: 'Ver mis contactos de hoy' };
+  if (pull === 'preparing') return { ...OFFER.preparing, text: `Estamos preparando tus ${size} contactos de hoy, cada uno con su investigación y su campaña.` };
+  return { ...OFFER.profile, text: `Cuéntanos a quién le vendes y ${often} te elegimos ${size} contactos nuevos.` };
+}
 
 function Banner({ text, children, accent }: { text: ReactNode; children: ReactNode; accent?: boolean }) {
   return <Card className={accent ? 'rounded-2xl border-primary/25 bg-primary/5' : 'rounded-2xl'} data-tour="lead-drop">
@@ -46,7 +58,7 @@ export function LeadDropBanner({ quietProfile = false }: { quietProfile?: boolea
   const drop = data?.drop;
   if (!drop) {
     if (quietProfile && data?.pull === 'profile') return null;
-    const offer = data?.pull ? OFFER[data.pull] : null;
+    const offer = data?.pull ? (data.plan && data.plan.size > 1 ? planOffer(data.pull, data.plan) : OFFER[data.pull]) : null;
     if (!offer) return null;
     return <Banner text={<p>{offer.text}</p>}>
       <Button asChild size="sm" variant="outline" className="w-full justify-between">
@@ -59,10 +71,16 @@ export function LeadDropBanner({ quietProfile = false }: { quietProfile?: boolea
   const text = drop.total === 1 && next
     ? <><p className="font-medium text-foreground">{next.name}{next.company ? `, ${next.company}` : ''}</p>
       <p>{next.why} {next.lookup ? 'Trae un primer correo y tres seguimientos; ver su correo y guardarlo usa 1 crédito.' : 'Ya tiene su correo verificado: guardarlo no gasta créditos.'}</p></>
+    // Several found with Apollo: no email is promised (each is looked up, a credit each), and each brings its campaign to approve.
+    : drop.lookup ? <p>{drop.left === drop.total
+      ? `${drop.total} contactos nuevos para ti${drop.campaigns ? ', cada uno con su campaña lista' : ''}. Ver el correo de cada uno usa 1 crédito.`
+      : `Te ${drop.left === 1 ? 'queda 1 contacto' : `quedan ${drop.left} contactos`} de ${drop.total} por revisar. Ver el correo de cada uno usa 1 crédito.`}</p>
     : <p>{drop.left === drop.total
       ? `${drop.total === 1 ? 'Un contacto nuevo' : `${drop.total} contactos nuevos`} para ti, con correo verificado. Guardarlos no gasta créditos.`
       : `Te ${drop.left === 1 ? 'falta guardar 1' : `faltan guardar ${drop.left}`} de ${drop.total}.`}</p>;
   return <Banner accent text={text}>
-    <Button asChild size="sm" variant="outline" className="w-full justify-between"><Link href={dropHref(drop.id)}>Ver y guardar<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link></Button>
+    <Button asChild size="sm" variant="outline" className="w-full justify-between">
+      <Link href={dropHref(drop.id)}>{drop.lookup && drop.total > 1 ? 'Revisar mis contactos' : 'Ver y guardar'}<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
+    </Button>
   </Banner>;
 }

@@ -678,9 +678,11 @@ export async function latestDrop(client: Client, scope: DropScope, now: Date) {
   if (!result.data || !unsaved.length) return null;
   const { company, why } = unsaved[0];
   const name = dropName(unsaved[0]);
-  // «Hoy» says what saving it costs: nothing when the email came with the search, a credit when it is looked up (Apollo).
+  // «Hoy» says what saving it costs: nothing when the email came with the search, a credit when it is looked up (Apollo). Of a drop
+  // of several, it says so for all that are left, and whether each comes with its campaign written.
   return { id: String(result.data.id), dropDate: String(result.data.drop_date), total: items.length, left: unsaved.length,
-    next: { name, company, why, ...(needsLookup(unsaved[0]) ? { lookup: true } : {}) } };
+    next: { name, company, why, ...(needsLookup(unsaved[0]) ? { lookup: true } : {}) },
+    ...(items.length > 1 && unsaved.some(needsLookup) ? { lookup: true } : {}), ...(items.length > 1 && unsaved.some(item => item.draft) ? { campaigns: true } : {}) };
 }
 
 /**
@@ -715,7 +717,10 @@ export async function homeDrop(client: Client, scope: DropScope, now: Date) {
   if (drop?.dropDate === dayInZone(now)) return { drop, pull: null };
   const pull = await pullStatus(client, scope, now);
   if (drop && pull !== 'today' && pull !== 'preparing') return { drop, pull: null };
-  return { drop: null, pull };
+  if (!pull) return { drop: null, pull };
+  // A team with a plan of its own is offered what it gets: how many contacts, and on how many days of the week.
+  const plan = await dropPlanFor(client, scope.organizationId);
+  return { drop: null, pull, ...(plan.size > 1 ? { plan: { size: plan.size, days: plan.weekdays.length } } : {}) };
 }
 
 /** Why a drop came empty, said to the person, and the button to «Perfil» when completing the customer helps. */

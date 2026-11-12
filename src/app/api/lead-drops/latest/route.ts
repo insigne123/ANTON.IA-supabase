@@ -20,11 +20,12 @@ export async function GET(request: Request) {
     const admin = getSupabaseAdminClient();
     const scope = { organizationId, userId: user.id };
     // Before the migration there are no drops: «Hoy» shows nothing.
-    const { drop, pull } = await homeDrop(admin, scope, now).catch((error: unknown) => {
+    const home: Awaited<ReturnType<typeof homeDrop>> = await homeDrop(admin, scope, now).catch((error: unknown) => {
       if (error instanceof LeadDropsError) return { drop: null, pull: null };
       throw error;
     });
-    return NextResponse.json({ scope: homeScope(user.id, organizationId, now), drop, pull },
+    // `plan` comes only for a team with a plan of its own, and only while there is something to offer.
+    return NextResponse.json({ scope: homeScope(user.id, organizationId, now), ...home },
       { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     return requestAuthErrorResponse(error) || handleAuthError(error instanceof LeadDropsError ? new AuthError(error.message, error.status) : error);

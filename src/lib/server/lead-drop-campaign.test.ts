@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { AuthError } from './auth-utils';
 import { memory } from './goals-alerts-test-fixtures';
-import { approveDropCampaign, editDropEmails, saveDropFeedback } from './lead-drop-campaign';
+import { approveDropCampaign, editDropEmails, mailDropCampaign, saveDropFeedback } from './lead-drop-campaign';
 import { dropLessons } from './lead-drop-finder';
 
 const ORG = 'org-1', USER = 'u-ana', DROP = '11111111-1111-4111-8111-111111111111';
@@ -16,6 +16,7 @@ const item = (leadId: string, extra: Record<string, unknown> = {}) => ({ leadId,
 const seed = (first: Record<string, unknown> = {}) => memory({
   lead_drops: [{ id: DROP, organization_id: ORG, user_id: USER, drop_date: '2026-11-13', status: 'sent', criteria: {}, items: [item(LEAD, first), item(OTHER, { name: 'Luisa Soto' })] }],
   enriched_leads: [{ id: 'e-1', organization_id: ORG, user_id: USER, email: 'Pedro.Araya@MineraAndina.cl' }, { id: 'e-9', organization_id: ORG, user_id: 'u-otro', email: 'x@otra.cl' }],
+  profiles: [{ id: USER, email: 'ana@brigadas.cl', full_name: 'Ana Rojas', signatures: {} }],
 });
 const auth = { supabase: {} as any, user: { id: USER } as any, organizationId: ORG };
 const NOW = new Date('2026-11-13T12:00:00.000Z');
@@ -64,8 +65,8 @@ test('«Aprobar y programar»: a campaign of one person, from the mailbox that s
   assert.deepEqual(definition.emails, ['pedro.araya@mineraandina.cl']);
   assert.equal(definition.provider, 'outlook');
   assert.equal(definition.name, 'Contacto del día · Pedro Araya · Minera Andina');
-  assert.deepEqual(definition.messages.map((message: any) => [message.subject, message.delayDays]), [['Brigadas en faena', 0], ['Re: brigadas', 2], ['Planes', 4], ['Cierro', 4]],
-    'days 1, 3, 7 and 11 as the Writer named them');
+  assert.deepEqual(definition.messages.map((message: any) => [message.subject, message.delayDays]), [['Brigadas en faena', 0], ['Re: brigadas', 3], ['Planes', 4], ['Cierro', 4]],
+    'days 1, 3, 7 and 11 as the Writer named them, and from a Friday the first follow-up waits for Monday');
   assert.equal(definition.criteria.relationship, 'never_contacted');
   assert.deepEqual(context.organizationIds, [ORG]);
   assert.equal(id, undefined);
@@ -74,7 +75,7 @@ test('«Aprobar y programar»: a campaign of one person, from the mailbox that s
   assert.deepEqual(reviewed, [{ id: creationId, input: { action: 'approve', revision: 1, reviewHash: 'a'.repeat(64) } }]);
   assert.deepEqual(done.campaign, { id: creationId, provider: 'outlook', approvedAt: '2026-11-13T12:00:00.000Z' });
   assert.equal(done.provider, 'Outlook');
-  assert.deepEqual(done.schedule, ['2026-11-13', '2026-11-15', '2026-11-19', '2026-11-23']);
+  assert.deepEqual(done.schedule, ['2026-11-13', '2026-11-16', '2026-11-20', '2026-11-24']);
   assert.deepEqual(tables.lead_drops[0].items[0].campaign, done.campaign);
 
   // Asked again (a second click, another tab): the campaign it made, and nothing new.
@@ -104,4 +105,70 @@ test('what stops a campaign is said as what to do: no email yet, no mailbox, a r
   const broken = { ...ready, review: never.review, save: (async () => { throw new Error('connection reset'); }) as any };
   await refused(approveDropCampaign(auth, withEmail.client, DROP, LEAD, broken), 503, /No pudimos programar la campaña/);
   assert.equal(withEmail.tables.lead_drops[0].items[0].campaign, undefined, 'nothing is marked approved when it was not');
+});
+
+test('once its email is found, the campaign goes to the person\'s inbox to read: once, in full, and only where the card can approve it', async () => {
+  const { client, tables } = seed({ savedLeadId: 'e-1' });
+  const sent: any[] = [];
+  const deps = { now: NOW, appUrl: 'https://app.ejemplo.cl', env: {}, mailbox: async () => ({ resolved: 'google' as const }), send: async (input: any) => { sent.push(input); return { ok: true }; } };
+  assert.deepEqual(await mailDropCampaign(client, scope, DROP, LEAD, deps), { sent: true });
+  const [email] = sent;
+  assert.equal(email.userId, USER);
+  assert.equal(email.to, 'ana@brigadas.cl');
+  assert.equal(email.subject, 'Campaña lista para aprobar: Pedro Araya · Minera Andina');
+  assert.match(email.text, /^Hola, Ana\. Encontramos el correo de Pedro Araya: pedro\.araya@mineraandina\.cl\./);
+  assert.match(email.text, /sale desde tu Gmail/);
+  assert.ok(email.text.includes('Hola Pedro,\n\n¿Cómo cubren los turnos de noche en Minera Andina?'), 'the first email in full, as its reader would get it');
+  assert.equal((email.text.match(/^— Seguimiento \d · /gm) || []).length, 3);
+  assert.ok(email.html.includes(`https://app.ejemplo.cl/search/contactos/${DROP}?c=${LEAD}`));
+  assert.equal(tables.lead_drops[0].items[0].campaignMailedAt, '2026-11-13T12:00:00.000Z');
+  // «Enriquecer» asked again, or the page linking twice: no second email.
+  assert.deepEqual(await mailDropCampaign(client, scope, DROP, LEAD, deps), { sent: false, reason: 'not_due' });
+  assert.equal(sent.length, 1);
+
+  const none = async (seeded: ReturnType<typeof seed>, reason: string, extra: Record<string, unknown> = {}) => {
+    const before = sent.length;
+    assert.deepEqual(await mailDropCampaign(seeded.client, scope, DROP, LEAD, { ...deps, ...extra }), { sent: false, reason });
+    assert.equal(sent.length, before, reason);
+    assert.equal(seeded.tables.lead_drops[0].items[0].campaignMailedAt, undefined, reason);
+  };
+  await none(seed(), 'not_due'); // its email is still to look up
+  await none(seed({ savedLeadId: 'e-1', draft: null }), 'not_due');
+  await none(seed({ savedLeadId: 'e-1', campaign: { id: 'c-1', provider: 'google', approvedAt: NOW.toISOString() } }), 'not_due');
+  await none(seed({ savedLeadId: 'e-9' }), 'no_contact_email'); // saved, and its email was not found
+  await none(seed({ savedLeadId: 'e-1' }), 'off', { env: { LEAD_DROPS_CAMPAIGN_EMAIL: 'off' } });
+  const quiet = seed({ savedLeadId: 'e-1' });
+  quiet.tables.profiles[0].signatures = { daily_alerts: { email: false } };
+  await none(quiet, 'unreachable');
+  const testing = seed({ savedLeadId: 'e-1' });
+  testing.tables.profiles[0].email = 'ana@example.com';
+  await none(testing, 'unreachable');
+  // The drop of one contact keeps its own way («Enriquecer y guardar» to «Por escribir»): its page has nothing to approve.
+  const alone = seed({ savedLeadId: 'e-1' });
+  alone.tables.lead_drops[0].items = alone.tables.lead_drops[0].items.slice(0, 1);
+  await none(alone, 'single');
+});
+
+test('an email that did not go out is not marked as sent, no mailbox is said in it, and an approval made meanwhile is kept', async () => {
+  const failed = seed({ savedLeadId: 'e-1' });
+  const base = { now: NOW, appUrl: 'https://app.ejemplo.cl', env: {}, mailbox: async () => ({ resolved: null }) };
+  assert.deepEqual(await mailDropCampaign(failed.client, scope, DROP, LEAD, { ...base, send: async () => ({ ok: false }) }), { sent: false, reason: 'send_failed' });
+  assert.equal(failed.tables.lead_drops[0].items[0].campaignMailedAt, undefined);
+
+  const racing = seed({ savedLeadId: 'e-1' });
+  const campaign = { id: 'c-1', provider: 'outlook', approvedAt: NOW.toISOString() };
+  let text = '';
+  const send = async (input: any) => {
+    text = input.text;
+    // The person approves on the page while the email is on its way: another request writes the row.
+    const row = racing.tables.lead_drops[0];
+    racing.tables.lead_drops[0] = { ...row, items: row.items.map((entry: any) => entry.leadId === LEAD ? { ...entry, campaign } : entry) };
+    return { ok: true };
+  };
+  assert.deepEqual(await mailDropCampaign(racing.client, scope, DROP, LEAD, { ...base, send }), { sent: true });
+  assert.match(text, /Para aprobarla, conecta Gmail u Outlook en «Conexiones»\./);
+  const [first, second] = racing.tables.lead_drops[0].items;
+  assert.deepEqual(first.campaign, campaign, 'the stamp does not undo the approval');
+  assert.equal(first.campaignMailedAt, '2026-11-13T12:00:00.000Z');
+  assert.equal(second.campaignMailedAt, undefined, 'the other contact is as it was');
 });
