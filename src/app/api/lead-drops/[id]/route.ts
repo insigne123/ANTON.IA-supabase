@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { requireHomeAuth } from '@/lib/server/home-auth';
 import { LeadDropsError, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
+import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
 import { requestAuthErrorResponse } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
@@ -32,11 +33,17 @@ const BodySchema = z.discriminatedUnion('action', [
   // «Enriquecer y guardar» of an Apollo contact: kept as a saved contact, its email looked up from the browser, then linked.
   z.object({ action: z.literal('keep'), leadId: LeadId }).strict(),
   z.object({ action: z.literal('link'), leadId: LeadId }).strict(),
+  // The person's own text for the emails, what they think of the contact, and «Aprobar y programar» (lead-drop-campaign.ts).
+  z.object({ action: z.literal('edit'), leadId: LeadId, emails: dropEmailsSchema }).strict(),
+  z.object({ action: z.literal('feedback'), leadId: LeadId, feedback: dropFeedbackSchema }).strict(),
+  z.object({ action: z.literal('approve'), leadId: LeadId }).strict(),
 ]);
 
 /**
  * Saves contacts of the drop: with `save`, those whose email came with the search, in «Por escribir», without credits; with
  * `keep` and `link`, an Apollo contact, before and after its email is looked up (src/lib/server/lead-drops.ts, keepDropLead).
+ * `edit` keeps the person's text for a contact's emails, `feedback` what they think of it, and `approve` starts its campaign
+ * from their mailbox.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -52,6 +59,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (body.data.action === 'link') {
       return NextResponse.json(await linkDropLead(admin, scope, id.data, body.data.leadId), { headers: noStore });
+    }
+    if (body.data.action === 'edit') {
+      return NextResponse.json(await editDropEmails(admin, scope, id.data, body.data.leadId, body.data.emails), { headers: noStore });
+    }
+    if (body.data.action === 'feedback') {
+      return NextResponse.json(await saveDropFeedback(admin, scope, id.data, body.data.leadId, body.data.feedback), { headers: noStore });
+    }
+    if (body.data.action === 'approve') {
+      return NextResponse.json(await approveDropCampaign(auth, admin, id.data, body.data.leadId), { headers: noStore });
     }
     const result = await saveDropLeads(admin, scope, id.data, body.data.leadIds);
     return NextResponse.json({ saved: result.saved.length, expired: result.expired.length, items: result.items }, { headers: noStore });

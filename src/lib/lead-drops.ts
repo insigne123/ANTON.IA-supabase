@@ -101,6 +101,10 @@ export type DropItem = {
   feedback?: { useful: boolean; reason?: string | null; at: string };
   /** The short research of the contact, read from the web before writing to it (server/lead-drop-research.ts). */
   brief?: DropBrief;
+  /** The person changed the emails by hand: what goes out is theirs. */
+  edited?: boolean;
+  /** The campaign the person approved for this contact («Aprobar y programar», server/lead-drop-campaign.ts): its emails go out from their mailbox. */
+  campaign?: { id: string; provider: 'google' | 'outlook'; approvedAt: string };
 };
 /**
  * Five lines for whoever sells, each one sentence: what the company does, what is happening there now (with the date and the source
@@ -114,6 +118,32 @@ export type DropBrief = {
   opener: string | null;
 };
 export type DropFollowUp = { day: number; subject: string; body: string };
+
+/**
+ * The emails of a contact as a campaign sends them: the first at once, and each follow-up so many days after the one before
+ * (bulk campaigns count from the previous send; the Writer names the day of each, the first being day 1). Empty without a first email.
+ */
+export function dropCampaignMessages(item: Pick<DropItem, 'draft' | 'followUps'>): Array<{ subject: string; body: string; delayDays: number }> {
+  if (!item.draft) return [];
+  let previous = 1;
+  return [{ subject: item.draft.subject, body: item.draft.body, delayDays: 0 }, ...(item.followUps || []).map(step => {
+    const delayDays = Math.max(1, Math.round(step.day) - previous);
+    previous += delayDays;
+    return { subject: step.subject, body: step.body, delayDays };
+  })];
+}
+/** The day each email of a contact would go out if the campaign started on `from` (yyyy-mm-dd, in Chile): «2026-11-13», «2026-11-15»… */
+export function dropSchedule(item: Pick<DropItem, 'draft' | 'followUps'>, from: Date): string[] {
+  let at = Date.parse(`${dayInZone(from)}T12:00:00.000Z`);
+  return dropCampaignMessages(item).map(message => { at += message.delayDays * 86_400_000; return new Date(at).toISOString().slice(0, 10); });
+}
+const SHORT_WEEKDAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const SHORT_MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+/** «vie 13 nov», for a day of a schedule. */
+export function shortDay(day: string) {
+  const date = new Date(`${day}T12:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? day : `${SHORT_WEEKDAYS[date.getUTCDay()]} ${date.getUTCDate()} ${SHORT_MONTHS[date.getUTCMonth()]}`;
+}
 
 /** The name a screen, the email and the PDF show: «Daniel N.» while Apollo's search hides the surname («Daniel Ni***o»). */
 export const dropName = (item: Pick<DropItem, 'name'>) => displayLeadName(item.name).text || item.name;
@@ -549,8 +579,10 @@ export const dropHref = (dropId: string) => `/search/contactos/${encodeURICompon
  * The drop's part of the email: each contact as a block (name, role and company, why), the button to see them and a note on
  * the PDF. With `heading: false` (the drop is all the email has) the title and its lead are left out.
  */
-export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean } = {}) {
+export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean; now?: Date } = {}) {
   const link = `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
+  // Several contacts (a team's plan): each with its campaign ready to approve, and its own way in.
+  if (items.length > 1) return campaignEmailSection(items, link, options);
   const one = items.length === 1;
   const heading = options.heading !== false;
   // Found with Apollo (since 3 Nov 2026), the email is looked up on saving: the email does not promise it is ready.
@@ -577,6 +609,82 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
     + `<div style="margin:0 0 16px;padding:4px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb">${items.map(block).join('')}</div>`
     + `<p style="margin:0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`}</a></p>`
     + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(dropCostNote(items))} ${research}</p>`;
+  return { text, html, link };
+}
+
+/** «el lun 16, el vie 20 y el mar 24 nov» would repeat the month: «lun 16 nov, vie 20 nov y mar 24 nov», joined as a sentence. */
+const listed = (values: string[]) => values.length <= 1 ? values.join('') : `${values.slice(0, -1).join(', ')} y ${values[values.length - 1]}`;
+const firstLines = (body: string, max: number) => { const flat = body.replace(/\s+/g, ' ').trim(); return flat.length > max ? `${flat.slice(0, max).replace(/\s+\S*$/, '')}…` : flat; };
+/**
+ * An email as its reader would get it, to read before it goes: «{{nombre}}» as the first name, «{{empresa}}» and «{{cargo}}» as the
+ * contact's (the campaign fills them the same way when it sends). What is kept and changed is the text with its variables.
+ */
+export const dropEmailPreview = (text: string, item: Pick<DropItem, 'name' | 'company' | 'title'>) => text
+  .replace(/\{\{\s*nombre\s*\}\}/g, dropName(item).split(' ')[0] || '').replace(/\{\{\s*empresa\s*\}\}/g, item.company || '').replace(/\{\{\s*cargo\s*\}\}/g, item.title || '');
+/** Where the morning email sends for one contact: its card on the drop's page, and its email looked up on arrival when it still has none. */
+export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'provider' | 'savedLeadId'>) =>
+  `${link}?c=${encodeURIComponent(item.leadId)}${needsLookup(item) ? '&enriquecer=1' : ''}`;
+
+/**
+ * The block of a drop of several contacts (12 Nov 2026): one card each, short enough to read on a phone. Why it is worth it, what is
+ * happening at its company (with the source and the date the search gave), how to open, and its campaign: the first email's subject
+ * and first lines, and when each follow-up would go if it started today. One button per contact, to its card: «Enriquecer y revisar»
+ * looks its email up on arrival (1 credit) and shows the campaign to change or approve. The emails in full go in the PDF.
+ */
+function campaignEmailSection(items: DropItem[], link: string, options: { heading?: boolean; now?: Date }) {
+  const heading = options.heading !== false;
+  const now = options.now ?? new Date();
+  const lookup = items.some(item => needsLookup(item));
+  const written = items.some(item => item.draft);
+  const lead = `${items.length} contactos nuevos para ti${written ? ', cada uno con su campaña lista' : ''}`;
+  const cards = items.map(item => {
+    const brief = item.brief;
+    const why = brief?.fit || item.reasons?.[0] || item.why;
+    const news = brief?.news ? `${brief.news.text.replace(/[.\s]+$/, '')}${[brief.news.source, brief.news.date].some(Boolean) ? ` (${[brief.news.source, brief.news.date].filter(Boolean).join(', ')})` : ''}.` : null;
+    const opener = brief?.opener || item.approach || null;
+    const days = dropSchedule(item, now).slice(1).map(shortDay);
+    const campaign = item.draft ? { subject: dropEmailPreview(item.draft.subject, item), preview: firstLines(dropEmailPreview(item.draft.body, item), 150),
+      followUps: days.length ? `${days.length === 1 ? 'Seguimiento' : `${days.length} seguimientos`} si no responde: ${listed(days)}.` : null } : null;
+    // The step each contact is at: its email still to look up, its campaign to approve, already going, or (the email came with the search) to save.
+    const action = needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
+    return { item, why, news, opener, campaign, href: dropContactHref(link, item), action };
+  });
+  const note = [lookup ? 'Enriquecer busca su correo y usa 1 crédito por contacto.' : dropCostNote(items),
+    ...(written ? ['Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde.', 'Los correos completos van en el PDF adjunto.'] : [])].join(' ');
+  const text = [
+    ...(heading ? [`${lead}:`] : []),
+    ...cards.flatMap(({ item, why, news, opener, campaign, href, action }) => [
+      '',
+      `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.track === 'explore' ? ' (para explorar)' : ''}`,
+      `Por qué: ${why}`,
+      ...(news ? [`Ahora: ${news}`] : []),
+      ...(opener ? [`Cómo abrir: ${opener}`] : []),
+      ...(campaign ? [`Primer correo: «${campaign.subject}». ${campaign.preview}`, ...(campaign.followUps ? [campaign.followUps] : [])] : []),
+      `${action}: ${href}`,
+    ]),
+    '',
+    `Verlos todos: ${link}`,
+    note,
+  ].join('\n');
+  const line = (label: string, value: string, color = '#374151') => `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:${color}"><strong style="color:#111827">${label}</strong> ${escape(value)}</p>`;
+  const card = ({ item, why, news, opener, campaign, href, action }: typeof cards[number]) => `<div style="margin:0 0 12px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#ffffff">`
+    + `<p style="margin:0;font-size:16px;line-height:22px;font-weight:600;color:#111827">${escape(dropName(item))}`
+    + `${item.track === 'explore' ? ' <span style="font-size:12px;font-weight:400;color:#6b7280">· para explorar</span>' : ''}</p>`
+    + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</p>`
+    + line('Por qué:', why)
+    + (news ? `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:#374151"><strong style="color:#111827">Ahora:</strong> ${escape(news)}</p>` : '')
+    + (opener ? line('Cómo abrir:', opener) : '')
+    + (campaign ? `<div style="margin:10px 0 0;padding:10px 12px;border-radius:10px;background:#f9fafb">`
+      + `<p style="margin:0;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Campaña lista</p>`
+      + `<p style="margin:4px 0 0;font-size:14px;line-height:20px;color:#111827"><strong>${escape(campaign.subject)}</strong></p>`
+      + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape(campaign.preview)}</p>`
+      + (campaign.followUps ? `<p style="margin:6px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(campaign.followUps)}</p>` : '') + '</div>' : '')
+    + `<p style="margin:12px 0 0"><a href="${escape(href)}" style="display:inline-block;padding:9px 14px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${escape(action)}</a></p></div>`;
+  const html = (heading ? `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
+      + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
+    + cards.map(card).join('')
+    + `<p style="margin:4px 0 0;font-size:14px;line-height:20px"><a href="${escape(link)}" style="color:#2563eb">Ver los ${items.length} juntos</a></p>`
+    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(note)}</p>`;
   return { text, html, link };
 }
 

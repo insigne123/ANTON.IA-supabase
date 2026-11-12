@@ -103,6 +103,50 @@ La búsqueda gratuita de Apollo trae nombre, cargo y empresa, y nada más: ni ru
 - **Apagar:** `LEAD_DROPS_BRIEF=off`.
 - **Medido el 12 de noviembre** con noticias públicas reales de una distribuidora de gas y un equipo que vende servicios de emergencia: eligió la noticia de su planta nueva de biogás (con su fecha y su medio), y propuso abrir preguntando cómo preparan la respuesta ante emergencias en esa planta.
 
+### La campaña lista: en el correo y en la página (varios contactos al día)
+
+Pedido del dueño: «que le entreguemos toda la campaña lista para aprobar», que pueda «enriquecer desde el mail», y una página donde revise por qué se le sugiere cada contacto, vea la investigación y la campaña, la modifique y la apruebe, con Gmail y con Outlook.
+
+**El correo de la mañana**, cuando el envío trae más de un contacto (`campaignEmailSection` en `src/lib/lead-drops.ts`), tiene una tarjeta por contacto:
+
+- nombre, cargo y empresa; los cargos vecinos dicen «para explorar»;
+- **Por qué:** por qué le sirve lo que vende el equipo (de la investigación; si no hay, la primera razón);
+- **Ahora:** la novedad de la empresa, con su medio y su fecha;
+- **Cómo abrir**;
+- **Campaña lista:** el asunto y las primeras líneas del primer correo, como las leería el contacto (con su nombre en vez de `{{nombre}}`), y los días en que saldrían los seguimientos si se aprueba hoy;
+- un botón por contacto, según en qué paso está:
+  - «Enriquecer y revisar · 1 crédito», si todavía no tiene correo;
+  - «Revisar y aprobar», si ya lo tiene;
+  - «Ver su campaña», si ya está aprobada.
+- Los correos completos van en el PDF adjunto. Con un solo contacto el correo es el de antes.
+
+**El botón del correo** lleva a la tarjeta de ese contacto (`?c=<id>`). Si todavía no tiene correo, el enlace además pide buscarlo al llegar (`&enriquecer=1`).
+
+- La búsqueda es la misma que hace el botón de la página, con la sesión de la persona y para un contacto suyo. Un lector de correo que sigue el enlace sin sesión no gasta nada.
+- Al llegar, la dirección pierde esos parámetros: volver a la página no pide otra búsqueda.
+
+**La página** (`/search/contactos/<id>`) muestra una tarjeta por contacto (`DropContactCard`), con un paso a la vez:
+
+1. **Por qué te lo recomendamos:** dos o tres razones en lenguaje simple. Primero lo que dice la investigación (por qué le sirve, qué le importa a ese cargo), después las razones de la oferta, y al final qué calzó con el cliente ideal.
+2. **Sobre la empresa:** qué hace, la novedad con enlace a su fuente, y su sitio.
+3. **Cómo abrir.**
+4. **Campaña lista:** plegada, dice cuántos correos son y entre qué días. Al abrirla, cada correo con su día; los seguimientos dicen «si no responde».
+   - **«Editar los correos»** cambia asuntos y textos ahí mismo (`editDropEmails`). No cambian cuántos son ni sus días.
+5. **Cómo calza con tu cliente ideal:** plegado, criterio por criterio.
+6. **«¿Te sirve este contacto?»:** «Me sirve» o «No me sirve». El segundo pregunta el motivo con un clic («El cargo no decide», «La empresa no calza», «Ya lo conozco», «Otro motivo»). Queda en `feedback` del contacto y el buscador lo usa en los envíos siguientes.
+
+- **La acción principal cambia con el estado:** «Enriquecer · 1 crédito» → «Aprobar y programar» → «Ver la campaña».
+
+**«Aprobar y programar»** (`approveDropCampaign` en `src/lib/server/lead-drop-campaign.ts`) crea una campaña de una persona en «Campañas» y la activa:
+
+- **Desde qué correo:** el que la persona eligió en «Conexiones», o el único conectado. Funciona igual con Gmail y con Outlook. Sin ninguno conectado, lo dice y no crea nada.
+- **Cuándo sale cada correo:** el primero con la siguiente pasada de envíos (cada 5 minutos); cada seguimiento, tantos días después del anterior como dijo la Redactora (días 1, 3, 7 y 11 → esperas de 2, 4 y 4 días).
+- **Se detiene** ante respuesta, baja o rebote, como toda campaña. Desde «Campañas» se pausa o se cambia.
+- **`{{nombre}}`, `{{empresa}}` y `{{cargo}}`** se reemplazan por los datos del contacto ya enriquecido.
+- **Pedirla dos veces no la duplica:** el mismo contacto del mismo envío es siempre la misma campaña.
+- **Lo que la campaña rechaza se dice tal cual:** un contacto ya contactado, dado de baja o de un dominio excluido.
+- **Requisitos:** el contacto en «Por escribir» con su correo (después de «Enriquecer») y `BULK_CAMPAIGNS_ENABLED=true`.
+
 Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el calce, la redacción y el envío de la mañana son iguales con Apollo.
 
 **Por qué martes, miércoles y viernes por defecto:** son días de aviso. Los avisos van de martes a viernes porque el lunes es del informe semanal, y la regla es un correo por día. Desde el 12 de noviembre los días son de cada equipo (`organizations.lead_drop_weekdays`); `DROP_WEEKDAYS` (`src/lib/lead-drops.ts`) es solo el valor por defecto.
@@ -243,10 +287,11 @@ La migración `20261020180000_lead_drops.sql` crea la tabla `lead_drops`, solo p
 | Reglas (puro): días, tamaño, reparto, correo | `src/lib/lead-drops.ts` |
 | Buscador con IA para equipos con varios contactos al día | `src/lib/server/lead-drop-finder.ts` |
 | Investigación corta de cada contacto | `src/lib/server/lead-drop-research.ts` |
+| Editar los correos, «me sirve / no me sirve» y «Aprobar y programar» | `src/lib/server/lead-drop-campaign.ts` |
 | Preparación, redacción, guardado y PDF; desde «Hoy» (`pullStatus`, `pullDrop`, `homeDrop`) | `src/lib/server/lead-drops.ts` |
 | En el aviso de la mañana | `src/lib/daily-alerts.ts`, `src/lib/server/daily-alerts.ts` |
 | Adjuntos del correo | `src/lib/server/self-email.ts` |
 | Cron | `src/app/api/cron/lead-drops/route.ts`, `functions/index.ts` (`leadDropsTick`) |
 | API | `src/app/api/lead-drops/[id]` (leer y guardar), `[id]/pdf`, `latest` y `now` (hacer el de hoy) |
-| Pantalla | `src/app/(app)/search/contactos/[id]/page.tsx`, `src/components/lead-drops/LeadDropFlow.tsx` |
+| Pantalla | `src/app/(app)/search/contactos/[id]/page.tsx`, `src/components/lead-drops/LeadDropFlow.tsx`, `DropContactCard.tsx` (varios contactos) |
 | «Hoy» | `src/components/home/LeadDropBanner.tsx` |
