@@ -19,7 +19,7 @@ test('«Hoy» puts the work first and the week beside it, in the phone order ste
 
 test('today\'s contact sits right under the next step, not fourth on a phone, and never doubles the «Perfil» step', () => {
   // It lived in the aside, below the checklist on a phone (21 Oct 2026): the feature we most want used came after two cards of setup.
-  assert.match(page, /<TodayPanel afterPrimary=\{primary => <LeadDropBanner quietProfile=\{primary\.href === '\/profile'\} \/>\} \/>/);
+  assert.match(page, /<TodayPanel afterPrimary=\{primary => <LeadDropBanner data=\{drops\.data\} quietProfile=\{primary\.href === '\/profile'\} \/>\} \/>/);
   const aside = page.slice(page.indexOf('<aside aria-label="Tu actividad de hoy"'), page.indexOf('</aside>'));
   assert.doesNotMatch(aside, /LeadDropBanner/);
   assert.match(today, /\{afterPrimary\?\.\(data\.primary\)\}/);
@@ -27,6 +27,21 @@ test('today\'s contact sits right under the next step, not fourth on a phone, an
   assert.ok(today.indexOf('afterPrimary?.(data.primary)') < today.indexOf('Lo que te espera'), 'before the pending');
   const banner = readFileSync('src/components/home/LeadDropBanner.tsx', 'utf8');
   assert.match(banner, /if \(quietProfile && data\?\.pull === 'profile'\) return null;/);
+});
+
+test('several contacts a day are the first thing of «Hoy», beside the week\'s goal, read once for the section and for the line', () => {
+  // The owner, 13 Nov 2026: «que sea una sección especial dentro del sistema, en Hoy… le deberíamos dar más importancia».
+  const sectionAt = page.indexOf('<TodayContacts board={drops.data?.board} ready={!drops.loading} />');
+  assert.ok(sectionAt > 0 && sectionAt < page.indexOf('<TodayPanel'), 'before the next step, in the main column');
+  assert.ok(sectionAt > page.indexOf('xl:col-start-1') && sectionAt < page.indexOf('<aside aria-label="Tu actividad de hoy"'), 'in the column beside the aside, whose first card is the goal');
+  const aside = page.slice(page.indexOf('<aside aria-label="Tu actividad de hoy"'), page.indexOf('</aside>'));
+  assert.ok(aside.indexOf('<WeeklyGoalCard') > 0 && aside.indexOf('<WeeklyGoalCard') < aside.indexOf('<HomeSummary'));
+  assert.equal(page.split("usePersonalHome<HomeDrops>('/api/lead-drops/latest')").length, 2, 'one read');
+  const banner = readFileSync('src/components/home/LeadDropBanner.tsx', 'utf8');
+  assert.doesNotMatch(banner, /usePersonalHome/);
+  const section = readFileSync('src/components/home/TodayContacts.tsx', 'utf8');
+  assert.doesNotMatch(section, /usePersonalHome/);
+  assert.match(section, /<DropContactCard item=\{item\}[^>]*collapsible \/>/);
 });
 
 test('what is empty today takes one line, not a card: nothing waiting, no activity yet', () => {

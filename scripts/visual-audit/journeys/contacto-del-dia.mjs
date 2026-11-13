@@ -238,6 +238,51 @@ const mailApproveSteps = [
   } },
 ];
 
+// ─── Inside the app, in «Hoy» (13 Nov 2026): the six contacts as the first section of the page ─────────────────────────────────────
+// «Hoy» reads them from the bench's database (GET /api/lead-drops/latest, for real); what each step answers is the same as on the
+// drop's own page. The drop is dated today in Chile, as the morning's would be.
+const chileToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+const seedHoy = (tables, ctx) => {
+  tables.lead_drops = tables.lead_drops.map(row => row.id === DROP ? { ...row, drop_date: chileToday(), status: 'sent', items: structuredClone(SIX) } : row);
+  tables.enriched_leads = [...(tables.enriched_leads || []), { id: ENRICHED, organization_id: ctx.ORG, user_id: ctx.OWNER, email: 'paula.reyes@cobresdelloa.example', full_name: 'Paula Reyes' }];
+};
+const hoy = c => c.page.locator('section#contactos-de-hoy');
+const counts = async c => (await hoy(c).locator('dl > div').allTextContents()).join(' · ');
+const hoySteps = [
+  { say: 'Entro a «Hoy»: mis seis contactos son lo primero', do: async c => {
+    await answerSix(c.page); await c.go('/dashboard'); await c.see('6 contactos nuevos para ti');
+    c.check('hay una fila por contacto', await hoy(c).locator('article').count() === 6);
+    c.check('dice cuántos faltan por enriquecer y por aprobar', await counts(c) === 'Por enriquecer5 · Por aprobar1 · En marcha0');
+    c.check('cada fila trae una línea de por qué, no la tarjeta entera', !(await c.has('Diario del Norte, 3 nov 2026')));
+    c.check('ya no repite el aviso chico de contactos', await c.page.getByRole('heading', { name: 'Contacto del día' }).count() === 0);
+    const top = await hoy(c).boundingBox(), goal = await c.page.getByRole('heading', { name: 'Meta de la semana' }).boundingBox().catch(() => null);
+    c.check('va arriba, antes que el resto de «Hoy»', Boolean(top) && top.y < 400);
+    if (goal && c.page.viewportSize().width >= 1280) c.check('queda al lado de «Meta de la semana»', goal.x > top.x + top.width - 1);
+  } },
+  { say: 'Abro el detalle del primero ahí mismo', do: async c => {
+    await card(c, 'Rodrigo S.').getByRole('button', { name: /Ver por qué y su campaña/ }).click();
+    await c.see('Diario del Norte, 3 nov 2026');
+    c.check('dice cómo abrir', await c.has('Pregúntale cómo van a cubrir la respuesta ante emergencias en la planta nueva.'));
+    c.check('sin su correo, el paso es enriquecer', await card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 1);
+  } },
+  { say: 'Apruebo la campaña de la que ya tiene correo, sin salir de «Hoy»', do: async c => {
+    await card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }).click();
+    await c.see('Campaña de Paula Reyes programada desde Gmail');
+    c.check('los contadores se actualizan', await counts(c) === 'Por enriquecer5 · Por aprobar0 · En marcha1');
+    c.check('la fila queda con su campaña en curso', await card(c, 'Paula Reyes').getByText('Campaña en curso').count() === 1);
+  } },
+];
+const hoyLinkSteps = [
+  { say: 'Con la sesión iniciada, toco el botón de un contacto en el correo', do: async c => {
+    await answerSix(c.page); await c.go(`/contactos/${TOKEN}?c=${id(3)}`); await c.see('6 contactos nuevos para ti');
+    c.check('me deja dentro de la app, en «Hoy»', new URL(c.page.url()).pathname === '/dashboard');
+    await c.page.waitForFunction(() => !window.location.search);
+    c.check('el enlace no queda en la dirección', new URL(c.page.url()).search === '');
+    c.check('el contacto del botón llega abierto, en su campaña', await card(c, 'Marcela D.').getByText('Primer correo ·').count() === 1);
+    c.check('los demás siguen como fila', await card(c, 'Rodrigo S.').getByRole('button', { name: /Ver por qué y su campaña/ }).count() === 1);
+  } },
+];
+
 export default () => [
   { id: 'contacto-apollo', persona: 'owner', title: 'Contacto del día con Apollo: por qué, el correo y sus seguimientos',
     goal: 'Ver a quién escribirle y por qué, el primer correo y los tres seguimientos, y saber que ver su correo cuesta 1 crédito.', steps },
@@ -256,6 +301,14 @@ export default () => [
     goal: 'Entender por qué me recomiendan a cada uno, ver su campaña, cambiarla, aprobarla y decir cuál no me sirve, sin salir de la página.', steps: sixSteps },
   { id: 'contactos-seis-telefono', persona: 'owner', viewport: 'phone', title: 'Seis contactos al día (móvil)',
     goal: 'Lo mismo en una pantalla angosta, sin desbordes.', steps: sixSteps },
+  { id: 'contactos-en-hoy', persona: 'owner', title: 'Mis contactos del día dentro de «Hoy»',
+    goal: 'Entrar a la app y encontrar mis contactos del día como lo primero de «Hoy», ver por qué me los recomiendan y aprobar una campaña ahí mismo.',
+    seed: seedHoy, steps: hoySteps },
+  { id: 'contactos-en-hoy-telefono', persona: 'owner', viewport: 'phone', title: 'Mis contactos del día dentro de «Hoy» (móvil)',
+    goal: 'Lo mismo en una pantalla angosta, sin desbordes.', seed: seedHoy, steps: hoySteps },
+  { id: 'contactos-del-correo-a-hoy', persona: 'owner', title: 'Del correo a «Hoy», con la sesión iniciada',
+    goal: 'Tocar el botón del correo y, como ya tengo la sesión iniciada, quedar dentro de la app con ese contacto abierto.',
+    seed: seedHoy, steps: hoyLinkSteps },
   { id: 'contactos-desde-el-correo', persona: 'visitor', title: 'Mis contactos desde el correo, sin iniciar sesión',
     goal: 'Tocar el botón del correo y, sin entrar a la app ni aprenderla, enriquecer a un contacto, ver qué falta para aprobar y decir cuál no me sirve.',
     seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailSteps },

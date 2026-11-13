@@ -47,12 +47,15 @@ const labelClass = 'text-xs font-medium uppercase tracking-wide text-muted-foreg
  * «Enriquecer» finds its email (1 credit), then «Aprobar y programar» starts the campaign from their Gmail or Outlook. «Me sirve» and
  * «No me sirve» teach the finder.
  */
-export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail }: {
+export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false }: {
   item: DropItem; actions: DropContactActions;
   /** Another contact is being saved or enriched: this one waits. */
   busy: boolean; enriching: boolean; defaultOpen?: boolean; heading?: 'h2' | 'h3'; mail?: DropContactMail;
+  /** In «Hoy» (TodayContacts): who it is, one line of why and its next step; the rest opens on demand, so six contacts stay a list. */
+  collapsible?: boolean;
 }) {
   const uid = useId();
+  const [expanded, setExpanded] = useState(!collapsible || defaultOpen);
   const [open, setOpen] = useState<'campaign' | 'fit' | null>(defaultOpen ? 'campaign' : null);
   const [editing, setEditing] = useState<{ draft: Email; followUps: Email[] } | null>(null);
   const [working, setWorking] = useState<'approve' | 'edit' | 'feedback' | 'switch' | null>(null);
@@ -108,7 +111,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
     : item.savedLeadId ? null
     : needsLookup(item) ? (item.lookup?.missed ? 'La última búsqueda no encontró su correo.' : 'Busca su correo de trabajo para poder escribirle.') : null;
 
-  return <article aria-labelledby={`${uid}-name`} className="space-y-4 p-4 sm:p-5">
+  return <article aria-labelledby={`${uid}-name`} className={cn('p-4 sm:p-5', expanded ? 'space-y-4' : 'space-y-2')}>
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 space-y-1">
         <Heading id={`${uid}-name`} className="text-base font-semibold">{dropName(item)}</Heading>
@@ -128,6 +131,15 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
       </div>
     </div>
 
+    {collapsible ? <div className="space-y-1">
+      {expanded ? null : <p className="line-clamp-2 text-sm text-muted-foreground">{reasons[0] || item.why}</p>}
+      <Button variant="ghost" size="sm" className="-ml-2 h-auto min-h-9 justify-start whitespace-normal py-1.5 text-left text-muted-foreground" aria-expanded={expanded} aria-controls={`${uid}-detail`}
+        onClick={() => setExpanded(value => !value)}>
+        <ChevronDown className={cn('mr-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden="true" />
+        <span>{expanded ? 'Ocultar el detalle' : emails.length ? 'Ver por qué y su campaña' : 'Ver por qué te lo recomendamos'}<span className="sr-only">: {dropName(item)}</span></span></Button>
+    </div> : null}
+
+    {expanded ? <div id={`${uid}-detail`} className="space-y-4">
     <div className="space-y-1.5">
       <p className={labelClass}>Por qué te lo recomendamos</p>
       {reasons.length ? <ul className="list-disc space-y-1 pl-5 text-sm">{reasons.map(reason => <li key={reason}>{reason}</li>)}</ul> : null}
@@ -209,5 +221,6 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
             onClick={() => setAsking(true)}><ThumbsDown className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />No me sirve</Button>
         </>}
     </div>
+    </div> : null}
   </article>;
 }

@@ -6,16 +6,19 @@ import { ArrowRight, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { dropHref } from '@/lib/lead-drops';
-import { usePersonalHome } from './usePersonalHome';
+import type { DropBoard } from './TodayContacts';
 
 type Pull = 'first' | 'today' | 'preparing' | 'profile';
 type Plan = { size: number; days: number };
-type Response = {
+/** What «Hoy» reads once about the contacts of the day (/api/lead-drops/latest) and hands to this line and to TodayContacts. */
+export type HomeDrops = {
   drop: { id: string; dropDate: string; total: number; left: number; lookup?: boolean; campaigns?: boolean;
     next?: { name: string; company: string | null; why: string; lookup?: boolean } } | null;
   pull?: Pull | null;
   /** The team's own plan, when it gets several contacts a day (organizations.lead_drop_size). */
   plan?: Plan | null;
+  /** Several contacts, shown in full at the top of «Hoy» (TodayContacts): this line then says nothing. */
+  board?: DropBoard | null;
 };
 
 /** What «Hoy» offers when there is no contact to save (src/lib/server/lead-drops.ts, pullStatus). */
@@ -52,9 +55,9 @@ function Banner({ text, children, accent }: { text: ReactNode; children: ReactNo
  * no email too, today's on Tuesdays, Wednesdays and Fridays (any day for the first one), made at that moment. It sits in the
  * main column, under the next step, so on a phone it is the second thing and not the fourth. `quietProfile`: when the next
  * step already leads to «Perfil», its own offer to fill in the ideal customer would be a second button to the same place.
+ * «Hoy» reads the contacts once and hands them here (`data`): several contacts are the section at the top of the page instead.
  */
-export function LeadDropBanner({ quietProfile = false }: { quietProfile?: boolean } = {}) {
-  const { data } = usePersonalHome<Response>('/api/lead-drops/latest');
+export function LeadDropBanner({ data, quietProfile = false }: { data: HomeDrops | null | undefined; quietProfile?: boolean }) {
   const drop = data?.drop;
   if (!drop) {
     if (quietProfile && data?.pull === 'profile') return null;

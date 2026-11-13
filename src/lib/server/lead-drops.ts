@@ -670,21 +670,42 @@ export async function readDrop(client: Client, scope: DropScope, dropId: string)
 }
 
 /** The person's latest drop of the last week with something left to save, for «Hoy», with the next one to save. */
-export async function latestDrop(client: Client, scope: DropScope, now: Date) {
+type LatestRow = { id: string; drop_date: string; items: DropItem[] } | null;
+/** The person's last drop of the week that has contacts. */
+async function latestDropRow(client: Client, scope: DropScope, now: Date): Promise<LatestRow> {
   const since = new Date(now.getTime() - 7 * DAY).toISOString().slice(0, 10);
   const result: any = await client.from('lead_drops').select('id,drop_date,status,items').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
     .in('status', ['ready', 'sent']).gte('drop_date', since).order('drop_date', { ascending: false }).limit(1).maybeSingle();
   if (result.error) throw new LeadDropsError('No pudimos leer tu contacto del día.', 503);
-  const items = (result.data?.items || []) as DropItem[];
+  return result.data ? { id: String(result.data.id), drop_date: String(result.data.drop_date), items: (result.data.items || []) as DropItem[] } : null;
+}
+function dropSummary(row: LatestRow) {
+  const items = row?.items || [];
   const unsaved = items.filter(item => !item.savedLeadId);
-  if (!result.data || !unsaved.length) return null;
+  if (!row || !unsaved.length) return null;
   const { company, why } = unsaved[0];
   const name = dropName(unsaved[0]);
   // «Hoy» says what saving it costs: nothing when the email came with the search, a credit when it is looked up (Apollo). Of a drop
   // of several, it says so for all that are left, and whether each comes with its campaign written.
-  return { id: String(result.data.id), dropDate: String(result.data.drop_date), total: items.length, left: unsaved.length,
+  return { id: row.id, dropDate: row.drop_date, total: items.length, left: unsaved.length,
     next: { name, company, why, ...(needsLookup(unsaved[0]) ? { lookup: true } : {}) },
     ...(items.length > 1 && unsaved.some(needsLookup) ? { lookup: true } : {}), ...(items.length > 1 && unsaved.some(item => item.draft) ? { campaigns: true } : {}) };
+}
+export async function latestDrop(client: Client, scope: DropScope, now: Date) {
+  return dropSummary(await latestDropRow(client, scope, now));
+}
+
+/** A contact of a drop of several still asks something of the person: its email to look up, or its campaign to approve. */
+export const dropItemPending = (item: DropItem) => !item.savedLeadId || Boolean(item.draft && !item.campaign);
+/**
+ * The contacts «Hoy» shows in full, to work on right there (13 Nov 2026, the owner: «que sea una sección especial dentro del sistema,
+ * en Hoy»): a drop of several contacts (a team's plan), all day on its day, and on the days after while a contact of it still waits
+ * for its email or its approval. A drop of one contact keeps its line in «Hoy» (`dropSummary`).
+ */
+function dropBoard(row: LatestRow, now: Date) {
+  if (!row || row.items.length < 2) return null;
+  if (row.drop_date !== dayInZone(now) && !row.items.some(dropItemPending)) return null;
+  return { id: row.id, date: row.drop_date, items: row.items };
 }
 
 /**
@@ -714,10 +735,17 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
  * What «Hoy» shows: the last drop with a contact left to save; on drop days, today's comes first (offered, or on its
  * way), so one nobody saved does not hold back the new one.
  */
-export async function homeDrop(client: Client, scope: DropScope, now: Date) {
-  const drop = await latestDrop(client, scope, now);
+export async function homeDrop(client: Client, scope: DropScope, now: Date): Promise<{ drop: ReturnType<typeof dropSummary>; pull: PullOffer; plan?: { size: number; days: number };
+  board?: { id: string; date: string; items: DropItem[] } }> {
+  const row = await latestDropRow(client, scope, now);
+  // Several contacts are «Hoy»'s own section, with each contact in full: no line about them besides, and nothing else to offer.
+  const board = dropBoard(row, now);
+  if (board?.date === dayInZone(now)) return { drop: null, pull: null, board };
+  const drop = board ? null : dropSummary(row);
   if (drop?.dropDate === dayInZone(now)) return { drop, pull: null };
+  // An earlier one, with something left: it stays until a new one is due, which never waits for it.
   const pull = await pullStatus(client, scope, now);
+  if (board && pull !== 'today' && pull !== 'preparing') return { drop: null, pull: null, board };
   if (drop && pull !== 'today' && pull !== 'preparing') return { drop, pull: null };
   if (!pull) return { drop: null, pull };
   // A team with a plan of its own is offered what it gets: how many contacts, and on how many days of the week.

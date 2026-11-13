@@ -588,6 +588,19 @@ const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;
 export const dropHref = (dropId: string) => `/search/contactos/${encodeURIComponent(dropId)}`;
 
 /**
+ * The drop a link from an email names (server/lead-drop-link.ts: its first 16 bytes), read without checking it: only the server can
+ * tell whether the link is good. The app uses it to know whether those are the contacts «Hoy» is showing.
+ */
+export function dropIdInLink(token: string): string | null {
+  if (!/^[A-Za-z0-9_-]{48}$/.test(token)) return null;
+  try {
+    const raw = atob(token.replace(/-/g, '+').replace(/_/g, '/'));
+    const hex = Array.from(raw.slice(0, 16), char => char.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  } catch { return null; }
+}
+
+/**
  * The drop's part of the email: each contact as a block (name, role and company, why), the button to see them and a note on
  * the PDF. With `heading: false` (the drop is all the email has) the title and its lead are left out.
  */

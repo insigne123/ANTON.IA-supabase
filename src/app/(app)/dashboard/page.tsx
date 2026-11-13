@@ -16,7 +16,9 @@ import { TouchesCard } from '@/components/home/TouchesCard';
 import { MyCreditResults } from '@/components/home/MyCreditResults';
 import { CallsCard } from '@/components/home/CallsCard';
 import { WeeklyGoalCard } from '@/components/home/WeeklyGoalCard';
-import { LeadDropBanner } from '@/components/home/LeadDropBanner';
+import { LeadDropBanner, type HomeDrops } from '@/components/home/LeadDropBanner';
+import { TodayContacts } from '@/components/home/TodayContacts';
+import { usePersonalHome } from '@/components/home/usePersonalHome';
 import { OpportunitiesTodayCard } from '@/components/home/OpportunitiesTodayCard';
 import { WeeklyReport } from '@/components/weekly-report/WeeklyReport';
 import { SEGMENT_TRACK, segmentClass } from '@/components/ui/chip';
@@ -32,6 +34,10 @@ const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric'
  * week's goal, how the day goes and the credits sit beside it, so they never push the work down. «Oportunidades», «Llamadas y
  * LinkedIn» and «Para retomar» follow the pending work when something is due. On phones the order is step → contact of the day →
  * pending → opportunities → calls and LinkedIn → to reconnect → goal → summary → recommended.
+ *
+ * A team that gets several contacts a day has them first, as a section of their own beside the week's goal (TodayContacts, 13 Nov
+ * 2026): they are the day's work, done right there. The contacts are read once here and handed to that section and to the line
+ * under the next step, which says nothing while the section is up.
  */
 export default function DashboardPage() {
   const [view, setView] = useState<View>('hoy');
@@ -43,6 +49,7 @@ export default function DashboardPage() {
   // A link inside «Hoy» to «Tu semana» with its own parameters (the goals editor): the address first, so «Tu semana» reads them.
   const open = (href: string) => { window.history.pushState(null, '', href); setView(viewInUrl()); window.scrollTo({ top: 0 }); };
   // The date is read in the browser: the page is prerendered, and the server's day may not be the person's.
+  const drops = usePersonalHome<HomeDrops>('/api/lead-drops/latest');
   const [today, setToday] = useState('');
   useEffect(() => {
     const update=()=>{const label = TODAY.format(new Date());setToday(label.charAt(0).toLocaleUpperCase('es-CL') + label.slice(1));};
@@ -73,7 +80,8 @@ export default function DashboardPage() {
       /* items-start at every width: a stretched grid item would turn a card's h-full into the whole column. */
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4 xl:col-start-1">
-          <TodayPanel afterPrimary={primary => <LeadDropBanner quietProfile={primary.href === '/profile'} />} />
+          <TodayContacts board={drops.data?.board} ready={!drops.loading} />
+          <TodayPanel afterPrimary={primary => <LeadDropBanner data={drops.data} quietProfile={primary.href === '/profile'} />} />
           <OpportunitiesTodayCard />
           <CallsCard />
           <TouchesCard />
