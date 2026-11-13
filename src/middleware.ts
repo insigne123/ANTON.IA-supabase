@@ -51,6 +51,8 @@ export async function middleware(req: NextRequest) {
         pathname === '/login' ||
         pathname === '/restablecer-clave' ||
         pathname === '/unsubscribe' ||
+        // «Contacto del día» opened from the person's inbox: its signed link is the way in (src/lib/server/lead-drop-link.ts).
+        pathname.startsWith('/contactos/') ||
         pathname.startsWith('/invite') ||
         pathname.startsWith('/privacy');
 

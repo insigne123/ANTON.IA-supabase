@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { deliverDailyAlert, readAlertFacts, readAlertsEmail, saveAlertsEmail } from './daily-alerts';
 import { memory } from './goals-alerts-test-fixtures';
+import { readDropLink } from './lead-drop-link';
 
 const ORG = 'org-1';
 const SCOPE = { organizationId: ORG, userId: 'u-ana' };
@@ -280,4 +281,32 @@ test('how long the person has been away: the latest of their sign-in and what th
   assert.equal((await read('2026-10-18T09:00:00Z')).idleDays, 2, 'a later sign-in wins');
   const nothing = memory(seed(), { unique: UNIQUE });
   assert.equal((await readAlertFacts(nothing.client, SCOPE, { now: TUESDAY, since: '2026-10-19T11:30:00.000Z', opportunities: 'none' })).idleDays, undefined, 'unknown is left out');
+});
+
+test('a drop of several contacts is used from the inbox: its email and its PDF open a page that needs no session; one contact still opens in the app', async () => {
+  const DROP = '11111111-1111-4111-8111-111111111111';
+  const contact = (leadId: string, name: string) => ({ leadId, name, title: 'Gerente HSE', company: 'Minera Andina', domain: null, industry: 'Minería', size: null, city: null,
+    hasEmail: true, hasPhone: false, why: 'Calza con tu cliente ideal.', research: [], provider: 'apollo', draft: { subject: 'Brigadas', body: 'Hola {{nombre}}' }, followUps: [] });
+  const drop = (items: unknown[]) => ({ ...seed(), lead_drops: [{ id: DROP, organization_id: ORG, user_id: 'u-ana', drop_date: '2026-10-20', status: 'ready', criteria: {}, items }] });
+  const previous = process.env.INTERNAL_API_SECRET;
+  process.env.INTERNAL_API_SECRET = 'a-secret-for-tests';
+  try {
+    const several = memory(drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya'), contact('6accdbfcd5f5d80001cf6902', 'Luisa Soto')]), { unique: UNIQUE });
+    const { sent, send } = sender();
+    assert.deepEqual(await deliverDailyAlert(several.client, SCOPE, { ...deps(send), now: TUESDAY }), { status: 'sent' });
+    const links = [...String(sent[0].html).matchAll(/href="https:\/\/app\.antonia\.ai\/contactos\/([A-Za-z0-9_-]{48})(\?c=[0-9a-f]{24})?"/g)];
+    assert.equal(links.length, 3, 'one button per contact and the way to all of them');
+    assert.deepEqual([...new Set(links.map(match => match[1]))].length, 1);
+    assert.deepEqual(readDropLink(links[0][1], { now: TUESDAY }), { dropId: DROP, expiresAt: new Date(TUESDAY.getTime() + 14 * 86_400_000) });
+    assert.ok(!String(sent[0].html).includes('/search/contactos/') && !String(sent[0].text).includes('/search/contactos/') && !String(sent[0].html).includes('enriquecer=1'));
+    assert.equal(sent[0].attachments.length, 1);
+    assert.equal(several.tables.lead_drops[0].status, 'sent');
+
+    // One contact (every team's plan until it asks for more) is opened in the app, as before.
+    const single = memory(drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya')]), { unique: UNIQUE });
+    const one = sender();
+    assert.deepEqual(await deliverDailyAlert(single.client, SCOPE, { ...deps(one.send), now: TUESDAY }), { status: 'sent' });
+    assert.ok(String(one.sent[0].html).includes(`https://app.antonia.ai/search/contactos/${DROP}`));
+    assert.ok(!String(one.sent[0].html).includes('/contactos/AAAA') && !/\/contactos\/[A-Za-z0-9_-]{48}/.test(String(one.sent[0].html)));
+  } finally { if (previous === undefined) delete process.env.INTERNAL_API_SECRET; else process.env.INTERNAL_API_SECRET = previous; }
 });

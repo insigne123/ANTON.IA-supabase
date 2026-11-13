@@ -310,6 +310,13 @@ test('the email of several contacts: a card each with why, what is happening, ho
   assert.match(section.html, /Ver los 3 juntos/);
   // Inside another alert the heading is the alert's.
   assert.doesNotMatch(dropEmailSection(items as any, 'drop-1', 'https://app.test', { heading: false }).html, /<h2/);
+  // Used from the inbox (server/lead-drop-link.ts): every button opens the drop's own page, and arriving there looks nothing up.
+  const open = dropEmailSection(items as any, 'drop-1', 'https://app.test/', { now: new Date('2026-11-12T12:00:00.000Z'), link: 'https://app.test/contactos/TOKEN' });
+  assert.equal(open.link, 'https://app.test/contactos/TOKEN');
+  assert.match(open.html, /href="https:\/\/app\.test\/contactos\/TOKEN\?c=lf_000000000000000000000001"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
+  assert.match(open.text, /Verlos todos: https:\/\/app\.test\/contactos\/TOKEN\n/);
+  assert.ok(!open.html.includes('enriquecer=1') && !open.text.includes('enriquecer=1') && !open.html.includes('/search/contactos/') && !open.text.includes('/search/contactos/'));
+  assert.equal(dropContactHref('https://app.test/contactos/TOKEN', items[0] as any, true), 'https://app.test/contactos/TOKEN?c=lf_000000000000000000000001');
 });
 
 test('a line for whoever sells says what is known, never what the search did not find', () => {

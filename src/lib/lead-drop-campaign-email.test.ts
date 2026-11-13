@@ -52,3 +52,15 @@ test('without a mailbox it says what is missing; a contact with one email has no
   assert.ok(!/seguimientos/i.test(single.text));
   assert.equal(dropCampaignEmail(contact({ draft: undefined }), input), null);
 });
+
+test('from a drop used from the inbox, the button opens its page without signing in, and the mailbox is connected there', () => {
+  const open = 'https://app.ejemplo.cl/contactos/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const email = dropCampaignEmail(contact(), { ...input, link: open })!;
+  assert.equal(email.link, `${open}?c=6accdbfcd5f5d80001cf6901`);
+  assert.ok(email.html.includes(`href="${open}?c=6accdbfcd5f5d80001cf6901"`));
+  assert.ok(email.text.includes(`Revisar y aprobar: ${open}?c=6accdbfcd5f5d80001cf6901`));
+  assert.ok(!email.text.includes('/search/contactos/'), 'no way into the app is needed to approve');
+  const unconnected = dropCampaignEmail(contact(), { ...input, link: open, mailbox: null })!;
+  assert.match(unconnected.text.split('\n')[1], /conecta tu Gmail u Outlook ahí mismo: es una sola vez\.$/);
+  assert.doesNotMatch(unconnected.text, /«Conexiones»/);
+});

@@ -19,6 +19,19 @@ export type DropContactActions = {
   feedback: (item: DropItem, useful: boolean, reason?: string) => Promise<void>;
 };
 type Email = { subject: string; body: string };
+/**
+ * The card opened from the person's inbox, outside the app (DropMailFlow, 13 Nov 2026): nothing links into the app, and what the
+ * app does elsewhere is done here. The mailbox is connected from the card the first time, and an approved campaign is stopped from it.
+ */
+export type DropContactMail = {
+  /** «Gmail» or «Outlook», the mailbox the campaign leaves from; null while none is connected. */
+  mailbox: string | null;
+  /** The contact's address, once looked up. */
+  email: string | null;
+  /** Where each mailbox is connected, once, and back to this page. */
+  connect: { google: string; outlook: string };
+  switchCampaign: (item: DropItem, to: 'pause' | 'resume') => Promise<void>;
+};
 
 const FIT: Record<DropFit['match'], string> = { yes: 'Calza', partial: 'Calza en parte', no: 'No calza', unknown: 'Sin dato' };
 /** Why a contact does not help, in the person's words: the finder reads them (server/lead-drop-finder.ts, dropLessons). */
@@ -34,15 +47,15 @@ const labelClass = 'text-xs font-medium uppercase tracking-wide text-muted-foreg
  * «Enriquecer» finds its email (1 credit), then «Aprobar y programar» starts the campaign from their Gmail or Outlook. «Me sirve» and
  * «No me sirve» teach the finder.
  */
-export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3' }: {
+export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail }: {
   item: DropItem; actions: DropContactActions;
   /** Another contact is being saved or enriched: this one waits. */
-  busy: boolean; enriching: boolean; defaultOpen?: boolean; heading?: 'h2' | 'h3';
+  busy: boolean; enriching: boolean; defaultOpen?: boolean; heading?: 'h2' | 'h3'; mail?: DropContactMail;
 }) {
   const uid = useId();
   const [open, setOpen] = useState<'campaign' | 'fit' | null>(defaultOpen ? 'campaign' : null);
   const [editing, setEditing] = useState<{ draft: Email; followUps: Email[] } | null>(null);
-  const [working, setWorking] = useState<'approve' | 'edit' | 'feedback' | null>(null);
+  const [working, setWorking] = useState<'approve' | 'edit' | 'feedback' | 'switch' | null>(null);
   const [asking, setAsking] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
   const Heading = heading;
@@ -67,19 +80,33 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
     <ChevronDown className={cn('mr-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none', open === key && 'rotate-180')} aria-hidden="true" />
     <span>{label}{hint ? <span className="font-normal"> · {hint}</span> : null}</span></Button>;
 
+  const paused = Boolean(item.campaign?.pausedAt);
   const action = item.campaign
-    ? <Button asChild size="sm" variant="outline"><Link href={`/campaigns?campaign=${encodeURIComponent(item.campaign.id)}`}>Ver la campaña<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
+    ? mail ? <Button size="sm" variant="outline" disabled={busy || working !== null} onClick={() => void run('switch', () => mail.switchCampaign(item, paused ? 'resume' : 'pause'))}>
+        {working === 'switch' ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}{paused ? 'Reanudar la campaña' : 'Detener la campaña'}</Button>
+      : <Button asChild size="sm" variant="outline"><Link href={`/campaigns?campaign=${encodeURIComponent(item.campaign.id)}`}>Ver la campaña<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
     : item.savedLeadId && emails.length
-      ? <Button size="sm" disabled={busy || working !== null || Boolean(editing)} onClick={() => void run('approve', () => actions.approve(item))}>
+      // From the inbox with no mailbox yet: connecting one is the step, here and once.
+      ? mail && !mail.mailbox ? <div className="flex flex-wrap gap-2 sm:justify-end">
+          <Button asChild size="sm"><a href={mail.connect.google}>Conectar Gmail</a></Button>
+          <Button asChild size="sm" variant="outline"><a href={mail.connect.outlook}>Conectar Outlook</a></Button>
+        </div>
+      : <Button size="sm" disabled={busy || working !== null || Boolean(editing)} onClick={() => void run('approve', () => actions.approve(item))}>
         {working === 'approve' ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Send className="mr-2 h-4 w-4" aria-hidden="true" />}
         {working === 'approve' ? 'Programando…' : 'Aprobar y programar'}</Button>
       : item.savedLeadId
-        ? <Button asChild size="sm" variant="outline"><Link href={`/saved/leads/enriched?investigar=${encodeURIComponent(item.savedLeadId)}&empezar=1`}>Investigar y escribirle</Link></Button>
+        ? mail ? null : <Button asChild size="sm" variant="outline"><Link href={`/saved/leads/enriched?investigar=${encodeURIComponent(item.savedLeadId)}&empezar=1`}>Investigar y escribirle</Link></Button>
         : needsLookup(item)
           ? <Button size="sm" disabled={busy} onClick={() => actions.enrich(item)}>
             {enriching ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
             {enriching ? 'Buscando su correo…' : 'Enriquecer · 1 crédito'}</Button>
-          : <Button size="sm" disabled={busy} onClick={() => actions.save(item)}>Guardar en «Por escribir»</Button>;
+          : <Button size="sm" disabled={busy} onClick={() => actions.save(item)}>{mail ? 'Guardar este contacto' : 'Guardar en «Por escribir»'}</Button>;
+  // Under the button, what it does or where things stand: from the inbox it names the person's own mailbox and never a part of the app.
+  const actionNote = !mail ? (!item.campaign && item.savedLeadId && emails.length ? 'Sale desde tu Gmail u Outlook. Se detiene si responde.' : null)
+    : item.campaign ? (paused ? 'Detenida: no sale ningún correo más.' : `Sale desde tu ${item.campaign.provider === 'google' ? 'Gmail' : 'Outlook'}. Se detiene sola si responde.`)
+    : item.savedLeadId && emails.length ? (mail.mailbox ? `Sale desde tu ${mail.mailbox}. Se detiene si responde.` : 'Es una sola vez: los correos salen desde tu propia casilla.')
+    : item.savedLeadId ? null
+    : needsLookup(item) ? (item.lookup?.missed ? 'La última búsqueda no encontró su correo.' : 'Busca su correo de trabajo para poder escribirle.') : null;
 
   return <article aria-labelledby={`${uid}-name`} className="space-y-4 p-4 sm:p-5">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -87,16 +114,17 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
         <Heading id={`${uid}-name`} className="text-base font-semibold">{dropName(item)}</Heading>
         <p className="text-sm text-muted-foreground">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
         {person ? <p className="text-xs text-muted-foreground">{person}</p> : null}
+        {mail?.email ? <p className="break-all text-sm">{mail.email}</p> : null}
         <div className="flex flex-wrap gap-1.5 pt-1">
           <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />{item.savedLeadId ? 'Con su correo' : item.provider === 'apollo' ? 'Tiene correo' : 'Correo verificado'}</span>
           {item.track === 'explore' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs" title="Un cargo vecino a los que buscas, para probar si también te sirve">Para explorar</span> : null}
-          {item.campaign ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><CalendarClock className="h-3 w-3" aria-hidden="true" />Campaña en curso</span>
-            : item.savedLeadId ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
+          {item.campaign ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><CalendarClock className="h-3 w-3" aria-hidden="true" />{paused ? 'Campaña detenida' : 'Campaña en curso'}</span>
+            : item.savedLeadId && !mail ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-stretch gap-1 sm:items-end">
         {action}
-        {!item.campaign && item.savedLeadId && emails.length ? <p className="text-xs text-muted-foreground sm:text-right">Sale desde tu Gmail u Outlook. Se detiene si responde.</p> : null}
+        {actionNote ? <p className="text-xs text-muted-foreground sm:text-right">{actionNote}</p> : null}
       </div>
     </div>
 
@@ -150,7 +178,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
               <p className="mt-1.5 whitespace-pre-line text-sm leading-6">{email.body}</p>
             </li>)}
           </ol>
-          {item.campaign ? <p className="text-xs text-muted-foreground">La campaña ya está en curso: para cambiar sus correos o pausarla, ábrela en «Campañas».</p>
+          {item.campaign ? <p className="text-xs text-muted-foreground">{mail ? 'La campaña ya fue aprobada: sus correos ya no se cambian desde aquí.'
+            : 'La campaña ya está en curso: para cambiar sus correos o pausarla, ábrela en «Campañas».'}</p>
             : <Button variant="outline" size="sm" onClick={() => item.draft && setEditing({ draft: { ...item.draft }, followUps: (item.followUps || []).map(step => ({ subject: step.subject, body: step.body })) })}>
               <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Editar los correos</Button>}
         </>}

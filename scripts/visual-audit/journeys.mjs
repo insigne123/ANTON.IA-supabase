@@ -96,7 +96,8 @@ async function runJourney(browser, built, supabase, journey, index) {
   // --scheme=dark: the journeys run as someone whose system is dark (the app follows it); by default they run light, as always.
   const context = await browser.newContext({ viewport, locale: 'es-CL', timezoneId: 'America/Santiago', reducedMotion: 'reduce', colorScheme: args.scheme === 'dark' ? 'dark' : 'light' });
   const userId = journey.persona === 'member' ? built.ctx.MEMBER : built.ctx.OWNER;
-  await context.addCookies([authCookie(built.personas[userId], { appUrl: APP_URL })]);
+  // `visitor`: nobody signed in, as whoever opens a link from an email (the «Contacto del día» page that needs no session).
+  if (journey.persona !== 'visitor') await context.addCookies([authCookie(built.personas[userId], { appUrl: APP_URL })]);
   const writes = [];
   await installPolicy(context, { appOrigin: APP_URL, supabaseOrigin: SUPABASE_URL, onRecord: record => writes.push(record), passWrites: journey.passWrites || [] });
   await installRealtime(context);
