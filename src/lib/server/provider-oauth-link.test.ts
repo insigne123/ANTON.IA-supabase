@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 
-import { dropLinkHref } from './lead-drop-link';
+import { dropLinkBase, dropLinkHref } from './lead-drop-link';
 
 // Gmail or Outlook connected from a «Contacto del día» email: the real OAuth helper and the link flow, with the provider, the
 // database and the link check answered by hand.
@@ -19,7 +19,8 @@ const idToken = (claims: object) => `x.${Buffer.from(JSON.stringify(claims)).toS
 const OWN = 'ana@brigadas.example';
 
 function harness(options: { owner?: string | null; connected?: Array<'google' | 'outlook'>; tokens?: object; tokenStatus?: number; saveError?: object; sessionUser?: string | null;
-  /** The email the drop's person signs in with, and what Microsoft says of the mailbox that consented. */ signIn?: string | null; me?: object; meStatus?: number } = {}) {
+  /** The email the drop's person signs in with, and what Microsoft says of the mailbox that consented. */ signIn?: string | null; me?: object; meStatus?: number;
+  /** The address the emails' link opens at, when it is not the app's own (LEAD_DROPS_PUBLIC_URL). */ publicUrl?: string } = {}) {
   const saves: any[] = [], sessionSaves: any[] = [], exchanges: any[] = [], resolved: unknown[] = [], profiles: any[] = [];
   const env = { NEXT_PUBLIC_BASE_URL: BASE, NEXT_PUBLIC_GOOGLE_CLIENT_ID: 'google-id', GOOGLE_CLIENT_SECRET: 'google-secret', NEXT_PUBLIC_AZURE_AD_CLIENT_ID: 'azure-id', AZURE_AD_CLIENT_SECRET: 'azure-secret' };
   const connected = new Set(options.connected || []);
@@ -47,7 +48,7 @@ function harness(options: { owner?: string | null; connected?: Array<'google' | 
     '@supabase/auth-helpers-nextjs': { createRouteHandlerClient: () => ({ auth: { getUser: async () => ({ data: { user: options.sessionUser ? { id: options.sessionUser } : null } }) } }) },
   });
   const link = load(LINK, {
-    'next/server': next, '@/lib/server/lead-drop-link': { dropLinkHref }, '@/lib/server/provider-oauth': oauth, '@/lib/services/token-service': { tokenService },
+    'next/server': next, '@/lib/server/lead-drop-link': { dropLinkHref, dropLinkBase: (base: string) => dropLinkBase(base, { LEAD_DROPS_PUBLIC_URL: options.publicUrl }) }, '@/lib/server/provider-oauth': oauth, '@/lib/services/token-service': { tokenService },
     '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ auth: { admin: { getUserById: async (id: string) => options.signIn === null ? { data: { user: null }, error: { message: 'not found' } }
       : { data: { user: { id, email: options.signIn ?? 'Ana@Brigadas.example' } }, error: null } } } }) },
     '@/lib/server/lead-drop-mail': { resolveDropLink: async (_client: unknown, token: unknown) => {
@@ -182,4 +183,19 @@ test('the app\'s own connection is as it was: it needs the session, and an attem
   assert.deepEqual(flow.saves, []);
   const signedOut = harness({ sessionUser: null });
   assert.equal((await signedOut.oauth.startProviderOAuth(request('/api/auth/connect/google'), 'google')).url, `${BASE}/gmail?error=session_expired`);
+});
+
+test('with an address of its own for the emails, the consent runs on the app and the person goes back to that address', async () => {
+  const PUBLIC = 'https://contactos.example.test';
+  const flow = harness({ tokens: GOOGLE, publicUrl: PUBLIC });
+  const begun = await flow.startLinkOAuth(request(`/api/auth/connect/google?enlace=${TOKEN}`), 'google', TOKEN);
+  const attempt = JSON.parse(begun.values.provider_oauth_google.value);
+  // Google and Microsoft know the app's address only: the consent starts and comes back there.
+  assert.equal(attempt.redirectUri, `${BASE}/api/auth/callback/google`);
+  const done = await flow.finishLinkOAuth(request(`/api/auth/callback/google?code=fake-code&state=${attempt.state}`, { provider_oauth_google: { value: JSON.stringify(attempt) } }), 'google', TOKEN);
+  assert.equal(done.url, `${PUBLIC}/contactos/${TOKEN}?correo=conectado`);
+  assert.equal(flow.saves.length, 1);
+  // A link that is not ours: its page, at the same address the email opened.
+  const gone = harness({ owner: null, publicUrl: PUBLIC });
+  assert.equal((await gone.startLinkOAuth(request(`/api/auth/connect/google?enlace=${TOKEN}`), 'google', TOKEN)).url, `${PUBLIC}/contactos/${TOKEN}`);
 });

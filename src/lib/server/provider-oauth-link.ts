@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dropLinkHref } from '@/lib/server/lead-drop-link';
+import { dropLinkBase, dropLinkHref } from '@/lib/server/lead-drop-link';
 import { resolveDropLink } from '@/lib/server/lead-drop-mail';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { beginProviderOAuth, exchangeProviderCode, oauthBase, oauthConfig, oauthCookie, offCanonicalHost, readOAuthAttempt, type Provider } from '@/lib/server/provider-oauth';
@@ -53,9 +53,12 @@ async function signInEmail(userId: string): Promise<string | null> {
   const email = String(found.data?.user?.email || '').trim().toLowerCase();
   return !found.error && email ? email : null;
 }
-/** Back to the contacts, saying how it went: «conectado», «cancelado», «otro» (not the account's own mailbox) or «error». */
+/**
+ * Back to the contacts, saying how it went: «conectado», «cancelado», «otro» (not the account's own mailbox) or «error». The consent
+ * runs on the app's own address, the one Google and Microsoft know; the person goes back to the address their email opened.
+ */
 const back = (base: string, token: string, state: 'conectado' | 'cancelado' | 'otro' | 'error') => {
-  const response = NextResponse.redirect(new URL(`${dropLinkHref(token)}?correo=${state}`, base));
+  const response = NextResponse.redirect(new URL(`${dropLinkHref(token)}?correo=${state}`, dropLinkBase(base)));
   response.headers.set('Cache-Control', 'no-store');
   return response;
 };
@@ -65,7 +68,7 @@ export async function startLinkOAuth(req: NextRequest, provider: Provider, token
   if (offCanonicalHost(req, base)) return NextResponse.redirect(new URL(`${req.nextUrl.pathname}${req.nextUrl.search}`, base));
   const link = await resolveDropLink(getSupabaseAdminClient(), token).catch(() => null);
   // Not a link of ours, or expired: its page says so.
-  if (!link) return NextResponse.redirect(new URL(dropLinkHref(encodeURIComponent(token.slice(0, 64))), base));
+  if (!link) return NextResponse.redirect(new URL(dropLinkHref(encodeURIComponent(token.slice(0, 64))), dropLinkBase(base)));
   const config = oauthConfig(provider);
   if (!config.clientId || !config.clientSecret) return back(base, token, 'error');
   if (await hasMailbox(link.scope.userId)) return back(base, token, 'conectado');

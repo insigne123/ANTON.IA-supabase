@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DROP_LINK_DAYS, dropLinkHref, dropLinkUrl, readDropLink, signDropLink } from './lead-drop-link';
+import { DROP_LINK_DAYS, dropLinkBase, dropLinkHref, dropLinkUrl, readDropLink, signDropLink } from './lead-drop-link';
 
 const DROP = '11111111-1111-4111-8111-111111111111';
 const env = { INTERNAL_API_SECRET: 'a-secret-for-tests' };
@@ -48,4 +48,20 @@ test('the link has a key of its own: the server\'s secret alone, or its other si
   assert.notEqual(own, first);
   assert.equal(readDropLink(own, { now: NOW, env }), null);
   assert.deepEqual(readDropLink(first, { now: NOW, env: { SUPABASE_SERVICE_ROLE_KEY: 'x', ...env } }), { dropId: DROP, expiresAt: later(DROP_LINK_DAYS) }, 'the internal secret comes before the service key');
+});
+
+test('the link opens at the address people know the product by, when there is one', () => {
+  const APP = 'https://app.example.test/';
+  const PUBLIC = 'https://contactos.example.test';
+  assert.equal(dropLinkBase(APP, {}), 'https://app.example.test');
+  assert.equal(dropLinkBase(APP, { LEAD_DROPS_PUBLIC_URL: `${PUBLIC}/` }), PUBLIC);
+  assert.equal(dropLinkBase(APP, { LEAD_DROPS_PUBLIC_URL: 'http://localhost:3000' }), 'http://localhost:3000');
+  // Anything that is not a plain https address is not used: the app's own stays.
+  for (const bad of ['http://contactos.example.test', 'contactos.example.test', 'https://user:pass@contactos.example.test', 'https://contactos.example.test/ruta', 'https://contactos.example.test/?a=1', 'javascript:alert(1)', '   '])
+    assert.equal(dropLinkBase(APP, { LEAD_DROPS_PUBLIC_URL: bad }), 'https://app.example.test', bad);
+  const token = signDropLink(DROP, { now: NOW, env })!;
+  assert.equal(dropLinkUrl(APP, DROP, { now: NOW, env: { ...env, LEAD_DROPS_PUBLIC_URL: PUBLIC } }), `${PUBLIC}/contactos/${token}`);
+  assert.equal(dropLinkUrl(APP, DROP, { now: NOW, env }), `https://app.example.test/contactos/${token}`);
+  // The link is the same wherever it opens: the address is not part of what is signed.
+  assert.deepEqual(readDropLink(token, { now: NOW, env: { ...env, LEAD_DROPS_PUBLIC_URL: PUBLIC } }), { dropId: DROP, expiresAt: later(DROP_LINK_DAYS) });
 });

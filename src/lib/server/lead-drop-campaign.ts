@@ -8,7 +8,7 @@ import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { AuthError, type AuthContext } from '@/lib/server/auth-utils';
 import { reviewBulkCampaign, saveBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
-import { dropLinkUrl } from '@/lib/server/lead-drop-link';
+import { dropLinkBase, dropLinkUrl } from '@/lib/server/lead-drop-link';
 import { LeadDropsError, readDrop, type DropScope } from '@/lib/server/lead-drops';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { isTestAddress, sendReportEmail, type SelfEmail } from '@/lib/server/self-email';
@@ -155,7 +155,8 @@ export async function mailDropCampaign(client: Client, scope: DropScope, dropId:
   const appUrl = deps.appUrl ?? String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
   const email = dropCampaignEmail(item, {
     dropId, contactEmail, mailbox: mailbox.resolved ? MAIL_PROVIDER_LABEL[mailbox.resolved] : null, name: String(profile.data?.full_name || ''),
-    appUrl, now: deps.now, link: dropLinkUrl(appUrl, dropId, { now: deps.now, env }),
+    // All of this email is at the address its link opens (LEAD_DROPS_PUBLIC_URL): the link to its settings too.
+    appUrl: dropLinkBase(appUrl, env), now: deps.now, link: dropLinkUrl(appUrl, dropId, { now: deps.now, env }),
   });
   if (!email) return skipped('not_due');
   const sent = await (deps.send ?? (input => sendReportEmail(client, input)))({ userId: scope.userId, to, subject: email.subject, html: email.html, text: email.text });

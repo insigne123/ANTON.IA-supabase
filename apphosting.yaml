@@ -465,6 +465,11 @@ env:
   # Contacto del día con Apollo, encendido el 10 de noviembre por decisión del dueño: la búsqueda es la gratuita de Apollo y el
   # contacto llega sin enriquecer, así que prepararlo y enviarlo no gasta créditos ni saldo de Apify. El crédito lo usa la persona
   # si elige «Enriquecer y guardar». Para volver a Leads Finder (Apify): LEAD_DROPS_PROVIDER=apify (docs/contacto-del-dia.md).
+  # Los enlaces de los correos de «Contacto del día» abren en el dominio que la gente conoce (13 nov 2026). Sirve esta misma app;
+  # el resto de la app y los permisos de Gmail y Outlook siguen en su dirección (docs/contacto-del-dia.md). Vacío: la de la app.
+  - variable: LEAD_DROPS_PUBLIC_URL
+    value: https://anton-ia.yago.cl
+    availability: [RUNTIME]
   # The app's own emails (weekly report, alerts, contact of the day, Apify balance) go out from this Yago address through
   # Resend (yago.cl verified, sa-east-1). Secret created 21 Oct; docs/informe-semanal.md, «Resend».
   - variable: REPORTS_FROM_EMAIL

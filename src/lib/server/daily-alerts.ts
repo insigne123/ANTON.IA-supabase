@@ -3,7 +3,7 @@ import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
 import { BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson, dropAlertEmail } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
-import { dropLinkUrl } from '@/lib/server/lead-drop-link';
+import { dropLinkBase, dropLinkUrl } from '@/lib/server/lead-drop-link';
 import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
 import { dropPdf, dropPlanFor } from '@/lib/server/lead-drops';
@@ -334,11 +334,12 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const own = Boolean(drop && drop.items.length > 1);
   const rest = own ? composeAlert({ ...facts, drop: null }, now, { goalReminders: deps.goalReminders }) : null;
   // A drop of several contacts is used from the inbox: its links open a page of its own, without signing in (lead-drop-link.ts).
+  // That email is all at the address its link opens (LEAD_DROPS_PUBLIC_URL), its other links too; the rest of the day keeps the app's.
   const open = drop && own ? dropLinkUrl(deps.appUrl, drop.id, { now }) : null;
   const attachments = drop ? [{ filename: `contacto-del-dia-${today}.pdf`, contentType: 'application/pdf',
     content: await dropPdf(drop.items, { name: facts.name, date: today, link: open || `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
   const mailed = drop && open ? { ...drop, link: open } : drop;
-  const sent = await deps.send({ userId: scope.userId, to, ...(own && mailed ? dropAlertEmail(facts.name, deps.appUrl, mailed) : alertEmail(alert, facts.name, deps.appUrl, mailed)),
+  const sent = await deps.send({ userId: scope.userId, to, ...(own && mailed ? dropAlertEmail(facts.name, open ? dropLinkBase(deps.appUrl) : deps.appUrl, mailed) : alertEmail(alert, facts.name, deps.appUrl, mailed)),
     ...(attachments ? { attachments } : {}) });
   const other = sent.ok && rest ? await deps.send({ userId: scope.userId, to, ...alertEmail(rest, facts.name, deps.appUrl) }) : null;
   const failure = !sent.ok ? sent : other && !other.ok ? other : null;
