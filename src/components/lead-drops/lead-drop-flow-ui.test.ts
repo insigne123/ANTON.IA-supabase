@@ -525,7 +525,13 @@ test('«Hoy» shows several contacts as a section of its own: where each stands,
     await press(page, within(cardOf(page, 1), 'Aprobar y programar'));
     assert.deepEqual(bodies.at(-1), { action: 'approve', leadId: '6accdbfcd5f5d80001cf6902' });
     assert.equal(calls.at(-1), `POST /api/lead-drops/${BOARD}`);
-    assert.match(section.querySelector('[role="status"]')?.textContent || '', /Campaña de Luisa Soto programada desde Gmail/);
+    // Said in the row it happened to, where the person is looking: not at the top of a section of six.
+    assert.match(page.dom.window.document.getElementById('contacto-6accdbfcd5f5d80001cf6902')!.querySelector('[role="status"]')?.textContent || '', /Campaña de Luisa Soto programada desde Gmail/);
+    assert.equal(section.querySelectorAll('[role="status"], [role="alert"]').length, 1);
+    // What the campaign refuses is said there too, as it says it.
+    answers = [{ status: 409, body: { error: 'Conecta tu Gmail u Outlook para programar la campaña.' } }];
+    await press(page, within(cardOf(page, 0), 'Enriquecer · 1 crédito'));
+    assert.equal(page.dom.window.document.getElementById('contacto-6accdbfcd5f5d80001cf6901')!.querySelector('[role="alert"]')?.textContent, 'Conecta tu Gmail u Outlook para programar la campaña.');
     assert.deepEqual([...section.querySelectorAll('dl > div')].map(entry => entry.textContent), ['Por enriquecer1', 'Por aprobar0', 'En marcha2']);
   } finally { await close(page); }
 
@@ -543,6 +549,7 @@ test('a button of the morning email opens its contact inside «Hoy», and other 
   const today = chileTime.dayInZone(new Date());
   const items = [apolloItem(1, { brief }), apolloItem(2)];
   const lead = '6accdbfcd5f5d80001cf6902';
+  bodies.length = 0; answers = [];
   const page = await openHoy({ id: BOARD, date: today, items }, `https://app.test/dashboard?contactos=${linkOf(BOARD)}&c=${lead}`);
   try {
     await page.settle();

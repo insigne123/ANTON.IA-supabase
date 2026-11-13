@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { DropContactCard } from '@/components/lead-drops/DropContactCard';
+import { DropContactCard, type DropContactActions } from '@/components/lead-drops/DropContactCard';
 import { useDropActions } from '@/components/lead-drops/useDropActions';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
@@ -64,6 +64,15 @@ function Board({ board, focus }: { board: DropBoard; focus: string | null }) {
     cache: 'no-store', ...init, headers: { 'Content-Type': 'application/json', ...(organizationId ? { 'x-organization-id': organizationId } : {}) },
   }), [organizationId]);
   const { saving, enriching, notice, actions } = useDropActions({ dropId: board.id, call, setItems, single: false });
+  // What happened is said in the row it happened to: with six rows, a line at the top of the section would be out of sight.
+  const [acted, setActed] = useState<string | null>(null);
+  const inRow: DropContactActions = {
+    enrich: item => { setActed(item.leadId); actions.enrich(item); },
+    save: item => { setActed(item.leadId); actions.save(item); },
+    approve: item => { setActed(item.leadId); return actions.approve(item); },
+    edit: (item, emails) => { setActed(item.leadId); return actions.edit(item, emails); },
+    feedback: (item, useful, reason) => { setActed(item.leadId); return actions.feedback(item, useful, reason); },
+  };
 
   // Where each contact stands: its email to look up, its campaign to approve, or its campaign going out.
   const toEnrich = items.filter(item => !item.savedLeadId).length;
@@ -78,7 +87,7 @@ function Board({ board, focus }: { board: DropBoard; focus: string | null }) {
     : 'No queda nada por hacer aquí: cada campaña se detiene sola si responden.';
   const steps = [{ label: 'Por enriquecer', value: toEnrich }, { label: 'Por aprobar', value: toApprove }, { label: 'En marcha', value: running }];
 
-  return <section id="contactos-de-hoy" aria-labelledby="contactos-de-hoy-titulo" data-tour="lead-drop" className="scroll-mt-6 overflow-hidden rounded-2xl border border-primary/25 bg-card shadow-sm">
+  return <section id="contactos-de-hoy" aria-labelledby="contactos-de-hoy-titulo" data-tour="lead-drop" className="scroll-mt-20 overflow-hidden rounded-2xl border border-primary/25 bg-card shadow-sm">
     <div className="space-y-4 bg-primary/5 p-5 sm:p-6">
       <div className="space-y-1.5">
         <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-primary"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{today ? 'Tus contactos de hoy' : `Tus contactos del ${dayLabel(board.date)}`}</p>
@@ -93,10 +102,10 @@ function Board({ board, focus }: { board: DropBoard; focus: string | null }) {
         </div>)}
       </dl>
     </div>
-    {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('border-t px-5 py-3 text-sm sm:px-6', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
     <ul className="divide-y border-t">
-      {items.map(item => <li key={item.leadId} id={`contacto-${item.leadId}`} className="scroll-mt-6">
-        <DropContactCard item={item} actions={actions} busy={saving || enriching !== null} enriching={enriching === item.leadId} defaultOpen={focus === item.leadId} collapsible />
+      {items.map(item => <li key={item.leadId} id={`contacto-${item.leadId}`} className="scroll-mt-20">
+        {notice && acted === item.leadId ? <p role={notice.ok ? 'status' : 'alert'} className={cn('mx-4 mt-4 rounded-xl px-3 py-2 text-sm sm:mx-5', notice.ok ? 'bg-primary/10' : 'bg-destructive/10')}>{notice.text}</p> : null}
+        <DropContactCard item={item} actions={inRow} busy={saving || enriching !== null} enriching={enriching === item.leadId} defaultOpen={focus === item.leadId} collapsible />
       </li>)}
     </ul>
     <p className="border-t px-5 py-3 text-sm sm:px-6">
