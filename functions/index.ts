@@ -306,21 +306,6 @@ export const leadDropsTick = functions.scheduler.onSchedule({
     await invokeFirebaseSchedulerBridge({ name: 'lead-drops', path: '/api/cron/lead-drops', method: 'POST' });
 });
 
-// One evening only (12 Nov 2026): the owner asked to see the six contacts of the test team that same night instead of at the next
-// morning's 6:00. It calls the two morning routes in their order, as they are: on a Thursday only that team's plan has contacts,
-// and an alert goes only to whoever has none yet that day. It fires on the evening of 12 November; removed with the next change.
-export const leadDropsPreviewTick = functions.scheduler.onSchedule({
-    schedule: '*/10 21-23 12 11 *',
-    timeZone: 'America/Santiago',
-    retryCount: 0,
-    timeoutSeconds: 540,
-    memory: '512MiB',
-    secrets: ['FIREBASE_SCHEDULER_SECRET'],
-}, async () => {
-    await invokeFirebaseSchedulerBridge({ name: 'lead-drops', path: '/api/cron/lead-drops', method: 'POST' });
-    await invokeFirebaseSchedulerBridge({ name: 'daily-alerts', path: '/api/cron/daily-alerts', method: 'POST' });
-});
-
 export const antoniaRollupsTick = functions.scheduler.onSchedule({
     schedule: '10 0 * * *',
     timeZone: 'Etc/UTC',
