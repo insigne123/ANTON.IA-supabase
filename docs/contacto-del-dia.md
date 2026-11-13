@@ -177,6 +177,8 @@ Pedido del dueño: «la idea es que le lleguen al mail sin siquiera necesidad de
 
 Solo aplica a envíos de **varios contactos** (el plan de un equipo). Con un contacto, los correos siguen abriendo la app como antes.
 
+**Un correo solo de contactos.** Pedido del dueño el mismo día, al ver el primer correo real: «quiero que el mail sea solo de leads, lo de oportunidades que sea aparte en otro mail». Con varios contactos, el correo de la mañana trae solo los contactos, su PDF y sus botones (asunto «6 contactos nuevos para ti»), sin enlace a la app. Lo demás del día (respuestas, oportunidades, una búsqueda que falla, la meta) va en un segundo correo, y solo si hay algo que decir (`deliverDailyAlert` en `src/lib/server/daily-alerts.ts`, `dropAlertEmail` en `src/lib/daily-alerts.ts`). Sigue siendo un solo aviso por persona y día en `daily_alerts`. Con un contacto, todo va en un correo como antes.
+
 **El enlace** (`src/lib/server/lead-drop-link.ts`) es lo que permite actuar sin sesión, así que vale lo que vale el correo:
 
 - **Qué es:** 48 caracteres que nombran un solo envío y la hora en que vence, sellados con HMAC-SHA256 bajo una clave propia derivada del secreto del servidor (`LEAD_DROPS_LINK_SECRET`, o `INTERNAL_API_SECRET`, o la clave de servicio). No sirve como ninguna otra firma, y ninguna otra firma sirve como enlace.

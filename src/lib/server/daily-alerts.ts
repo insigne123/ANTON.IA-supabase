@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
-import { BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson } from '@/lib/daily-alerts';
+import { BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson, dropAlertEmail } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
 import { dropLinkUrl } from '@/lib/server/lead-drop-link';
@@ -328,14 +328,22 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const profile: any = await client.from('profiles').select('email,signatures').eq('id', scope.userId).maybeSingle();
   const to = String(profile.data?.email || '').trim();
   if (!readAlertsEmail(profile.data?.signatures) || !to) return { status: 'stored' as const };
-  // Today's contacts go in the same email, with their research and first emails in a PDF.
+  // One contact goes in the day's email, with its research and first emails in a PDF. Several contacts (a team's plan) are an email of
+  // their own, only about them (13 Nov 2026, the owner: «que el mail sea solo de leads»): what else the day has (replies, opportunities,
+  // a search that keeps failing) goes in a second email, when there is any. The row keeps the whole day, as one alert.
+  const own = Boolean(drop && drop.items.length > 1);
+  const rest = own ? composeAlert({ ...facts, drop: null }, now, { goalReminders: deps.goalReminders }) : null;
   // A drop of several contacts is used from the inbox: its links open a page of its own, without signing in (lead-drop-link.ts).
-  const open = drop && drop.items.length > 1 ? dropLinkUrl(deps.appUrl, drop.id, { now }) : null;
+  const open = drop && own ? dropLinkUrl(deps.appUrl, drop.id, { now }) : null;
   const attachments = drop ? [{ filename: `contacto-del-dia-${today}.pdf`, contentType: 'application/pdf',
     content: await dropPdf(drop.items, { name: facts.name, date: today, link: open || `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
-  const sent = await deps.send({ userId: scope.userId, to, ...alertEmail(alert, facts.name, deps.appUrl, drop && open ? { ...drop, link: open } : drop), ...(attachments ? { attachments } : {}) });
+  const mailed = drop && open ? { ...drop, link: open } : drop;
+  const sent = await deps.send({ userId: scope.userId, to, ...(own && mailed ? dropAlertEmail(facts.name, deps.appUrl, mailed) : alertEmail(alert, facts.name, deps.appUrl, mailed)),
+    ...(attachments ? { attachments } : {}) });
+  const other = sent.ok && rest ? await deps.send({ userId: scope.userId, to, ...alertEmail(rest, facts.name, deps.appUrl) }) : null;
+  const failure = !sent.ok ? sent : other && !other.ok ? other : null;
   const at = new Date().toISOString();
-  await client.from('daily_alerts').update(sent.ok ? { status: 'sent', emailed_at: at, email_error: null } : { status: 'failed', email_error: sent.error.slice(0, 300) }).eq('id', stored.data.id);
+  await client.from('daily_alerts').update(failure ? { status: 'failed', email_error: failure.error.slice(0, 300) } : { status: 'sent', emailed_at: at, email_error: null }).eq('id', stored.data.id);
   if (sent.ok && drop) await client.from('lead_drops').update({ status: 'sent', emailed_at: at, updated_at: at }).eq('id', drop.id).eq('status', 'ready');
-  return { status: sent.ok ? 'sent' as const : 'failed' as const };
+  return { status: failure ? 'failed' as const : 'sent' as const };
 }
