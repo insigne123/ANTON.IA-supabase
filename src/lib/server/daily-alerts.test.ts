@@ -302,6 +302,19 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     assert.equal(sent[0].attachments.length, 1);
     assert.equal(several.tables.lead_drops[0].status, 'sent');
 
+    // With an address of its own for these emails (LEAD_DROPS_PUBLIC_URL), the contacts' email and its PDF are all there; the
+    // rest of the day keeps the app's address.
+    process.env.LEAD_DROPS_PUBLIC_URL = 'https://contactos.example.test';
+    try {
+      const data = drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya'), contact('6accdbfcd5f5d80001cf6902', 'Luisa Soto')]);
+      data.contacted_leads.push(reply('r-new', '2026-10-19T22:00:00Z'));
+      const branded = sender();
+      assert.deepEqual(await deliverDailyAlert(memory(data, { unique: UNIQUE }).client, SCOPE, { ...deps(branded.send), now: TUESDAY }), { status: 'sent' });
+      assert.equal([...String(branded.sent[0].html).matchAll(/href="https:\/\/contactos\.example\.test\/contactos\/[A-Za-z0-9_-]{48}(\?c=[0-9a-f]{24})?"/g)].length, 3);
+      assert.ok(!String(branded.sent[0].html).includes('app.antonia.ai') && !String(branded.sent[0].text).includes('app.antonia.ai'));
+      assert.ok(String(branded.sent[1].html).includes('https://app.antonia.ai') && !String(branded.sent[1].html).includes('contactos.example.test'));
+    } finally { delete process.env.LEAD_DROPS_PUBLIC_URL; }
+
     // Only about the contacts: its own subject, nothing of the rest of the day, no way into the app.
     assert.equal(sent.length, 1);
     assert.equal(sent[0].subject, '2 contactos nuevos para ti');

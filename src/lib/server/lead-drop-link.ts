@@ -48,8 +48,25 @@ export function readDropLink(token: unknown, options: { now?: Date; env?: Env } 
 /** The page a token opens: outside the app, with nothing to sign in to (src/app/contactos/[token]). */
 export const dropLinkHref = (token: string) => `/contactos/${token}`;
 
+/**
+ * Where the link opens: the address people know the product by (LEAD_DROPS_PUBLIC_URL, https://anton-ia.yago.cl since 13 Nov 2026),
+ * which serves this same app; without it, or with something that is not a plain https address, the app's own. Only the way into a
+ * drop from an email uses it: the rest of the app keeps its address, where its sessions and its mailbox consents live.
+ */
+export function dropLinkBase(appUrl: string, env: Env = process.env): string {
+  const own = appUrl.replace(/\/$/, '');
+  const raw = String(env.LEAD_DROPS_PUBLIC_URL || '').trim();
+  if (!raw) return own;
+  try {
+    const url = new URL(raw);
+    const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:')) || url.username || url.password || url.search || url.hash || url.pathname !== '/') return own;
+    return url.origin;
+  } catch { return own; }
+}
+
 /** The full address for an email, or null without a secret. */
 export function dropLinkUrl(appUrl: string, dropId: string, options: { now?: Date; env?: Env } = {}): string | null {
   const token = signDropLink(dropId, options);
-  return token ? `${appUrl.replace(/\/$/, '')}${dropLinkHref(token)}` : null;
+  return token ? `${dropLinkBase(appUrl, options.env)}${dropLinkHref(token)}` : null;
 }

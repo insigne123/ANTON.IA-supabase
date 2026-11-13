@@ -130,6 +130,11 @@ test('once its email is found, the campaign goes to the person\'s inbox to read:
   await mailDropCampaign(open.client, scope, DROP, LEAD, { ...deps, env: { INTERNAL_API_SECRET: 'a-secret-for-tests' } });
   assert.match(sent[1].html, new RegExp(`href="https://app\\.ejemplo\\.cl/contactos/[A-Za-z0-9_-]{48}\\?c=${LEAD}"`));
   assert.ok(!sent[1].html.includes('/search/contactos/') && !sent[1].text.includes('/search/contactos/'));
+  // With an address of its own for these emails (LEAD_DROPS_PUBLIC_URL), all of it is there: the button and the way to its settings.
+  const branded = seed({ savedLeadId: 'e-1' });
+  await mailDropCampaign(branded.client, scope, DROP, LEAD, { ...deps, env: { INTERNAL_API_SECRET: 'a-secret-for-tests', LEAD_DROPS_PUBLIC_URL: 'https://contactos.ejemplo.cl' } });
+  assert.match(sent[2].html, new RegExp(`href="https://contactos\\.ejemplo\\.cl/contactos/[A-Za-z0-9_-]{48}\\?c=${LEAD}"`));
+  assert.ok(!sent[2].html.includes('app.ejemplo.cl') && !sent[2].text.includes('app.ejemplo.cl'));
 
   const none = async (seeded: ReturnType<typeof seed>, reason: string, extra: Record<string, unknown> = {}) => {
     const before = sent.length;
