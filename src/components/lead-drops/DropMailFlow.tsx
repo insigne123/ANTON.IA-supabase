@@ -30,7 +30,8 @@ const POLL_TIMES = 12;
  * from their own Gmail or Outlook, connected right here the first time. The link in the address is who asks (server/lead-drop-link.ts);
  * every step is a button, so arriving does nothing by itself.
  */
-export function DropMailFlow({ token, initial, focus, mailboxNotice }: { token: string; initial: MailDropView; focus: string | null; mailboxNotice: string | null }) {
+export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = null }: { token: string; initial: MailDropView; focus: string | null; mailboxNotice: string | null;
+  /** The same contacts inside the app, for whoever prefers to work there: it asks to sign in. Nothing here needs it. */ appHref?: string | null }) {
   const [view, setView] = useState(initial);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(mailboxNotice ? MAILBOX_NOTICE[mailboxNotice] ?? null : null);
   const [enriching, setEnriching] = useState<string | null>(null);
@@ -141,5 +142,8 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice }: { token: 
       Enriquecer busca el correo de trabajo del contacto y usa 1 crédito. Al aprobar, los correos salen desde tu propio Gmail u Outlook y las respuestas te llegan ahí.
       Esta página es personal: se abre con el enlace de tu correo, así que no lo reenvíes.
     </p>
+    {appHref ? <p className="mt-2 text-xs leading-5 text-muted-foreground">
+      ¿Prefieres trabajarlos dentro de ANTON.IA? <a href={appHref} className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Ábrelos en «Hoy»</a>: te pedirá iniciar sesión.
+    </p> : null}
   </main>;
 }

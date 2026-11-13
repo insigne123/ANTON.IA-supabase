@@ -417,6 +417,21 @@ test('«Hoy» for a team with a plan of its own: what it is offered says how man
   const kept = await latestDrop(client, ANA, THURSDAY);
   assert.deepEqual([kept?.total, kept?.left, kept?.lookup, kept?.campaigns], [3, 2, true, true]);
   assert.deepEqual(await homeDrop(client, ANA, THURSDAY), { drop: null, pull: 'today', plan: { size: 6, days: 5 } });
+  // Several contacts are a section of «Hoy», each in full: all day on their day, whatever is left of them...
+  const today = seed();
+  const items = [apollo(1, { savedLeadId: 'e-1', campaign: { id: 'c-1', provider: 'google', approvedAt: '2026-10-22T12:00:00.000Z' } }), apollo(2, { savedLeadId: 'e-2' }), apollo(3)];
+  today.lead_drops = [dropRow({ drop_date: '2026-10-22', status: 'sent', items })];
+  const planned = { organizations: [{ id: ORG, lead_drop_size: 6, lead_drop_weekdays: [1, 2, 3, 4, 5] }] };
+  assert.deepEqual(await homeDrop(memory({ ...today, ...planned }, unique).client, ANA, THURSDAY), { drop: null, pull: null, board: { id: 'drop-old', date: '2026-10-22', items } });
+  const done = seed();
+  const approved = items.map(item => ({ ...item, savedLeadId: 'e-9', campaign: { id: 'c-9', provider: 'google', approvedAt: '2026-10-22T12:00:00.000Z' } }));
+  done.lead_drops = [dropRow({ drop_date: '2026-10-22', status: 'sent', items: approved })];
+  assert.deepEqual((await homeDrop(memory({ ...done, ...planned }, unique).client, ANA, THURSDAY)).board?.items.length, 3, 'its day: it stays, all approved');
+  // ...and on the days after while one still waits for its email or its approval, unless a new one is due (Saturday is not a day of the team's).
+  const SATURDAY = new Date('2026-10-24T15:00:00.000Z');
+  assert.equal((await homeDrop(memory({ ...today, ...planned }, unique).client, ANA, SATURDAY)).board?.id, 'drop-old');
+  assert.deepEqual(await homeDrop(memory({ ...done, ...planned }, unique).client, ANA, SATURDAY), { drop: null, pull: null });
+  assert.deepEqual(await homeDrop(memory({ ...today, ...planned }, unique).client, ANA, FRIDAY), { drop: null, pull: 'today', plan: { size: 6, days: 5 } });
   // A drop whose contacts came with their email (Leads Finder) says nothing of credits.
   const finder = seed();
   finder.lead_drops = [dropRow({ status: 'sent', items: [{ ...contact, leadId: 'lf_1' }, { ...contact, leadId: 'lf_2' }] })];

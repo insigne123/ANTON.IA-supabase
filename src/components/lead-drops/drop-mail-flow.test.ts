@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import test, { after } from 'node:test';
@@ -83,6 +84,33 @@ test('opened from the email: the contacts with their steps, nothing leading into
     assert.equal(asked.length, 0, 'opening the page asks the server for nothing');
     assert.match(text(), /Esta página es personal/);
   } finally { await act(async () => root.unmount()); }
+});
+
+test('whoever prefers the app gets one quiet line to the same contacts in «Hoy»; sent here by «Hoy», none', async () => {
+  server(() => ({ body: {} }));
+  const href = `/dashboard?contactos=${TOKEN}`;
+  const root = await mount(viewOf([contact(LEAD, 'Pedro Araya'), contact(OTHER, 'Luisa Soto')]), { appHref: href });
+  try {
+    const links = [...dom.window.document.querySelectorAll('a')];
+    assert.deepEqual(links.map(link => [link.getAttribute('href'), link.textContent]), [[href, 'Ábrelos en «Hoy»']]);
+    assert.match(text(), /¿Prefieres trabajarlos dentro de ANTON\.IA\? Ábrelos en «Hoy»: te pedirá iniciar sesión\./);
+    // Everything still works here, without it.
+    assert.equal([...dom.window.document.querySelectorAll('button')].filter(entry => entry.textContent === 'Enriquecer · 1 crédito').length, 2);
+  } finally { await act(async () => root.unmount()); }
+});
+
+test('the page of the email: signed in as the person it names, the contacts open in «Hoy»; nobody is asked to sign in', () => {
+  const page = readFileSync(new URL('../../app/contactos/[token]/page.tsx', import.meta.url), 'utf8');
+  // The link is checked first, and only the person it names is sent into the app: another account's session stays on this page.
+  assert.match(page, /const \{ dropId, scope \} = await resolveDropLink\(admin, token\);\s*inside = !stay && !single\(query\.correo\) && await signedInAs\(scope\.userId\);/);
+  assert.match(page, /return user\?\.id === userId;\s*\} catch \{ return false; \}/);
+  // Sent back by «Hoy» (`aqui=1`) or coming back from connecting a mailbox (`correo`): it stays here, and offers no way back in a loop.
+  assert.match(page, /const stay = single\(query\.aqui\) === '1';/);
+  assert.match(page, /appHref=\{stay \? null : inApp\(token, null\)\}/);
+  assert.match(page, /const inApp = \(token: string, leadId: string \| null\) => `\/dashboard\?contactos=\$\{encodeURIComponent\(token\)\}/);
+  // The redirect is thrown outside the try, so it is never shown as a broken link.
+  assert.ok(page.indexOf('redirect(inApp(token, focus));') > page.indexOf("'Entrar a ANTON.IA'") || page.indexOf('redirect(inApp(token, focus));') > page.indexOf('Entrar a ANTON.IA'));
+  assert.doesNotMatch(page, /redirect\('\/login/);
 });
 
 test('«Enriquecer» is one tap: found, it says so with the address and the next step is to connect the mailbox, once, right there', async () => {

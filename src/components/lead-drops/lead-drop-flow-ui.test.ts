@@ -7,6 +7,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
+import * as chileTime from '@/lib/admin/chile-time';
 import * as leadDrops from '@/lib/lead-drops';
 
 const require = createRequire(import.meta.url);
@@ -37,7 +38,7 @@ const shared = {
 };
 const contactCard = await component('./DropContactCard.tsx', shared);
 let home: any = null;
-const { LeadDropBanner } = await component('../home/LeadDropBanner.tsx', { ...shared, './usePersonalHome': { usePersonalHome: () => ({ data: home }) } });
+const { LeadDropBanner } = await component('../home/LeadDropBanner.tsx', shared);
 let answers: Array<{ status: number; body: unknown }> = [];
 // What the session knows: the organization, whether it is still being read, and the way to read it again.
 let auth: { organizationId: string | null; loading: boolean; refreshOrganization: () => Promise<void> } = { organizationId: 'org-1', loading: false, refreshOrganization: async () => {} };
@@ -49,15 +50,20 @@ const bodies: any[] = [];
 let savedLeads: any[] = [];
 let lookups: Array<{ leads: any[]; lookups: Record<string, string> }> = [];
 let completion: any = { moved: [], notFound: [], expired: 0, failures: [], consumed: 0, markedNotFound: true };
-const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
+// What the person does with the contacts, shared by the drop's page and by «Hoy» (useDropActions), with the browser's part doubled.
+const dropActions = await component('./useDropActions.ts', {
   ...shared,
-  './DropContactCard': contactCard,
   '@/lib/supabase-service': { supabaseService: { getLeads: async () => savedLeads } },
   '@/lib/leads-workspace/complete-contacts': {
     completeSavedContacts: async (leads: any[], chosen: Record<string, string>) => { lookups.push({ leads, lookups: chosen }); return completion; },
     completionSummary: () => ({ title: 'No encontramos correos', description: 'El proveedor no devolvió resultados para estos contactos.' }),
   },
   '@/lib/leads-workspace/enrichment-provider': { enrichmentCreditReceipt: (consumed: number) => consumed ? `Se descontó ${consumed} crédito de ANTON.IA.` : '' },
+});
+const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
+  ...shared,
+  './DropContactCard': contactCard,
+  './useDropActions': dropActions,
   '@/context/AuthContext': { useAuth: () => auth },
   '@/components/page-header': { PageHeader: ({ title, description }: any) => React.createElement('header', null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
   '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
@@ -70,7 +76,7 @@ const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
 });
 
 test('«Hoy» shows the contact of the day, offers today\'s, the way back to it, or «Perfil» when there is no customer', () => {
-  const render = (data: unknown) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner)); };
+  const render = (data: unknown) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner, { data: home })); };
   assert.equal(render({ drop: null, pull: null }), '');
   assert.match(render({ drop: null, pull: 'first' }), /Contacto del día[\s\S]*href="\/search\/contactos\/nuevo"[^>]*>Ver mi primer contacto/);
   assert.match(render({ drop: null, pull: 'today' }), /Hoy te toca un contacto nuevo[\s\S]*Ver mi contacto de hoy/);
@@ -82,7 +88,7 @@ test('«Hoy» shows the contact of the day, offers today\'s, the way back to it,
 });
 
 test('«Hoy» for a team with several contacts a day: no email is promised before it is looked up, and the offers say how many', () => {
-  const render = (data: unknown) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner)); };
+  const render = (data: unknown) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner, { data: home })); };
   const several = { id: 'd-6', dropDate: '2026-11-13', total: 6, left: 6, lookup: true, campaigns: true, next: { name: 'Pedro Ar***a', company: 'Minera Andina', why: 'Calza.', lookup: true } };
   const fresh = render({ drop: several, pull: null });
   assert.match(fresh, /6 contactos nuevos para ti, cada uno con su campaña lista\. Ver el correo de cada uno usa 1 crédito\.[\s\S]*href="\/search\/contactos\/d-6"[^>]*>Revisar mis contactos/);
@@ -233,7 +239,7 @@ test('the search plays back the first time on this device, and not again when th
 });
 
 test('«Hoy» does not offer to fill in the ideal customer when the next step already leads to «Perfil»', () => {
-  const render = (data: unknown, quiet: boolean) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner, { quietProfile: quiet })); };
+  const render = (data: unknown, quiet: boolean) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner, { data: home, quietProfile: quiet })); };
   assert.equal(render({ drop: null, pull: 'profile' }, true), '');
   assert.match(render({ drop: null, pull: 'profile' }, false), /Completar mi cliente ideal/);
   assert.match(render({ drop: null, pull: 'first' }, true), /Ver mi primer contacto/, 'the other offers stay');
@@ -459,4 +465,112 @@ test('opened from the morning email on one contact: its email is looked up at on
     assert.equal(bodies.length, 0);
     assert.equal(plain.dom.window.location.search, '');
   } finally { await close(plain); }
+});
+
+// «Tus contactos de hoy», the section of «Hoy» for a drop of several contacts, with the same doubles as the drop's own page.
+const todayContacts = await component('../home/TodayContacts.tsx', {
+  ...shared,
+  '@/components/lead-drops/DropContactCard': contactCard,
+  '@/components/lead-drops/useDropActions': dropActions,
+  '@/lib/admin/chile-time': chileTime,
+  '@/context/AuthContext': { useAuth: () => auth },
+  '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
+    calls.push(`${init?.method || 'GET'} ${path}`);
+    if (init?.body) bodies.push(JSON.parse(String(init.body)));
+    const answer = answers.shift() || { status: 500, body: { error: 'sin respuesta' } };
+    return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
+  } },
+});
+/** A link as an email carries it: 36 bytes, the first 16 the drop's id (server/lead-drop-link.ts). Unsigned: the app never checks it. */
+const BOARD = '11111111-1111-4111-8111-111111111111';
+const linkOf = (dropId: string) => Buffer.concat([Buffer.from(dropId.replace(/-/g, ''), 'hex'), Buffer.alloc(20, 7)]).toString('base64url');
+async function openHoy(board: unknown, url = 'https://app.test/dashboard') {
+  const dom = new JSDOM('<div id="root"></div>', { url });
+  (dom.window as any).matchMedia = () => ({ matches: true });
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  await act(async () => root.render(React.createElement(todayContacts.TodayContacts, { board, ready: true })));
+  const settle = async () => { for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  return { dom, root, settle, text: () => dom.window.document.body.textContent || '' };
+}
+
+test('«Hoy» shows several contacts as a section of its own: where each stands, one line of why, and its next step', async () => {
+  const today = chileTime.dayInZone(new Date());
+  const campaign = { id: '22222222-2222-4222-8222-222222222222', provider: 'google', approvedAt: `${today}T12:00:00.000Z` };
+  const items = [apolloItem(1, { brief }), apolloItem(2, { savedLeadId: 'e-2', name: 'Luisa Soto' }), apolloItem(3, { savedLeadId: 'e-3', name: 'Marta Rojas', campaign })];
+  const page = await openHoy({ id: BOARD, date: today, items });
+  try {
+    const section = page.dom.window.document.querySelector('section#contactos-de-hoy')!;
+    assert.match(section.textContent || '', /Tus contactos de hoy[\s\S]*3 contactos nuevos para ti[\s\S]*Enriquece los que te interesen y aprueba su campaña/);
+    assert.deepEqual([...section.querySelectorAll('dl > div')].map(entry => entry.textContent), ['Por enriquecer1', 'Por aprobar1', 'En marcha1']);
+    assert.equal(section.querySelectorAll('article').length, 3);
+    // A row, not the whole card: who, one line of why and the step. The rest opens in place.
+    const first = cardOf(page, 0);
+    assert.match(first.textContent || '', /Persona1 A\.[\s\S]*Una planta nueva suma áreas que proteger\./);
+    assert.doesNotMatch(first.textContent || '', /Sobre Minera 1|Cómo abrir|¿Te sirve este contacto\?/);
+    assert.ok(within(first, 'Enriquecer · 1 crédito'));
+    assert.ok(within(cardOf(page, 1), 'Aprobar y programar'));
+    assert.equal(cardOf(page, 2).querySelector('a[href="/campaigns?campaign=22222222-2222-4222-8222-222222222222"]')?.textContent, 'Ver la campaña');
+    const toggle = within(first, /Ver por qué y su campaña/);
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    await press(page, toggle);
+    assert.equal(within(first, /Ocultar el detalle/).getAttribute('aria-expanded'), 'true');
+    assert.match(first.textContent || '', /Por qué te lo recomendamos[\s\S]*Sobre Minera 1[\s\S]*Cómo abrir[\s\S]*Campaña lista · 3 correos[\s\S]*¿Te sirve este contacto\?/);
+    assert.ok(first.querySelector(`#${toggle.getAttribute('aria-controls')!.replace(/:/g, '\\:')}`), 'the button names what it opens');
+    assert.equal(section.querySelector(`a[href="/search/contactos/${BOARD}"]`)?.textContent, 'Ver cómo los buscamos y descargar el PDF');
+
+    // «Aprobar y programar» right there: the counts move and what happened is said.
+    bodies.length = 0;
+    answers = [{ status: 200, body: { items: items.map((item, index) => index === 1 ? { ...item, campaign } : item), campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-16'] } }];
+    await press(page, within(cardOf(page, 1), 'Aprobar y programar'));
+    assert.deepEqual(bodies.at(-1), { action: 'approve', leadId: '6accdbfcd5f5d80001cf6902' });
+    assert.equal(calls.at(-1), `POST /api/lead-drops/${BOARD}`);
+    // Said in the row it happened to, where the person is looking: not at the top of a section of six.
+    assert.match(page.dom.window.document.getElementById('contacto-6accdbfcd5f5d80001cf6902')!.querySelector('[role="status"]')?.textContent || '', /Campaña de Luisa Soto programada desde Gmail/);
+    assert.equal(section.querySelectorAll('[role="status"], [role="alert"]').length, 1);
+    // What the campaign refuses is said there too, as it says it.
+    answers = [{ status: 409, body: { error: 'Conecta tu Gmail u Outlook para programar la campaña.' } }];
+    await press(page, within(cardOf(page, 0), 'Enriquecer · 1 crédito'));
+    assert.equal(page.dom.window.document.getElementById('contacto-6accdbfcd5f5d80001cf6901')!.querySelector('[role="alert"]')?.textContent, 'Conecta tu Gmail u Outlook para programar la campaña.');
+    assert.deepEqual([...section.querySelectorAll('dl > div')].map(entry => entry.textContent), ['Por enriquecer1', 'Por aprobar0', 'En marcha2']);
+  } finally { await close(page); }
+
+  // All approved: it says so. An earlier day's, with something left: how many are left, and which day they are of.
+  const done = await openHoy({ id: BOARD, date: today, items: items.map(item => ({ ...item, savedLeadId: 'e-9', campaign })) });
+  try { assert.match(done.text(), /Tus 3 campañas ya están en marcha[\s\S]*No queda nada por hacer aquí/); } finally { await close(done); }
+  const earlier = await openHoy({ id: BOARD, date: '2026-10-20', items });
+  try { assert.match(earlier.text(), /Tus contactos del martes, 20 de octubre[\s\S]*Te quedan 2 contactos por revisar/); } finally { await close(earlier); }
+  // No contacts of several: no section at all (one contact keeps its line under the next step).
+  const none = await openHoy(null);
+  try { assert.equal(none.dom.window.document.querySelector('section'), null); } finally { await close(none); }
+});
+
+test('a button of the morning email opens its contact inside «Hoy», and other contacts than the ones on screen open on their own page', async () => {
+  const today = chileTime.dayInZone(new Date());
+  const items = [apolloItem(1, { brief }), apolloItem(2)];
+  const lead = '6accdbfcd5f5d80001cf6902';
+  bodies.length = 0; answers = [];
+  const page = await openHoy({ id: BOARD, date: today, items }, `https://app.test/dashboard?contactos=${linkOf(BOARD)}&c=${lead}`);
+  try {
+    await page.settle();
+    assert.equal(page.dom.window.location.href, 'https://app.test/dashboard', 'the link leaves the address');
+    // The contact the email named is open, on its campaign; the others stay a row.
+    assert.match(cardOf(page, 1).textContent || '', /Por qué te lo recomendamos[\s\S]*¿Cómo cubren los turnos de noche\?/);
+    assert.doesNotMatch(cardOf(page, 0).textContent || '', /Cómo abrir/);
+    assert.equal(bodies.filter(body => body.action === 'keep').length, 0, 'arriving does nothing by itself');
+  } finally { await close(page); }
+
+  const { linkedArrival, } = todayContacts;
+  const token = linkOf(BOARD);
+  assert.equal(linkedArrival('', BOARD), null);
+  assert.equal(linkedArrival('?vista=semana', BOARD), null);
+  assert.deepEqual(linkedArrival(`?contactos=${token}&c=${lead}`, BOARD), { focus: lead, away: null });
+  assert.deepEqual(linkedArrival(`?contactos=${token}`, BOARD), { focus: null, away: null });
+  // An earlier email, another team's contacts, or nothing on screen: their own page, told not to send the person back.
+  const other = '33333333-3333-4333-8333-333333333333';
+  assert.deepEqual(linkedArrival(`?contactos=${token}&c=${lead}`, other), { focus: null, away: `/contactos/${token}?aqui=1&c=${lead}` });
+  assert.deepEqual(linkedArrival(`?contactos=${token}`, null), { focus: null, away: `/contactos/${token}?aqui=1` });
+  assert.deepEqual(linkedArrival('?contactos=no-es-un-enlace', BOARD), { focus: null, away: '/contactos/no-es-un-enlace?aqui=1' });
+  assert.equal(leadDrops.dropIdInLink(token), BOARD);
+  assert.equal(leadDrops.dropIdInLink('corto'), null);
 });

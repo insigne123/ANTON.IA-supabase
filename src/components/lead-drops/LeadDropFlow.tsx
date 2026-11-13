@@ -8,11 +8,9 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
-import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, shortDay, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
-import { DropContactCard, type DropContactActions } from './DropContactCard';
-import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
-import { completeSavedContacts, completionSummary } from '@/lib/leads-workspace/complete-contacts';
-import { supabaseService } from '@/lib/supabase-service';
+import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
+import { DropContactCard } from './DropContactCard';
+import { useDropActions } from './useDropActions';
 import { cn } from '@/lib/utils';
 
 type Drop = { id: string; date: string; criteria: DropCriteria; items: DropItem[] };
@@ -89,12 +87,9 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   /** The drop is not this person's or is no longer there: asking again answers the same, so the way out is today's contact. */
   const [missing, setMissing] = useState(false);
   const [step, setStep] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [howOpen, setHowOpen] = useState(false);
-  /** The contact whose email is being looked up, and the one whose follow-ups are open. */
-  const [enriching, setEnriching] = useState<string | null>(null);
+  /** The contact whose follow-ups are open. */
   const [followOpen, setFollowOpen] = useState<string | null>(null);
   const started = useRef(false);
   /** The contact the morning email linked to, and whether that link asked to look its email up: read once, then gone from the address. */
@@ -169,74 +164,9 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const one = drop?.items.length === 1 ? drop.items[0] : null;
   // Found with Apollo: the email is looked up on saving (1 credit), and the screen says so before the click.
   const lookup = Boolean(drop?.items.some(item => item.provider === 'apollo'));
-  const post = async (body: Record<string, unknown>) => {
-    const response = await call(`/api/lead-drops/${encodeURIComponent(id || '')}`, { method: 'POST', body: JSON.stringify(body) });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.error || 'No pudimos guardarlo.');
-    return payload;
-  };
-  // «Enriquecer y guardar»: kept as a saved contact, its email looked up as any saved contact's (1 credit), then tied to this drop.
-  const enrich = async (item: DropItem) => {
-    if (!id || saving || enriching) return;
-    setEnriching(item.leadId); setNotice(null);
-    try {
-      const kept = await post({ action: 'keep', leadId: item.leadId });
-      setDrop(current => current && { ...current, items: kept.items });
-      if (kept.savedLeadId) return;
-      const saved = (await supabaseService.getLeads()).find(lead => lead.id === kept.keptLeadId);
-      if (!saved) throw new Error('Quedó guardado, pero no pudimos buscar su correo. Búscalo desde «Por escribir».');
-      const completion = await completeSavedContacts([saved], { [saved.id]: 'email' });
-      const linked = await post({ action: 'link', leadId: item.leadId });
-      setDrop(current => current && { ...current, items: linked.items });
-      const found = completion.moved.some(lead => lead.email);
-      setNotice(linked.linked && found
-        ? { ok: true, text: `Listo: ya tienes su correo y quedó en «Por escribir». ${enrichmentCreditReceipt(completion.consumed)}`.trim() }
-        : linked.linked ? { ok: true, text: 'Quedó en «Por escribir»: su correo sigue en búsqueda y aparecerá allí en unos minutos.' }
-        : { ok: false, text: completionSummary(completion).description });
-    } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
-    finally { setEnriching(null); }
-  };
-  const save = async (leadIds?: string[]) => {
-    if (!id) return;
-    setSaving(true); setNotice(null);
-    try {
-      const response = await call(`/api/lead-drops/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify({ action: 'save', ...(leadIds ? { leadIds } : {}) }) });
-      const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(body?.error || 'No pudimos guardarlo.');
-      setDrop(current => current && { ...current, items: body.items });
-      setNotice(body.expired ? { ok: false, text: one ? 'Este contacto venció: pasaron más de 30 días desde que lo encontramos.'
-        : `${body.expired === 1 ? 'Un contacto venció' : `${body.expired} contactos vencieron`}: pasaron más de 30 días. Los demás quedaron en «Por escribir».` }
-        : { ok: true, text: one ? 'Quedó en «Por escribir», con su correo. Para enviarle desde ANTON.IA, lo investigamos a fondo (toma unos minutos) y luego revisas el correo.'
-          : body.saved === 1 ? 'Quedó en «Por escribir», con su correo.' : `Quedaron ${body.saved} en «Por escribir», con su correo.` });
-    } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
-    finally { setSaving(false); }
-  };
-  // What a card does with its contact (DropContactCard): each answers with the drop's contacts as they are now.
-  const act = async (body: Record<string, unknown>, failed: string) => {
-    setNotice(null);
-    try {
-      const payload = await post(body);
-      if (Array.isArray(payload?.items)) setDrop(current => current && { ...current, items: payload.items });
-      return payload;
-    } catch (e) { setNotice({ ok: false, text: e instanceof Error && e.message !== 'No pudimos guardarlo.' ? e.message : failed }); return null; }
-  };
-  const actions: DropContactActions = {
-    enrich: item => void enrich(item),
-    save: item => void save([item.leadId]),
-    approve: async item => {
-      const done = await act({ action: 'approve', leadId: item.leadId }, 'No pudimos programar la campaña. Inténtalo de nuevo.');
-      if (!done?.campaign) return;
-      const later = (done.schedule as string[]).slice(1).map(shortDay);
-      setNotice({ ok: true, text: `Campaña de ${dropName(item)} programada desde ${done.provider}: el primer correo sale en unos minutos${later.length
-        ? ` y ${later.length === 1 ? 'el seguimiento' : 'los seguimientos'} ${later.length === 1 ? `el ${later[0]}` : `el ${later.slice(0, -1).join(', el ')} y el ${later[later.length - 1]}`}` : ''}. Se detiene si responde.` });
-    },
-    edit: async (item, emails) => {
-      const done = await act({ action: 'edit', leadId: item.leadId, emails }, 'No pudimos guardar los correos. Inténtalo de nuevo.');
-      if (done) setNotice({ ok: true, text: `Guardamos tus cambios en los correos de ${dropName(item)}.` });
-      return Boolean(done);
-    },
-    feedback: async (item, useful, reason) => { await act({ action: 'feedback', leadId: item.leadId, feedback: { useful, reason: reason ?? null } }, 'No pudimos guardar tu opinión. Inténtalo de nuevo.'); },
-  };
+  // What the person does with the contacts is the same wherever the app shows them (useDropActions): here and in «Hoy».
+  const { saving, enriching, notice, setNotice, enrich, save, actions } = useDropActions({
+    dropId: id, call, single: Boolean(one), setItems: items => setDrop(current => current && { ...current, items }) });
   const copy = async (key: string, email: { subject: string; body: string } | null | undefined) => {
     if (!email) return;
     const textValue = `Asunto: ${email.subject}\n\n${email.body}`;
