@@ -196,7 +196,8 @@ Solo aplica a envíos de **varios contactos** (el plan de un equipo). Con un con
 **Conectar el correo desde el enlace** (`src/lib/server/provider-oauth-link.ts`). Es el mismo flujo OAuth de «Conexiones» (mismos permisos, misma dirección de retorno, PKCE), con dos diferencias:
 
 - la persona la nombra el enlace firmado, no una sesión; se revisa al empezar y de nuevo al volver, así que la cookie del intento nunca decide para quién es el buzón;
-- **solo conecta quien no tiene ningún buzón:** un enlace nunca reemplaza el Gmail u Outlook que ya envía.
+- **solo conecta quien no tiene ningún buzón:** un enlace nunca reemplaza el Gmail u Outlook que ya envía;
+- **solo el buzón de la propia cuenta:** la dirección del buzón tiene que ser el correo con que la persona entra a ANTON.IA (el de `auth.users`, el único que la cuenta ha probado). Quien acepta el consentimiento es quien tiene el navegador, no necesariamente quien nombra el enlace: sin esta regla, un enlace reenviado («conecta tu correo aquí») ataría el buzón de un tercero a la cuenta de quien lo reenvió. El correo al que llegan los avisos (`profiles.email`) no sirve para esto, porque cada persona puede cambiarlo. Otro buzón se conecta desde la app, y la página lo dice.
 
 **Lo que sigue necesitando la app:** cambiar el buzón con que se envía, ver las respuestas clasificadas y las campañas en detalle, y apagar los avisos («Tu semana»).
 

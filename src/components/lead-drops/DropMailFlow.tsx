@@ -16,6 +16,7 @@ const listed = (values: string[]) => values.length <= 1 ? values.join('') : `${v
 const MAILBOX_NOTICE: Record<string, { ok: boolean; text: string }> = {
   conectado: { ok: true, text: 'Tu correo quedó conectado. Ya puedes aprobar y programar tus campañas.' },
   cancelado: { ok: false, text: 'No se conectó tu correo: faltó aceptar los permisos. Inténtalo de nuevo cuando quieras.' },
+  otro: { ok: false, text: 'Ese no es el correo de tu cuenta, así que no lo conectamos. Elige el correo con el que entras a ANTON.IA; para enviar desde otro, conéctalo entrando a ANTON.IA.' },
   error: { ok: false, text: 'No pudimos conectar tu correo. Inténtalo de nuevo.' },
 };
 /** A lookup the provider is still answering: asked again every few seconds, for a minute. */

@@ -12,6 +12,11 @@ import { tokenService } from '@/lib/services/token-service';
  * sending them to learn the app. The signed link of the email names the person (lead-drop-link.ts); it is checked when the consent
  * starts and again when it comes back, so the cookie alone never says for whom the mailbox is. Only a person with no mailbox at all
  * connects one this way: a link never replaces a mailbox that already sends.
+ *
+ * The mailbox must be the account's own: its address has to be the email the person signs in with. Whoever consents at Google or
+ * Microsoft is whoever holds the browser, not necessarily whoever the link names: a link passed on («conecta tu correo aquí») would
+ * otherwise tie a stranger's mailbox to the account that sent it. The sign-in email is the one address the account has proved; the
+ * address its emails go to (profiles.email) is the person's to change, so it proves nothing. Another mailbox is connected from the app.
  */
 
 /** The link an attempt was started with, read from its cookie before anything is trusted. */
@@ -26,8 +31,30 @@ const hasMailbox = async (userId: string) => {
   const mailbox = await readMailSenderPreference(getSupabaseAdminClient(), userId);
   return mailbox.connected.google || mailbox.connected.outlook;
 };
-/** Back to the contacts, saying how it went: «conectado», «cancelado» or «error». */
-const back = (base: string, token: string, state: 'conectado' | 'cancelado' | 'error') => {
+/** The addresses of the mailbox that just consented, in lower case: Google says it in the id token, Microsoft in the profile. */
+async function mailboxAddresses(provider: Provider, tokens: { accessToken: string | null; idToken: string | null }): Promise<string[]> {
+  const clean = (values: unknown[]) => [...new Set(values.map(value => String(value || '').trim().toLowerCase()).filter(value => value.includes('@')))];
+  if (provider === 'google') {
+    try {
+      // Straight from Google's token endpoint over TLS: read, not verified again.
+      const claims = JSON.parse(Buffer.from(String(tokens.idToken || '').split('.')[1] || '', 'base64url').toString('utf8')) as { email?: unknown; email_verified?: unknown };
+      return claims.email_verified === false ? [] : clean([claims.email]);
+    } catch { return []; }
+  }
+  if (!tokens.accessToken) return [];
+  const response = await fetch('https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName', { headers: { Authorization: `Bearer ${tokens.accessToken}` }, signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) return [];
+  const me = await response.json().catch(() => null) as { mail?: unknown; userPrincipalName?: unknown } | null;
+  return clean([me?.mail, me?.userPrincipalName]);
+}
+/** The email the person signs in with: the one address the account has proved. */
+async function signInEmail(userId: string): Promise<string | null> {
+  const found = await getSupabaseAdminClient().auth.admin.getUserById(userId);
+  const email = String(found.data?.user?.email || '').trim().toLowerCase();
+  return !found.error && email ? email : null;
+}
+/** Back to the contacts, saying how it went: «conectado», «cancelado», «otro» (not the account's own mailbox) or «error». */
+const back = (base: string, token: string, state: 'conectado' | 'cancelado' | 'otro' | 'error') => {
   const response = NextResponse.redirect(new URL(`${dropLinkHref(token)}?correo=${state}`, base));
   response.headers.set('Cache-Control', 'no-store');
   return response;
@@ -65,6 +92,9 @@ export async function finishLinkOAuth(req: NextRequest, provider: Provider, toke
     if ('error' in exchanged) return finish('error');
     // Connected meanwhile from the app: that mailbox stays, this consent is dropped.
     if (await hasMailbox(link.scope.userId)) return finish('conectado');
+    // The account's own mailbox only (see the top of this file): anyone else's consent is dropped, and nothing is kept.
+    const own = await signInEmail(link.scope.userId);
+    if (!own || !(await mailboxAddresses(provider, exchanged)).includes(own)) return finish('otro');
     const saveError = await tokenService.saveTokenFor(link.scope.userId, provider === 'google' ? 'google' : 'outlook', exchanged.refreshToken);
     return finish(saveError ? 'error' : 'conectado');
   } catch {

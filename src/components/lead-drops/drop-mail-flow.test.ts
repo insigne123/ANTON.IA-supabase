@@ -110,6 +110,15 @@ test('«Enriquecer» is one tap: found, it says so with the address and the next
   } finally { await act(async () => root.unmount()); }
 });
 
+test('back from a consent with someone else\'s mailbox, the page says it was not connected and which one to choose', async () => {
+  server(() => ({ body: {} }));
+  const root = await mount(viewOf([contact(LEAD, 'Pedro Araya', { savedLeadId: 'e-1' })]), { mailboxNotice: 'otro' });
+  try {
+    assert.match(dom.window.document.querySelector('[role="status"]')!.textContent || '', /^Ese no es el correo de tu cuenta, así que no lo conectamos\. Elige el correo con el que entras a ANTON\.IA/);
+    assert.ok([...dom.window.document.querySelectorAll('a')].some(link => link.textContent === 'Conectar Gmail'), 'the step is still there to try again');
+  } finally { await act(async () => root.unmount()); }
+});
+
 test('nothing found and a refusal are said as they are, and the contact stays to try again', async () => {
   let step = 0;
   const asked = server(() => ++step === 1

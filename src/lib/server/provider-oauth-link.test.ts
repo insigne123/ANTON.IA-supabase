@@ -14,8 +14,13 @@ const LINK = compile('src/lib/server/provider-oauth-link.ts');
 const TOKEN = 'T'.repeat(48);
 const BASE = 'https://app.example.test';
 
-function harness(options: { owner?: string | null; connected?: Array<'google' | 'outlook'>; tokens?: object; tokenStatus?: number; saveError?: object; sessionUser?: string | null } = {}) {
-  const saves: any[] = [], sessionSaves: any[] = [], exchanges: any[] = [], resolved: unknown[] = [];
+/** Google's id token, as its token endpoint returns it: the mailbox's address is in its claims. */
+const idToken = (claims: object) => `x.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.y`;
+const OWN = 'ana@brigadas.example';
+
+function harness(options: { owner?: string | null; connected?: Array<'google' | 'outlook'>; tokens?: object; tokenStatus?: number; saveError?: object; sessionUser?: string | null;
+  /** The email the drop's person signs in with, and what Microsoft says of the mailbox that consented. */ signIn?: string | null; me?: object; meStatus?: number } = {}) {
+  const saves: any[] = [], sessionSaves: any[] = [], exchanges: any[] = [], resolved: unknown[] = [], profiles: any[] = [];
   const env = { NEXT_PUBLIC_BASE_URL: BASE, NEXT_PUBLIC_GOOGLE_CLIENT_ID: 'google-id', GOOGLE_CLIENT_SECRET: 'google-secret', NEXT_PUBLIC_AZURE_AD_CLIENT_ID: 'azure-id', AZURE_AD_CLIENT_SECRET: 'azure-secret' };
   const connected = new Set(options.connected || []);
   const redirect = (url: URL | string) => {
@@ -29,7 +34,11 @@ function harness(options: { owner?: string | null; connected?: Array<'google' | 
   const load = (code: string, dependencies: Record<string, any>) => {
     const exports: any = {};
     new Function('require', 'exports', 'process', 'fetch', code)((name: string) => { assert.ok(name in dependencies, `Unexpected dependency ${name}`); return dependencies[name]; },
-      exports, { env }, async (url: string, init: any) => { exchanges.push({ url, body: new URLSearchParams(init.body) }); return Response.json(options.tokens || {}, { status: options.tokenStatus || 200 }); });
+      exports, { env }, async (url: string, init: any) => {
+        if (String(url).startsWith('https://graph.microsoft.com/')) { profiles.push({ url: String(url), authorization: init.headers.Authorization }); return Response.json(options.me ?? { mail: OWN }, { status: options.meStatus || 200 }); }
+        exchanges.push({ url, body: new URLSearchParams(init.body) });
+        return Response.json(options.tokens || {}, { status: options.tokenStatus || 200 });
+      });
     return exports;
   };
   const next = { NextResponse: { redirect } };
@@ -39,7 +48,8 @@ function harness(options: { owner?: string | null; connected?: Array<'google' | 
   });
   const link = load(LINK, {
     'next/server': next, '@/lib/server/lead-drop-link': { dropLinkHref }, '@/lib/server/provider-oauth': oauth, '@/lib/services/token-service': { tokenService },
-    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({}) },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ auth: { admin: { getUserById: async (id: string) => options.signIn === null ? { data: { user: null }, error: { message: 'not found' } }
+      : { data: { user: { id, email: options.signIn ?? 'Ana@Brigadas.example' } }, error: null } } } }) },
     '@/lib/server/lead-drop-mail': { resolveDropLink: async (_client: unknown, token: unknown) => {
       resolved.push(token);
       if (token !== TOKEN || options.owner === null) throw new Error('not a link');
@@ -47,15 +57,18 @@ function harness(options: { owner?: string | null; connected?: Array<'google' | 
     } },
     '@/lib/server/mail-sender-preference': { readMailSenderPreference: async () => ({ connected: { google: connected.has('google'), outlook: connected.has('outlook') } }) },
   });
-  return { ...link, oauth, saves, sessionSaves, exchanges, resolved };
+  return { ...link, oauth, saves, sessionSaves, exchanges, resolved, profiles };
 }
 const request = (path: string, values: Record<string, any> = {}) => ({ nextUrl: new URL(path, BASE), cookies: { get: (name: string) => values[name] }, headers: new Headers({ host: 'app.example.test' }) });
 const page = (state: string) => `${BASE}/contactos/${TOKEN}?correo=${state}`;
 const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly';
 
-for (const [provider, saved, scope] of [['google', 'google', GOOGLE_SCOPE], ['azure', 'outlook', 'User.Read Mail.Send Mail.Read']] as const) {
-  test(`${provider}: a person with no mailbox connects one from the email's link, without a session, and lands back on their contacts`, async () => {
-    const flow = harness({ tokens: { refresh_token: 'fake-refresh', scope } });
+const GOOGLE = { refresh_token: 'fake-refresh', scope: GOOGLE_SCOPE, id_token: idToken({ email: 'Ana@Brigadas.example', email_verified: true }) };
+const AZURE = { refresh_token: 'fake-refresh', scope: 'User.Read Mail.Send Mail.Read', access_token: 'fake-access' };
+
+for (const [provider, saved, tokens] of [['google', 'google', GOOGLE], ['azure', 'outlook', AZURE]] as const) {
+  test(`${provider}: a person with no mailbox connects their own from the email's link, without a session, and lands back on their contacts`, async () => {
+    const flow = harness({ tokens });
     const start = await flow.startLinkOAuth(request(`/api/auth/connect/${provider}?enlace=${TOKEN}`), provider, TOKEN);
     const authorize = new URL(start.url);
     const cookie = start.values[`provider_oauth_${provider}`];
@@ -77,22 +90,22 @@ for (const [provider, saved, scope] of [['google', 'google', GOOGLE_SCOPE], ['az
 }
 
 test('a link never replaces a mailbox that already sends: nothing is asked of the provider, nothing is saved', async () => {
-  const flow = harness({ connected: ['outlook'], tokens: { refresh_token: 'fake-refresh', scope: GOOGLE_SCOPE } });
+  const flow = harness({ connected: ['outlook'], tokens: GOOGLE });
   const start = await flow.startLinkOAuth(request(`/api/auth/connect/google?enlace=${TOKEN}`), 'google', TOKEN);
   assert.equal(start.url, page('conectado'));
   assert.deepEqual(start.values, {});
   // Connected from the app while the consent was open: the consent is dropped.
-  const late = harness({ tokens: { refresh_token: 'fake-refresh', scope: GOOGLE_SCOPE } });
+  const late = harness({ tokens: GOOGLE });
   const begun = await late.startLinkOAuth(request(`/api/auth/connect/google?enlace=${TOKEN}`), 'google', TOKEN);
   const attempt = JSON.parse(begun.values.provider_oauth_google.value);
-  const other = harness({ connected: ['google'], tokens: { refresh_token: 'fake-refresh', scope: GOOGLE_SCOPE } });
+  const other = harness({ connected: ['google'], tokens: GOOGLE });
   const finish = await other.finishLinkOAuth(request(`/api/auth/callback/google?code=fake-code&state=${attempt.state}`, begun.values), 'google', TOKEN);
   assert.equal(finish.url, page('conectado'));
   assert.deepEqual(other.saves, []);
 });
 
 test('the cookie alone never says for whom: a forged attempt, another person\'s, a stale state or a link that is not ours save nothing', async () => {
-  const tokens = { refresh_token: 'fake-refresh', scope: GOOGLE_SCOPE };
+  const tokens = GOOGLE;
   const flow = harness({ tokens });
   const start = await flow.startLinkOAuth(request(`/api/auth/connect/google?enlace=${TOKEN}`), 'google', TOKEN);
   const attempt = JSON.parse(start.values.provider_oauth_google.value);
@@ -114,7 +127,7 @@ test('the cookie alone never says for whom: a forged attempt, another person\'s,
   assert.equal(start2.url, `${BASE}/contactos/${TOKEN}`);
   assert.deepEqual(start2.values, {});
   // Partial consent, a failed exchange and a failed save are an error, not a connection.
-  for (const options of [{ tokens: { refresh_token: 'r', scope: 'https://www.googleapis.com/auth/gmail.send' } }, { tokens: {}, tokenStatus: 400 }, { tokens, saveError: { message: 'db' } }]) {
+  for (const options of [{ tokens: { ...GOOGLE, scope: 'https://www.googleapis.com/auth/gmail.send' } }, { tokens: {}, tokenStatus: 400 }, { tokens, saveError: { message: 'db' } }]) {
     const failing = harness(options);
     const begun = await failing.startLinkOAuth(request(`/api/auth/connect/google?enlace=${TOKEN}`), 'google', TOKEN);
     const made = JSON.parse(begun.values.provider_oauth_google.value);
@@ -123,6 +136,38 @@ test('the cookie alone never says for whom: a forged attempt, another person\'s,
   assert.equal(flow.attemptLink(JSON.stringify({ state: 'x' })), null);
   assert.equal(flow.attemptLink('no es json'), null);
   assert.equal(flow.attemptLink(undefined), null);
+});
+
+test('only the account\'s own mailbox: a link passed on to someone else never ties their mailbox to the account that sent it', async () => {
+  const through = async (provider: 'google' | 'azure', options: Parameters<typeof harness>[0]) => {
+    const flow = harness(options);
+    const start = await flow.startLinkOAuth(request(`/api/auth/connect/${provider}?enlace=${TOKEN}`), provider, TOKEN);
+    const attempt = JSON.parse(start.values[`provider_oauth_${provider}`].value);
+    const finish = await flow.finishLinkOAuth(request(`/api/auth/callback/${provider}?code=fake-code&state=${attempt.state}`, start.values), provider, TOKEN);
+    return { flow, url: finish.url };
+  };
+  // Whoever consented is someone else (the link reached them by another way): nothing is kept, and the page says why.
+  for (const [provider, options] of [
+    ['google', { tokens: { ...GOOGLE, id_token: idToken({ email: 'victima@otra.example', email_verified: true }) } }],
+    ['google', { tokens: { ...GOOGLE, id_token: idToken({ email: OWN, email_verified: false }) } }],
+    ['google', { tokens: { ...GOOGLE, id_token: undefined } }],
+    ['google', { tokens: { ...GOOGLE, id_token: 'no-es-un-token' } }],
+    ['azure', { tokens: AZURE, me: { mail: 'victima@otra.example', userPrincipalName: 'victima@otra.example' } }],
+    ['azure', { tokens: AZURE, meStatus: 401 }],
+    ['azure', { tokens: { ...AZURE, access_token: undefined } }],
+    // The account has no sign-in email to compare with, or it is not the mailbox's.
+    ['google', { tokens: GOOGLE, signIn: null }],
+    ['google', { tokens: GOOGLE, signIn: 'otra@brigadas.example' }],
+  ] as const) {
+    const { flow, url } = await through(provider, options as any);
+    assert.equal(url, page('otro'), JSON.stringify(options));
+    assert.deepEqual(flow.saves, []);
+  }
+  // Microsoft names the mailbox by its address or by its sign-in name: either being the account's is enough, in any letter case.
+  const upn = await through('azure', { tokens: AZURE, me: { mail: null, userPrincipalName: 'ANA@brigadas.example' } });
+  assert.equal(upn.url, page('conectado'));
+  assert.deepEqual(upn.flow.saves, [{ userId: 'u-ana', provider: 'outlook', refresh: 'fake-refresh' }]);
+  assert.deepEqual(upn.flow.profiles, [{ url: 'https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName', authorization: 'Bearer fake-access' }]);
 });
 
 test('the app\'s own connection is as it was: it needs the session, and an attempt of the app is not a link attempt', async () => {

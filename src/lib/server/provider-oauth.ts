@@ -91,7 +91,7 @@ export async function startProviderOAuth(req: NextRequest, provider: Provider) {
 }
 
 /** The code for a refresh token with the permissions the app needs, or why it could not be had. Throws when the provider cannot be reached. */
-export async function exchangeProviderCode(provider: Provider, attempt: OAuthAttempt, code: string): Promise<{ refreshToken: string } | { error: string }> {
+export async function exchangeProviderCode(provider: Provider, attempt: OAuthAttempt, code: string): Promise<{ refreshToken: string; accessToken: string | null; idToken: string | null } | { error: string }> {
   const config = oauthConfig(provider);
   if (!config.clientId || !config.clientSecret) return { error: 'configuration_missing' };
   const result = await fetch(config.token, {
@@ -112,7 +112,8 @@ export async function exchangeProviderCode(provider: Provider, attempt: OAuthAtt
     ? ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
     : ['mail.send', 'mail.read'];
   if (!required.every((scope) => scopes.has(scope) || scopes.has(`https://graph.microsoft.com/${scope}`))) return { error: 'missing_permissions' };
-  return { refreshToken: tokens.refresh_token };
+  const text = (value: unknown) => typeof value === 'string' && value ? value : null;
+  return { refreshToken: tokens.refresh_token, accessToken: text(tokens.access_token), idToken: text(tokens.id_token) };
 }
 
 export async function finishProviderOAuth(req: NextRequest, provider: Provider) {
