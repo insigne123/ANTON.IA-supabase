@@ -328,11 +328,13 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
   const lines = drop?.items.length ? alert.lines.filter(line => line.kind !== 'drop') : alert.lines;
   const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base, { heading: lines.length > 0, link: drop.link }) : null;
   const intro = lines.length || !section ? 'Esto te espera hoy en ANTON.IA' : drop!.items.length === 1 ? 'Tu contacto del día ya está listo' : 'Tus contactos del día ya están listos';
+  // Contacts used from the inbox, alone in their email (dropAlertEmail): nothing sends the person into the app.
+  const inbox = Boolean(section && drop?.link && !lines.length);
   const text = [
     `${greeting}. ${intro}${lines.length ? ':' : '.'}`, '',
     ...lines.map(line => `- ${line.text} (${link(line.href)})${line.action ? `. ${line.action.label}: ${link(line.action.href)}` : ''}`), ...(lines.length ? [''] : []),
     ...(section ? [section.text, ''] : []),
-    `Abrir ANTON.IA: ${link('/dashboard')}`,
+    ...(inbox ? [] : [`Abrir ANTON.IA: ${link('/dashboard')}`]),
     `Te avisamos solo cuando hay algo que hacer. Los apagas en «Tu semana»: ${settings}`,
   ].join('\n');
   // A line's own step («Asignar») is a small outlined button under it: the dark «Abrir ANTON.IA» stays the one main button.
@@ -340,7 +342,7 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
     + `<a href="${escape(link(line.href))}" style="color:#111827;text-decoration:none">${escape(line.text)}<span style="color:#2563eb"> &rsaquo;</span></a>`
     + (line.action ? `<br><a href="${escape(link(line.action.href))}" style="display:inline-block;margin-top:8px;padding:4px 12px;border:1px solid #d1d5db;border-radius:8px;color:#111827;text-decoration:none;font-size:13px;line-height:20px">${escape(line.action.label)}</a>` : '')
     + '</p>').join('');
-  const open = section
+  const open = inbox ? '' : section
     ? `<p style="margin:24px 0 0;font-size:14px"><a href="${escape(link('/dashboard'))}" style="color:#2563eb;text-decoration:none">Abrir ANTON.IA &rsaquo;</a></p>`
     : `<p style="margin:24px 0 0"><a href="${escape(link('/dashboard'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Abrir ANTON.IA</a></p>`;
   const html = emailShell(`<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
@@ -350,4 +352,12 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
     + open
     + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p>`);
   return { subject: alert.subject, text, html };
+}
+
+/**
+ * The email of a drop of several contacts, only about them (13 Nov 2026): its subject, each contact with its button, and nothing of
+ * the rest of the day, which goes in its own email (server/daily-alerts.ts, deliverDailyAlert).
+ */
+export function dropAlertEmail(name: string, appUrl: string, drop: NonNullable<AlertFacts['drop']>) {
+  return alertEmail({ subject: dropSubject(drop.items), lines: [] }, name, appUrl, drop);
 }

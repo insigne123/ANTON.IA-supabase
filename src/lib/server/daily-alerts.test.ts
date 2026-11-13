@@ -302,11 +302,45 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     assert.equal(sent[0].attachments.length, 1);
     assert.equal(several.tables.lead_drops[0].status, 'sent');
 
-    // One contact (every team's plan until it asks for more) is opened in the app, as before.
+    // Only about the contacts: its own subject, nothing of the rest of the day, no way into the app.
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].subject, '2 contactos nuevos para ti');
+    assert.match(sent[0].text, /^Hola, Ana\. Tus contactos del día ya están listos\.\n\n\nPedro Araya, Gerente HSE en Minera Andina/);
+    assert.ok(!sent[0].text.includes('Abrir ANTON.IA') && !sent[0].html.includes('Abrir ANTON.IA'));
+
+    // The rest of the day (a reply, an opportunity, a search that keeps failing) is a second email, without the contacts or the PDF.
+    const busyDay = () => {
+      const data = drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya'), contact('6accdbfcd5f5d80001cf6902', 'Luisa Soto')]);
+      data.contacted_leads.push(reply('r-new', '2026-10-19T22:00:00Z'));
+      return data;
+    };
+    const busy = memory(busyDay(), { unique: UNIQUE });
+    const two = sender();
+    assert.deepEqual(await deliverDailyAlert(busy.client, SCOPE, { ...deps(two.send), now: TUESDAY }), { status: 'sent' });
+    assert.deepEqual(two.sent.map(email => email.subject), ['2 contactos nuevos para ti', 'Te respondió Persona r-new']);
+    assert.ok(!two.sent[0].text.includes('Persona r-new') && two.sent[0].attachments.length === 1);
+    assert.ok(two.sent[1].text.includes('Persona r-new'));
+    assert.ok(!two.sent[1].text.includes('Pedro Araya') && !two.sent[1].text.includes('/contactos/') && two.sent[1].attachments === undefined);
+    assert.match(two.sent[1].text, /Abrir ANTON\.IA/);
+    assert.equal(busy.tables.daily_alerts.length, 1, 'one alert a day, whatever it took to send it');
+    assert.deepEqual([busy.tables.daily_alerts[0].status, busy.tables.daily_alerts[0].payload.lines.map((line: any) => line.kind).includes('drop')], ['sent', true]);
+    // The contacts went out and the second email did not: said as a failure, and the contacts are not offered again.
+    const half = memory(busyDay(), { unique: UNIQUE });
+    let count = 0;
+    assert.deepEqual(await deliverDailyAlert(half.client, SCOPE, { ...deps(async () => ++count === 1 ? { ok: true as const } : { ok: false as const, error: 'resend 500' }), now: TUESDAY }), { status: 'failed' });
+    assert.deepEqual([half.tables.daily_alerts[0].status, half.tables.daily_alerts[0].email_error, half.tables.lead_drops[0].status], ['failed', 'resend 500', 'sent']);
+
+    // One contact (every team's plan until it asks for more) is opened in the app, as before, in the day's one email.
     const single = memory(drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya')]), { unique: UNIQUE });
     const one = sender();
     assert.deepEqual(await deliverDailyAlert(single.client, SCOPE, { ...deps(one.send), now: TUESDAY }), { status: 'sent' });
     assert.ok(String(one.sent[0].html).includes(`https://app.antonia.ai/search/contactos/${DROP}`));
+    const oneBusyData = drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya')]);
+    oneBusyData.contacted_leads.push(reply('r-new', '2026-10-19T22:00:00Z'));
+    const oneBusy = sender();
+    await deliverDailyAlert(memory(oneBusyData, { unique: UNIQUE }).client, SCOPE, { ...deps(oneBusy.send), now: TUESDAY });
+    assert.equal(oneBusy.sent.length, 1);
+    assert.ok(oneBusy.sent[0].text.includes('Persona r-new') && oneBusy.sent[0].text.includes('Pedro Araya') && oneBusy.sent[0].text.includes('Abrir ANTON.IA'));
     assert.ok(!String(one.sent[0].html).includes('/contactos/AAAA') && !/\/contactos\/[A-Za-z0-9_-]{48}/.test(String(one.sent[0].html)));
   } finally { if (previous === undefined) delete process.env.INTERNAL_API_SECRET; else process.env.INTERNAL_API_SECRET = previous; }
 });
