@@ -3,6 +3,7 @@ import { decisionEmail, type DecisionNoticeKind } from '@/lib/commercial-opportu
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
 import { isTestAddress, sendReportEmail, type SelfEmail } from '@/lib/server/self-email';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 type Send = (input: SelfEmail) => Promise<{ ok: boolean }>;
 type Row = Record<string, any>;
@@ -41,7 +42,7 @@ export async function notifyDecisionByEmail(client: SupabaseClient, scope: WorkS
   const profiles = new Map(((people.data || []) as Row[]).map(row => [String(row.id), row]));
   const actor = profiles.get(scope.userId);
   const actorName = String(actor?.full_name || '').trim() || String(actor?.email || '').trim() || null;
-  const appUrl = deps.appUrl ?? String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
+  const appUrl = deps.appUrl ?? appLinkBase(String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'), env);
   const send: Send = deps.send ?? (email => sendReportEmail(client, email));
   for (const user of to) {
     const profile = profiles.get(user);

@@ -4,6 +4,7 @@ import { opportunityLocalClock } from '@/lib/commercial-opportunities/workspace'
 import { emailShell } from '@/lib/email-shell';
 import { reportSourceSilence } from '@/lib/server/provider-alerts';
 import { isCompraAgilOutage, isCompraAgilTimeout } from './compra-agil';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 /**
  * The sources of «Oportunidades» watched from outside, after 7 to 9 Nov 2026: Compra Ágil failed for three days (24 of 28
@@ -106,7 +107,7 @@ export async function checkOpportunitySources(client: SupabaseClient, deps: Deps
     // A source nobody has on, or that did not run one of the days, says nothing either way.
     if (days.some(day => !day.searches)) { sources.push({ source, silent: false, alert: null, skipped: true as const }); continue; }
     const silent = days.every(day => day.found === 0);
-    const email = silent ? sourceSilenceEmail(source, days, String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai')) : null;
+    const email = silent ? sourceSilenceEmail(source, days, appLinkBase(String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'), env)) : null;
     sources.push(await reportSourceSilence(client, source, silent, email, { days }, { ...deps, now }));
   }
   return { checked: true as const, sources };

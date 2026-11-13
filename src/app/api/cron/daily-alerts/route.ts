@@ -9,6 +9,7 @@ import { deliverDailyAlert, readAlertsEmail } from '@/lib/server/daily-alerts';
 import { canEmailEveryone, isTestAddress, sendReportEmail } from '@/lib/server/self-email';
 import { readOpportunityManagers } from '@/lib/server/weekly-report';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
     if (!managers.has(organizationId)) managers.set(organizationId, readOpportunityManagers(admin, organizationId).catch(() => []));
     return managers.get(organizationId)!;
   };
-  const appUrl = String(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
+  const appUrl = appLinkBase(String(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'));
   const result = { sent: 0, stored: 0, quiet: 0, already: 0, failed: 0, left: Math.max(0, queue.length - BATCH) };
   const batch = queue.slice(0, BATCH);
   const work = async (row: any) => {

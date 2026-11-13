@@ -3,6 +3,7 @@ import { assignmentDigestEmail, assignmentEmail } from '@/lib/commercial-opportu
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
 import { isTestAddress, sendReportEmail, type SelfEmail } from '@/lib/server/self-email';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 type Send = (input: SelfEmail) => Promise<{ ok: boolean }>;
 type Row = Record<string, any>;
@@ -38,7 +39,7 @@ export async function notifyNewParticipants(client: SupabaseClient, scope: WorkS
   const profiles = new Map(((people.data || []) as Row[]).map(row => [String(row.id), row]));
   const actor = profiles.get(scope.userId);
   const assignedBy = String(actor?.full_name || '').trim() || String(actor?.email || '').trim() || null;
-  const appUrl = deps.appUrl ?? String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
+  const appUrl = deps.appUrl ?? appLinkBase(String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'), env);
   const send: Send = deps.send ?? (input => sendReportEmail(client, input));
   for (const user of newcomers) {
     const profile = profiles.get(user);
@@ -97,7 +98,7 @@ export async function notifyBulkAssignment(client: SupabaseClient, scope: WorkSc
   const profiles = new Map(((people.data || []) as Row[]).map(row => [String(row.id), row]));
   const actor = profiles.get(scope.userId);
   const assignedBy = String(actor?.full_name || '').trim() || String(actor?.email || '').trim() || null;
-  const appUrl = deps.appUrl ?? String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
+  const appUrl = deps.appUrl ?? appLinkBase(String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'), env);
   const send: Send = deps.send ?? (input => sendReportEmail(client, input));
   for (const [user, list] of joined) {
     const profile = profiles.get(user);

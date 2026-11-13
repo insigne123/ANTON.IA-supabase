@@ -5,6 +5,7 @@ import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grant
 import { sendReportEmail } from '@/lib/server/self-email';
 import { deliverWeeklyReport } from '@/lib/server/weekly-report';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
   const memberships: any = ids.length ? await admin.from('organization_members').select('organization_id,user_id').in('user_id', ids) : { data: [] };
   if (memberships.error) return NextResponse.json({ error: 'No pudimos leer las organizaciones.' }, { status: 503, headers });
   const result = { sent: 0, stored: 0, already: 0, failed: 0, left: 0 };
-  const appUrl = String(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
+  const appUrl = appLinkBase(String(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'));
   let done = 0;
   for (const membership of memberships.data || []) {
     if (done >= BATCH) { result.left++; continue; }

@@ -15,6 +15,7 @@ import { detectAutoReplyHeaders } from '@/lib/reply-autoresponse';
 import { conversationAdvice } from '@/lib/conversation-advice';
 import { replySyncDueFilter } from '@/lib/server/reply-sync-policy';
 import { emailDomain, isFreeMailDomain } from '@/lib/cowork/send-cadence';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 export { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 export type { InboundReplyIngestionResult } from '@/lib/server/inbound-reply-ingestion';
@@ -474,7 +475,7 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
   }
 
   if (!failure && row.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+    const appUrl = appLinkBase(process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai');
     const summary = classification.summary || preview || 'Respuesta positiva detectada';
     const who = colleague ? `${sender}, de la empresa de ${row.email || row.lead_id || row.id},` : `Lead ${row.email || row.lead_id || row.id}`;
     await notificationService.sendAlert(

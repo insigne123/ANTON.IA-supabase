@@ -12,6 +12,7 @@ import { dropLinkBase, dropLinkUrl } from '@/lib/server/lead-drop-link';
 import { LeadDropsError, readDrop, type DropScope } from '@/lib/server/lead-drops';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { isTestAddress, sendReportEmail, type SelfEmail } from '@/lib/server/self-email';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 /**
  * What a person does with a contact of their «Contacto del día» besides saving it (12 Nov 2026, docs/contacto-del-dia.md): change its
@@ -152,7 +153,7 @@ export async function mailDropCampaign(client: Client, scope: DropScope, dropId:
   const to = String(profile.data?.email || '').trim();
   if (!to || isTestAddress(to) || !readAlertsEmail(profile.data?.signatures)) return skipped('unreachable');
   const mailbox = await (deps.mailbox ?? readMailSenderPreference)(client, scope.userId).catch(() => ({ resolved: null }));
-  const appUrl = deps.appUrl ?? String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
+  const appUrl = deps.appUrl ?? appLinkBase(String(env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'), env);
   const email = dropCampaignEmail(item, {
     dropId, contactEmail, mailbox: mailbox.resolved ? MAIL_PROVIDER_LABEL[mailbox.resolved] : null, name: String(profile.data?.full_name || ''),
     // All of this email is at the address its link opens (LEAD_DROPS_PUBLIC_URL): the link to its settings too.

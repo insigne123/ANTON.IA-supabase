@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { appLinkBase, plainOrigin } from '@/lib/server/app-origins';
 
 /**
  * The way into a «Contacto del día» from the person's inbox, without signing in (13 Nov 2026, docs/contacto-del-dia.md): the emails
@@ -49,20 +50,12 @@ export function readDropLink(token: unknown, options: { now?: Date; env?: Env } 
 export const dropLinkHref = (token: string) => `/contactos/${token}`;
 
 /**
- * Where the link opens: the address people know the product by (LEAD_DROPS_PUBLIC_URL, https://anton-ia.yago.cl since 13 Nov 2026),
- * which serves this same app; without it, or with something that is not a plain https address, the app's own. Only the way into a
- * drop from an email uses it: the rest of the app keeps its address, where its sessions and its mailbox consents live.
+ * Where the link opens: the address people know the product by (APP_PUBLIC_URL, https://anton-ia.yago.cl since 13 Nov 2026,
+ * src/lib/server/app-origins.ts), which serves this same app; without it, the app's own. LEAD_DROPS_PUBLIC_URL, when set, is an
+ * address for these links alone.
  */
 export function dropLinkBase(appUrl: string, env: Env = process.env): string {
-  const own = appUrl.replace(/\/$/, '');
-  const raw = String(env.LEAD_DROPS_PUBLIC_URL || '').trim();
-  if (!raw) return own;
-  try {
-    const url = new URL(raw);
-    const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-    if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:')) || url.username || url.password || url.search || url.hash || url.pathname !== '/') return own;
-    return url.origin;
-  } catch { return own; }
+  return plainOrigin(env.LEAD_DROPS_PUBLIC_URL) ?? appLinkBase(appUrl, env);
 }
 
 /** The full address for an email, or null without a secret. */

@@ -3,6 +3,7 @@ import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import type { AutonomousReplyDecision } from '@/lib/antonia-reply-policy';
 import { draftAutonomousReply } from '@/lib/server/antonia-reply-drafting';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 type EscalateReplyReviewInput = {
   supabase: any;
@@ -26,7 +27,7 @@ type EscalateReplyReviewInput = {
 };
 
 function getAppUrl() {
-  return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://app.antonia.ai').trim().replace(/\/$/, '');
+  return appLinkBase(String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://app.antonia.ai'));
 }
 
 export async function maybeEscalateAutonomousReplyReview(input: EscalateReplyReviewInput) {
