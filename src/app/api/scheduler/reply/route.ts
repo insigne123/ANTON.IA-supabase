@@ -9,6 +9,7 @@ import {
     createStableInboundMessageId,
     ingestInboundReply,
 } from '@/lib/server/inbound-reply-ingestion';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
         }
 
         if (!row.reply_intent && row.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
-            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+            const appUrl = appLinkBase(process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai');
             const summary = classification.summary || preview || 'Respuesta positiva detectada';
             await notificationService.sendAlert(
                 row.organization_id,

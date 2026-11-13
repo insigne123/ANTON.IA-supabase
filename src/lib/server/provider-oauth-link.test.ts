@@ -45,6 +45,8 @@ function harness(options: { owner?: string | null; connected?: Array<'google' | 
   const next = { NextResponse: { redirect } };
   const oauth = load(OAUTH, {
     'node:crypto': { createHash, randomBytes }, 'next/headers': { cookies: () => {} }, 'next/server': next, '@/lib/services/token-service': { tokenService },
+    // The link's consent runs at the app's own address, whatever the public one is (app-origins.ts).
+    '@/lib/server/app-origins': { publicAppOrigin: () => null, requestAppOrigin: (_headers: unknown, canonical: string) => canonical },
     '@supabase/auth-helpers-nextjs': { createRouteHandlerClient: () => ({ auth: { getUser: async () => ({ data: { user: options.sessionUser ? { id: options.sessionUser } : null } }) } }) },
   });
   const link = load(LINK, {

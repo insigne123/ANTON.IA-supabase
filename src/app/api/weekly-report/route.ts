@@ -8,11 +8,12 @@ import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { canEmailEveryone, resendSender, sendReportEmail } from '@/lib/server/self-email';
 import { WeeklyReportError, buildWeeklyReport, readReportEmail, saveOpportunityManagers, saveReportEmail } from '@/lib/server/weekly-report';
 import { reportEmail } from '@/lib/weekly-report';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 export const dynamic = 'force-dynamic';
 const noStore = { 'Cache-Control': 'private, no-store' };
 const toAuthError = (error: unknown) => (error instanceof WeeklyReportError || error instanceof DailyAlertsError ? new AuthError(error.message, error.status) : error);
-const appUrl = () => String(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai');
+const appUrl = () => appLinkBase(String(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai'));
 
 /** «Informe semanal» of the signed-in person (src/lib/weekly-report.ts): this week or the last, with a section per role. */
 export async function GET(req: NextRequest) {

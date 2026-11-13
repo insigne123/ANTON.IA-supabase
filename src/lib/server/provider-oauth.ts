@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
+import { publicAppOrigin, requestAppOrigin } from '@/lib/server/app-origins';
 import { tokenService } from '@/lib/services/token-service';
 
 export type Provider = 'google' | 'azure';
@@ -9,7 +10,20 @@ export type Provider = 'google' | 'azure';
 export type OAuthAttempt = { state: string; verifier: string; userId: string; redirectUri: string; createdAt: number; link?: string };
 const MAX_AGE = 600;
 export const oauthCookie = (provider: Provider) => `provider_oauth_${provider}`;
+/** The app's own address: the one Google and Microsoft know, so every consent comes back to it. */
 export const oauthBase = (req: NextRequest) => new URL(process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin).origin;
+/**
+ * Where the person is: the public address (APP_PUBLIC_URL, src/lib/server/app-origins.ts) when the request came to it, else the
+ * app's own. The session and the attempt's cookie live there, so a consent started there ends there.
+ */
+export const oauthHome = (req: NextRequest, base: string) => requestAppOrigin(req.headers, base);
+/**
+ * Marks the state of a consent started at the public address. The providers only know the app's own callback, so the answer lands
+ * there first, where there is neither session nor attempt; the mark tells that callback to hand the answer on, unread, to the
+ * public address. It is not what protects the attempt: the state is still compared whole with the cookie, and the code is worth
+ * nothing without the verifier that cookie keeps.
+ */
+const PUBLIC_STATE = 'p.';
 
 export function oauthConfig(provider: Provider) {
   const tenant = encodeURIComponent(process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common');
@@ -52,10 +66,10 @@ export function offCanonicalHost(req: NextRequest, base: string) {
 }
 
 /** The way to the provider's consent, with the attempt kept in a cookie that only this server's callback reads. */
-export function beginProviderOAuth(provider: Provider, base: string, userId: string, link?: string) {
+export function beginProviderOAuth(provider: Provider, base: string, userId: string, link?: string, home: string = base) {
   const config = oauthConfig(provider);
   const attempt: OAuthAttempt = {
-    state: randomBytes(32).toString('base64url'),
+    state: `${home === base ? '' : PUBLIC_STATE}${randomBytes(32).toString('base64url')}`,
     verifier: randomBytes(32).toString('base64url'),
     userId,
     redirectUri: `${base}/api/auth/callback/${provider}`,
@@ -73,7 +87,7 @@ export function beginProviderOAuth(provider: Provider, base: string, userId: str
   const response = NextResponse.redirect(url);
   response.headers.set('Cache-Control', 'no-store');
   response.cookies.set(oauthCookie(provider), JSON.stringify(attempt), {
-    httpOnly: true, secure: base.startsWith('https:'), sameSite: 'lax', path: '/api/auth', maxAge: MAX_AGE,
+    httpOnly: true, secure: home.startsWith('https:'), sameSite: 'lax', path: '/api/auth', maxAge: MAX_AGE,
   });
   return response;
 }
@@ -81,13 +95,15 @@ export function beginProviderOAuth(provider: Provider, base: string, userId: str
 export async function startProviderOAuth(req: NextRequest, provider: Provider) {
   const config = oauthConfig(provider);
   const base = oauthBase(req);
-  const failure = (error: string) => NextResponse.redirect(new URL(`${config.page}?error=${error}`, base));
-  if (offCanonicalHost(req, base)) return NextResponse.redirect(new URL(req.nextUrl.pathname, base));
+  // Signed in at the public address: the consent starts here, where the session is, and comes back here through the app's callback.
+  const home = oauthHome(req, base);
+  const failure = (error: string) => NextResponse.redirect(new URL(`${config.page}?error=${error}`, home));
+  if (home === base && offCanonicalHost(req, base)) return NextResponse.redirect(new URL(req.nextUrl.pathname, base));
   const supabase = createRouteHandlerClient({ cookies });
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return failure('session_expired');
   if (!config.clientId || !config.clientSecret) return failure('configuration_missing');
-  return beginProviderOAuth(provider, base, user.id);
+  return beginProviderOAuth(provider, base, user.id, undefined, home);
 }
 
 /** The code for a refresh token with the permissions the app needs, or why it could not be had. Throws when the provider cannot be reached. */
@@ -119,13 +135,25 @@ export async function exchangeProviderCode(provider: Provider, attempt: OAuthAtt
 export async function finishProviderOAuth(req: NextRequest, provider: Provider) {
   const config = oauthConfig(provider);
   const base = oauthBase(req);
+  const home = oauthHome(req, base);
+  // A consent started at the public address answers here first: handed on as it came, to the address that holds its session and
+  // its attempt. Only ever to the address the server was configured with, and nothing of it is read here.
+  if (home === base && req.nextUrl.searchParams.get('state')?.startsWith(PUBLIC_STATE)) {
+    const open = publicAppOrigin();
+    if (open && open !== base) {
+      const response = NextResponse.redirect(new URL(`/api/auth/callback/${provider}${req.nextUrl.search}`, open));
+      response.headers.set('Cache-Control', 'no-store');
+      response.headers.set('Referrer-Policy', 'no-referrer');
+      return response;
+    }
+  }
   const cookieName = oauthCookie(provider);
   const finish = (params: Record<string, string>) => {
-    const url = new URL(config.page, base);
+    const url = new URL(config.page, home);
     url.search = new URLSearchParams(params).toString();
     const response = NextResponse.redirect(url);
     response.headers.set('Cache-Control', 'no-store');
-    response.cookies.set(cookieName, '', { httpOnly: true, secure: base.startsWith('https:'), sameSite: 'lax', path: '/api/auth', maxAge: 0 });
+    response.cookies.set(cookieName, '', { httpOnly: true, secure: home.startsWith('https:'), sameSite: 'lax', path: '/api/auth', maxAge: 0 });
     return response;
   };
   try {

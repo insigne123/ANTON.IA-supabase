@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './antonia-report-email';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 function reviewRequiredEmailResult() {
     // This service never dispatches email; a separate durable approval flow is required.
@@ -7,7 +8,7 @@ function reviewRequiredEmailResult() {
 }
 
 function getDashboardUrl() {
-    const base = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://app.antonia.ai').trim().replace(/\/$/, '');
+    const base = appLinkBase(String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://app.antonia.ai'));
     return `${base}/antonia`;
 }
 

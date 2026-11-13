@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { requireAuth } from '@/lib/server/auth-utils';
 import { assertOrganizationAccess, organizationApiError, organizationNoStoreHeaders } from '@/lib/server/organization-api';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,9 +35,8 @@ export async function POST(request: Request, context: { params: Promise<{ organi
     });
     if (error) throw error;
 
-    const origin = String(
-      process.env.CANONICAL_APP_URL || process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin,
-    ).trim().replace(/\/$/, '');
+    // The invitation opens at the address people know the product by, when there is one (app-origins.ts).
+    const origin = appLinkBase(String(process.env.CANONICAL_APP_URL || process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin));
     return NextResponse.json({
       inviteUrl: `${origin}/invite/${encodeURIComponent(token)}`,
       expiresAt: data.expiresAt,

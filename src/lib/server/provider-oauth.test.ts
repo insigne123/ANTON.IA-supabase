@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { publicAppOrigin, requestAppOrigin } from './app-origins';
 
 const compiled = ts.transpileModule(readFileSync('src/lib/server/provider-oauth.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -22,6 +23,8 @@ function harness(options: { userId?: string | null; tokens?: object; tokenStatus
       return response;
     } } },
     '@/lib/services/token-service': { tokenService: { saveToken: async (...args: any[]) => { saves.push(args); return options.saveError || null; } } },
+    // The two addresses, read from this harness's environment (app-origins.ts).
+    '@/lib/server/app-origins': { publicAppOrigin: () => publicAppOrigin(env), requestAppOrigin: (headers: Headers, canonical: string) => requestAppOrigin(headers, canonical, env) },
   };
   new Function('require', 'exports', 'process', 'fetch', compiled)((name: string) => {
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);
@@ -128,3 +131,77 @@ test('OAuth fails closed without server configuration and does not trust forward
   assert.equal(result.url, 'https://app.example.test/gmail?error=configuration_missing');
   assert.equal(flow.calls.length, 0);
 });
+
+// Signed in at the public address (APP_PUBLIC_URL): the session and the attempt live there, while Google and Microsoft only know the
+// app's own callback. The consent starts at the public address, answers at the app's callback, and is handed on to where it started.
+const OPEN = 'https://open.example.test';
+const atOpen = (path: string, values: Record<string, any> = {}, header = 'x-forwarded-host') => ({
+  nextUrl: new URL(path, 'http://0.0.0.0:8080'), cookies: { get: (name: string) => values[name] }, headers: new Headers({ [header]: 'open.example.test' }),
+});
+for (const provider of ['google', 'azure']) {
+  const page = provider === 'google' ? '/gmail' : '/outlook';
+  const scope = provider === 'google' ? 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly' : 'User.Read Mail.Send Mail.Read';
+  test(`${provider}: signed in at the public address, the mailbox is connected there through the callback the provider knows`, async () => {
+    const flow = harness({ tokens: { refresh_token: 'fake-refresh', scope }, env: { APP_PUBLIC_URL: OPEN } });
+    for (const header of ['host', 'x-forwarded-host']) {
+      const start = await flow.startProviderOAuth(atOpen(`/api/auth/connect/${provider}`, {}, header), provider);
+      const authorize = new URL(start.url);
+      const attempt = JSON.parse(start.values[`provider_oauth_${provider}`].value);
+      // It starts here, not at the app's own address, and the provider is told the one callback it knows.
+      assert.ok(authorize.host.endsWith('google.com') || authorize.host.endsWith('microsoftonline.com'));
+      assert.equal(authorize.searchParams.get('redirect_uri'), `https://app.example.test/api/auth/callback/${provider}`);
+      assert.equal(attempt.redirectUri, `https://app.example.test/api/auth/callback/${provider}`);
+      assert.match(attempt.state, /^p\.[A-Za-z0-9_-]{43}$/);
+      assert.equal(authorize.searchParams.get('state'), attempt.state);
+      assert.equal(authorize.searchParams.get('code_challenge'), createHash('sha256').update(attempt.verifier).digest('base64url'));
+
+      // The answer lands at the app's own callback, which has neither the session nor the attempt: handed on whole, nothing read.
+      const before = flow.calls.length;
+      const landed = await flow.finishProviderOAuth(request(`/api/auth/callback/${provider}?code=fake-code&state=${attempt.state}`), provider);
+      assert.equal(landed.url, `${OPEN}/api/auth/callback/${provider}?code=fake-code&state=${attempt.state}`);
+      assert.equal(landed.headers.get('Referrer-Policy'), 'no-referrer');
+      assert.equal(landed.headers.get('Cache-Control'), 'no-store');
+      assert.deepEqual(landed.values, {}, 'no cookie is touched at the app\'s own address');
+      assert.equal(flow.calls.length, before, 'the code is not exchanged there');
+
+      // At the public address it ends as any other: the same session, the same attempt, the same verifier.
+      const saved = flow.saves.length;
+      const finish = await flow.finishProviderOAuth(atOpen(`/api/auth/callback/${provider}?code=fake-code&state=${attempt.state}`, start.values, header), provider);
+      assert.equal(finish.url, `${OPEN}${page}?connected=true`);
+      assert.equal(flow.calls.at(-1).init.body.get('code_verifier'), attempt.verifier);
+      assert.equal(flow.calls.at(-1).init.body.get('redirect_uri'), `https://app.example.test/api/auth/callback/${provider}`);
+      assert.equal(flow.saves.length, saved + 1);
+      assert.equal(flow.saves.at(-1)[2], 'fake-refresh');
+    }
+  });
+
+  test(`${provider}: the hand-on gives nothing away: no session, another person's attempt or a made-up state end with nothing connected`, async () => {
+    const env = { APP_PUBLIC_URL: OPEN };
+    const flow = harness({ tokens: { refresh_token: 'fake-refresh', scope }, env });
+    const start = await flow.startProviderOAuth(atOpen(`/api/auth/connect/${provider}`), provider);
+    const attempt = JSON.parse(start.values[`provider_oauth_${provider}`].value);
+    const name = `provider_oauth_${provider}`;
+    // Without the attempt's cookie (another browser, a link someone passed on), or with a state that is not the cookie's.
+    for (const values of [{}, { [name]: { value: JSON.stringify({ ...attempt, state: `p.${'x'.repeat(43)}` }) } }, { [name]: { value: JSON.stringify({ ...attempt, userId: 'other' }) } }]) {
+      const response = await flow.finishProviderOAuth(atOpen(`/api/auth/callback/${provider}?code=fake&state=${attempt.state}`, values), provider);
+      assert.equal(response.url, `${OPEN}${page}?error=invalid_state`);
+    }
+    // Nobody signed in at the public address: nothing starts and nothing ends.
+    const anonymous = harness({ userId: null, env });
+    assert.equal((await anonymous.startProviderOAuth(atOpen(`/api/auth/connect/${provider}`), provider)).url, `${OPEN}${page}?error=session_expired`);
+    assert.equal((await anonymous.finishProviderOAuth(atOpen(`/api/auth/callback/${provider}?code=fake&state=${attempt.state}`, start.values), provider)).url, `${OPEN}${page}?error=session_expired`);
+    assert.equal(flow.calls.length + anonymous.calls.length, 0, 'no code is ever exchanged');
+    assert.equal(flow.saves.length, 0);
+    // An attempt of the app's own address is never handed on, whatever its state looks like without the mark.
+    const own = await flow.startProviderOAuth(request(`/api/auth/connect/${provider}`), provider);
+    assert.doesNotMatch(JSON.parse(own.values[name].value).state, /^p\./);
+    // Without a public address configured, a marked state is just a state that matches no attempt; and a host the server was not
+    // configured with is not a place to hand anything on to.
+    const plain = harness();
+    assert.equal((await plain.finishProviderOAuth(request(`/api/auth/callback/${provider}?code=fake&state=${attempt.state}`), provider)).url, `https://app.example.test${page}?error=invalid_state`);
+    const elsewhere = { nextUrl: new URL(`http://0.0.0.0:8080/api/auth/connect/${provider}`), cookies: { get: () => undefined }, headers: new Headers({ 'x-forwarded-host': 'evil.example' }) };
+    const sent = await flow.startProviderOAuth(elsewhere, provider);
+    assert.equal(sent.url, `https://app.example.test/api/auth/connect/${provider}`);
+    assert.deepEqual(sent.values, {});
+  });
+}

@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const requestUrl = new URL(request.url);
     let origin: string;
     try {
-        origin = authCallbackOrigin(requestUrl);
+        origin = authCallbackOrigin(requestUrl, process.env, request.headers);
     } catch {
         return NextResponse.json({ error: 'No se pudo abrir el enlace. Intenta de nuevo más tarde.' }, {
             status: 503, headers: { 'Cache-Control': 'no-store' },

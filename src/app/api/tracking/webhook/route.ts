@@ -12,6 +12,7 @@ import {
     ingestInboundReply,
     safetyStopCampaignRecipientFromContacted,
 } from '@/lib/server/inbound-reply-ingestion';
+import { appLinkBase } from '@/lib/server/app-origins';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -450,7 +451,7 @@ export async function POST(req: Request) {
                             bookingLink: autopilotConfig?.booking_link,
                             meetingInstructions: autopilotConfig?.meeting_instructions,
                         });
-                        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                        const appUrl = appLinkBase(process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai');
                         const summary = classification.summary || preview || 'Respuesta positiva detectada';
 
                         await notificationService.sendAlert(

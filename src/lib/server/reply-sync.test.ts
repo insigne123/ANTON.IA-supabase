@@ -4,6 +4,7 @@ import test from 'node:test';
 import ts from 'typescript';
 import { emailDomain, isFreeMailDomain } from '../cowork/send-cadence';
 import { replyStageSuggestion } from '../reply-stage';
+import { appLinkBase } from './app-origins';
 
 // Isolate provider polling from classification, notifications and all external services.
 const source = readFileSync('src/lib/server/reply-sync.ts', 'utf8');
@@ -15,6 +16,8 @@ function load(overrides: Record<string, unknown> = {}) {
     detectAutoReplyHeaders: () => null,
     replySyncDueFilter: () => 'reply_sync_attempted_at.is.null',
     emailDomain, isFreeMailDomain,
+    // Where the alert's link opens (app-origins.ts): the real rule, with this run's environment.
+    appLinkBase,
     ...overrides,
   }), exports);
   return exports;
