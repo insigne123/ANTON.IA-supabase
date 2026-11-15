@@ -305,7 +305,7 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const floor = now.getTime() - 4 * 86_400_000;
   const since = new Date(last.data ? Math.max(Date.parse(last.data.created_at), floor) : now.getTime() - 86_400_000).toISOString();
   // The team's plan says which days carry contacts (dropPlanFor): one on Tuesdays, Wednesdays and Fridays unless it says more.
-  const todayDrop = dropPlanFor(client as any, scope.organizationId).then(plan => dropDay(now, plan) ? readTodayDrop(client, scope, today) : null);
+  const todayDrop = dropPlanFor(client as any, scope.organizationId, scope.userId).then(plan => dropDay(now, plan) ? readTodayDrop(client, scope, today) : null);
   if (deps.requireDrop && !(await todayDrop)) return { status: 'quiet' as const };
   const [facts, drop] = await Promise.all([
     readAlertFacts(client, scope, { now, since, opportunities: deps.opportunities, lastSignInAt: deps.lastSignInAt }),

@@ -35,6 +35,30 @@ export function dropPlanOf(row: { lead_drop_size?: unknown; lead_drop_weekdays?:
     weekdays: weekdays.length ? weekdays : DEFAULT_DROP_PLAN.weekdays,
   };
 }
+/**
+ * A person's own plan over their team's (lead_drop_person_plans, since 15 Nov 2026): how many contacts, their days (the team's when
+ * the row names none) and the day it began. A row out of range is no plan: the person keeps the team's.
+ */
+export type PersonDropPlan = { size: number; weekdays: number[] | null; startsOn: string | null };
+export function personDropPlanOf(row: { lead_drop_size?: unknown; lead_drop_weekdays?: unknown; starts_on?: unknown } | null | undefined): PersonDropPlan | null {
+  const size = Number(row?.lead_drop_size);
+  if (!Number.isInteger(size) || size < 1 || size > MAX_DROP_SIZE) return null;
+  const weekdays = Array.isArray(row?.lead_drop_weekdays)
+    ? [...new Set(row!.lead_drop_weekdays.map(Number).filter(day => Number.isInteger(day) && day >= 1 && day <= 5))].sort((a, b) => a - b) : [];
+  const startsOn = /^\d{4}-\d{2}-\d{2}/.test(String(row?.starts_on || '')) ? String(row!.starts_on).slice(0, 10) : null;
+  return { size, weekdays: weekdays.length ? weekdays : null, startsOn };
+}
+/** What a person gets: their own plan when they have one, on their own days or the team's; the team's otherwise. */
+export const planOfPerson = (team: DropPlan, own?: PersonDropPlan | null): DropPlan => own ? { size: own.size, weekdays: own.weekdays ?? team.weekdays } : team;
+/**
+ * People of one workspace by what they get today: one group per number of contacts, the largest first, so whoever gets several is
+ * chosen with the finder and the rest as a team of one contact is.
+ */
+export function groupByDropSize(people: string[], sizeOf: (userId: string) => number): Array<{ size: number; people: string[] }> {
+  const groups = new Map<number, string[]>();
+  for (const userId of people) groups.set(sizeOf(userId), [...(groups.get(sizeOf(userId)) || []), userId]);
+  return [...groups].sort((a, b) => b[0] - a[0]).map(([size, members]) => ({ size, people: members }));
+}
 const weekdayOf = (day: string) => new Date(`${day}T12:00:00.000Z`).getUTCDay();
 export const dropDay = (now: Date, plan: DropPlan = DEFAULT_DROP_PLAN) => plan.weekdays.includes(weekdayOf(dayInZone(now)));
 const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];

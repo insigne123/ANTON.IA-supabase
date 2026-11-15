@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { alertDay, managesOpportunityAlert } from '@/lib/daily-alerts';
-import { dropDay } from '@/lib/lead-drops';
-import { dropPlans } from '@/lib/server/lead-drops';
+import { DEFAULT_DROP_PLAN, dropDay, planOfPerson } from '@/lib/lead-drops';
+import { dropPlans, personDropPlans, personPlanKey } from '@/lib/server/lead-drops';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { deliverDailyAlert, readAlertsEmail } from '@/lib/server/daily-alerts';
@@ -34,8 +34,12 @@ export async function POST(request: Request) {
   const admin = getSupabaseAdminClient();
   const regular = alertDay(now);
   // Not a day of alerts: only the teams with contacts today, and only to carry them.
-  const withContacts = regular ? null : new Set([...(await dropPlans(admin))].filter(([, plan]) => dropDay(now, plan)).map(([organizationId]) => organizationId));
-  if (withContacts && !withContacts.size) return NextResponse.json({ skipped: 'not_alert_day' }, { headers });
+  const plans = regular ? null : await dropPlans(admin);
+  const withContacts = plans ? new Set([...plans].filter(([, plan]) => dropDay(now, plan)).map(([organizationId]) => organizationId)) : null;
+  // ...and whoever has a plan of their own with contacts today (lead_drop_person_plans), whatever their team's days are.
+  const peopleWithContacts = plans ? new Set([...(await personDropPlans(admin))]
+    .filter(([key, own]) => dropDay(now, planOfPerson(plans.get(key.split(':')[0]) ?? DEFAULT_DROP_PLAN, own))).map(([key]) => key)) : null;
+  if (withContacts && !withContacts.size && !peopleWithContacts?.size) return NextResponse.json({ skipped: 'not_alert_day' }, { headers });
   const today = dayInZone(now);
   const [members, done, tokens]: any[] = await Promise.all([
     admin.from('organization_members').select('organization_id,user_id,role,created_at').order('created_at').limit(5000),
@@ -57,7 +61,7 @@ export async function POST(request: Request) {
   const home = new Map<string, string>();
   for (const row of members.data || []) if (!home.has(String(row.user_id))) home.set(String(row.user_id), String(row.organization_id));
   const queue = ((members.data || []) as any[]).filter(row => on.has(String(row.user_id)) && !alerted.has(`${row.organization_id}:${row.user_id}`)
-    && (!withContacts || withContacts.has(String(row.organization_id))));
+    && (!withContacts || withContacts.has(String(row.organization_id)) || Boolean(peopleWithContacts?.has(personPlanKey(String(row.organization_id), String(row.user_id))))));
   // Who can assign on Oportunidades in each workspace: its owners and administrators.
   const admins = new Map<string, Set<string>>();
   for (const row of members.data || []) {

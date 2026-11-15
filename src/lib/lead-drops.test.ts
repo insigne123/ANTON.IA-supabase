@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -215,6 +215,22 @@ test('a team\'s plan: how many contacts and on which days, and anything out of r
   // 19 Oct 2026 is a Monday; the 24th, a Saturday.
   assert.deepEqual(['19', '20', '22', '24', '25'].map(day => dropDay(new Date(`2026-10-${day}T15:00:00.000Z`), daily)), [true, true, true, false, false]);
   assert.deepEqual(['19', '22', '23', '24'].map(day => nextDropDay(new Date(`2026-10-${day}T15:00:00.000Z`), daily)), ['mañana', 'mañana', 'el lunes', 'el lunes']);
+});
+
+test('a person\'s own plan: how many contacts they get whatever the team\'s, on the team\'s days unless they have their own (15 nov)', () => {
+  const team = { size: 1, weekdays: [2, 3, 5] };
+  assert.deepEqual(personDropPlanOf({ lead_drop_size: 6, lead_drop_weekdays: null, starts_on: '2026-11-16' }), { size: 6, weekdays: null, startsOn: '2026-11-16' });
+  assert.deepEqual(personDropPlanOf({ lead_drop_size: 3, lead_drop_weekdays: [5, 1, 1], starts_on: '2026-11-16T03:00:00Z' }), { size: 3, weekdays: [1, 5], startsOn: '2026-11-16' });
+  assert.deepEqual(personDropPlanOf({ lead_drop_size: 2, lead_drop_weekdays: [6, 7], starts_on: 'ayer' }), { size: 2, weekdays: null, startsOn: null }, 'days out of the working week are the team\'s');
+  for (const row of [null, undefined, {}, { lead_drop_size: 0 }, { lead_drop_size: 11 }, { lead_drop_size: 'seis' }]) assert.equal(personDropPlanOf(row as any), null);
+  assert.deepEqual(planOfPerson(team, { size: 6, weekdays: null, startsOn: null }), { size: 6, weekdays: [2, 3, 5] });
+  assert.deepEqual(planOfPerson(team, { size: 6, weekdays: [1, 2, 3, 4, 5], startsOn: null }), { size: 6, weekdays: [1, 2, 3, 4, 5] });
+  assert.equal(planOfPerson(team, null), team);
+  assert.equal(planOfPerson(team), team);
+  // People of one team who get a different number of contacts are searched apart, the most first.
+  const sizes: Record<string, number> = { ana: 1, leo: 6, sol: 1, tom: 6, eva: 3 };
+  assert.deepEqual(groupByDropSize(['ana', 'leo', 'sol', 'tom', 'eva'], userId => sizes[userId]), [{ size: 6, people: ['leo', 'tom'] }, { size: 3, people: ['eva'] }, { size: 1, people: ['ana', 'sol'] }]);
+  assert.deepEqual(groupByDropSize([], () => 1), []);
 });
 
 test('the finder\'s pick: the customer\'s own roles by score, and the last slots for roles next to them', () => {

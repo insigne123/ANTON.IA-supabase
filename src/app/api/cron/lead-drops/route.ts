@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { generateStructured } from '@/ai/openai-json';
 import { dayInZone } from '@/lib/admin/chile-time';
-import { DEFAULT_DROP_PLAN, dropDay } from '@/lib/lead-drops';
+import { DEFAULT_DROP_PLAN, dropDay, groupByDropSize, planOfPerson } from '@/lib/lead-drops';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
-import { dropPlans, dropsEnabled, dropsMonthlyUsd, monthSpend, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
+import { dropPlans, dropsEnabled, dropsMonthlyUsd, monthSpend, personDropPlans, personPlanKey, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
 import { dropBriefEnabled, researchDropContact } from '@/lib/server/lead-drop-research';
 import { canEmailEveryone, isTestAddress } from '@/lib/server/self-email';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -29,7 +29,8 @@ const DROP_PARALLEL = 6;
 
 /**
  * «Contacto del día» (functions/index.ts, leadDropsTick, Monday to Friday from 6:00 to 7:40 in Chile): on the days of each
- * team's plan (Tuesdays, Wednesdays and Fridays unless its row says otherwise; a day in nobody's plan does nothing), first
+ * team's plan (Tuesdays, Wednesdays and Fridays unless its row says otherwise; a day in nobody's plan does nothing) and of
+ * each person's own when they have one (lead_drop_person_plans: some of a team get more contacts than the rest), first
  * finishes the drops an earlier run planned, then plans the missing ones, organization by organization, and writes
  * them while there is time. Only for whoever will get them by email (the alerts on, an address, and their own mailbox or the
  * reports mailbox), one drop per person in their team's workspace. The morning alert (8:00) carries what is ready.
@@ -52,9 +53,12 @@ export async function POST(request: Request) {
   const admin = getSupabaseAdminClient();
   const today = dayInZone(now);
   // Each team's days and contacts; a team without a row of its own has the default.
-  const plans = await dropPlans(admin);
-  const planOf = (organizationId: string) => plans.get(organizationId) ?? DEFAULT_DROP_PLAN;
-  if (!dropDay(now) && ![...plans.values()].some(plan => dropDay(now, plan))) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
+  const [plans, own] = await Promise.all([dropPlans(admin), personDropPlans(admin)]);
+  // What a person gets in a workspace: their own plan when they have one, the team's otherwise.
+  const planOf = (organizationId: string, userId?: string) =>
+    planOfPerson(plans.get(organizationId) ?? DEFAULT_DROP_PLAN, userId ? own.get(personPlanKey(organizationId, userId)) : null);
+  const someoneToday = [...own.keys()].some(key => { const [organizationId, userId] = key.split(':'); return dropDay(now, planOf(organizationId, userId)); });
+  if (!dropDay(now) && ![...plans.values()].some(plan => dropDay(now, plan)) && !someoneToday) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
   const generate = (options: Parameters<Parameters<typeof writeDrop>[2]['generate']>[0]) =>
     generateStructured({ ...options, allowDefaultModelFallback: false, maxAttempts: 1 });
   // The short research of each contact, from the web, before its emails are written (LEAD_DROPS_BRIEF=off leaves it out).
@@ -104,22 +108,29 @@ export async function POST(request: Request) {
       const home = new Map<string, string>();
       for (const row of members.data || []) {
         const userId = String(row.user_id), org = String(row.organization_id);
-        if (!reachable.has(userId) || !dropDay(now, planOf(org))) continue;
+        if (!reachable.has(userId) || !dropDay(now, planOf(org, userId))) continue;
         if (pinned) { if (org === pinned) home.set(userId, org); continue; }
         const current = home.get(userId);
         if (!current || (size.get(org) || 0) > (size.get(current) || 0)) home.set(userId, org);
       }
       // Audit B3: whoever left the last six unopened rests two weeks (restingFromDrops); a run asked for by name never skips anyone.
-      const resting = only ? new Set<string>() : await restingPeople(admin, [...home.keys()], now);
+      // A plan of one's own starts the count again: what was left unopened before it began does not rest anyone.
+      const since = new Map<string, string>();
+      for (const [userId, org] of home) { const from = own.get(personPlanKey(org, userId))?.startsOn; if (from) since.set(userId, from); }
+      const resting = only ? new Set<string>() : await restingPeople(admin, [...home.keys()], now, since);
       result.resting = resting.size;
       const byOrg = new Map<string, string[]>();
       for (const [userId, org] of home) if (!resting.has(userId)) byOrg.set(org, [...(byOrg.get(org) || []), userId]);
       let spent = await monthSpend(admin, now);
       const budget = dropsMonthlyUsd();
       for (const [organizationId, people] of byOrg) {
-        if (timeLeft() < 90_000) break;
-        const planned = await planOrganizationDrops(admin, organizationId, people, { now, budgetUsd: budget, spentUsd: spent, plan: planOf(organizationId), generate });
-        spent += planned.spentUsd; result.spentUsd += planned.spentUsd; result.planned += planned.planned; result.empty += planned.empty;
+        // Whoever gets several goes first and with the finder; the rest, as a team of one contact does.
+        for (const group of groupByDropSize(people, userId => planOf(organizationId, userId).size)) {
+          if (timeLeft() < 90_000) break;
+          const plan = { size: group.size, weekdays: planOf(organizationId).weekdays };
+          const planned = await planOrganizationDrops(admin, organizationId, group.people, { now, budgetUsd: budget, spentUsd: spent, plan, generate });
+          spent += planned.spentUsd; result.spentUsd += planned.spentUsd; result.planned += planned.planned; result.empty += planned.empty;
+        }
       }
       await writePending();
     }

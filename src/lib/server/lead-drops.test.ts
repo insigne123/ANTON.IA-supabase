@@ -473,6 +473,36 @@ test('whoever left the last six unopened rests two weeks from the last one, then
   assert.equal(restingFromDrops([...sent(six), { drop_date: '2026-10-30', opened_at: null, saved_at: '2026-10-30T13:00:00Z' }], '2026-11-03'), false, 'saving counts as opening');
 });
 
+test('a person with a plan of their own in a team of one contact: «Hoy» offers them theirs, their rest starts over, and the others keep the team\'s (15 nov)', async () => {
+  const { apolloDropDepth, dropPlanFor, personDropPlans, personPlanKey, restingPeople } = await import('./lead-drops');
+  const six = ['2026-10-07', '2026-10-09', '2026-10-13', '2026-10-14', '2026-10-16', '2026-10-20'];
+  const unopened = (userId: string) => six.map((drop_date, index) => ({ id: `${userId}-${index}`, organization_id: ORG, user_id: userId, drop_date, status: 'sent', criteria: {}, items: [], opened_at: null, saved_at: null }));
+  const { client } = memory({ ...seed(), lead_drops: [...unopened('u-ana'), ...unopened('u-leo')],
+    lead_drop_person_plans: [
+      { organization_id: ORG, user_id: 'u-ana', lead_drop_size: 6, lead_drop_weekdays: null, starts_on: '2026-10-22' },
+      { organization_id: ORG, user_id: 'u-sin', lead_drop_size: 3, lead_drop_weekdays: [1, 2, 3, 4, 5], starts_on: '2026-10-22' },
+      { organization_id: 'org-otra', user_id: 'u-ana', lead_drop_size: 4, lead_drop_weekdays: null, starts_on: '2026-10-22' },
+      { organization_id: ORG, user_id: 'u-leo', lead_drop_size: 40, lead_drop_weekdays: null, starts_on: '2026-10-22' },
+    ] }, unique);
+  // Ana gets six on the team's days; whoever has none (or one that cannot be) gets what the team does.
+  assert.deepEqual(await dropPlanFor(client, ORG, 'u-ana'), { size: 6, weekdays: [2, 3, 5] });
+  assert.deepEqual(await dropPlanFor(client, ORG, 'u-sin'), { size: 3, weekdays: [1, 2, 3, 4, 5] });
+  assert.deepEqual(await dropPlanFor(client, ORG, 'u-leo'), { size: 1, weekdays: [2, 3, 5] });
+  assert.deepEqual(await dropPlanFor(client, ORG), { size: 1, weekdays: [2, 3, 5] });
+  const plans = await personDropPlans(client, [ORG]);
+  assert.deepEqual([...plans.keys()].sort(), [personPlanKey(ORG, 'u-ana'), personPlanKey(ORG, 'u-sin')]);
+  // Thursday is no day of the team's: nothing new for Ana (her own days are the team's), but it is one of u-sin's.
+  assert.equal((await homeDrop(client, ANA, THURSDAY)).pull, null);
+  assert.deepEqual(await homeDrop(client, { organizationId: ORG, userId: 'u-sin' }, THURSDAY), { drop: null, pull: 'first', plan: { size: 3, days: 5 } });
+  assert.deepEqual((await homeDrop(client, ANA, FRIDAY)).plan, { size: 6, days: 3 });
+  // Both left their last six unopened. Ana's plan starts after them: she is counted from there, and Leo rests.
+  const startOf = new Map([['u-ana', '2026-10-22']]);
+  assert.deepEqual([...await restingPeople(client, ['u-ana', 'u-leo'], FRIDAY)].sort(), ['u-ana', 'u-leo']);
+  assert.deepEqual([...await restingPeople(client, ['u-ana', 'u-leo'], FRIDAY, startOf)], ['u-leo']);
+  // How far down Apollo's list a search goes: as many more as the team already has, by hundreds, and never past a thousand.
+  assert.deepEqual([0, 1, 100, 101, 650, 5000].map(known => apolloDropDepth(300, known)), [300, 400, 400, 500, 1000, 1000]);
+});
+
 test('when the search brings only people the team has, it looks once more, wider and further down the list (plan de uso A5)', async () => {
   const known = () => {
     const data = seed();
