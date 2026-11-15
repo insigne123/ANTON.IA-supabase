@@ -121,14 +121,31 @@ export async function monthSpend(client: Client, now: Date) {
 }
 
 /** The people, companies and contacts the organization already has, and who got what in earlier drops: never offered again. */
+/**
+ * Every row of a query, a thousand at a time. The API answers at most its max_rows (1 000 in production) whatever limit is asked,
+ * so one request would silently leave out the rest of a team with more: people it already has would be offered again (15 Nov 2026).
+ */
+const KNOWN_PAGE = 1000;
+const KNOWN_MAX = 30_000;
+async function allRows(build: () => any): Promise<{ data: any[]; error: unknown }> {
+  const data: any[] = [];
+  for (let from = 0; from < KNOWN_MAX; from += KNOWN_PAGE) {
+    const page: any = await build().order('id').range(from, from + KNOWN_PAGE - 1);
+    if (page.error) return { data, error: page.error };
+    data.push(...(page.data || []));
+    if ((page.data || []).length < KNOWN_PAGE) break;
+  }
+  return { data, error: null };
+}
+
 async function knownPeople(client: Client, organizationId: string, now: Date): Promise<KnownPeople> {
   const since = new Date(now.getTime() - 180 * DAY).toISOString().slice(0, 10);
   // Contactos too: a person a member saved there is theirs (lead-claim.ts), and «Por escribir» would refuse them.
   const [enriched, contacted, drops, saved]: any[] = await Promise.all([
-    client.from('enriched_leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId).limit(10000),
-    client.from('contacted_leads').select('email').eq('organization_id', organizationId).limit(10000),
-    client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since).limit(2000),
-    client.from('leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId).limit(10000),
+    allRows(() => client.from('enriched_leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId)),
+    allRows(() => client.from('contacted_leads').select('email').eq('organization_id', organizationId)),
+    allRows(() => client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since)),
+    allRows(() => client.from('leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId)),
   ]);
   if (enriched.error || contacted.error || drops.error || saved.error) throw new LeadDropsError('No pudimos leer los contactos del equipo.', 503);
   const lower = (value: unknown) => String(value || '').trim().toLowerCase();

@@ -512,6 +512,17 @@ test('a person with a plan of their own in a team of one contact: «Hoy» offers
   assert.deepEqual([0, 1, 100, 101, 650, 5000].map(known => apolloDropDepth(300, known)), [300, 400, 400, 500, 1000, 1000]);
 });
 
+test('nobody a teammate has is offered, however many the team has: its people are read past the API\'s thousand rows (15 nov)', async () => {
+  const lead = (index: number, email: string) => ({ id: `e-${String(index).padStart(5, '0')}`, organization_id: ORG, user_id: 'u-leo', email, linkedin_url: null, source_provider_id: null });
+  // Leo has 1 200 people. The last ones are everyone the search brings but Falabella's.
+  const filler = Array.from({ length: 1189 }, (_, index) => lead(index, `otro${index}@empresa.cl`));
+  const theirs = POOL.map((company, index) => ({ company, index })).filter(({ company }) => company !== 'Falabella')
+    .map(({ company, index }, at) => lead(1189 + at, `p${index + 1}@${company.toLowerCase()}.cl`));
+  const { client, tables } = memory({ ...seed(), enriched_leads: [...filler, ...theirs] }, { ...unique, maxRows: 1000 });
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035, plan: { size: 3, weekdays: [1, 2, 3, 4, 5] } });
+  assert.deepEqual(tables.lead_drops[0].items.map((item: any) => item.company), ['Falabella'], 'the only one nobody of the team has');
+});
+
 test('when the search brings only people the team has, it looks once more, wider and further down the list (plan de uso A5)', async () => {
   const known = () => {
     const data = seed();

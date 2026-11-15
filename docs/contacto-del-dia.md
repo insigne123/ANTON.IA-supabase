@@ -68,6 +68,7 @@ Pedido del dueño: dar 6 contactos a algunas personas de un equipo (las que entr
   - Para dar 6 a una persona: `insert into lead_drop_person_plans (organization_id, user_id, lead_drop_size) values ('…', '…', 6)`. Para quitarlo, borrar la fila.
   - En una misma corrida, las personas de un equipo se buscan por separado según cuántos reciben: primero las de más contactos, con el buscador con IA.
 - **Nadie recibe a una persona que el equipo ya tiene.** La exclusión es de todo el equipo, no de cada persona: leads guardados, enriquecidos, contactados y todo lo recomendado a cualquier compañero en los últimos 180 días.
+  - Esa lista se lee completa, de a mil filas: la API responde como máximo 1.000 por consulta, y antes un equipo con más de mil leads habría quedado con la lista cortada sin aviso.
 - **Búsqueda más profunda** (`apolloDropDepth`): Apollo responde cada búsqueda en el mismo orden, así que un equipo que ya tenía a los primeros se quedaba sin gente nueva aunque hubiera miles más abajo. Ahora la primera búsqueda del buscador pide 300 personas más tantas como el equipo ya tiene, de a cien, hasta 1.000 (diez páginas, sin costo).
   - Medido el 15 de noviembre para el cliente de GrupoExpro en Chile: unas 25.700 personas en Apollo, 12.700 con correo verificado; el equipo tenía cerca de 1.000 y la búsqueda leía solo las primeras 300.
   - Con 6 personas a 6 contactos, tres días a la semana, se usan unos 470 al mes.
