@@ -71,6 +71,7 @@ Pedido del dueño: dar 6 contactos a algunas personas de un equipo (las que entr
 - **Búsqueda más profunda** (`apolloDropDepth`): Apollo responde cada búsqueda en el mismo orden, así que un equipo que ya tenía a los primeros se quedaba sin gente nueva aunque hubiera miles más abajo. Ahora la primera búsqueda del buscador pide 300 personas más tantas como el equipo ya tiene, de a cien, hasta 1.000 (diez páginas, sin costo).
   - Medido el 15 de noviembre para el cliente de GrupoExpro en Chile: unas 25.700 personas en Apollo, 12.700 con correo verificado; el equipo tenía cerca de 1.000 y la búsqueda leía solo las primeras 300.
   - Con 6 personas a 6 contactos, tres días a la semana, se usan unos 470 al mes.
+  - Una búsqueda más larga toma más tiempo: con varias búsquedas por hacer, la corrida no empieza otra si le quedan menos de 90 segundos. Esas personas quedan sin fila y las planifica la corrida siguiente (hay seis cada mañana).
 
 ### El buscador con IA (`src/lib/server/lead-drop-finder.ts`)
 

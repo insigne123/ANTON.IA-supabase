@@ -128,7 +128,7 @@ export async function POST(request: Request) {
         for (const group of groupByDropSize(people, userId => planOf(organizationId, userId).size)) {
           if (timeLeft() < 90_000) break;
           const plan = { size: group.size, weekdays: planOf(organizationId).weekdays };
-          const planned = await planOrganizationDrops(admin, organizationId, group.people, { now, budgetUsd: budget, spentUsd: spent, plan, generate });
+          const planned = await planOrganizationDrops(admin, organizationId, group.people, { now, budgetUsd: budget, spentUsd: spent, plan, generate, timeLeft });
           spent += planned.spentUsd; result.spentUsd += planned.spentUsd; result.planned += planned.planned; result.empty += planned.empty;
         }
       }

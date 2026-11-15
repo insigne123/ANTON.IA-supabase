@@ -329,6 +329,8 @@ const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.s
 /** What the finder's first search asks for, and each of its two extra ones (the roles as people write them, the words of their area). */
 const FINDER_BASE = 300;
 const FINDER_EXTRA = 100;
+/** What one group's search, classification and score may take at worst (ten pages twice, and the model's timeouts). */
+const GROUP_MS = 90_000;
 const criteriaKey = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort().join(',')).join('|');
 
 /** What the team did with the contacts of its drops of the last six months (dropLessons); nothing when it cannot be read. */
@@ -374,6 +376,11 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   plan?: DropPlan;
   /** The model the finder asks (a team with several contacts a day); the default one when the caller gives none. */
   generate?: Generate;
+  /**
+   * How long the caller still has, in ms (the cron's run). With several searches to make, one is not started with less than
+   * GROUP_MS left once another was made: its people get no row today yet, so the next run plans them.
+   */
+  timeLeft?: () => number;
 }) {
   const today = dayInZone(deps.now);
   const plan = deps.plan ?? await dropPlanFor(client, organizationId);
@@ -394,7 +401,9 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
   const lessons = finder && groups.length ? await readDropLessons(client, organizationId, deps.now) : { liked: [], disliked: [] };
   let spent = deps.spentUsd;
+  let searched = 0;
   for (const { criteria, people: members } of groups) {
+    if (searched++ && deps.timeLeft && deps.timeLeft() < GROUP_MS) break;
     // Apollo's search is free: as many as one page brings, so the days ahead still find people the team does not have.
     const count = apollo ? (finder ? apolloDropDepth(FINDER_BASE, Math.max(known.leadIds.size, known.emails.size, known.linkedins.size)) : 100) : searchCount(members.length, plan.size);
     if (overBudget(spent, count, usdPerLead, deps.budgetUsd)) {

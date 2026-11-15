@@ -88,6 +88,15 @@ test('similar customers share a search; a different one gets its own, and the fi
   assert.ok(first.tables.lead_drops.every(drop => drop.status === 'pending' && drop.criteria.source === 'perfil'));
   assert.deepEqual(first.tables.lead_drops.find(drop => drop.user_id === 'u-sin').criteria.titles, ['Jefes de operaciones', 'Gerente de Operaciones'], 'each keeps their own customer');
 
+  // A run with little time left makes one search and leaves the other group for the next run, which plans only who is missing.
+  searchCalls.length = 0;
+  const short = memory(own(), { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
+  const hurried = await planOrganizationDrops(short.client, ORG, ['u-ana', 'u-leo', 'u-sin'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035, timeLeft: () => 30_000 });
+  assert.deepEqual([hurried.planned, searchCalls.length], [2, 1]);
+  assert.deepEqual(short.tables.lead_drops.map((drop: any) => drop.user_id).sort(), ['u-leo', 'u-sin'], 'Ana has no row yet: not an empty one, which would end her day');
+  const later = await planOrganizationDrops(short.client, ORG, ['u-ana'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035, timeLeft: () => 30_000 });
+  assert.deepEqual([later.planned, short.tables.lead_drops.length], [1, 3], 'the first search of a run is always made');
+
   searchCalls.length = 0;
   const withFicha = memory({ ...own(), profiles: [...own().profiles.slice(0, 2), profile('u-sin')],
     organization_company_profile: [{ organization_id: ORG, fields: { services: 'AXIS: consultas judiciales', targetRoles: 'Jefe de Seguridad', targetIndustries: 'minería' } }] },
