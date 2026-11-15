@@ -294,9 +294,10 @@ export const dailyAlertsTick = functions.scheduler.onSchedule({
 
 // «Contacto del día»: before the alerts, which carry what is ready. Every working day, because each team has its own days
 // (organizations.lead_drop_weekdays; Tuesdays, Wednesdays and Fridays by default): the route does nothing on a day in
-// nobody's plan. Each run finishes what the previous one left.
+// nobody's plan. Each run finishes what the previous one left. From 5:00 since 15 Nov 2026: nine runs instead of six, because some
+// people get six contacts (lead_drop_person_plans) and all must be written before the 8:00 alert.
 export const leadDropsTick = functions.scheduler.onSchedule({
-    schedule: '0,20,40 6-7 * * 1-5',
+    schedule: '0,20,40 5-7 * * 1-5',
     timeZone: 'America/Santiago',
     retryCount: 0,
     timeoutSeconds: 300,

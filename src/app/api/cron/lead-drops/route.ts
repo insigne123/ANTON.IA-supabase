@@ -28,7 +28,7 @@ const ROUND_CONTACTS = 8;
 const DROP_PARALLEL = 6;
 
 /**
- * «Contacto del día» (functions/index.ts, leadDropsTick, Monday to Friday from 6:00 to 7:40 in Chile): on the days of each
+ * «Contacto del día» (functions/index.ts, leadDropsTick, Monday to Friday from 5:00 to 7:40 in Chile): on the days of each
  * team's plan (Tuesdays, Wednesdays and Fridays unless its row says otherwise; a day in nobody's plan does nothing) and of
  * each person's own when they have one (lead_drop_person_plans: some of a team get more contacts than the rest), first
  * finishes the drops an earlier run planned, then plans the missing ones, organization by organization, and writes
