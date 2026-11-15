@@ -163,6 +163,8 @@ export async function enrichDropLead(client: Client, scope: DropScope, dropId: s
     return { outcome: 'not_found', email: null, consumed };
   }
   const linked = await linkDropLead(client, scope, dropId, leadId, now);
+  // Its mobile was asked with its email: the card and the answer to the person's inbox know it is on its way (lead-drop-ready.ts).
+  if (linked.linked && deps.phone) await patchItem(client, scope, dropId, leadId, entry => entry.phoneLookup ? entry : { ...entry, phoneLookup: { attempt: 0, at: now.toISOString() } }).catch(() => undefined);
   // In «Por escribir» now: it leaves the saved ones, as a contact that got its email does in the app.
   if (linked.linked) await client.from('leads').delete().eq('id', saved.data.id).eq('user_id', scope.userId).eq('organization_id', scope.organizationId);
   return { outcome: email && linked.linked ? 'found' : 'pending', email: email || null, consumed };

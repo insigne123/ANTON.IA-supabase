@@ -271,6 +271,60 @@ const mailSteps = [
     c.check('no muestra ningún contacto', await c.page.locator('article').count() === 0);
   } },
 ];
+/** «Enriquecer los N»: every lookup found except one, and the answer to the inbox said as sent; the view is the server's own plus what was answered here. */
+async function answerMailBulk(c) {
+  const over = {}, emails = {}, asked = [];
+  const view = async () => {
+    const real = await (await c.page.request.post(`${new URL(c.page.url()).origin}/api/lead-drops/link`, { data: { token: TOKEN, action: 'read' } })).json();
+    return { ...real.view, emails: { ...real.view.emails, ...emails }, items: real.view.items.map(item => ({ ...item, ...(over[item.leadId] || {}) })) };
+  };
+  await c.page.route('**/api/lead-drops/link', async route => {
+    const body = route.request().postDataJSON() || {};
+    if (body.action === 'enrich') {
+      asked.push(body);
+      // One of them has no email anywhere: it is said, and the rest go on.
+      if (body.leadId === id(6)) { over[body.leadId] = { lookup: { attempt: 1, at: '2026-11-13T12:00:00.000Z', missed: true } }; return route.fulfill(answered({ view: await view(), lookup: { outcome: 'not_found', email: null, consumed: 0 } })); }
+      over[body.leadId] = { savedLeadId: `00000000-0000-4000-8000-0000000030${body.leadId.slice(-2)}`, keptLeadId: `kept-${body.leadId.slice(-2)}`, ...(body.phone ? { phone: { state: 'pending' }, phoneLookup: { attempt: 0, at: '2026-11-13T12:00:00.000Z' } } : {}) };
+      emails[body.leadId] = `contacto${body.leadId.slice(-1)}@empresa.example`;
+      return route.fulfill(answered({ view: await view(), lookup: { outcome: 'found', email: emails[body.leadId], consumed: body.phone ? 8 : 1 } }));
+    }
+    if (body.action === 'ready') { asked.push(body); return route.fulfill(answered({ view: await view(), mailed: true })); }
+    const response = await route.fetch();
+    const payload = await response.json();
+    if (payload.view) payload.view = await view();
+    return route.fulfill({ status: response.status(), contentType: 'application/json', body: JSON.stringify(payload) });
+  });
+  return asked;
+}
+let bulkAsked = [];
+const mailBulkSteps = [
+  { say: 'En el correo de la mañana toco «Con sus teléfonos»: la página abre con esa opción elegida y todavía no gasta nada', do: async c => {
+    await c.go(`/contactos/${TOKEN}?todos=telefono`);
+    await c.see('Enriquecer los 5 de una vez');
+    bulkAsked = await answerMailBulk(c);
+    c.check('se queda en la página del correo, sin pedir sesión', new URL(c.page.url()).pathname === `/contactos/${TOKEN}`);
+    c.check('viene elegido «Correo y teléfono»', await c.page.getByRole('radio', { name: /Correo y teléfono · 40 créditos/ }).isChecked());
+    c.check('ofrece también solo el correo, con su costo', await c.page.getByRole('radio', { name: /Solo correo · 5 créditos/ }).count() === 1);
+    c.check('el botón dice cuánto usa', await c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }).count() === 1);
+    c.check('llegar no enriquece a nadie', bulkAsked.length === 0 && await c.page.getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 5);
+  } },
+  { say: 'Cambio a solo correo y vuelvo a correo y teléfono: el botón sigue el costo', do: async c => {
+    await c.page.getByRole('radio', { name: /Solo correo/ }).check();
+    c.check('solo correo: 5 créditos', await c.page.getByRole('button', { name: 'Enriquecer los 5 · 5 créditos' }).count() === 1);
+    await c.page.getByRole('radio', { name: /Correo y teléfono/ }).check();
+    c.check('correo y teléfono: 40 créditos', await c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }).count() === 1);
+  } },
+  { say: 'Confirmo: busca a cada uno y me avisa que la respuesta va a mi correo', do: async c => {
+    await c.clickOn(c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }));
+    await c.see('Listo: encontramos el correo de 4 de 5.');
+    c.check('dice que lo envió a mi correo, en la conversación de la mañana', await c.has('Te lo enviamos a tu correo, en la conversación de esta mañana, con cada campaña lista para aprobar.'));
+    c.check('dice que los teléfonos llegan con su guion', await c.has('Sus teléfonos llegan en unos minutos, con el guion de cada llamada.'));
+    c.check('nombra al que quedó sin correo', await c.has('Sin correo:'));
+    c.check('dice los créditos que usó', await c.has('Se descontaron 32 créditos de ANTON.IA.'));
+    c.check('buscó a los cinco, con teléfono, y pidió la respuesta una vez', bulkAsked.filter(entry => entry.action === 'enrich' && entry.phone && entry.quiet).length === 5 && bulkAsked.filter(entry => entry.action === 'ready' && entry.phone).length === 1);
+    c.check('queda uno por enriquecer: ya no ofrece «de una vez»', !(await c.has('de una vez')));
+  } },
+];
 const mailApproveSteps = [
   { say: 'Abro «Revisar y aprobar» desde el correo de la campaña lista', do: async c => {
     await c.go(`/contactos/${TOKEN}?c=${id(2)}`);
@@ -379,6 +433,11 @@ export default () => [
     seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailSteps },
   { id: 'contactos-desde-el-correo-telefono', persona: 'visitor', viewport: 'phone', title: 'Mis contactos desde el correo (móvil)',
     goal: 'Lo mismo desde el teléfono, donde se lee el correo.', seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailSteps },
+  { id: 'contactos-desde-el-correo-todos', persona: 'visitor', title: 'Enriquecer a todos desde el correo, con sus teléfonos',
+    goal: 'Tocar «Con sus teléfonos» en el correo de la mañana, confirmar en la página cuánto se usa y saber que la respuesta me llega al correo.',
+    seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailBulkSteps },
+  { id: 'contactos-desde-el-correo-todos-telefono', persona: 'visitor', viewport: 'phone', title: 'Enriquecer a todos desde el correo (móvil)',
+    goal: 'Lo mismo desde el teléfono, donde se lee el correo.', seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailBulkSteps },
   { id: 'contactos-desde-el-correo-aprobar', persona: 'visitor', title: 'Aprobar, cambiar y detener una campaña desde el correo',
     goal: 'Con mi correo ya conectado: cambiar un correo, aprobar la campaña y detenerla, todo desde la página del correo.',
     seed: seedMail({ mailbox: true }), passWrites: MAIL_PASS, steps: mailApproveSteps },

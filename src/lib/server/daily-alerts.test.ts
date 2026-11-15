@@ -315,11 +315,19 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
       assert.ok(String(branded.sent[1].html).includes('https://app.antonia.ai') && !String(branded.sent[1].html).includes('contactos.example.test'));
     } finally { delete process.env.LEAD_DROPS_PUBLIC_URL; }
 
-    // Only about the contacts: its own subject, nothing of the rest of the day, no way into the app.
+    // Only about the contacts: its own subject and nothing of the rest of the day. The person goes on from the inbox or from the app
+    // (15 Nov 2026): all of them looked up at once, with their mobiles or without, or the same contacts in «Hoy».
     assert.equal(sent.length, 1);
     assert.equal(sent[0].subject, '2 contactos nuevos para ti');
-    assert.match(sent[0].text, /^Hola, Ana\. Tus contactos del día ya están listos\.\n\n\nPedro Araya, Gerente HSE en Minera Andina/);
-    assert.ok(!sent[0].text.includes('Abrir ANTON.IA') && !sent[0].html.includes('Abrir ANTON.IA'));
+    assert.match(sent[0].text, /^Hola, Ana\. Tus contactos del día ya están listos\.\n\n\nSigue desde este correo o desde la app\./);
+    const token = links[0][1];
+    assert.ok(sent[0].text.includes(`Enriquecer los 2 · 2 créditos: https://app.antonia.ai/contactos/${token}?todos=correo\nCon sus teléfonos · 16 créditos: https://app.antonia.ai/contactos/${token}?todos=telefono\nAbrir en ANTON.IA: https://app.antonia.ai/dashboard?contactos=${token}\n\nPedro Araya, Gerente HSE en Minera Andina`));
+    assert.match(sent[0].html, new RegExp(`<td bgcolor="#2563eb"[^>]*><a href="https://app\\.antonia\\.ai/contactos/${token}\\?todos=correo"[^>]*>Enriquecer los 2 · 2 créditos</a>`));
+    assert.ok(sent[0].html.includes(`href="https://app.antonia.ai/dashboard?contactos=${token}"`));
+    // It opens a conversation of its own: what the person does from it is answered there (src/lib/lead-drop-thread.ts).
+    assert.equal(sent[0].headers.References, `<contactos.${DROP}@contactos.anton-ia.yago.cl>`);
+    assert.equal(sent[0].headers['In-Reply-To'], sent[0].headers.References);
+    assert.ok(!sent[0].text.includes('Abrir ANTON.IA:') && !sent[0].html.includes('>Abrir ANTON.IA<'), 'the alert button of the rest of the day is not here');
 
     // The rest of the day (a reply, an opportunity, a search that keeps failing) is a second email, without the contacts or the PDF.
     const busyDay = () => {

@@ -115,7 +115,9 @@ test('once its email is found, the campaign goes to the person\'s inbox to read:
   const [email] = sent;
   assert.equal(email.userId, USER);
   assert.equal(email.to, 'ana@brigadas.cl');
-  assert.equal(email.subject, 'Campaña lista para aprobar: Pedro Araya · Minera Andina');
+  // In the conversation of the morning email: its subject, answered, and the drop's thread (src/lib/lead-drop-thread.ts).
+  assert.equal(email.subject, 'Re: 2 contactos nuevos para ti');
+  assert.match(email.headers.References, /^<contactos\.[0-9a-f-]{36}@contactos\.anton-ia\.yago\.cl>$/);
   assert.match(email.text, /^Hola, Ana\. Encontramos el correo de Pedro Araya: pedro\.araya@mineraandina\.cl\./);
   assert.match(email.text, /sale desde tu Gmail/);
   assert.ok(email.text.includes('Hola Pedro,\n\n¿Cómo cubren los turnos de noche en Minera Andina?'), 'the first email in full, as its reader would get it');

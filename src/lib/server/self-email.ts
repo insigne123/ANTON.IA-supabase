@@ -14,23 +14,33 @@ import { signalProviderOutage } from '@/lib/server/provider-outage';
  */
 type Fetch = typeof fetch;
 export type SelfAttachment = { filename: string; contentType: string; content: Buffer };
-export type SelfEmail = { userId: string; to: string; subject: string; html: string; text: string; attachments?: SelfAttachment[] };
+export type SelfEmail = { userId: string; to: string; subject: string; html: string; text: string; attachments?: SelfAttachment[];
+  /** Headers of its own, for the emails of one conversation (src/lib/lead-drop-thread.ts). Outlook's own API takes none: there the subject groups them. */
+  headers?: Record<string, string> };
 
 const EMAIL = /^[^\s@<>()",;:\\[\]]+@[^\s@<>()",;:\\[\]]+\.[^\s@<>()",;:\\[\]]{2,}$/;
 const base64Lines = (text: string) => Buffer.from(text, 'utf8').toString('base64').replace(/.{1,76}/g, line => `${line}\r\n`).trimEnd();
 
 const base64Bytes = (content: Buffer) => content.toString('base64').replace(/.{1,76}/g, line => `${line}\r\n`).trimEnd();
 /** A file name for a MIME header: plain ASCII, without quotes or line breaks. */
+/** The headers an email may bring of its own: a plain name, and a value in one line of printable ASCII (a subject goes encoded). */
+export function ownHeaders(headers: Record<string, string> | undefined): Array<[string, string]> {
+  return Object.entries(headers ?? {}).flatMap(([name, value]): Array<[string, string]> => {
+    const clean = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+    if (!/^[A-Za-z][A-Za-z0-9-]{0,60}$/.test(name) || !clean || /^(to|from|cc|bcc|subject|content-type|mime-version|content-transfer-encoding)$/i.test(name)) return [];
+    return [[name, /^[\x20-\x7e]*$/.test(clean) ? clean : encodeHeaderRFC2047(clean)]];
+  });
+}
 const mimeName = (name: string) => name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.\- ]/g, '').trim().slice(0, 120) || 'adjunto';
 
 /** The message as Gmail's API takes it: multipart/alternative, UTF-8, the subject encoded; inside multipart/mixed when it carries files. */
-export function selfMime(input: Pick<SelfEmail, 'to' | 'subject' | 'html' | 'text' | 'attachments'>, boundary = `anton-${randomUUID()}`) {
+export function selfMime(input: Pick<SelfEmail, 'to' | 'subject' | 'html' | 'text' | 'attachments' | 'headers'>, boundary = `anton-${randomUUID()}`) {
   const alternative = [
     `--${boundary}`, 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', base64Lines(input.text),
     `--${boundary}`, 'Content-Type: text/html; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', base64Lines(input.html),
     `--${boundary}--`,
   ];
-  const head = [`To: ${input.to}`, `Subject: ${encodeHeaderRFC2047(input.subject)}`, 'MIME-Version: 1.0'];
+  const head = [`To: ${input.to}`, `Subject: ${encodeHeaderRFC2047(input.subject)}`, ...ownHeaders(input.headers).map(([name, value]) => `${name}: ${value}`), 'MIME-Version: 1.0'];
   if (!input.attachments?.length) return [...head, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alternative, ''].join('\r\n');
   const mixed = `${boundary}-mixed`;
   return [
@@ -101,6 +111,7 @@ async function sendWithResend(input: SelfEmail, resend: Resend, request: Fetch, 
   const body = JSON.stringify({
     from: resend.from, to: [input.to.trim()], subject: input.subject, html: input.html, text: input.text,
     ...(resend.replyTo ? { reply_to: resend.replyTo } : {}),
+    ...(ownHeaders(input.headers).length ? { headers: Object.fromEntries(ownHeaders(input.headers)) } : {}),
     ...(input.attachments?.length ? { attachments: input.attachments.map(file => ({ filename: file.filename, content: file.content.toString('base64') })) } : {}),
   });
   for (let attempt = 0; ; attempt++) {

@@ -116,7 +116,7 @@ test('with today\'s contact the email has one block and one main button; without
   assert.equal([...email.html.matchAll(/Tu contacto de hoy, con su correo listo/g)].length, 1, 'said once, not as a line and again as a heading');
   assert.match(email.html, /Ana te respondió/);
   assert.match(email.html, />Ver y guardar</);
-  assert.doesNotMatch(email.html, /background:#111827[^>]*>Abrir ANTON\.IA</, 'no second button');
+  assert.doesNotMatch(email.html, /background-color:#111827[^>]*>Abrir ANTON\.IA</, 'no second button');
   assert.match(email.html, />Abrir ANTON\.IA &rsaquo;</);
   assert.match(email.html, /^<div style="background:#ffffff;color:#111827;color-scheme:light/, 'on a white card of its own, readable in a dark mail client');
   assert.doesNotMatch(email.text, /guárdalo sin gastar créditos \(/);
@@ -128,7 +128,8 @@ test('with today\'s contact the email has one block and one main button; without
   assert.match(only.text, /^Hola, Ana\. Tu contacto del día ya está listo\./);
   // No contact: the usual dark button, and still the white card.
   const plain = alertEmail(composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana', company: null }] }), TUESDAY)!, 'Ana', 'https://app.antonia.ai/');
-  assert.match(plain.html, /background:#111827[^>]*>Abrir ANTON\.IA</);
+  // Its colour is the cell's own attribute too: a mail client that drops a style must not leave white text on white (emailButton).
+  assert.match(plain.html, /<td bgcolor="#111827"[^>]*><a href="https:\/\/app\.antonia\.ai\/dashboard" style="[^"]*background-color:#111827;color:#ffffff[^"]*">Abrir ANTON\.IA<\/a>/);
   assert.match(plain.html, /^<div style="background:#ffffff/);
 });
 
@@ -255,7 +256,7 @@ test('each of the best new ones has «Asignar» in the email: a small button und
   assert.match(email.text, /- Evaluación psicolaboral <Concurso> · Municipalidad · cierra el viernes \(https:\/\/app\.antonia\.ai\/opportunities\?op=o-1\)\. Asignar: https:\/\/app\.antonia\.ai\/opportunities\?op=o-1&accion=asignar/);
   assert.match(email.html, /<br><a href="https:\/\/app\.antonia\.ai\/opportunities\?op=o-1&amp;accion=asignar" style="display:inline-block;[^"]*border:1px solid #d1d5db[^"]*">Asignar<\/a><\/p>/);
   assert.match(email.html, /Evaluación psicolaboral &lt;Concurso&gt;/);
-  assert.equal((email.html.match(/background:#111827/g) || []).length, 1, 'one main button');
+  assert.equal((email.html.match(/bgcolor="#111827"/g) || []).length, 1, 'one main button');
   // A line without its own step has none.
   const plain = alertEmail(composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana', company: null }] }), TUESDAY)!, 'Ana', 'https://app.antonia.ai/');
   assert.doesNotMatch(plain.html, /accion=asignar|<br><a/);

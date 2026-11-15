@@ -58,12 +58,14 @@ const labelClass = 'text-xs font-medium uppercase tracking-wide text-muted-foreg
  * «Para llamar» (15 Nov 2026, DropCallPanel): its mobile, looked up with the email («O con su teléfono») or after it, and the script
  * of its call.
  */
-export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false }: {
+export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false, callOpen = false }: {
   item: DropItem; actions: DropContactActions;
   /** Another contact is being saved or enriched: this one waits. */
   busy: boolean; enriching: boolean; defaultOpen?: boolean; heading?: 'h2' | 'h3'; mail?: DropContactMail;
   /** In «Hoy» (TodayContacts): who it is, one line of why and its next step; the rest opens on demand, so six contacts stay a list. */
   collapsible?: boolean;
+  /** «Para llamar» open on arrival (the email's «Llamar»). */
+  callOpen?: boolean;
 }) {
   const uid = useId();
   const [expanded, setExpanded] = useState(!collapsible || defaultOpen);
@@ -174,7 +176,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
 
     {opener ? <div className="space-y-1.5"><p className={labelClass}>Cómo abrir</p><p className="text-sm">{opener}</p></div> : null}
 
-    <DropCallPanel item={item} actions={actions} busy={busy || working !== null} mail={Boolean(mail)} />
+    <DropCallPanel item={item} actions={actions} busy={busy || working !== null} mail={Boolean(mail)} defaultOpen={callOpen} />
 
     {emails.length ? <div>
       {section('campaign', item.campaign ? 'Su campaña' : 'Campaña lista', emails.length === 1 ? 'un correo' : `${emails.length} correos, del ${shortDay(days[0])} al ${shortDay(days[days.length - 1])}`)}

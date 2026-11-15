@@ -1,4 +1,5 @@
-import type { DropCallScript, DropPhone } from '@/lib/lead-drop-call';
+import { DROP_EMAIL_AND_PHONE_CREDITS, type DropCallScript, type DropPhone } from '@/lib/lead-drop-call';
+import { emailButton } from '@/lib/email-shell';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { displayLeadName } from '@/lib/lead-name';
 
@@ -139,6 +140,8 @@ export type DropItem = {
   call?: { script: DropCallScript; at: string };
   /** Its mobile looked up from the card after its email: which try it is and when. */
   phoneLookup?: { attempt: number; at: string };
+  /** When its mobile, or the news that none came, went to the person's inbox with the script of its call (server/lead-drop-ready.ts). */
+  callMailedAt?: string;
   /** Where its mobile stands, read from «Por escribir» each time the contacts are shown: never kept in the drop. */
   phone?: DropPhone;
 };
@@ -664,7 +667,7 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
   const html = (heading ? `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
       + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
     + `<div style="margin:0 0 16px;padding:4px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb">${items.map(block).join('')}</div>`
-    + `<p style="margin:0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`}</a></p>`
+    + emailButton(link, one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`)
     + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(dropCostNote(items))} ${research}</p>`;
   return { text, html, link };
 }
@@ -678,6 +681,10 @@ const firstLines = (body: string, max: number) => { const flat = body.replace(/\
  */
 export const dropEmailPreview = (text: string, item: Pick<DropItem, 'name' | 'company' | 'title'>) => text
   .replace(/\{\{\s*nombre\s*\}\}/g, dropName(item).split(' ')[0] || '').replace(/\{\{\s*empresa\s*\}\}/g, item.company || '').replace(/\{\{\s*cargo\s*\}\}/g, item.title || '');
+/** The same contacts inside the app, from the address of the page that needs no session: «Hoy» asks to sign in and brings them into view. */
+export const dropAppHref = (link: string) => link.replace(/\/contactos\/([A-Za-z0-9_-]{48})(?:[?#].*)?$/, '/dashboard?contactos=$1');
+/** Where «Enriquecer los N» of the morning email sends: the page with that choice made and a button to confirm it, never the arrival. */
+export const dropBulkHref = (link: string, phone: boolean) => `${link}?todos=${phone ? 'telefono' : 'correo'}`;
 /** Where the morning email sends for one contact: its card on the drop's page, and its email looked up on arrival when it still has none. */
 export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'provider' | 'savedLeadId'>, open = false) =>
   `${link}?c=${encodeURIComponent(item.leadId)}${needsLookup(item) && !open ? '&enriquecer=1' : ''}`;
@@ -706,10 +713,23 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
     const action = needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
     return { item, why, news, opener, campaign, href: dropContactHref(link, item, options.open), action };
   });
-  const note = [lookup ? 'Enriquecer busca su correo y usa 1 crédito por contacto.' : dropCostNote(items),
+  // From the inbox the person chooses how to go on (15 Nov 2026, the owner: «la idea es que tenga la opción de continuar desde el mail
+  // o desde la app»): all of them looked up at once, with their mobiles or without, or the same contacts inside the app. The answer to
+  // «Enriquecer» comes back in this conversation (src/lib/lead-drop-ready-email.ts). One main button: the rest are outlined.
+  const pending = items.filter(item => needsLookup(item)).length;
+  const bulk = options.open ? {
+    all: pending >= 2 ? { label: `Enriquecer ${pending === items.length ? `los ${pending}` : `los ${pending} que faltan`} · ${pending} créditos`, href: dropBulkHref(link, false) } : null,
+    phones: pending >= 2 ? { label: `Con sus teléfonos · ${pending * DROP_EMAIL_AND_PHONE_CREDITS} créditos`, href: dropBulkHref(link, true) } : null,
+    app: { label: 'Abrir en ANTON.IA', href: dropAppHref(link) },
+    lead: pending >= 2
+      ? 'Sigue desde este correo o desde la app. Si los enriqueces de una vez, te respondemos en esta misma conversación con el correo de cada uno, su campaña lista para aprobar y, si pides teléfonos, el guion de cada llamada.'
+      : 'Sigue desde este correo, con el botón de cada contacto, o desde la app.',
+  } : null;
+  const note = [lookup ? `Enriquecer busca su correo y usa 1 crédito por contacto${bulk ? `; con su teléfono, ${DROP_EMAIL_AND_PHONE_CREDITS} por ambos. Nada se cobra al abrir: confirmas en la página` : ''}.` : dropCostNote(items),
     ...(written ? ['Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde.', 'Los correos completos van en el PDF adjunto.'] : [])].join(' ');
   const text = [
     ...(heading ? [`${lead}:`] : []),
+    ...(bulk ? ['', bulk.lead, ...[bulk.all, bulk.phones, bulk.app].filter((entry): entry is { label: string; href: string } => Boolean(entry)).map(entry => `${entry.label}: ${entry.href}`)] : []),
     ...cards.flatMap(({ item, why, news, opener, campaign, href, action }) => [
       '',
       `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.track === 'explore' ? ' (para explorar)' : ''}`,
@@ -736,9 +756,13 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
       + `<p style="margin:4px 0 0;font-size:14px;line-height:20px;color:#111827"><strong>${escape(campaign.subject)}</strong></p>`
       + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape(campaign.preview)}</p>`
       + (campaign.followUps ? `<p style="margin:6px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(campaign.followUps)}</p>` : '') + '</div>' : '')
-    + `<p style="margin:12px 0 0"><a href="${escape(href)}" style="display:inline-block;padding:9px 14px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${escape(action)}</a></p></div>`;
+    + `<div style="margin:12px 0 0">${emailButton(href, action, { quiet: Boolean(bulk?.all) })}</div></div>`;
   const html = (heading ? `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
       + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
+    + (bulk ? `<div style="margin:0 0 16px;padding:14px 16px 6px;border:1px solid #e5e7eb;border-radius:14px;background-color:#f9fafb">`
+      + `<p style="margin:0 0 12px;font-size:14px;line-height:20px;color:#374151">${escape(bulk.lead)}</p>`
+      + (bulk.all ? emailButton(bulk.all.href, bulk.all.label) : '') + (bulk.phones ? emailButton(bulk.phones.href, bulk.phones.label, { quiet: true }) : '')
+      + emailButton(bulk.app.href, bulk.app.label, { quiet: true }) + '</div>' : '')
     + cards.map(card).join('')
     + `<p style="margin:4px 0 0;font-size:14px;line-height:20px"><a href="${escape(link)}" style="color:#2563eb">Ver los ${items.length} juntos</a></p>`
     + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(note)}</p>`;

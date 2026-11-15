@@ -1,7 +1,7 @@
 // The email a person gets once a contact's email is found (12 Nov 2026, docs/contacto-del-dia.md): the campaign as it would go, to
 // read wherever they are. The first email and each follow-up in full, with the day each would leave if approved today, and the way
 // to the contact's card, where it is approved or changed. Pure: the server reads the facts (server/lead-drop-campaign.ts).
-import { emailShell } from '@/lib/email-shell';
+import { emailButton, emailShell } from '@/lib/email-shell';
 import { dropCampaignMessages, dropEmailPreview, dropHref, dropName, dropSchedule, shortDay, type DropItem } from '@/lib/lead-drops';
 
 export type DropCampaignEmailInput = {
@@ -67,7 +67,7 @@ export function dropCampaignEmail(item: DropItem, input: DropCampaignEmailInput)
     + `<p style="margin:0;font-size:16px;line-height:24px;font-weight:600;color:#111827">${escape(contact)}</p>`
     + (role ? `<p style="margin:2px 0 14px;font-size:14px;line-height:20px;color:#374151">${escape(role)}</p>` : '<div style="height:14px"></div>')
     + emails.map(block).join('')
-    + `<p style="margin:20px 0 0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">Revisar y aprobar</a></p>`
+    + `<div style="margin:20px 0 0">${emailButton(link, 'Revisar y aprobar')}</div>`
     + `<p style="margin:10px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(note)}</p>`
     + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">${escape(off)} <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p>`);
   return { subject, text, html, link };

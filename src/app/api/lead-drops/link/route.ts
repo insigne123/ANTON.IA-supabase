@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, mailDropCampaign, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
 import { enrichDropLead, linkAuth, mailDropView, resolveDropLink, switchDropCampaign } from '@/lib/server/lead-drop-mail';
 import { findDropPhone, prepareDropCall } from '@/lib/server/lead-drop-call';
+import { mailDropCalls, mailDropReady, prepareDropCalls } from '@/lib/server/lead-drop-ready';
 import { LeadDropsError, saveDropLeads } from '@/lib/server/lead-drops';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
@@ -16,7 +17,10 @@ const Token = z.string().regex(/^[A-Za-z0-9_-]{48}$/);
 const one = <A extends string, S extends z.ZodRawShape>(action: A, shape: S) => z.object({ token: Token, action: z.literal(action), ...shape }).strict();
 const Body = z.discriminatedUnion('action', [
   one('read', {}),
-  one('enrich', { leadId: LeadId, phone: z.boolean().optional() }),
+  // `quiet`: one of several looked up at once («Enriquecer los N»): its campaign goes in the one answer for all of them (`ready`).
+  one('enrich', { leadId: LeadId, phone: z.boolean().optional(), quiet: z.boolean().optional() }),
+  // The contacts looked up at once are in: the answer goes to the person's inbox, in the conversation of the morning email.
+  one('ready', { phone: z.boolean().optional() }),
   // «Para llamar» (src/lib/server/lead-drop-call.ts): the mobile of a contact already looked up, and the script of its call.
   one('phone', { leadId: LeadId }),
   one('script', { leadId: LeadId, fresh: z.boolean().optional() }),
@@ -47,9 +51,20 @@ export async function POST(request: Request) {
       const lookup = await enrichDropLead(admin, scope, dropId, data.leadId, { phone: data.phone });
       extra = { lookup };
       // With its email found, the campaign goes to the person's inbox to read (once).
-      if (lookup.outcome === 'found') after(() => mailDropCampaign(admin, scope, dropId, data.leadId).catch(() => null));
+      if (lookup.outcome === 'found' && !data.quiet) after(() => mailDropCampaign(admin, scope, dropId, data.leadId).catch(() => null));
+    } else if (data.action === 'ready') {
+      // Within the request, not after it: the page waits for this answer to say the email is on its way. With their mobiles asked,
+      // the script of each call is written now, so the email that brings each number has it (src/lib/server/lead-drop-ready.ts).
+      if (data.phone) await prepareDropCalls(admin, scope, dropId).catch(() => null);
+      const mailed = await mailDropReady(admin, scope, dropId, { phones: Boolean(data.phone) }).catch(() => ({ sent: false as const }));
+      // A mobile the provider already had lands at once, without a later answer to send it.
+      if (data.phone) await mailDropCalls(admin, scope, dropId).catch(() => null);
+      extra = { mailed: mailed.sent };
     } else if (data.action === 'phone') {
-      extra = { phone: await findDropPhone(admin, scope, dropId, data.leadId) };
+      const phone = await findDropPhone(admin, scope, dropId, data.leadId);
+      extra = { phone };
+      // Found at once (the provider already had it): it goes to the person's inbox now. One that is on its way goes when it lands.
+      if (phone.outcome === 'found') after(() => mailDropCalls(admin, scope, dropId).catch(() => null));
     } else if (data.action === 'script') {
       await prepareDropCall(admin, scope, dropId, data.leadId, { fresh: data.fresh });
     } else if (data.action === 'save') {
@@ -70,6 +85,8 @@ export async function POST(request: Request) {
     if (data.action === 'read') {
       const due = view.items.filter(item => view.emails[item.leadId] && item.draft && !item.campaign && !item.campaignMailedAt);
       if (due.length) after(async () => { for (const item of due) await mailDropCampaign(admin, scope, dropId, item.leadId).catch(() => null); });
+      // And the mobiles that landed while nobody was told (an answer of the provider that never came for one of them holds no other back).
+      if (view.items.some(item => item.phoneLookup && !item.callMailedAt && item.phone?.state === 'found')) after(() => mailDropCalls(admin, scope, dropId).catch(() => null));
     }
     return NextResponse.json({ view, ...extra }, { headers });
   } catch (error) {

@@ -46,7 +46,8 @@ const shared: Record<string, unknown> = {
 };
 const callPanel = await compile('./DropCallPanel.tsx', shared);
 const card = await compile('./DropContactCard.tsx', { ...shared, './DropCallPanel': callPanel });
-const flow = await compile('./DropMailFlow.tsx', { ...shared, './DropContactCard': card });
+const bulkPanel = await compile('./DropBulkEnrich.tsx', shared);
+const flow = await compile('./DropMailFlow.tsx', { ...shared, './DropContactCard': card, './DropBulkEnrich': bulkPanel });
 
 const LEAD = '6accdbfcd5f5d80001cf6901', OTHER = '6accdbfcd5f5d80001cf6902';
 const contact = (leadId: string, name: string, extra: Record<string, unknown> = {}) => ({ leadId, name, title: 'Gerente HSE', company: 'Minera Andina', domain: null, industry: 'Minería', size: null, city: null,
@@ -109,7 +110,9 @@ test('whoever prefers the app gets one quiet line to the same contacts in «Hoy�
 test('the page of the email: signed in as the person it names, the contacts open in «Hoy»; nobody is asked to sign in', () => {
   const page = readFileSync(new URL('../../app/contactos/[token]/page.tsx', import.meta.url), 'utf8');
   // The link is checked first, and only the person it names is sent into the app: another account's session stays on this page.
-  assert.match(page, /const \{ dropId, scope \} = await resolveDropLink\(admin, token\);\s*inside = !stay && !single\(query\.correo\) && await signedInAs\(scope\.userId\);/);
+  assert.match(page, /const \{ dropId, scope \} = await resolveDropLink\(admin, token\);\s*inside = !stay && !bulk && !call && !single\(query\.correo\) && await signedInAs\(scope\.userId\);/);
+  // «Enriquecer los N» of the morning email is the way on from the inbox: it stays on this page, with the choice made there.
+  assert.match(page, /const bulk = todos === 'telefono' \? 'phone' as const : todos === 'correo' \? 'email' as const : null;/);
   assert.match(page, /return user\?\.id === userId;\s*\} catch \{ return false; \}/);
   // Sent back by «Hoy» (`aqui=1`) or coming back from connecting a mailbox (`correo`): it stays here, and offers no way back in a loop.
   assert.match(page, /const stay = single\(query\.aqui\) === '1';/);
@@ -204,5 +207,69 @@ test('with the mailbox connected: «Aprobar y programar» says from where and wh
     assert.equal(status(), 'La campaña de Pedro Araya sigue desde donde quedó.');
     assert.deepEqual(asked.map(entry => [entry.action, entry.leadId, entry.token]), [['approve', LEAD, TOKEN], ['pause', LEAD, TOKEN], ['resume', LEAD, TOKEN]]);
     assert.deepEqual([...document.querySelectorAll('a')].map(link => link.getAttribute('href')), [], 'still nothing leading into the app');
+  } finally { await act(async () => root.unmount()); }
+});
+
+test('«Enriquecer los N»: the email brings the choice, the button confirms it; each contact is looked up in turn and the answer goes to the inbox', async () => {
+  const third = '6accdbfcd5f5d80001cf6903';
+  const items = [contact(LEAD, 'Pedro Araya'), contact(OTHER, 'Luisa Soto'), contact(third, 'Raúl Pinto')];
+  const saved = new Set<string>();
+  const asked = server(body => {
+    if (body.action === 'enrich') {
+      if (body.leadId === third) return { body: { view: viewOf(items.map(item => saved.has(item.leadId) ? { ...item, savedLeadId: `e-${item.leadId}` } : item)), lookup: { outcome: 'not_found', email: null, consumed: 0 } } };
+      saved.add(body.leadId);
+      return { body: { view: viewOf(items.map(item => saved.has(item.leadId) ? { ...item, savedLeadId: `e-${item.leadId}` } : item)), lookup: { outcome: 'found', email: 'x@y.cl', consumed: 8 } } };
+    }
+    if (body.action === 'ready') return { body: { view: viewOf(items.map(item => saved.has(item.leadId) ? { ...item, savedLeadId: `e-${item.leadId}` } : item)), mailed: true } };
+    return { status: 500, body: { error: 'x' } };
+  });
+  // «Con sus teléfonos» of the morning email: the page opens with that choice made, and nothing asked yet.
+  const root = await mount(viewOf(items), { bulk: 'phone', focus: null });
+  try {
+    const document = dom.window.document;
+    assert.match(text(), /Enriquecer los 3 de una vez/);
+    const radios = [...document.querySelectorAll('input[type="radio"]')] as HTMLInputElement[];
+    assert.deepEqual(radios.map(radio => radio.checked), [false, true]);
+    assert.match(text(), /Solo correo · 3 créditos/);
+    assert.match(text(), /Correo y teléfono · 24 créditos/);
+    assert.equal(asked.length, 0, 'arriving looks nothing up');
+    await press(button('Enriquecer los 3 · 24 créditos')!);
+    for (let turn = 0; turn < 8; turn++) await settle();
+    assert.deepEqual(asked.map(entry => [entry.action, entry.leadId ?? null, entry.phone ?? null, entry.quiet ?? null]),
+      [['enrich', LEAD, true, true], ['enrich', OTHER, true, true], ['enrich', third, true, true], ['ready', null, true, null]]);
+    assert.match(text(), /Listo: encontramos el correo de 2 de 3\. Te lo enviamos a tu correo, en la conversación de esta mañana, con cada campaña lista para aprobar\. Sus teléfonos llegan en unos minutos, con el guion de cada llamada\. Sin correo: Raúl Pinto\. Se descontaron 16 créditos de ANTON\.IA\./);
+    // One left to look up: the panel for several is gone, and its own card has the step.
+    assert.doesNotMatch(text(), /de una vez/);
+  } finally { await act(async () => root.unmount()); }
+});
+
+test('«Enriquecer los N» with the email alone, stopped by a refusal the next one would get too: what was found is still sent', async () => {
+  const items = [contact(LEAD, 'Pedro Araya'), contact(OTHER, 'Luisa Soto')];
+  let first = true;
+  const asked = server(body => {
+    if (body.action === 'enrich' && first) { first = false; return { body: { view: viewOf([{ ...items[0], savedLeadId: 'e-1' }, items[1]]), lookup: { outcome: 'found', email: 'x@y.cl', consumed: 1 } } }; }
+    if (body.action === 'enrich') return { status: 409, body: { error: 'Tu equipo no tiene créditos disponibles este mes.' } };
+    if (body.action === 'ready') return { body: { view: viewOf([{ ...items[0], savedLeadId: 'e-1' }, items[1]]), mailed: false } };
+    return { status: 500, body: { error: 'x' } };
+  });
+  const root = await mount(viewOf(items), { bulk: 'email', focus: LEAD });
+  try {
+    assert.deepEqual(([...dom.window.document.querySelectorAll('input[type="radio"]')] as HTMLInputElement[]).map(radio => radio.checked), [true, false]);
+    await press(button('Enriquecer los 2 · 2 créditos')!);
+    for (let turn = 0; turn < 8; turn++) await settle();
+    assert.deepEqual(asked.map(entry => [entry.action, entry.phone ?? null]), [['enrich', null], ['enrich', null], ['ready', null]]);
+    assert.match(text(), /Listo: encontramos el correo de 1 de 2\. Revisa aquí cada campaña y apruébala\. Nos detuvimos antes de terminar\. Tu equipo no tiene créditos disponibles este mes\. Se descontó 1 crédito de ANTON\.IA\./);
+  } finally { await act(async () => root.unmount()); }
+});
+
+test('«Llamar» of the email that brought a mobile: the card opens with «Para llamar» in view and the number is dialled from the page', async () => {
+  const withPhone = contact(LEAD, 'Pedro Araya', { savedLeadId: 'e-1', phone: { state: 'found', number: '+56 9 8765 4321', more: 0 } });
+  server(() => ({ body: {} }));
+  // Without the email's «Llamar», the panel waits closed and nothing is dialled.
+  const quiet = await mount(viewOf([withPhone, contact(OTHER, 'Luisa Soto')], { emails: { [LEAD]: 'pedro@mineraandina.cl' } }), { focus: LEAD });
+  try { assert.doesNotMatch(text(), /Llamar · WhatsApp · \+56 9 8765 4321/); } finally { await act(async () => quiet.unmount()); }
+  const root = await mount(viewOf([withPhone, contact(OTHER, 'Luisa Soto')], { emails: { [LEAD]: 'pedro@mineraandina.cl' } }), { focus: LEAD, call: true });
+  try {
+    assert.ok(dom.window.document.getElementById(`contacto-${LEAD}`)!.querySelector('a[href="tel:+56987654321"]'), 'its number, to tap again');
   } finally { await act(async () => root.unmount()); }
 });

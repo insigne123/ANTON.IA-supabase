@@ -31,13 +31,15 @@ const WAIT_TIMES = 12;
  * `mail`: opened from the person's inbox, where nobody is signed in: the number's two ways are plain links, without the app's record
  * of the call. `collapsible`: folded under its heading, as the other parts of a card; a page of one contact shows it open.
  */
-export function DropCallPanel({ item, actions, busy, mail = false, collapsible = true }: {
+export function DropCallPanel({ item, actions, busy, mail = false, collapsible = true, defaultOpen = false }: {
   item: DropItem; actions: DropCallActions;
   /** Another step is running in the page: the buttons wait. */
   busy: boolean; mail?: boolean; collapsible?: boolean;
+  /** Open on arrival: «Llamar» of the email that brought its mobile leads here. */
+  defaultOpen?: boolean;
 }) {
   const uid = useId();
-  const [open, setOpen] = useState(!collapsible);
+  const [open, setOpen] = useState(!collapsible || defaultOpen);
   const [working, setWorking] = useState<'phone' | 'script' | 'refresh' | null>(null);
   const [copied, setCopied] = useState(false);
   const phone = item.phone;

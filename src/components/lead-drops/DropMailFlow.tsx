@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { telHref } from '@/lib/contact-calls';
 import { dropName, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
 import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
 import type { MailDropView } from '@/lib/server/lead-drop-mail';
 import { cn } from '@/lib/utils';
+import { DropBulkEnrich } from './DropBulkEnrich';
 import { DropContactCard, type DropContactActions, type DropContactMail } from './DropContactCard';
 
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
@@ -31,24 +33,34 @@ const POLL_TIMES = 12;
  * from their own Gmail or Outlook, connected right here the first time. The link in the address is who asks (server/lead-drop-link.ts);
  * every step is a button, so arriving does nothing by itself.
  */
-export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = null }: { token: string; initial: MailDropView; focus: string | null; mailboxNotice: string | null;
+export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = null, bulk = null, call = false }: { token: string; initial: MailDropView; focus: string | null; mailboxNotice: string | null;
+  /** «Enriquecer los N» of the morning email brought the person here with this choice made (DropBulkEnrich): the button confirms it. */ bulk?: 'email' | 'phone' | null;
+  /** «Llamar» of the email that brought a mobile (lead-drop-ready-email.ts): mail clients drop `tel:` links, so the call starts here, at the contact. */ call?: boolean;
   /** The same contacts inside the app, for whoever prefers to work there: it asks to sign in. Nothing here needs it. */ appHref?: string | null }) {
   const [view, setView] = useState(initial);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(mailboxNotice ? MAILBOX_NOTICE[mailboxNotice] ?? null : null);
   const [enriching, setEnriching] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [bulkPhone, setBulkPhone] = useState(bulk === 'phone');
+  const [bulkRun, setBulkRun] = useState<{ done: number; total: number; mailing: boolean } | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   // The contact the email linked to comes into view; what the address said is read once and leaves it (the link itself stays).
   useEffect(() => {
-    if (focus) document.getElementById(`contacto-${focus}`)?.scrollIntoView?.({ block: 'start' });
+    if (focus && !bulk) document.getElementById(`contacto-${focus}`)?.scrollIntoView?.({ block: 'start' });
     if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
-  }, [focus]);
+  }, [focus, bulk]);
+  // The number is dialled once on arrival; from then on its card has «Llamar», «WhatsApp» and the script.
+  useEffect(() => {
+    const phone = call && focus ? initial.items.find(item => item.leadId === focus)?.phone : null;
+    const tel = phone?.state === 'found' ? telHref(phone.number) : null;
+    if (tel) window.location.href = tel;
+  }, [call, focus, initial]);
 
   const post = async (body: Record<string, unknown>) => {
     const response = await fetch('/api/lead-drops/link', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, ...body }) });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.error || 'No pudimos completar la acción. Inténtalo de nuevo.');
+    if (!response.ok) throw Object.assign(new Error(payload?.error || 'No pudimos completar la acción. Inténtalo de nuevo.'), { status: response.status });
     if (payload?.view && alive.current) setView(payload.view);
     return payload;
   };
@@ -80,6 +92,53 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
       else if (lookup.outcome === 'not_found') setNotice({ ok: false, text: `No encontramos un correo para ${closing(item)} ${receipt || 'No se descontó ningún crédito.'}` });
       else { setNotice({ ok: true, text: `Seguimos buscando el correo de ${dropName(item)}: aparecerá aquí en un momento.` }); await waitFor(item); }
     } finally { if (alive.current) setEnriching(null); }
+  };
+  /**
+   * «Enriquecer los N»: each contact without an email is looked up, one after another, and the answer goes to the person's inbox
+   * in the conversation of the morning email (server/lead-drop-ready.ts). A refusal that the next one would get too (no credits,
+   * today's quota, a link that ended) stops it there; anything else skips that contact and goes on.
+   */
+  const enrichAll = async () => {
+    if (enriching || saving || bulkRun) return;
+    const targets = view.items.filter(item => needsLookup(item));
+    if (targets.length < 2) return;
+    const withPhone = bulkPhone;
+    setNotice(null);
+    let found = 0, consumed = 0, failed = 0, stopped: string | null = null;
+    const missed: DropItem[] = [];
+    for (let index = 0; index < targets.length && alive.current; index++) {
+      const item = targets[index];
+      setBulkRun({ done: index, total: targets.length, mailing: false });
+      setEnriching(item.leadId);
+      try {
+        const lookup = (await post({ action: 'enrich', leadId: item.leadId, quiet: true, ...(withPhone ? { phone: true } : {}) }))?.lookup as { outcome: 'found' | 'pending' | 'not_found'; consumed: number } | undefined;
+        consumed += Number(lookup?.consumed) || 0;
+        if (lookup?.outcome === 'found') found++;
+        else if (lookup?.outcome === 'not_found') missed.push(item);
+      } catch (e) {
+        if ([404, 409, 410, 429].includes(Number((e as { status?: number })?.status))) { stopped = e instanceof Error ? e.message : null; break; }
+        failed++;
+      }
+    }
+    if (!alive.current) return;
+    setEnriching(null);
+    let mailed = false;
+    if (found) {
+      setBulkRun({ done: targets.length, total: targets.length, mailing: true });
+      mailed = Boolean((await post({ action: 'ready', ...(withPhone ? { phone: true } : {}) }).catch(() => null))?.mailed);
+    }
+    if (!alive.current) return;
+    setBulkRun(null);
+    const parts = [
+      found ? `Listo: encontramos el correo de ${found === targets.length ? `tus ${found} contactos` : `${found} de ${targets.length}`}.` : stopped ? null : 'No encontramos el correo de ninguno.',
+      found ? (mailed ? 'Te lo enviamos a tu correo, en la conversación de esta mañana, con cada campaña lista para aprobar.' : 'Revisa aquí cada campaña y apruébala.') : null,
+      found && withPhone ? 'Sus teléfonos llegan en unos minutos, con el guion de cada llamada.' : null,
+      missed.length ? `Sin correo: ${missed.slice(0, -1).map(item => `${dropName(item)}, `).join('')}${closing(missed[missed.length - 1])}` : null,
+      failed ? `${failed === 1 ? 'Una búsqueda no respondió' : `${failed} búsquedas no respondieron`}: inténtalas de nuevo desde su tarjeta.` : null,
+      stopped ? `Nos detuvimos antes de terminar. ${stopped}` : null,
+      enrichmentCreditReceipt(consumed) || null,
+    ].filter(Boolean);
+    setNotice({ ok: found > 0, text: parts.join(' ') });
   };
   const actions: DropContactActions = {
     enrich: (item, withPhone) => void enrich(item, withPhone),
@@ -142,11 +201,13 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
 
     <p role="status" aria-live="polite" className={cn('mt-4 rounded-xl px-4 py-3 text-sm', !notice && 'sr-only', notice && (notice.ok ? 'bg-primary/10 text-foreground' : 'bg-destructive/10 text-foreground'))}>{notice?.text ?? ''}</p>
 
+    {toLook >= 2 || bulkRun ? <DropBulkEnrich count={toLook} phone={bulkPhone} onPhone={setBulkPhone} onStart={() => void enrichAll()} running={bulkRun} disabled={saving || (enriching !== null && !bulkRun)} /> : null}
+
     <Card className="mt-6 rounded-2xl">
       <CardContent className="divide-y p-0">
         {items.map(item => <div key={item.leadId} id={`contacto-${item.leadId}`} className="scroll-mt-4">
           <DropContactCard item={item} actions={actions} mail={mailOf(item)} heading="h2"
-            busy={saving || enriching !== null} enriching={enriching === item.leadId} defaultOpen={item.leadId === focus || items.length === 1} />
+            busy={saving || enriching !== null || bulkRun !== null} enriching={enriching === item.leadId} defaultOpen={item.leadId === focus || items.length === 1} callOpen={call && item.leadId === focus} />
         </div>)}
       </CardContent>
     </Card>
