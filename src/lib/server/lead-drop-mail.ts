@@ -6,6 +6,7 @@ import { AuthError, type AuthContext } from '@/lib/server/auth-utils';
 import { getBulkCampaign, reviewBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { readDropLink } from '@/lib/server/lead-drop-link';
 import { LeadDropsError, keepDropLead, linkDropLead, readDrop, type DropScope } from '@/lib/server/lead-drops';
+import { dropPhoneOf } from '@/lib/lead-drop-call';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 
 /**
@@ -47,27 +48,31 @@ export async function mailDropView(client: Client, scope: DropScope, dropId: str
   const drop = await readDrop(client, scope, dropId);
   const saved = drop.items.map(item => item.savedLeadId).filter((id): id is string => Boolean(id));
   const [rows, mailbox]: [any, { resolved: 'google' | 'outlook' | null }] = await Promise.all([
-    saved.length ? client.from('enriched_leads').select('id,email').in('id', saved).eq('organization_id', scope.organizationId).eq('user_id', scope.userId) : { data: [] },
+    saved.length ? client.from('enriched_leads').select('id,email,primary_phone,phone_numbers,enrichment_status,updated_at,created_at').in('id', saved).eq('organization_id', scope.organizationId).eq('user_id', scope.userId) : { data: [] },
     readMailSenderPreference(client, scope.userId).catch(() => ({ resolved: null })),
   ]);
-  const byId = new Map<string, string>(((rows.data || []) as Array<{ id: unknown; email: unknown }>).map(row => [String(row.id), String(row.email || '').trim().toLowerCase()]));
+  const byId = new Map<string, any>(((rows.data || []) as Array<{ id: unknown }>).map(row => [String(row.id), row]));
   const emails: Record<string, string> = {};
-  for (const item of drop.items) {
-    const email = item.savedLeadId ? byId.get(item.savedLeadId) : '';
+  const now = Date.now();
+  // Each saved contact with where its mobile stands («Para llamar», src/lib/lead-drop-call.ts): read here, never kept in the drop.
+  const items = drop.items.map(item => {
+    const row = item.savedLeadId ? byId.get(item.savedLeadId) : null;
+    const email = String(row?.email || '').trim().toLowerCase();
     if (email) emails[item.leadId] = email;
-  }
-  return { date: drop.drop_date, items: drop.items, emails, mailbox: mailbox.resolved ? MAIL_PROVIDER_LABEL[mailbox.resolved] : null };
+    return row ? { ...item, phone: dropPhoneOf(row, Boolean(item.phoneLookup), now) } : item;
+  });
+  return { date: drop.drop_date, items, emails, mailbox: mailbox.resolved ? MAIL_PROVIDER_LABEL[mailbox.resolved] : null };
 }
 
 /** Read again, then change one contact: another button may have written the drop meanwhile. */
-async function patchItem(client: Client, scope: DropScope, dropId: string, leadId: string, change: (item: DropItem) => DropItem) {
+export async function patchItem(client: Client, scope: DropScope, dropId: string, leadId: string, change: (item: DropItem) => DropItem) {
   const fresh = await readDrop(client, scope, dropId);
   const items = fresh.items.map(entry => entry.leadId === leadId ? change(entry) : entry);
   const written = await client.from('lead_drops').update({ items, updated_at: new Date().toISOString() }).eq('id', dropId);
   if (written.error) throw new LeadDropsError('No pudimos guardar el cambio. Inténtalo de nuevo.', 503);
 }
 
-const internalBaseUrl = (env: Record<string, string | undefined>) =>
+export const internalBaseUrl = (env: Record<string, string | undefined>) =>
   [env.CANONICAL_APP_URL, env.NEXT_PUBLIC_APP_URL, env.NEXT_PUBLIC_BASE_URL, env.APP_URL].map(value => String(value || '').trim().replace(/\/$/, '')).find(Boolean) || '';
 const domainOf = (website: unknown) => {
   const raw = String(website || '').trim();
@@ -75,7 +80,9 @@ const domainOf = (website: unknown) => {
   try { return new URL(raw.startsWith('http') ? raw : `https://${raw}`).hostname.replace(/^www\./, '') || undefined; } catch { return undefined; }
 };
 
-export type EnrichDeps = { fetch?: typeof fetch; baseUrl?: string; internalSecret?: string; now?: Date };
+export type EnrichDeps = { fetch?: typeof fetch; baseUrl?: string; internalSecret?: string; now?: Date;
+  /** The mobile too (src/lib/lead-drop-call.ts): asked with the email, it lands by itself minutes later. */
+  phone?: boolean };
 export type EnrichOutcome = {
   /** `found`: its email is here. `pending`: the provider is still looking, it lands by itself. `not_found`: searched, nothing. */
   outcome: 'found' | 'pending' | 'not_found';
@@ -120,7 +127,7 @@ export async function enrichDropLead(client: Client, scope: DropScope, dropId: s
     response = await (deps.fetch ?? fetch)(`${baseUrl}/api/opportunities/enrich-apollo`, {
       method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
       headers: {
-        'Content-Type': 'application/json', Accept: 'application/json', 'Idempotency-Key': `lead-drop:${dropId}:${leadId}:email:${attempt}`,
+        'Content-Type': 'application/json', Accept: 'application/json', 'Idempotency-Key': `lead-drop:${dropId}:${leadId}:${deps.phone ? 'email-phone' : 'email'}:${attempt}`,
         'x-user-id': scope.userId, 'x-organization-id': scope.organizationId, 'x-internal-api-secret': secret,
       },
       body: JSON.stringify({
@@ -128,7 +135,7 @@ export async function enrichDropLead(client: Client, scope: DropScope, dropId: s
           fullName: String(saved.data.name || item.name || ''), linkedinUrl: saved.data.linkedin_url || undefined, companyName: saved.data.company || item.company || undefined,
           companyDomain: domainOf(saved.data.company_website) ?? item.domain ?? undefined, clientRef: String(saved.data.id), id: String(saved.data.id), sourceProviderId: leadId,
         }],
-        revealEmail: true, revealPhone: false, tableName: 'enriched_leads',
+        revealEmail: true, revealPhone: Boolean(deps.phone), tableName: 'enriched_leads',
       }),
     });
   } catch {

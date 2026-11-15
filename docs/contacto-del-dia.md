@@ -75,6 +75,27 @@ Pedido del dueño: dar 6 contactos a algunas personas de un equipo (las que entr
   - Una búsqueda más larga toma más tiempo: con varias búsquedas por hacer, la corrida no empieza otra si le quedan menos de 90 segundos. Esas personas quedan sin fila y las planifica la corrida siguiente.
   - Las corridas de la mañana parten a las 05:00 de Chile en vez de las 06:00 (nueve en vez de seis), para que alcance el tiempo de investigar y escribir a todos antes del correo de las 08:00.
 
+### Desde el 15 de noviembre: «Para llamar», el teléfono y el guion de cada contacto
+
+Pedido del dueño: «necesito que puedan también enriquecer con teléfono y que les hagamos un guion personalizado, con un listado de puntos de interés para el lead».
+
+- **El teléfono, con el correo o después.** La tarjeta de cada contacto (`DropContactCard`) mantiene «Enriquecer · 1 crédito» como botón. Debajo, la opción secundaria «O con su teléfono · 8 créditos» busca el correo y el móvil en la misma búsqueda: 8 créditos por ambos, porque la búsqueda del móvil ya trae el correo. A un contacto ya enriquecido se le busca después, en «Para llamar» → «Buscar su teléfono · 8 créditos», que se suman al crédito del correo.
+  - Es la misma búsqueda del resto de la app (`/api/opportunities/enrich-apollo`): mismo cupo diario, mismo reparto de créditos del equipo y mismo registro. El costo sale de la regla de la app (`apolloAllocationCost`).
+  - El proveedor responde el móvil en minutos. Mientras tanto la tarjeta dice «Buscando su teléfono» y vuelve a leer sola cada 20 segundos, hasta 4 minutos; «Actualizar» lo hace a mano.
+  - Un segundo toque mientras la búsqueda está en camino no pregunta ni cobra de nuevo. Una búsqueda que terminó sin teléfono lo dice, y la siguiente es otra operación.
+- **El número no se guarda en el contacto del día.** Se lee cada vez desde «Por escribir» (`enriched_leads`), solo de la propia persona (`withDropPhones`, `dropPhoneOf`).
+- **Con el número:** «Llamar» y «WhatsApp».
+  - Dentro de la app son los botones de siempre (`ContactActions`): registran el intento y después preguntan cómo salió (`contact_calls`).
+  - Desde la página del correo, sin sesión, son enlaces simples (`tel:` y `wa.me`), sin ese registro.
+  - El WhatsApp se abre con el primer mensaje del guion ya escrito; la persona lo revisa y lo envía desde su propio WhatsApp.
+- **El guion de llamada** se prepara al pedirlo («Preparar guion de llamada»), una sola vez, y queda guardado con el contacto (`item.call`); «Otra versión» pide otro. No usa créditos.
+  - Trae: puntos de interés de esa persona (de 2 a 5), qué decir al contestar, de 2 a 4 preguntas, hasta 3 objeciones con su respuesta, el mensaje si no contesta y el primer WhatsApp.
+  - Sale de lo que el contacto del día ya sabe: cargo, empresa, la investigación corta (qué hace la empresa, la novedad, por qué calza, qué le importa a ese cargo), las razones de la recomendación y el primer correo de su campaña. El modelo no puede inventar datos: lo que no se sabe se plantea como pregunta.
+  - Modelo: `LEAD_DROPS_CALL_MODEL`, o el de la investigación (`LEAD_DROPS_RESEARCH_MODEL`), Haiku por defecto.
+- **Dónde funciona:** en la página del contacto, en «Tus contactos de hoy» de «Hoy» y en la página que abren los correos, con Gmail y con Outlook por igual (la tarjeta es la misma).
+- **Código:** `src/lib/lead-drop-call.ts` (reglas, contrato del guion y lo que se le pide al modelo), `src/lib/server/lead-drop-call.ts` (lectura del teléfono, búsqueda y guion), acciones `phone` y `script` en `/api/lead-drops/[id]` y `/api/lead-drops/link`. Sin cambios de esquema.
+- **Pruebas:** `src/lib/lead-drop-call.test.ts`, `src/lib/server/lead-drop-call.test.ts`, y los casos de «Para llamar» en `drop-contact-card.test.ts`, `lead-drop-flow-ui.test.ts` y `lead-drop-mail.test.ts`. Recorrido: `contactos-para-llamar` (escritorio y móvil).
+
 ### El buscador con IA (`src/lib/server/lead-drop-finder.ts`)
 
 Con un contacto al día alcanzaba con tomar al primero cuyo cargo tuviera las palabras del cliente ideal. Con seis al día eso se queda sin gente en una semana y no aprende. El buscador hace cuatro cosas, todas con la búsqueda gratuita de Apollo y un modelo chico (Claude Haiku):

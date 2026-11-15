@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
+import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { DropCallPanel } from './DropCallPanel';
 import { DropContactCard } from './DropContactCard';
 import { useDropActions } from './useDropActions';
 import { cn } from '@/lib/utils';
@@ -364,7 +366,12 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
             {personLine(one) ? <p className="text-xs text-muted-foreground">{personLine(one)}</p> : null}
           </div>
           {one.savedLeadId ? <Button asChild size="lg"><Link href={writeHref(one)}>Investigar y escribirle<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
-            : needsLookup(one) ? enrichButton(one, 'lg')
+            : needsLookup(one) ? <div className="flex shrink-0 flex-col items-stretch gap-1 sm:items-end">
+              {enrichButton(one, 'lg')}
+              {/* The same lookup with its mobile too, for whoever means to call («Para llamar», below). */}
+              {enriching ? null : <Button variant="link" size="sm" className="h-auto min-h-9 justify-start p-0 text-xs font-normal text-muted-foreground sm:justify-end" disabled={saving}
+                onClick={() => actions.enrich(one, true)}>O con su teléfono · {DROP_EMAIL_AND_PHONE_CREDITS} créditos</Button>}
+            </div>
             : <Button size="lg" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}
         </div>
@@ -377,6 +384,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           </div>
           {fit(one)}
           {hasDetails(one) ? details(one) : null}
+          <DropCallPanel item={one} actions={actions} busy={saving || enriching !== null} />
         </div>
         {howSection}
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">

@@ -8,6 +8,8 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
 import * as chileTime from '@/lib/admin/chile-time';
+import * as contactCalls from '@/lib/contact-calls';
+import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
 
 const require = createRequire(import.meta.url);
@@ -30,13 +32,18 @@ const shared = {
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
   'next/link': { __esModule: true, default: ({ href, children, ...props }: any) => React.createElement('a', { href, ...props }, children) },
   '@/lib/lead-drops': leadDrops,
+  // «Para llamar»: the real rules of the number and of the script; the app's «Llamar» and «WhatsApp» as a line that says what it got.
+  '@/lib/contact-calls': contactCalls,
+  '@/lib/lead-drop-call': leadDropCall,
+  '@/components/contact/ContactActions': { ContactActions: ({ phone, whatsappText, contact }: any) => React.createElement('p', { 'data-contact-actions': contact?.leadId || '', 'data-whatsapp': whatsappText || '' }, `Llamar · WhatsApp · ${phone}`) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
   // The fields of the card as the browser has them, so a test can type in them.
   '@/components/ui/input': { Input: (props: any) => React.createElement('input', props) },
   '@/components/ui/textarea': { Textarea: (props: any) => React.createElement('textarea', props) },
   '@/components/ui/label': { Label: (props: any) => React.createElement('label', props) },
 };
-const contactCard = await component('./DropContactCard.tsx', shared);
+const callPanel = await component('./DropCallPanel.tsx', shared);
+const contactCard = await component('./DropContactCard.tsx', { ...shared, './DropCallPanel': callPanel });
 let home: any = null;
 const { LeadDropBanner } = await component('../home/LeadDropBanner.tsx', shared);
 let answers: Array<{ status: number; body: unknown }> = [];
@@ -63,6 +70,7 @@ const dropActions = await component('./useDropActions.ts', {
 const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
   ...shared,
   './DropContactCard': contactCard,
+  './DropCallPanel': callPanel,
   './useDropActions': dropActions,
   '@/context/AuthContext': { useAuth: () => auth },
   '@/components/page-header': { PageHeader: ({ title, description }: any) => React.createElement('header', null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
@@ -262,6 +270,9 @@ test('a contact found with Apollo: one credit said before the click, «Enriquece
     assert.match(document.querySelector('header')?.textContent || '', /Ver su correo y guardarlo usa 1 crédito\./);
     assert.match(page.text(), /Tiene correo/);
     assert.doesNotMatch(page.text(), /Correo verificado|no gasta créditos/);
+    // A page of one contact has «Para llamar» too: its mobile with the email, said with what it costs, and the script of its call.
+    assert.ok([...document.querySelectorAll('button')].some(entry => entry.textContent === 'O con su teléfono · 8 créditos'));
+    assert.match(page.text(), /Para llamar · teléfono y guion/);
     // The follow-ups wait folded under the first email.
     assert.doesNotMatch(page.text(), /Seguimiento 1 · día 3/);
     await click(page, /Si no responde: 3 seguimientos/);
@@ -290,6 +301,48 @@ test('a contact found with Apollo: one credit said before the click, «Enriquece
     assert.match(missing.text(), /El proveedor no devolvió resultados/);
     assert.ok([...missing.dom.window.document.querySelectorAll('button')].some(button => button.textContent === 'Enriquecer y guardar · 1 crédito'), 'it can be tried again');
   } finally { await close(missing); }
+});
+
+test('«Para llamar» in the app: with its mobile the lookup asks for both, and a contact already in «Por escribir» gets its mobile and its script from the server', async () => {
+  const LEAD = '6accdbfcd5f5d80001cf6959';
+  const contact = { ...drop.items[0], leadId: LEAD, name: 'Daniel Nieto', provider: 'apollo' };
+  const two = { ...drop, items: [contact, { ...contact, leadId: '6accdbfcd5f5d80001cf6960', name: 'Carla Soto' }] };
+  answers = [{ status: 200, body: two }];
+  calls.length = 0; bodies.length = 0; lookups = [];
+  savedLeads = [{ id: 'saved-1', name: 'Daniel Nieto', email: null, sourceProvider: 'apollo', sourceProviderId: LEAD }];
+  completion = { moved: [{ id: 'e-9', email: 'daniel@webclass.cl', enrichmentStatus: 'pending_phone' }], notFound: [], expired: 0, failures: [], consumed: 8, markedNotFound: true };
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    const waiting = two.items.map((item, index) => index ? item : { ...item, keptLeadId: 'saved-1', savedLeadId: 'e-9', phone: { state: 'pending' } });
+    answers = [{ status: 200, body: { keptLeadId: 'saved-1', savedLeadId: null, items: two.items.map((item, index) => index ? item : { ...item, keptLeadId: 'saved-1' }) } },
+      { status: 200, body: { linked: true, savedLeadId: 'e-9', items: waiting } }];
+    await click(page, 'O con su teléfono · 8 créditos');
+    await page.settle();
+    assert.deepEqual(lookups.map(entry => entry.lookups), [{ 'saved-1': 'email_phone' }], 'one lookup, of the email and the mobile');
+    assert.match(page.text(), /Listo: ya tienes su correo y quedó en «Por escribir»\. Su teléfono llega en unos minutos: lo verás en «Para llamar»\. Se descontó 8 crédito/);
+  } finally { await close(page); }
+  // A contact looked up before, without its mobile: asked from its card, to the server, with what it costs said first.
+  const saved = two.items.map((item, index) => index ? { ...item, savedLeadId: 'e-10', phone: { state: 'none', missed: false } } : { ...item, savedLeadId: 'e-9', phone: { state: 'pending' } });
+  answers = [{ status: 200, body: { ...two, items: saved } }];
+  const again = await open('drop-1');
+  try {
+    await again.settle();
+    const sections = [...again.dom.window.document.querySelectorAll('button')].filter(entry => /^Para llamar/.test(entry.textContent || ''));
+    assert.match(sections[0].textContent || '', /buscando su teléfono/, 'the first one\'s mobile is on its way');
+    await act(async () => { sections[1].dispatchEvent(new again.dom.window.MouseEvent('click', { bubbles: true })); });
+    bodies.length = 0;
+    answers = [{ status: 200, body: { phone: { outcome: 'pending', consumed: 8 }, items: saved.map((item, index) => index ? { ...item, phone: { state: 'pending' } } : item) } }];
+    await click(again, 'Buscar su teléfono · 8 créditos');
+    await again.settle();
+    assert.deepEqual(bodies, [{ action: 'phone', leadId: '6accdbfcd5f5d80001cf6960' }]);
+    assert.match(again.text(), /Buscando el teléfono de Carla Soto: suele tardar unos minutos y aparece solo en «Para llamar»\. Usa 8 créditos\./);
+    bodies.length = 0;
+    answers = [{ status: 200, body: { items: saved } }];
+    await click(again, 'Preparar guion de llamada');
+    await again.settle();
+    assert.deepEqual(bodies, [{ action: 'script', leadId: '6accdbfcd5f5d80001cf6960' }]);
+  } finally { await close(again); }
 });
 
 test('a contact that is not theirs or is gone leads to today\'s, without a retry that would answer the same', async () => {

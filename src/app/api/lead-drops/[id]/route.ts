@@ -4,10 +4,13 @@ import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { requireHomeAuth } from '@/lib/server/home-auth';
 import { LeadDropsError, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
 import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, mailDropCampaign, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
+import { findDropPhone, prepareDropCall, withDropPhones } from '@/lib/server/lead-drop-call';
 import { requestAuthErrorResponse } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
+// A mobile's lookup waits for the provider (lead-drop-call.ts, 100 s at most).
+export const maxDuration = 120;
 const noStore = { 'Cache-Control': 'private, no-store' };
 const failure = (error: unknown) => requestAuthErrorResponse(error) || handleAuthError(error instanceof LeadDropsError ? new AuthError(error.message, error.status) : error);
 const Id = z.string().uuid();
@@ -21,7 +24,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const admin = getSupabaseAdminClient();
     const drop = await readDrop(admin, { organizationId, userId: user.id }, id.data);
     if (!drop.opened_at) await admin.from('lead_drops').update({ opened_at: new Date().toISOString() }).eq('id', drop.id);
-    return NextResponse.json({ id: drop.id, date: drop.drop_date, criteria: drop.criteria, items: drop.items }, { headers: noStore });
+    return NextResponse.json({ id: drop.id, date: drop.drop_date, criteria: drop.criteria, items: await withDropPhones(admin, { organizationId, userId: user.id }, drop.items) }, { headers: noStore });
   } catch (error) {
     return failure(error);
   }
@@ -37,6 +40,9 @@ const BodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('edit'), leadId: LeadId, emails: dropEmailsSchema }).strict(),
   z.object({ action: z.literal('feedback'), leadId: LeadId, feedback: dropFeedbackSchema }).strict(),
   z.object({ action: z.literal('approve'), leadId: LeadId }).strict(),
+  // «Para llamar» (src/lib/server/lead-drop-call.ts): the mobile of a contact already in «Por escribir», and the script of its call.
+  z.object({ action: z.literal('phone'), leadId: LeadId }).strict(),
+  z.object({ action: z.literal('script'), leadId: LeadId, fresh: z.boolean().optional() }).strict(),
 ]);
 
 /**
@@ -54,27 +60,36 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const body = BodySchema.safeParse(await request.json().catch(() => null));
     if (!body.success) throw new AuthError('Solicitud no válida.', 400);
     const admin = getSupabaseAdminClient();
+    // Every answer brings the contacts as they are now, each saved one with where its mobile stands.
+    const shown = async <T extends { items: Parameters<typeof withDropPhones>[2] }>(result: T) => ({ ...result, items: await withDropPhones(admin, scope, result.items) });
     if (body.data.action === 'keep') {
-      return NextResponse.json(await keepDropLead(auth, admin, id.data, body.data.leadId), { headers: noStore });
+      return NextResponse.json(await shown(await keepDropLead(auth, admin, id.data, body.data.leadId)), { headers: noStore });
+    }
+    if (body.data.action === 'phone') {
+      const phone = await findDropPhone(admin, scope, id.data, body.data.leadId);
+      return NextResponse.json(await shown({ phone, items: (await readDrop(admin, scope, id.data)).items }), { headers: noStore });
+    }
+    if (body.data.action === 'script') {
+      return NextResponse.json(await shown(await prepareDropCall(admin, scope, id.data, body.data.leadId, { fresh: body.data.fresh })), { headers: noStore });
     }
     if (body.data.action === 'link') {
       const leadId = body.data.leadId;
       const linked = await linkDropLead(admin, scope, id.data, leadId);
       // With its email found, the campaign goes to the person's inbox to read (once, and only in a drop of several contacts).
       if (linked.linked) after(() => mailDropCampaign(admin, scope, id.data, leadId).catch(() => null));
-      return NextResponse.json(linked, { headers: noStore });
+      return NextResponse.json(await shown(linked), { headers: noStore });
     }
     if (body.data.action === 'edit') {
-      return NextResponse.json(await editDropEmails(admin, scope, id.data, body.data.leadId, body.data.emails), { headers: noStore });
+      return NextResponse.json(await shown(await editDropEmails(admin, scope, id.data, body.data.leadId, body.data.emails)), { headers: noStore });
     }
     if (body.data.action === 'feedback') {
-      return NextResponse.json(await saveDropFeedback(admin, scope, id.data, body.data.leadId, body.data.feedback), { headers: noStore });
+      return NextResponse.json(await shown(await saveDropFeedback(admin, scope, id.data, body.data.leadId, body.data.feedback)), { headers: noStore });
     }
     if (body.data.action === 'approve') {
-      return NextResponse.json(await approveDropCampaign(auth, admin, id.data, body.data.leadId), { headers: noStore });
+      return NextResponse.json(await shown(await approveDropCampaign(auth, admin, id.data, body.data.leadId)), { headers: noStore });
     }
     const result = await saveDropLeads(admin, scope, id.data, body.data.leadIds);
-    return NextResponse.json({ saved: result.saved.length, expired: result.expired.length, items: result.items }, { headers: noStore });
+    return NextResponse.json({ saved: result.saved.length, expired: result.expired.length, items: await withDropPhones(admin, scope, result.items) }, { headers: noStore });
   } catch (error) {
     return failure(error);
   }
