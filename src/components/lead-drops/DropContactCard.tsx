@@ -7,16 +7,24 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { dropEmailPreview, dropName, dropSchedule, needsLookup, placeLabel, shortDay, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
+import { DropCallPanel } from './DropCallPanel';
 
 /** What the card asks its page to do with the contact: each answers when done, and the page shows what happened. */
 export type DropContactActions = {
-  enrich: (item: DropItem) => void;
+  /** `withPhone`: its mobile too, in the same lookup (src/lib/lead-drop-call.ts). */
+  enrich: (item: DropItem, withPhone?: boolean) => void;
   save: (item: DropItem) => void;
   approve: (item: DropItem) => Promise<void>;
   edit: (item: DropItem, emails: { draft: Email; followUps: Email[] }) => Promise<boolean>;
   feedback: (item: DropItem, useful: boolean, reason?: string) => Promise<void>;
+  // «Para llamar» (15 Nov 2026): the mobile of a contact already looked up, the script of its call, and the contacts read again
+  // while a mobile is on its way.
+  phone: (item: DropItem) => Promise<void>;
+  script: (item: DropItem, fresh?: boolean) => Promise<void>;
+  refresh: () => Promise<void>;
 };
 type Email = { subject: string; body: string };
 /**
@@ -46,6 +54,9 @@ const labelClass = 'text-xs font-medium uppercase tracking-wide text-muted-foreg
  * campaign, the first email and the follow-ups with the day each would go, which the person can change. One step at a time:
  * «Enriquecer» finds its email (1 credit), then «Aprobar y programar» starts the campaign from their Gmail or Outlook. «Me sirve» and
  * «No me sirve» teach the finder.
+ *
+ * «Para llamar» (15 Nov 2026, DropCallPanel): its mobile, looked up with the email («O con su teléfono») or after it, and the script
+ * of its call.
  */
 export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false }: {
   item: DropItem; actions: DropContactActions;
@@ -104,6 +115,10 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
             {enriching ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
             {enriching ? 'Buscando su correo…' : 'Enriquecer · 1 crédito'}</Button>
           : <Button size="sm" disabled={busy} onClick={() => actions.save(item)}>{mail ? 'Guardar este contacto' : 'Guardar en «Por escribir»'}</Button>;
+  // The same lookup with its mobile too, for whoever means to call: the quieter way, under the button.
+  const withPhone = !item.campaign && !item.savedLeadId && needsLookup(item) && !enriching
+    ? <Button variant="link" size="sm" className="h-auto min-h-9 justify-start p-0 text-xs font-normal text-muted-foreground sm:justify-end" disabled={busy} onClick={() => actions.enrich(item, true)}>
+      O con su teléfono · {DROP_EMAIL_AND_PHONE_CREDITS} créditos</Button> : null;
   // Under the button, what it does or where things stand: from the inbox it names the person's own mailbox and never a part of the app.
   const actionNote = !mail ? (!item.campaign && item.savedLeadId && emails.length ? 'Sale desde tu Gmail u Outlook. Se detiene si responde.' : null)
     : item.campaign ? (paused ? 'Detenida: no sale ningún correo más.' : `Sale desde tu ${item.campaign.provider === 'google' ? 'Gmail' : 'Outlook'}. Se detiene sola si responde.`)
@@ -128,6 +143,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
       <div className="flex shrink-0 flex-col items-stretch gap-1 sm:items-end">
         {action}
         {actionNote ? <p className="text-xs text-muted-foreground sm:text-right">{actionNote}</p> : null}
+        {withPhone}
       </div>
     </div>
 
@@ -157,6 +173,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
     </div> : null}
 
     {opener ? <div className="space-y-1.5"><p className={labelClass}>Cómo abrir</p><p className="text-sm">{opener}</p></div> : null}
+
+    <DropCallPanel item={item} actions={actions} busy={busy || working !== null} mail={Boolean(mail)} />
 
     {emails.length ? <div>
       {section('campaign', item.campaign ? 'Su campaña' : 'Campaña lista', emails.length === 1 ? 'un correo' : `${emails.length} correos, del ${shortDay(days[0])} al ${shortDay(days[days.length - 1])}`)}

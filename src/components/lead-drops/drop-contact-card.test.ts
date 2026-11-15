@@ -4,6 +4,8 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 import ts from 'typescript';
 import { JSDOM } from 'jsdom';
+import * as contactCalls from '@/lib/contact-calls';
+import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
 
 // The page exists before React is loaded, so the card hears typing as a browser's does (lead-drop-flow-ui.test.ts covers the rest).
@@ -25,8 +27,18 @@ const stubs: Record<string, unknown> = {
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
   'next/link': { __esModule: true, default: ({ href, children, ...props }: any) => React.createElement('a', { href, ...props }, children) },
   '@/lib/lead-drops': leadDrops,
+  // «Para llamar»: the real rules of the number and of the script; the app's «Llamar» and «WhatsApp» as a line that says what it got.
+  '@/lib/contact-calls': contactCalls,
+  '@/lib/lead-drop-call': leadDropCall,
+  '@/components/contact/ContactActions': { ContactActions: ({ phone, whatsappText, contact }: any) => React.createElement('p', { 'data-contact-actions': contact?.leadId || '', 'data-whatsapp': whatsappText || '' }, `Llamar · WhatsApp · ${phone}`) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
 };
+// «Para llamar» is its own component (DropCallPanel), compiled the same way and handed to the card.
+const panelSource = await readFile(new URL('./DropCallPanel.tsx', import.meta.url), 'utf8');
+const panelCode = ts.transpileModule(panelSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+const panel: any = {};
+new Function('require', 'exports', panelCode)((id: string) => id in stubs ? stubs[id] : require(id), panel);
+stubs['./DropCallPanel'] = panel;
 const card: any = {};
 new Function('require', 'exports', code)((id: string) => id in stubs ? stubs[id] : require(id), card);
 
@@ -45,7 +57,7 @@ const press = async (target: Element) => { await act(async () => { target.dispat
 test('the person rewrites the emails of a contact: what they typed is what is saved, and a refusal keeps their text on screen', async () => {
   const saved: any[] = [];
   let accept = false;
-  const actions = { enrich: () => {}, save: () => {}, approve: async () => {}, feedback: async () => {},
+  const actions = { enrich: () => {}, save: () => {}, approve: async () => {}, feedback: async () => {}, phone: async () => {}, script: async () => {}, refresh: async () => {},
     edit: async (_item: unknown, emails: unknown) => { saved.push(JSON.parse(JSON.stringify(emails))); return accept; } };
   const root = createRoot(dom.window.document.getElementById('root')!);
   try {
@@ -78,6 +90,73 @@ test('the person rewrites the emails of a contact: what they typed is what is sa
     await press(button('Cancelar'));
     assert.equal(document.querySelector('form'), null);
     assert.match(document.body.textContent || '', /Asunto: Brigadas en faena/);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+const SCRIPT = { points: ['Turnos de noche: quién responde ante una emergencia en faena.', 'Auditorías de seguridad: evidencia de cada inspección.'],
+  opening: 'Hola Pedro, soy Ana de Brigadas del Sur. Te llamo porque apoyamos a faenas con brigadas de emergencia. ¿Cómo cubren hoy los turnos de noche?',
+  questions: ['¿Cuántas personas quedan a cargo en el turno de noche?', '¿Cómo registran hoy cada inspección?'],
+  objections: [{ objection: 'Ya tenemos proveedor', answer: 'Perfecto. ¿Te sirve comparar cómo cubrimos los turnos de noche, sin compromiso?' }],
+  voicemail: 'Hola Pedro, soy Ana de Brigadas del Sur. Te llamaba por las brigadas de emergencia en faena. Te escribo un correo con el detalle.',
+  whatsapp: 'Hola Pedro, soy Ana de Brigadas del Sur. Apoyamos a faenas con brigadas de emergencia. ¿Te sirve conversar cinco minutos esta semana?' };
+
+test('«Para llamar»: the mobile with the email or after it, the number with its two ways once it lands, and the script of the call, prepared when asked', async () => {
+  const asked: string[] = [];
+  const actions = { save: () => {}, approve: async () => {}, feedback: async () => {}, edit: async () => true,
+    enrich: (_item: unknown, withPhone?: boolean) => { asked.push(withPhone ? 'enrich+phone' : 'enrich'); },
+    phone: async () => { asked.push('phone'); }, script: async (_item: unknown, fresh?: boolean) => { asked.push(fresh ? 'script:fresh' : 'script'); }, refresh: async () => { asked.push('refresh'); } };
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  const document = dom.window.document;
+  const show = (contact: Record<string, unknown>, extra: Record<string, unknown> = {}) => act(async () => root.render(React.createElement(card.DropContactCard, { item: contact, actions, busy: false, enriching: false, ...extra })));
+  const text = () => document.body.textContent || '';
+  try {
+    // Not looked up yet: the email alone is the button; with its mobile, the quieter way under it.
+    await show({ ...item, savedLeadId: null });
+    assert.ok(button('Enriquecer · 1 crédito'));
+    await press(button('O con su teléfono · 8 créditos'));
+    assert.deepEqual(asked, ['enrich+phone']);
+    await press(button(/^Para llamar/));
+    assert.match(text(), /Su teléfono se busca al enriquecerlo: junto con el correo \(8 créditos por ambos\) o después \(8 más\)\./);
+    // Without a script yet, it is prepared when asked, and costs no credit.
+    await press(button('Preparar guion de llamada'));
+    assert.deepEqual(asked, ['enrich+phone', 'script']);
+    assert.match(text(), /No usa créditos\./);
+
+    // In «Por escribir», without a mobile: it is looked up from here; one that found nothing says so.
+    asked.length = 0;
+    await show({ ...item, phone: { state: 'none', missed: false } });
+    await press(button('Buscar su teléfono · 8 créditos'));
+    assert.deepEqual(asked, ['phone']);
+    await show({ ...item, phone: { state: 'none', missed: true } });
+    assert.match(text(), /La última búsqueda no encontró un teléfono para este contacto\./);
+
+    // On its way: said as a status, with a way to ask again.
+    asked.length = 0;
+    await show({ ...item, phone: { state: 'pending' } });
+    assert.match(document.querySelector('[role="status"]')?.textContent || '', /Buscando su teléfono/);
+    await press(button('Actualizar'));
+    assert.deepEqual(asked, ['refresh']);
+
+    // Here: the number with «Llamar» and «WhatsApp» (the app's own, which record the call), the WhatsApp line being the script's.
+    await show({ ...item, phone: { state: 'found', number: '+56 9 8765 4321', more: 1 }, call: { script: SCRIPT, at: '2026-11-15T12:00:00.000Z' } });
+    assert.match(button(/^Para llamar/).textContent || '', /\+56 9 8765 4321/, 'the number shows before opening the section');
+    const ways = document.querySelector('[data-contact-actions]')!;
+    assert.equal(ways.getAttribute('data-contact-actions'), 'e-1');
+    assert.equal(ways.getAttribute('data-whatsapp'), SCRIPT.whatsapp);
+    assert.match(text(), /Puntos de interés[\s\S]*Turnos de noche: quién responde[\s\S]*Al contestar[\s\S]*Preguntas[\s\S]*Si te dice…[\s\S]*«Ya tenemos proveedor»[\s\S]*Si no contesta[\s\S]*Primer WhatsApp/);
+    asked.length = 0;
+    await press(button('Otra versión'));
+    assert.deepEqual(asked, ['script:fresh']);
+
+    // From the inbox nobody is signed in: the same number as plain links, the WhatsApp one with the script's first line.
+    await show({ ...item, phone: { state: 'found', number: '+56 9 8765 4321', more: 0 }, call: { script: SCRIPT, at: '2026-11-15T12:00:00.000Z' } },
+      { mail: { mailbox: 'Gmail', email: 'pedro@mineraandina.cl', connect: { google: '/g', outlook: '/o' }, switchCampaign: async () => {} } });
+    assert.equal(document.querySelector('[data-contact-actions]'), null);
+    const links = [...document.querySelectorAll('a')].map(link => link.getAttribute('href') || '');
+    assert.ok(links.includes('tel:+56987654321'));
+    assert.ok(links.some(href => href.startsWith('https://wa.me/56987654321?text=') && decodeURIComponent(href).includes('soy Ana de Brigadas del Sur')));
   } finally {
     await act(async () => root.unmount());
     Object.assign(globalThis, { ...previous, IS_REACT_ACT_ENVIRONMENT: false });

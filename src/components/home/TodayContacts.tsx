@@ -67,7 +67,10 @@ function Board({ board, focus }: { board: DropBoard; focus: string | null }) {
   // What happened is said in the row it happened to: with six rows, a line at the top of the section would be out of sight.
   const [acted, setActed] = useState<string | null>(null);
   const inRow: DropContactActions = {
-    enrich: item => { setActed(item.leadId); actions.enrich(item); },
+    enrich: (item, withPhone) => { setActed(item.leadId); actions.enrich(item, withPhone); },
+    phone: item => { setActed(item.leadId); return actions.phone(item); },
+    script: (item, fresh) => { setActed(item.leadId); return actions.script(item, fresh); },
+    refresh: actions.refresh,
     save: item => { setActed(item.leadId); actions.save(item); },
     approve: item => { setActed(item.leadId); return actions.approve(item); },
     edit: (item, emails) => { setActed(item.leadId); return actions.edit(item, emails); },

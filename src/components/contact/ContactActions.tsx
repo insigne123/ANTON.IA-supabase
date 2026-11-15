@@ -18,6 +18,7 @@ export function ContactActions({
   morePhones = 0,
   onScript,
   senderCompany,
+  whatsappText,
   className,
 }: {
   phone: string | null | undefined;
@@ -27,6 +28,8 @@ export function ContactActions({
   /** Opens the call script, when the screen has one. */
   onScript?: () => void;
   senderCompany?: string | null;
+  /** The first WhatsApp line, when the screen wrote one for this contact; the usual greeting otherwise. */
+  whatsappText?: string | null;
   className?: string;
 }) {
   const { user } = useAuth();
@@ -35,7 +38,7 @@ export function ContactActions({
   const shown = String(phone || '').trim();
   const meta = (user?.user_metadata || {}) as Record<string, unknown>;
   const senderName = typeof meta.full_name === 'string' ? meta.full_name : typeof meta.name === 'string' ? meta.name : null;
-  const whatsapp = whatsappHref(phone, whatsappOpener({ contactName: contact.name, senderName, senderCompany }));
+  const whatsapp = whatsappHref(phone, whatsappText?.trim() || whatsappOpener({ contactName: contact.name, senderName, senderCompany }));
   const who = contact.name || 'este contacto';
 
   return (

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
+import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { dropName, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
 import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
 import type { MailDropView } from '@/lib/server/lead-drop-mail';
@@ -66,21 +67,33 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
       if (payload?.view?.emails?.[item.leadId]) { setNotice({ ok: true, text: `Listo: encontramos el correo de ${closing(named(payload, item))} Revisa su campaña y apruébala.` }); return; }
     }
   };
-  const enrich = async (item: DropItem) => {
+  const enrich = async (item: DropItem, withPhone = false) => {
     if (enriching || saving) return;
     setEnriching(item.leadId);
     try {
-      const payload = await act({ action: 'enrich', leadId: item.leadId });
+      const payload = await act({ action: 'enrich', leadId: item.leadId, ...(withPhone ? { phone: true } : {}) });
       const lookup = payload?.lookup as { outcome: 'found' | 'pending' | 'not_found'; consumed: number } | undefined;
       if (!lookup) return;
       const receipt = enrichmentCreditReceipt(lookup.consumed);
-      if (lookup.outcome === 'found') setNotice({ ok: true, text: `Listo: encontramos el correo de ${closing(named(payload, item))} Revisa su campaña y apruébala. ${receipt}`.trim() });
+      const phoneNote = withPhone ? ' Su teléfono llega en unos minutos, en «Para llamar».' : '';
+      if (lookup.outcome === 'found') setNotice({ ok: true, text: `Listo: encontramos el correo de ${closing(named(payload, item))} Revisa su campaña y apruébala.${phoneNote} ${receipt}`.trim() });
       else if (lookup.outcome === 'not_found') setNotice({ ok: false, text: `No encontramos un correo para ${closing(item)} ${receipt || 'No se descontó ningún crédito.'}` });
       else { setNotice({ ok: true, text: `Seguimos buscando el correo de ${dropName(item)}: aparecerá aquí en un momento.` }); await waitFor(item); }
     } finally { if (alive.current) setEnriching(null); }
   };
   const actions: DropContactActions = {
-    enrich: item => void enrich(item),
+    enrich: (item, withPhone) => void enrich(item, withPhone),
+    phone: async item => {
+      const done = await act({ action: 'phone', leadId: item.leadId });
+      const found = done?.phone as { outcome: 'found' | 'pending' | 'not_found'; consumed: number } | undefined;
+      if (!found) return;
+      const receipt = enrichmentCreditReceipt(found.consumed);
+      setNotice(found.outcome === 'found' ? { ok: true, text: `Listo: ya tienes el teléfono de ${closing(item)} ${receipt}`.trim() }
+        : found.outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Para llamar». Usa ${DROP_PHONE_CREDITS} créditos.` }
+        : { ok: false, text: `No encontramos un teléfono para ${closing(item)} ${receipt}`.trim() });
+    },
+    script: async (item, fresh) => { await act({ action: 'script', leadId: item.leadId, ...(fresh ? { fresh: true } : {}) }); },
+    refresh: async () => { await post({ action: 'read' }).catch(() => null); },
     save: item => {
       if (saving || enriching) return;
       setSaving(true);
@@ -139,7 +152,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
     </Card>
 
     <p className="mt-6 text-xs leading-5 text-muted-foreground">
-      Enriquecer busca el correo de trabajo del contacto y usa 1 crédito. Al aprobar, los correos salen desde tu propio Gmail u Outlook y las respuestas te llegan ahí.
+      Enriquecer busca el correo de trabajo del contacto y usa 1 crédito; con su teléfono, {DROP_EMAIL_AND_PHONE_CREDITS} por ambos. Al aprobar, los correos salen desde tu propio Gmail u Outlook y las respuestas te llegan ahí.
       Esta página es personal: se abre con el enlace de tu correo, así que no lo reenvíes.
     </p>
     {appHref ? <p className="mt-2 text-xs leading-5 text-muted-foreground">

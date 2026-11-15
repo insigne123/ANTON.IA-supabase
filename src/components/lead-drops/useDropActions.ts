@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { dropName, shortDay, type DropItem } from '@/lib/lead-drops';
+import { DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { completeSavedContacts, completionSummary } from '@/lib/leads-workspace/complete-contacts';
 import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
 import { supabaseService } from '@/lib/supabase-service';
@@ -14,7 +15,8 @@ export type DropNotice = { ok: boolean; text: string } | null;
  * prospectos» (LeadDropFlow) and, for a drop of several, the section of «Hoy» (TodayContacts, 13 Nov 2026). «Enriquecer» keeps the
  * contact as a saved one, looks its email up as any saved contact's (1 credit) and ties it back to the drop; `save` keeps those whose
  * email came with the search; the card's own steps (the emails changed by hand, «Aprobar y programar», whether it is useful) each
- * answer with the drop's contacts as they are now. `single`: the drop has one contact, and what is said speaks of one.
+ * answer with the drop's contacts as they are now. «Para llamar» (src/lib/lead-drop-call.ts): the mobile with the email or after it,
+ * and the script of the call, both asked to the server. `single`: the drop has one contact, and what is said speaks of one.
  */
 export function useDropActions({ dropId, call, setItems, single }: {
   dropId: string | null; call: (path: string, init?: RequestInit) => Promise<Response>; setItems: (items: DropItem[]) => void; single: boolean;
@@ -31,7 +33,8 @@ export function useDropActions({ dropId, call, setItems, single }: {
     return payload;
   };
   // «Enriquecer y guardar»: kept as a saved contact, its email looked up as any saved contact's (1 credit), then tied to this drop.
-  const enrich = async (item: DropItem) => {
+  // `withPhone`: its mobile in the same lookup; the provider answers it minutes later, and the card shows it when it lands.
+  const enrich = async (item: DropItem, withPhone = false) => {
     if (!dropId || saving || enriching) return;
     setEnriching(item.leadId); setNotice(null);
     try {
@@ -40,13 +43,14 @@ export function useDropActions({ dropId, call, setItems, single }: {
       if (kept.savedLeadId) return;
       const saved = (await supabaseService.getLeads()).find(lead => lead.id === kept.keptLeadId);
       if (!saved) throw new Error('Quedó guardado, pero no pudimos buscar su correo. Búscalo desde «Por escribir».');
-      const completion = await completeSavedContacts([saved], { [saved.id]: 'email' });
+      const completion = await completeSavedContacts([saved], { [saved.id]: withPhone ? 'email_phone' : 'email' });
       const linked = await post({ action: 'link', leadId: item.leadId });
       setItems(linked.items);
       const found = completion.moved.some(lead => lead.email);
+      const phoneNote = withPhone && linked.linked ? ' Su teléfono llega en unos minutos: lo verás en «Para llamar».' : '';
       setNotice(linked.linked && found
-        ? { ok: true, text: `Listo: ya tienes su correo y quedó en «Por escribir». ${enrichmentCreditReceipt(completion.consumed)}`.trim() }
-        : linked.linked ? { ok: true, text: 'Quedó en «Por escribir»: su correo sigue en búsqueda y aparecerá allí en unos minutos.' }
+        ? { ok: true, text: `Listo: ya tienes su correo y quedó en «Por escribir».${phoneNote} ${enrichmentCreditReceipt(completion.consumed)}`.trim() }
+        : linked.linked ? { ok: true, text: `Quedó en «Por escribir»: su correo sigue en búsqueda y aparecerá allí en unos minutos.${phoneNote}` }
         : { ok: false, text: completionSummary(completion).description });
     } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
     finally { setEnriching(null); }
@@ -74,7 +78,23 @@ export function useDropActions({ dropId, call, setItems, single }: {
     } catch (e) { setNotice({ ok: false, text: e instanceof Error && e.message !== 'No pudimos guardarlo.' ? e.message : failed }); return null; }
   };
   const actions: DropContactActions = {
-    enrich: item => void enrich(item),
+    enrich: (item, withPhone) => void enrich(item, withPhone),
+    phone: async item => {
+      const done = await act({ action: 'phone', leadId: item.leadId }, 'No pudimos buscar su teléfono. Inténtalo de nuevo.');
+      const outcome = done?.phone?.outcome as 'found' | 'pending' | 'not_found' | undefined;
+      if (!outcome) return;
+      const receipt = enrichmentCreditReceipt(Number(done.phone.consumed) || 0);
+      setNotice(outcome === 'found' ? { ok: true, text: `Listo: ya tienes el teléfono de ${dropName(item)}. ${receipt}`.trim() }
+        : outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Para llamar». Usa ${DROP_PHONE_CREDITS} créditos.` }
+        : { ok: false, text: `No encontramos un teléfono para ${dropName(item)}. ${receipt}`.trim() });
+    },
+    script: async (item, fresh) => { await act({ action: 'script', leadId: item.leadId, ...(fresh ? { fresh: true } : {}) }, 'No pudimos preparar el guion. Inténtalo de nuevo.'); },
+    refresh: async () => {
+      if (!dropId) return;
+      const response = await call(`/api/lead-drops/${encodeURIComponent(dropId)}`);
+      const payload = await response.json().catch(() => null);
+      if (response.ok && Array.isArray(payload?.items)) setItems(payload.items);
+    },
     save: item => void save([item.leadId]),
     approve: async item => {
       const done = await act({ action: 'approve', leadId: item.leadId }, 'No pudimos programar la campaña. Inténtalo de nuevo.');

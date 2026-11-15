@@ -5,6 +5,8 @@ import { createRequire } from 'node:module';
 import test, { after } from 'node:test';
 import ts from 'typescript';
 import { JSDOM } from 'jsdom';
+import * as contactCalls from '@/lib/contact-calls';
+import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
 import * as provider from '@/lib/leads-workspace/enrichment-provider';
 
@@ -35,10 +37,15 @@ const shared: Record<string, unknown> = {
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
   'next/link': { __esModule: true, default: ({ href, children, ...props }: any) => React.createElement('a', { href, ...props }, children) },
   '@/lib/lead-drops': leadDrops,
+  // «Para llamar»: the real rules of the number and of the script; the app's «Llamar» and «WhatsApp» as a line that says what it got.
+  '@/lib/contact-calls': contactCalls,
+  '@/lib/lead-drop-call': leadDropCall,
+  '@/components/contact/ContactActions': { ContactActions: ({ phone, whatsappText, contact }: any) => React.createElement('p', { 'data-contact-actions': contact?.leadId || '', 'data-whatsapp': whatsappText || '' }, `Llamar · WhatsApp · ${phone}`) },
   '@/lib/leads-workspace/enrichment-provider': provider,
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
 };
-const card = await compile('./DropContactCard.tsx', shared);
+const callPanel = await compile('./DropCallPanel.tsx', shared);
+const card = await compile('./DropContactCard.tsx', { ...shared, './DropCallPanel': callPanel });
 const flow = await compile('./DropMailFlow.tsx', { ...shared, './DropContactCard': card });
 
 const LEAD = '6accdbfcd5f5d80001cf6901', OTHER = '6accdbfcd5f5d80001cf6902';

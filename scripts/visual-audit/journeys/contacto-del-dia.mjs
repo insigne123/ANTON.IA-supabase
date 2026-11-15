@@ -23,6 +23,12 @@ const steps = [
     c.check('dice que ver su correo usa 1 crédito', await c.has('Ver su correo y guardarlo usa 1 crédito'));
     c.check('no muestra el apellido con asteriscos', !(await c.has('***')));
     c.check('la acción principal es «Enriquecer y guardar · 1 crédito»', await c.has('Enriquecer y guardar · 1 crédito'));
+    c.check('ofrece buscar también su teléfono, con lo que cuesta', await c.has('O con su teléfono · 8 créditos'));
+  } },
+  { say: 'Abro «Para llamar» y le preparo el guion', do: async c => {
+    await c.click({ name: /^Para llamar/ });
+    await c.see('Preparar guion de llamada');
+    c.check('dice que el guion no usa créditos', await c.has('No usa créditos.'));
   } },
   { say: 'Abro los tres seguimientos', do: async c => {
     await c.click({ name: /Si no responde: 3 seguimientos/ });
@@ -120,6 +126,61 @@ const sixSteps = [
     await card(c, 'Ignacio M.').getByRole('button', { name: 'No me sirve' }).click();
     await card(c, 'Ignacio M.').getByRole('button', { name: 'El cargo no decide' }).click();
     await c.see('Dijiste que no te sirve (el cargo no decide): lo tendremos en cuenta.');
+  } },
+];
+
+// ─── «Para llamar» (15 Nov 2026): the mobile with the email or after it, and the script of the call ─────────────────────────────
+// The lookup spends credits and the script asks a model, so both are answered here with what the server answers
+// (src/lib/server/lead-drop-call.ts): a mobile takes minutes, so asking for it answers «pending» and the number comes with a later read.
+const CALL_SCRIPT = {
+  points: ['Planta concentradora nueva en 2027: más áreas y turnos que cubrir ante una emergencia.', 'Turnos de noche: quién responde hoy cuando la brigada propia queda corta.',
+    'Fiscalización: cómo demuestran ante la autoridad que cada faena tiene su plan.'],
+  opening: 'Hola Paula, soy Camila de Resguarda. Te llamo porque vi que Cobres del Loa parte una planta nueva en 2027 y apoyamos a faenas con brigadas de emergencia. ¿Cómo piensan cubrir la respuesta en esa planta?',
+  questions: ['¿Quién responde hoy ante una emergencia en los turnos de noche?', '¿La planta nueva va a tener brigada propia o externa?', '¿Cómo registran hoy los simulacros y las inspecciones?'],
+  objections: [{ objection: 'Ya tenemos brigada propia', answer: 'Tiene sentido. Muchas faenas la complementan solo en los turnos de noche; ¿te sirve ver cómo lo hacen, sin compromiso?' },
+    { objection: 'Mándame un correo', answer: 'Claro, te lo envío hoy. ¿Lo revisamos el jueves en diez minutos?' }],
+  voicemail: 'Hola Paula, soy Camila de Resguarda. Te llamaba por la respuesta ante emergencias en la planta nueva. Te escribo un correo con el detalle y te vuelvo a llamar el jueves.',
+  whatsapp: 'Hola Paula, soy Camila de Resguarda. Vi que parten una planta nueva en 2027 y apoyamos a faenas con brigadas de emergencia. ¿Te sirve conversar diez minutos esta semana?',
+};
+async function answerCalls(page) {
+  let items = SIX.map((item, index) => index === 1 ? { ...item, phone: { state: 'found', number: '+56 9 8765 4321', more: 1 }, call: { script: CALL_SCRIPT, at: '2026-11-15T12:00:00.000Z' } }
+    : index === 2 ? { ...item, name: 'Marcela Díaz', savedLeadId: '00000000-0000-4000-8000-000000002003', keptLeadId: 'kept-3', phone: { state: 'none', missed: false } } : item);
+  await page.route(`**/api/lead-drops/${DROP}`, async route => {
+    if (route.request().method() === 'GET') return route.fulfill(answered({ id: DROP, date: '2026-11-13', items,
+      criteria: { titles: ['Gerente HSE', 'Jefe de Prevención de Riesgos', 'Superintendente de Seguridad'], industries: ['Minería', 'Energía', 'Forestal'], locations: ['Chile'], sizes: [], source: 'empresa' } }));
+    const body = route.request().postDataJSON() || {};
+    const change = patch => { items = items.map(item => item.leadId === body.leadId ? { ...item, ...patch(item) } : item); };
+    if (body.action === 'phone') { change(() => ({ phone: { state: 'pending' } })); return route.fulfill(answered({ items, phone: { outcome: 'pending', consumed: 8 } })); }
+    if (body.action === 'script') change(() => ({ call: { script: { ...CALL_SCRIPT, opening: CALL_SCRIPT.opening.replace('Paula', 'Marcela').replace('Cobres del Loa', 'Energía Atacama') }, at: '2026-11-15T12:00:00.000Z' } }));
+    return route.fulfill(answered({ items }));
+  });
+}
+const callSteps = [
+  { say: 'Abro mis contactos del día', do: async c => { await answerCalls(c.page); await c.go(`/search/contactos/${DROP}`); await c.see('6 contactos nuevos'); } },
+  { say: 'Veo que al que aún no enriquezco puedo buscarle también el teléfono', do: async c => {
+    c.check('el correo solo sigue siendo el botón', await card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 1);
+    c.check('con su teléfono es la opción secundaria y dice cuánto cuesta', await card(c, 'Rodrigo S.').getByRole('button', { name: 'O con su teléfono · 8 créditos' }).count() === 1);
+  } },
+  { say: 'Abro «Para llamar» de quien ya tiene su teléfono: el número, cómo llamar o escribir, y el guion', do: async c => {
+    c.check('el número se ve antes de abrir', await card(c, 'Paula Reyes').getByRole('button', { name: /Para llamar · \+56 9 8765 4321/ }).count() === 1);
+    await card(c, 'Paula Reyes').getByRole('button', { name: /^Para llamar/ }).click();
+    await c.see('Puntos de interés');
+    c.check('puedo llamar', await card(c, 'Paula Reyes').getByRole('link', { name: /Llamar a Paula Reyes/ }).count() === 1);
+    c.check('puedo escribir por WhatsApp', await card(c, 'Paula Reyes').getByRole('link', { name: /Escribir a Paula Reyes por WhatsApp/ }).count() === 1);
+    c.check('el guion trae qué decir, qué preguntar y qué responder', await c.has('Al contestar') && await c.has('Preguntas') && await c.has('Si te dice…') && await c.has('Si no contesta') && await c.has('Primer WhatsApp'));
+    c.check('se puede copiar y pedir otra versión', await card(c, 'Paula Reyes').getByRole('button', { name: 'Otra versión' }).count() === 1);
+  } },
+  { say: 'A otra que ya enriquecí le busco el teléfono', do: async c => {
+    await card(c, 'Marcela Díaz').getByRole('button', { name: /^Para llamar/ }).click();
+    await card(c, 'Marcela Díaz').getByRole('button', { name: 'Buscar su teléfono · 8 créditos' }).click();
+    await c.see('Buscando el teléfono de Marcela Díaz');
+    c.check('dice que llega solo y cuánto usa', await c.has('aparece solo en «Para llamar». Usa 8 créditos.'));
+    c.check('la tarjeta lo muestra en camino', await card(c, 'Marcela Díaz').getByText('Buscando su teléfono: suele tardar unos minutos').count() === 1);
+  } },
+  { say: 'Le preparo el guion mientras llega su teléfono', do: async c => {
+    await card(c, 'Marcela Díaz').getByRole('button', { name: 'Preparar guion de llamada' }).click();
+    await card(c, 'Marcela Díaz').getByText('Puntos de interés').waitFor();
+    c.check('el guion es para ella', await card(c, 'Marcela Díaz').getByText(/Hola Marcela, soy Camila/).count() >= 1);
   } },
 ];
 
@@ -301,6 +362,10 @@ export default () => [
     goal: 'Entender por qué me recomiendan a cada uno, ver su campaña, cambiarla, aprobarla y decir cuál no me sirve, sin salir de la página.', steps: sixSteps },
   { id: 'contactos-seis-telefono', persona: 'owner', viewport: 'phone', title: 'Seis contactos al día (móvil)',
     goal: 'Lo mismo en una pantalla angosta, sin desbordes.', steps: sixSteps },
+  { id: 'contactos-para-llamar', persona: 'owner', title: 'Llamar a un contacto del día: su teléfono y su guion',
+    goal: 'Buscar el teléfono de un contacto, con el correo o después, y tener preparado qué decirle: sus puntos de interés, cómo abrir, qué preguntar y qué responder.', steps: callSteps },
+  { id: 'contactos-para-llamar-telefono', persona: 'owner', viewport: 'phone', title: 'Llamar a un contacto del día (móvil)',
+    goal: 'Lo mismo desde el teléfono, que es desde donde se llama.', steps: callSteps },
   { id: 'contactos-en-hoy', persona: 'owner', title: 'Mis contactos del día dentro de «Hoy»',
     goal: 'Entrar a la app y encontrar mis contactos del día como lo primero de «Hoy», ver por qué me los recomiendan y aprobar una campaña ahí mismo.',
     seed: seedHoy, steps: hoySteps },

@@ -1,3 +1,4 @@
+import type { DropCallScript, DropPhone } from '@/lib/lead-drop-call';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { displayLeadName } from '@/lib/lead-name';
 
@@ -133,6 +134,13 @@ export type DropItem = {
   campaign?: { id: string; provider: 'google' | 'outlook'; approvedAt: string; /** Stopped by the person from their inbox (server/lead-drop-mail.ts). */ pausedAt?: string | null };
   /** When the campaign went to the person's inbox to read, once its email was found (server/lead-drop-campaign.ts, mailDropCampaign). */
   campaignMailedAt?: string;
+  // Since 15 Nov 2026: «Para llamar» (src/lib/lead-drop-call.ts).
+  /** The script of its call, prepared once when the person asks for it (server/lead-drop-call.ts). */
+  call?: { script: DropCallScript; at: string };
+  /** Its mobile looked up from the card after its email: which try it is and when. */
+  phoneLookup?: { attempt: number; at: string };
+  /** Where its mobile stands, read from «Por escribir» each time the contacts are shown: never kept in the drop. */
+  phone?: DropPhone;
 };
 /**
  * Five lines for whoever sells, each one sentence: what the company does, what is happening there now (with the date and the source

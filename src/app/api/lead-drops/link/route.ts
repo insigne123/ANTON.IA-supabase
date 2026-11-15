@@ -2,6 +2,7 @@ import { after, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, mailDropCampaign, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
 import { enrichDropLead, linkAuth, mailDropView, resolveDropLink, switchDropCampaign } from '@/lib/server/lead-drop-mail';
+import { findDropPhone, prepareDropCall } from '@/lib/server/lead-drop-call';
 import { LeadDropsError, saveDropLeads } from '@/lib/server/lead-drops';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
@@ -15,7 +16,10 @@ const Token = z.string().regex(/^[A-Za-z0-9_-]{48}$/);
 const one = <A extends string, S extends z.ZodRawShape>(action: A, shape: S) => z.object({ token: Token, action: z.literal(action), ...shape }).strict();
 const Body = z.discriminatedUnion('action', [
   one('read', {}),
-  one('enrich', { leadId: LeadId }),
+  one('enrich', { leadId: LeadId, phone: z.boolean().optional() }),
+  // «Para llamar» (src/lib/server/lead-drop-call.ts): the mobile of a contact already looked up, and the script of its call.
+  one('phone', { leadId: LeadId }),
+  one('script', { leadId: LeadId, fresh: z.boolean().optional() }),
   one('save', { leadId: LeadId }),
   one('edit', { leadId: LeadId, emails: dropEmailsSchema }),
   one('feedback', { leadId: LeadId, feedback: dropFeedbackSchema }),
@@ -40,10 +44,14 @@ export async function POST(request: Request) {
     // Opened by a person: the first button they press says so (arriving does not, a mail scanner arrives too).
     if (data.action !== 'read') await admin.from('lead_drops').update({ opened_at: new Date().toISOString() }).eq('id', dropId).is('opened_at', null);
     if (data.action === 'enrich') {
-      const lookup = await enrichDropLead(admin, scope, dropId, data.leadId);
+      const lookup = await enrichDropLead(admin, scope, dropId, data.leadId, { phone: data.phone });
       extra = { lookup };
       // With its email found, the campaign goes to the person's inbox to read (once).
       if (lookup.outcome === 'found') after(() => mailDropCampaign(admin, scope, dropId, data.leadId).catch(() => null));
+    } else if (data.action === 'phone') {
+      extra = { phone: await findDropPhone(admin, scope, dropId, data.leadId) };
+    } else if (data.action === 'script') {
+      await prepareDropCall(admin, scope, dropId, data.leadId, { fresh: data.fresh });
     } else if (data.action === 'save') {
       const saved = await saveDropLeads(admin, scope, dropId, [data.leadId]);
       extra = { saved: saved.saved.length, expired: saved.expired.length };

@@ -101,6 +101,23 @@ test('«Enriquecer» from the inbox: the app\'s own lookup, asked as that member
   assert.equal(route.requests.length, 1);
 });
 
+test('«O con su teléfono»: the same lookup asks for the mobile too, as an operation of its own, and the page shows where it stands', async () => {
+  const { client, tables } = seed();
+  const route = lookupRoute(tables, request => ({
+    persist: { email: 'pedro.araya@mineraandina.cl', full_name: 'Pedro Araya', primary_phone: null, phone_numbers: [], enrichment_status: 'pending_phone', updated_at: new Date().toISOString() },
+    body: { operationStatus: 'completed', usage: { consumed: 8 }, enriched: [{ id: 'e-new', clientRef: request.body.leads[0].clientRef, email: 'pedro.araya@mineraandina.cl', enrichmentStatus: 'pending_phone', serverPersisted: true }] },
+  }));
+  assert.deepEqual(await enrichDropLead(client, scope, DROP, LEAD, { ...route.deps, phone: true }), { outcome: 'found', email: 'pedro.araya@mineraandina.cl', consumed: 8 });
+  assert.equal(route.requests[0].headers['Idempotency-Key'], `lead-drop:${DROP}:${LEAD}:email-phone:0`);
+  assert.deepEqual([route.requests[0].body.revealEmail, route.requests[0].body.revealPhone], [true, true]);
+  // The mobile is on its way: the page says so, and shows it once it lands. A contact not looked up has nothing to say.
+  const waiting = await mailDropView(client, scope, DROP);
+  assert.deepEqual(waiting.items.map(entry => entry.phone), [{ state: 'pending' }, undefined]);
+  Object.assign(tables.enriched_leads[0], { enrichment_status: 'completed', primary_phone: '+56 9 8765 4321' });
+  assert.deepEqual((await mailDropView(client, scope, DROP)).items[0].phone, { state: 'found', number: '+56 9 8765 4321', more: 0 });
+  assert.equal(tables.lead_drops[0].items[0].phone, undefined, 'the number is read each time, never kept in the drop');
+});
+
 test('a second tap while the first lookup is out repeats that operation; only one that ended without an email starts a new one', async () => {
   const { client, tables } = seed();
   let found = false;
