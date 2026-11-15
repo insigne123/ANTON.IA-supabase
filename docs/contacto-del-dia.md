@@ -56,6 +56,25 @@ Pedido del dueño: que un equipo reciba **6 contactos recomendados al día, de l
   - `dailyAlertsTick` también corre el lunes, que sigue siendo del informe semanal: ese día solo escribe a los equipos con contactos el lunes, y solo cuando sus contactos están listos. Mientras no lo están no guarda nada, así la corrida siguiente lo intenta de nuevo.
 - **Con un contacto al día nada cambia.** El buscador con IA se usa solo cuando el plan pide más de uno (`plan.size > 1`) y la búsqueda es la de Apollo.
 
+### Desde el 15 de noviembre: plan por persona y búsqueda más profunda
+
+Pedido del dueño: dar 6 contactos a algunas personas de un equipo (las que entran pero usan poco), sin cambiar al resto, y que los recomendados no se acaben pronto.
+
+- **Plan por persona** (migración `20261115120000_lead_drop_person_plans.sql`, tabla `lead_drop_person_plans`):
+  - Una fila por persona y equipo: `lead_drop_size` (1 a 10), `lead_drop_weekdays` (vacío = los días del equipo) y `starts_on`.
+  - Quien tiene fila recibe lo que dice su fila; el resto del equipo sigue con el plan del equipo.
+  - `starts_on` reinicia la cuenta del descanso: lo que la persona dejó sin abrir antes de esa fecha no la deja fuera.
+  - Solo la escriben el servidor y quien opera la base de datos (sin acceso para `anon` ni `authenticated`).
+  - Para dar 6 a una persona: `insert into lead_drop_person_plans (organization_id, user_id, lead_drop_size) values ('…', '…', 6)`. Para quitarlo, borrar la fila.
+  - En una misma corrida, las personas de un equipo se buscan por separado según cuántos reciben: primero las de más contactos, con el buscador con IA.
+- **Nadie recibe a una persona que el equipo ya tiene.** La exclusión es de todo el equipo, no de cada persona: leads guardados, enriquecidos, contactados y todo lo recomendado a cualquier compañero en los últimos 180 días.
+  - Esa lista se lee completa, de a mil filas: la API responde como máximo 1.000 por consulta, y antes un equipo con más de mil leads habría quedado con la lista cortada sin aviso.
+- **Búsqueda más profunda** (`apolloDropDepth`): Apollo responde cada búsqueda en el mismo orden, así que un equipo que ya tenía a los primeros se quedaba sin gente nueva aunque hubiera miles más abajo. Ahora la primera búsqueda del buscador pide 300 personas más tantas como el equipo ya tiene, de a cien, hasta 1.000 (diez páginas, sin costo).
+  - Medido el 15 de noviembre para el cliente de GrupoExpro en Chile: unas 25.700 personas en Apollo, 12.700 con correo verificado; el equipo tenía cerca de 1.000 y la búsqueda leía solo las primeras 300.
+  - Con 6 personas a 6 contactos, tres días a la semana, se usan unos 470 al mes.
+  - Una búsqueda más larga toma más tiempo: con varias búsquedas por hacer, la corrida no empieza otra si le quedan menos de 90 segundos. Esas personas quedan sin fila y las planifica la corrida siguiente.
+  - Las corridas de la mañana parten a las 05:00 de Chile en vez de las 06:00 (nueve en vez de seis), para que alcance el tiempo de investigar y escribir a todos antes del correo de las 08:00.
+
 ### El buscador con IA (`src/lib/server/lead-drop-finder.ts`)
 
 Con un contacto al día alcanzaba con tomar al primero cuyo cargo tuviera las palabras del cliente ideal. Con seis al día eso se queda sin gente en una semana y no aprende. El buscador hace cuatro cosas, todas con la búsqueda gratuita de Apollo y un modelo chico (Claude Haiku):
@@ -219,7 +238,7 @@ Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el
 
 ## Cómo funciona
 
-1. **Preparación** (`leadDropsTick`, de lunes a viernes de 06:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
+1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
    - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos y una dirección que no es de prueba, y a quien le llega el correo: con Resend, a todos; sin Resend, a quien tiene su Gmail u Outlook conectado (o con el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
    - **A quién buscar: el cliente ideal de cada persona** (desde el 29 de octubre):
      - el de su «Perfil», si lo declaró;

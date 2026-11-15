@@ -2,9 +2,10 @@
  * The tables in memory, with the query methods «Metas semanales» and «Avisos» use (server/weekly-goals.ts and
  * server/daily-alerts.ts). A table listed in `missing` answers as not created yet; `unique` names the columns of a
  * table's unique key, so a second insert answers 23505 as Postgres does. An update followed by `select` answers the rows
- * it changed, as PostgREST does; an upsert with `ignoreDuplicates` leaves an existing row as it was.
+ * it changed, as PostgREST does; an upsert with `ignoreDuplicates` leaves an existing row as it was. `maxRows` caps what one
+ * select answers, as the API's max_rows does.
  */
-export function memory(seed: Record<string, any[]>, options: { missing?: string[]; unique?: Record<string, string[]> } = {}) {
+export function memory(seed: Record<string, any[]>, options: { missing?: string[]; unique?: Record<string, string[]>; maxRows?: number } = {}) {
   const tables: Record<string, any[]> = { weekly_goals: [], daily_alerts: [], ...seed };
   const calls: Array<{ table: string; kind: string; values?: any }> = [];
   let serial = 0;
@@ -33,7 +34,9 @@ export function memory(seed: Record<string, any[]>, options: { missing?: string[
       const found = rows.filter(row => filters.every(filter => filter(row)));
       if (action.kind === 'update') { found.forEach(row => Object.assign(row, action.values)); return { data: returning ? found : null, error: null }; }
       if (action.kind === 'delete') { tables[name] = rows.filter(row => !found.includes(row)); return { data: null, error: null }; }
-      const page = range ? found.slice(range[0], range[1] + 1) : found.slice(0, limit);
+      // `maxRows`: what PostgREST answers at most in one request (its max_rows), whatever limit or range was asked.
+      const cap = options.maxRows ?? Infinity;
+      const page = range ? found.slice(range[0], Math.min(range[1] + 1, range[0] + cap)) : found.slice(0, Math.min(limit, cap));
       if (one === 'single') return page.length ? { data: page[0], error: null } : { data: null, error: { code: 'PGRST116' } };
       if (one === 'maybe') return { data: page[0] ?? null, error: null };
       return { data: page, error: null };

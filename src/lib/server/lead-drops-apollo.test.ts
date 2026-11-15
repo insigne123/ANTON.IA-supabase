@@ -188,11 +188,11 @@ test('a team with six contacts a day: the customer asked three ways, every candi
     plan: { size: 6, weekdays: [1, 2, 3, 4, 5] } });
   assert.equal(planned.planned, 1);
   assert.deepEqual(searches.map(call => [call.titles.join('|'), call.maxResults, call.includeSimilarTitles, call.industryKeywords.length > 0]), [
-    ['Gerente de Personas', 300, true, true],
+    ['Gerente de Personas', 400, true, true],
     ['HR Manager|Gerenta de Personas', 100, true, true],
     ['personas|rrhh', 100, false, true],
-    ['Gerente de Personas', 300, true, false],
-  ], 'the customer\'s roles, the ways people write them, the words of their area and, with few new people, the titles and places only');
+    ['Gerente de Personas', 400, true, false],
+  ], 'the customer\'s roles (a hundred further down Apollo\'s list than the base, for the few people the team has), the ways people write them, the words of their area and, with few new people, the titles and places only');
   const drop = tables.lead_drops.find((row: any) => row.drop_date === '2026-10-20');
   assert.deepEqual(drop.items.map((item: any) => [item.company, item.title, item.track ?? 'core']), [
     ['Ripley', 'Gerente de Personas', 'core'], ['Easy', 'HR Manager', 'core'], ['Falabella', 'Gerente de Personas', 'core'], ['Paris', 'Gerente de Personas', 'core'],

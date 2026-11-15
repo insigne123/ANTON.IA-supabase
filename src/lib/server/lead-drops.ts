@@ -9,8 +9,9 @@ import { renderPdf } from '@/lib/documents/render-pdf';
 import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
   DEFAULT_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, groupDropPeople, needsLookup, nextDropDay,
-  personDropCriteria, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria,
+  personDropCriteria, personDropPlanOf, planOfPerson, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria,
   type DropFollowUp, type DropItem, type DropPlan, type DropScore, type IcpDeclared, type KnownPeople,
+type PersonDropPlan,
 } from '@/lib/lead-drops';
 import { isMaskedName } from '@/lib/lead-name';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
@@ -57,8 +58,28 @@ export async function dropPlans(client: Client, organizationIds?: string[]): Pro
   for (const row of result.data || []) plans.set(String(row.id), dropPlanOf(row));
   return plans;
 }
-export async function dropPlanFor(client: Client, organizationId: string): Promise<DropPlan> {
-  return (await dropPlans(client, [organizationId])).get(organizationId) ?? DEFAULT_DROP_PLAN;
+export const personPlanKey = (organizationId: string, userId: string) => `${organizationId}:${userId}`;
+/**
+ * The people with a plan of their own (lead_drop_person_plans, since 15 Nov 2026), by workspace and person (personPlanKey): some of a
+ * team get more contacts than the rest. A database without the table yet, or a failed read, has none: everybody keeps their team's.
+ */
+export async function personDropPlans(client: Client, organizationIds?: string[]): Promise<Map<string, PersonDropPlan>> {
+  const plans = new Map<string, PersonDropPlan>();
+  let query: any = client.from('lead_drop_person_plans').select('organization_id,user_id,lead_drop_size,lead_drop_weekdays,starts_on');
+  if (organizationIds) query = query.in('organization_id', organizationIds.slice(0, 500));
+  const result: any = await query.limit(5000);
+  if (result.error) return plans;
+  for (const row of result.data || []) {
+    const plan = personDropPlanOf(row);
+    if (plan) plans.set(personPlanKey(String(row.organization_id), String(row.user_id)), plan);
+  }
+  return plans;
+}
+/** What a team gets, or what one of its people does when `userId` is given and they have a plan of their own. */
+export async function dropPlanFor(client: Client, organizationId: string, userId?: string): Promise<DropPlan> {
+  const team = (await dropPlans(client, [organizationId])).get(organizationId) ?? DEFAULT_DROP_PLAN;
+  if (!userId) return team;
+  return planOfPerson(team, (await personDropPlans(client, [organizationId])).get(personPlanKey(organizationId, userId)));
 }
 
 const DAY = 86_400_000;
@@ -100,14 +121,31 @@ export async function monthSpend(client: Client, now: Date) {
 }
 
 /** The people, companies and contacts the organization already has, and who got what in earlier drops: never offered again. */
+/**
+ * Every row of a query, a thousand at a time. The API answers at most its max_rows (1 000 in production) whatever limit is asked,
+ * so one request would silently leave out the rest of a team with more: people it already has would be offered again (15 Nov 2026).
+ */
+const KNOWN_PAGE = 1000;
+const KNOWN_MAX = 30_000;
+async function allRows(build: () => any): Promise<{ data: any[]; error: unknown }> {
+  const data: any[] = [];
+  for (let from = 0; from < KNOWN_MAX; from += KNOWN_PAGE) {
+    const page: any = await build().order('id').range(from, from + KNOWN_PAGE - 1);
+    if (page.error) return { data, error: page.error };
+    data.push(...(page.data || []));
+    if ((page.data || []).length < KNOWN_PAGE) break;
+  }
+  return { data, error: null };
+}
+
 async function knownPeople(client: Client, organizationId: string, now: Date): Promise<KnownPeople> {
   const since = new Date(now.getTime() - 180 * DAY).toISOString().slice(0, 10);
   // Contactos too: a person a member saved there is theirs (lead-claim.ts), and «Por escribir» would refuse them.
   const [enriched, contacted, drops, saved]: any[] = await Promise.all([
-    client.from('enriched_leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId).limit(10000),
-    client.from('contacted_leads').select('email').eq('organization_id', organizationId).limit(10000),
-    client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since).limit(2000),
-    client.from('leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId).limit(10000),
+    allRows(() => client.from('enriched_leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId)),
+    allRows(() => client.from('contacted_leads').select('email').eq('organization_id', organizationId)),
+    allRows(() => client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since)),
+    allRows(() => client.from('leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId)),
   ]);
   if (enriched.error || contacted.error || drops.error || saved.error) throw new LeadDropsError('No pudimos leer los contactos del equipo.', 503);
   const lower = (value: unknown) => String(value || '').trim().toLowerCase();
@@ -187,8 +225,15 @@ export function apolloDropEntries(people: unknown[]): VaultEntry[] {
   });
 }
 
-/** How many people one Apollo search of a drop may bring: three pages of a hundred (the finder's first search), each a free call. */
-const APOLLO_DROP_SEARCH_MAX = 300;
+/** How many people one Apollo search of a drop may bring: ten pages of a hundred at most (apolloDropDepth), each a free call. */
+const APOLLO_DROP_SEARCH_MAX = 1000;
+/**
+ * How far down Apollo's list the finder's first search goes (15 Nov 2026). Apollo answers a search in the same order every day, so
+ * a team that already has the first people would be told there is nobody new while thousands wait further down (GrupoExpro's
+ * customer: 12 700 people with a verified email in Chile, and the search read the first 300). It asks for as many more as the team
+ * already has (saved, contacted or recommended in six months), by hundreds, up to APOLLO_DROP_SEARCH_MAX.
+ */
+export const apolloDropDepth = (base: number, known: number) => Math.min(APOLLO_DROP_SEARCH_MAX, base + Math.ceil(Math.max(0, known) / 100) * 100);
 /** Apollo's free people search, for a drop: a page of up to 100 people, or the next ones too when more are asked, at no cost. */
 export const searchApolloDrops: Search = async input => {
   const found: any = await executeProviderLeadSearch({ ...input, provider: 'apollo' as LeadSearchInput['provider'], maxResults: Math.min(APOLLO_DROP_SEARCH_MAX, input.maxResults) }, getGatewayConfig());
@@ -248,8 +293,11 @@ export function restingFromDrops(sent: Array<{ drop_date: string; opened_at: str
   if (recent.length < UNOPENED_TO_PAUSE || recent.some(drop => drop.opened_at || drop.saved_at)) return false;
   return daysBetween(recent[0].drop_date, today) < PAUSE_DAYS;
 }
-/** Who among `people` is resting (restingFromDrops). A failed read rests nobody: the morning run goes on as before. */
-export async function restingPeople(client: Client, people: string[], now: Date): Promise<Set<string>> {
+/**
+ * Who among `people` is resting (restingFromDrops). A failed read rests nobody: the morning run goes on as before. `startOf`: the day
+ * a person's own plan began; what they left unopened before it does not count, so they start again with it.
+ */
+export async function restingPeople(client: Client, people: string[], now: Date, startOf?: Map<string, string>): Promise<Set<string>> {
   const today = dayInZone(now);
   const since = new Date(now.getTime() - 60 * 86_400_000).toISOString().slice(0, 10);
   const resting = new Set<string>();
@@ -258,7 +306,11 @@ export async function restingPeople(client: Client, people: string[], now: Date)
       .eq('status', 'sent').gte('drop_date', since).limit(5000);
     if (rows.error) return new Set();
     const byUser = new Map<string, any[]>();
-    for (const row of rows.data || []) byUser.set(String(row.user_id), [...(byUser.get(String(row.user_id)) || []), row]);
+    for (const row of rows.data || []) {
+      const from = startOf?.get(String(row.user_id));
+      if (from && String(row.drop_date) < from) continue;
+      byUser.set(String(row.user_id), [...(byUser.get(String(row.user_id)) || []), row]);
+    }
     for (const [userId, sent] of byUser) if (restingFromDrops(sent, today)) resting.add(userId);
   }
   return resting;
@@ -294,6 +346,8 @@ const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.s
 /** What the finder's first search asks for, and each of its two extra ones (the roles as people write them, the words of their area). */
 const FINDER_BASE = 300;
 const FINDER_EXTRA = 100;
+/** What one group's search, classification and score may take at worst (ten pages twice, and the model's timeouts). */
+const GROUP_MS = 90_000;
 const criteriaKey = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort().join(',')).join('|');
 
 /** What the team did with the contacts of its drops of the last six months (dropLessons); nothing when it cannot be read. */
@@ -339,6 +393,11 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   plan?: DropPlan;
   /** The model the finder asks (a team with several contacts a day); the default one when the caller gives none. */
   generate?: Generate;
+  /**
+   * How long the caller still has, in ms (the cron's run). With several searches to make, one is not started with less than
+   * GROUP_MS left once another was made: its people get no row today yet, so the next run plans them.
+   */
+  timeLeft?: () => number;
 }) {
   const today = dayInZone(deps.now);
   const plan = deps.plan ?? await dropPlanFor(client, organizationId);
@@ -359,9 +418,11 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
   const lessons = finder && groups.length ? await readDropLessons(client, organizationId, deps.now) : { liked: [], disliked: [] };
   let spent = deps.spentUsd;
+  let searched = 0;
   for (const { criteria, people: members } of groups) {
+    if (searched++ && deps.timeLeft && deps.timeLeft() < GROUP_MS) break;
     // Apollo's search is free: as many as one page brings, so the days ahead still find people the team does not have.
-    const count = apollo ? (finder ? FINDER_BASE : 100) : searchCount(members.length, plan.size);
+    const count = apollo ? (finder ? apolloDropDepth(FINDER_BASE, Math.max(known.leadIds.size, known.emails.size, known.linkedins.size)) : 100) : searchCount(members.length, plan.size);
     if (overBudget(spent, count, usdPerLead, deps.budgetUsd)) {
       for (const userId of members) results.push({ userId, status: 'empty', error: NO_BUDGET, criteria: own.get(userId)! });
       continue;
@@ -400,7 +461,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       // Too few people the team does not have yet: the titles and places only, before choosing, so the score reads them all at once.
       const needed = members.length * plan.size * 3;
       if (usableDrops([...entries.values()].map(candidateOf), known).length < needed) {
-        const wider = await search(searchInput(criteria, FINDER_BASE, true), searchDeps(FINDER_BASE)).catch(() => null);
+        const wider = await search(searchInput(criteria, count, true), searchDeps(count)).catch(() => null);
         for (const entry of wider?.results || []) if (!entries.has(entry.lead.id)) entries.set(entry.lead.id, entry);
       }
       found = { ...found, results: [...entries.values()] };
@@ -724,7 +785,7 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
   const today = Boolean(last) && String(last!.drop_date) === dayInZone(now);
   if (today && last!.status === 'pending') return 'preparing';
   const fresh = !last || withoutCustomer(last);
-  if (!fresh && (today || !dropDay(now, await dropPlanFor(client, scope.organizationId)))) return null;
+  if (!fresh && (today || !dropDay(now, await dropPlanFor(client, scope.organizationId, scope.userId)))) return null;
   if (!customerFor(await teamOf(client, scope.organizationId), scope.userId)) return 'profile';
   const usdPerLead = dropUsdPerLead();
   if (usdPerLead > 0 && overBudget(await monthSpend(client, now), searchCount(1), usdPerLead, dropsMonthlyUsd())) return null;
@@ -748,8 +809,8 @@ export async function homeDrop(client: Client, scope: DropScope, now: Date): Pro
   if (board && pull !== 'today' && pull !== 'preparing') return { drop: null, pull: null, board };
   if (drop && pull !== 'today' && pull !== 'preparing') return { drop, pull: null };
   if (!pull) return { drop: null, pull };
-  // A team with a plan of its own is offered what it gets: how many contacts, and on how many days of the week.
-  const plan = await dropPlanFor(client, scope.organizationId);
+  // A team (or a person) with a plan of its own is offered what it gets: how many contacts, and on how many days of the week.
+  const plan = await dropPlanFor(client, scope.organizationId, scope.userId);
   return { drop: null, pull, ...(plan.size > 1 ? { plan: { size: plan.size, days: plan.weekdays.length } } : {}) };
 }
 
@@ -774,7 +835,7 @@ const STALLED_MS = 4 * 60_000;
 export async function pullDrop(client: Client, scope: DropScope, deps: { now: Date; generate: Generate; search?: Search;
   research?: (input: DropResearchInput) => Promise<DropResearch | null> }) {
   const today = dayInZone(deps.now);
-  const teamPlan = await dropPlanFor(client, scope.organizationId);
+  const teamPlan = await dropPlanFor(client, scope.organizationId, scope.userId);
   const read = async () => {
     const result: any = await client.from('lead_drops').select('id,organization_id,user_id,status,criteria,items,error,created_at,updated_at')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).eq('drop_date', today).maybeSingle();
