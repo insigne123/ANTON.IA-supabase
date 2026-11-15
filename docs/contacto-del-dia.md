@@ -257,6 +257,55 @@ Lo de abajo describe cómo funciona con Leads Finder. El reparto, los grupos, el
 
 **Por qué martes, miércoles y viernes por defecto:** son días de aviso. Los avisos van de martes a viernes porque el lunes es del informe semanal, y la regla es un correo por día. Desde el 12 de noviembre los días son de cada equipo (`organizations.lead_drop_weekdays`); `DROP_WEEKDAYS` (`src/lib/lead-drops.ts`) es solo el valor por defecto.
 
+### Desde el 15 de noviembre: seguir desde el correo o desde la app, y la respuesta en la misma conversación
+
+Pedido del dueño al ver el correo de ejemplo: «faltaría el botón que te permita ir a la app o el botón que te deje darle a
+enriquecer todos con teléfono + mail, solo teléfono o solo mail … si desea continuar desde el mail y le da a enriquecer, le
+debería llegar un mail en el mismo hilo con los leads enriquecidos y todo listo para iniciar el primer contacto y lanzar la
+campaña de seguimiento, o el guion listo para la llamada».
+
+**En el correo de la mañana** (varios contactos al día, `campaignEmailSection` en `src/lib/lead-drops.ts`), antes de las
+tarjetas, tres caminos:
+
+- **«Enriquecer los N · N créditos»** (el botón principal): abre `/contactos/<enlace>?todos=correo`.
+- **«Con sus teléfonos · 8N créditos»**: abre `/contactos/<enlace>?todos=telefono`.
+- **«Abrir en ANTON.IA»**: los mismos contactos dentro de «Hoy» (`/dashboard?contactos=<enlace>`), que pide iniciar sesión.
+
+Son dos opciones de enriquecimiento y no tres: buscar el teléfono trae también el correo por los mismos créditos
+(`apolloAllocationCost`: 8 por ambos), así que «solo teléfono» sería lo mismo que «correo y teléfono». El teléfono de alguien
+que ya tiene correo se busca desde su tarjeta («Buscar su teléfono · 8 créditos»).
+
+**El enlace no gasta nada.** La página abre con la opción elegida (`DropBulkEnrich`) y el botón «Enriquecer los N · X
+créditos» es lo que busca: un lector de correo que sigue enlaces nunca usa créditos. Al confirmar, la página busca a cada
+contacto, uno tras otro, con la misma búsqueda de siempre (`enrich`, con `quiet` para que no salga un correo por contacto) y
+al terminar pide la respuesta (`ready`). Un rechazo que le tocaría también al siguiente (sin créditos, cupo del día) detiene
+el resto; lo ya encontrado se envía igual.
+
+**La respuesta llega a la misma conversación** (`src/lib/server/lead-drop-ready.ts`, `src/lib/lead-drop-ready-email.ts`):
+
+- **«Listos»**: un correo con cada contacto encontrado: su dirección, su primer correo completo, los días de sus
+  seguimientos y «Revisar y aprobar». Aprobar sigue siendo un botón de la página.
+- **«Para llamar»**: cuando llegan los teléfonos (la respuesta del proveedor tarda minutos y entra por
+  `src/app/api/apollo-webhook/[token]`), un correo con cada número, «Llamar», «WhatsApp» con su primer mensaje escrito y el
+  guion de la llamada; los que quedaron sin teléfono se nombran. Mientras un teléfono pedido hace menos de 10 minutos siga
+  en camino, espera para enviarlos juntos. El guion se escribe al confirmar (`prepareDropCalls`), para que esté listo cuando
+  llegue el número.
+- «Llamar» abre la ficha del contacto con «Para llamar» abierto y marca desde la página (`?c=<contacto>&llamar=1`): los
+  lectores de correo neutralizan los enlaces `tel:` (visto el 15 de noviembre en Gmail). El número va además como texto.
+
+Cada contacto va una vez en cada correo: se marca en el drop antes de enviar (`campaignMailedAt`, `callMailedAt`), bajo la
+última escritura del drop, y si el envío falla la marca se devuelve. El correo «Campaña lista para aprobar» de un contacto
+enriquecido por separado va ahora en la misma conversación.
+
+**Cómo se agrupan** (`src/lib/lead-drop-thread.ts`): todos los correos de un drop llevan el mismo asunto (con «Re:» las
+respuestas) y los mismos encabezados: `References` e `In-Reply-To` con una raíz propia del drop (Resend escribe el
+`Message-ID` de cada correo, así que ninguno puede nombrar a otro; todos nombran la misma raíz, como hacen los correos de
+notificación), y `Thread-Topic` y `Thread-Index` para Outlook, con el id del drop como id de conversación. Por la API de
+Outlook (`sendMail`) no se pueden enviar encabezados propios: ahí agrupa el asunto.
+
+**Botones visibles en cualquier lector** (`emailButton` en `src/lib/email-shell.ts`): el color va como atributo de la celda
+y como `background-color`; con el atajo `background` un intermediario lo quitó y quedó texto blanco sobre blanco.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

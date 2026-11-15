@@ -37,15 +37,21 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const [{ token }, query] = await Promise.all([params, searchParams]);
   const focus = single(query.c);
   const stay = single(query.aqui) === '1';
+  // «Enriquecer los N» of the morning email: the choice made there, to confirm here with a button. It is the way on from the inbox,
+  // so it stays on this page whoever is signed in.
+  const todos = single(query.todos);
+  const bulk = todos === 'telefono' ? 'phone' as const : todos === 'correo' ? 'email' as const : null;
+  // «Llamar» of the email that brought a contact's mobile: the call starts on this page, at its card.
+  const call = single(query.llamar) === '1' && Boolean(focus);
   let inside = false;
   try {
     const admin = getSupabaseAdminClient();
     const { dropId, scope } = await resolveDropLink(admin, token);
-    inside = !stay && !single(query.correo) && await signedInAs(scope.userId);
+    inside = !stay && !bulk && !call && !single(query.correo) && await signedInAs(scope.userId);
     if (!inside) {
       const view = await mailDropView(admin, scope, dropId);
       // From «Hoy» there is no way back into it: it sent the person here.
-      return <DropMailFlow token={token} initial={view} focus={focus} mailboxNotice={single(query.correo)} appHref={stay ? null : inApp(token, null)} />;
+      return <DropMailFlow token={token} initial={view} focus={focus} mailboxNotice={single(query.correo)} bulk={bulk} call={call} appHref={stay ? null : inApp(token, null)} />;
     }
   } catch (error) {
     const known = error instanceof LeadDropsError;

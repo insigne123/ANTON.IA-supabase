@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -158,7 +158,7 @@ test('the email table escapes what came from outside and links to the drop', () 
   assert.match(section.text, /^Tu contacto de hoy, con su correo listo:/);
   assert.match(section.html, />Ver y guardar</);
   // One contact is a block, not a three-column table that breaks on a phone: name, role · company, why.
-  assert.doesNotMatch(section.html, /<table|<th /);
+  assert.doesNotMatch(section.html, /<th |<table(?! role="presentation")/);
   assert.match(section.html, /font-weight:600[^>]*>Ana &lt;b&gt;<\/p><p[^>]*>Gerente · R&amp;R<\/p><p[^>]*>Calza\.<\/p>/);
   assert.match(section.html, /Contacto del día<\/h2>/);
   // When the drop is all the email has, the title and its lead are left out.
@@ -333,6 +333,39 @@ test('the email of several contacts: a card each with why, what is happening, ho
   assert.match(open.text, /Verlos todos: https:\/\/app\.test\/contactos\/TOKEN\n/);
   assert.ok(!open.html.includes('enriquecer=1') && !open.text.includes('enriquecer=1') && !open.html.includes('/search/contactos/') && !open.text.includes('/search/contactos/'));
   assert.equal(dropContactHref('https://app.test/contactos/TOKEN', items[0] as any, true), 'https://app.test/contactos/TOKEN?c=lf_000000000000000000000001');
+});
+
+test('from the inbox the person chooses how to go on: all of them looked up at once, with their mobiles or without, or the same contacts in the app', () => {
+  const contact = (leadId: string, extra: Record<string, unknown> = {}) => ({ leadId, name: 'Ana Soto', title: 'Gerente', company: 'Andina', domain: null, industry: null, size: null, city: null, hasEmail: true, hasPhone: false,
+    why: 'Calza.', research: [], provider: 'apollo', draft: { subject: 'Hola', body: 'Hola {{nombre}}' }, ...extra });
+  const token = 'A'.repeat(48);
+  const link = `https://app.test/contactos/${token}`;
+  assert.equal(dropAppHref(link), `https://app.test/dashboard?contactos=${token}`);
+  assert.equal(dropAppHref(`${link}?c=x`), `https://app.test/dashboard?contactos=${token}`);
+  assert.equal(dropBulkHref(link, true), `${link}?todos=telefono`);
+  const three = [contact('lf_000000000000000000000001'), contact('lf_000000000000000000000002'), contact('lf_000000000000000000000003')];
+  const all = dropEmailSection(three as any, 'drop-1', 'https://app.test', { heading: false, link });
+  // One main button, to look all of them up; the rest are outlined: with their mobiles, the app, and each contact's own.
+  assert.equal((all.html.match(/<td bgcolor="#2563eb"/g) || []).length, 1);
+  assert.match(all.html, new RegExp(`<td bgcolor="#2563eb"[^>]*><a href="${link.replace(/\./g, '\\.')}\\?todos=correo"[^>]*>Enriquecer los 3 · 3 créditos</a>`));
+  assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="${link.replace(/\./g, '\\.')}\\?todos=telefono"[^>]*>Con sus teléfonos · 24 créditos</a>`));
+  assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="https://app\\.test/dashboard\\?contactos=${token}"[^>]*>Abrir en ANTON\\.IA</a>`));
+  assert.equal((all.html.match(/<td bgcolor="#ffffff"[^>]*><a href="[^"]+\?c=lf_[0-9]+"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/g) || []).length, 3);
+  assert.match(all.text, /Sigue desde este correo o desde la app\. Si los enriqueces de una vez, te respondemos en esta misma conversación/);
+  assert.match(all.text, /con su teléfono, 8 por ambos\. Nada se cobra al abrir: confirmas en la página\./);
+  // Some already looked up: the button counts the ones that are left. With one left, its own button is the main one.
+  const some = dropEmailSection([{ ...three[0], savedLeadId: 'e-1' }, three[1], three[2]] as any, 'drop-1', 'https://app.test', { link });
+  assert.match(some.html, />Enriquecer los 2 que faltan · 2 créditos</);
+  assert.match(some.html, />Con sus teléfonos · 16 créditos</);
+  const last = dropEmailSection([{ ...three[0], savedLeadId: 'e-1' }, { ...three[1], savedLeadId: 'e-2' }, three[2]] as any, 'drop-1', 'https://app.test', { link });
+  assert.doesNotMatch(last.html, /todos=/);
+  assert.match(last.html, /<td bgcolor="#2563eb"[^>]*><a href="[^"]+\?c=lf_000000000000000000000003"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
+  assert.match(last.html, />Abrir en ANTON\.IA</);
+  assert.match(last.text, /Sigue desde este correo, con el botón de cada contacto, o desde la app\./);
+  // Without a page that needs no session, the email is as before: every button opens the app.
+  const inApp = dropEmailSection(three as any, 'drop-1', 'https://app.test');
+  assert.doesNotMatch(inApp.html, /todos=|Abrir en ANTON\.IA|Sigue desde este correo/);
+  assert.equal((inApp.html.match(/<td bgcolor="#2563eb"/g) || []).length, 3);
 });
 
 test('a line for whoever sells says what is known, never what the search did not find', () => {

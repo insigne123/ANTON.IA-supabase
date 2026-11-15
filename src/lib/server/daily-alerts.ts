@@ -3,6 +3,7 @@ import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
 import { BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson, dropAlertEmail } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
+import { dropThread } from '@/lib/lead-drop-thread';
 import { dropLinkBase, dropLinkUrl } from '@/lib/server/lead-drop-link';
 import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
@@ -339,7 +340,9 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const attachments = drop ? [{ filename: `contacto-del-dia-${today}.pdf`, contentType: 'application/pdf',
     content: await dropPdf(drop.items, { name: facts.name, date: today, link: open || `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
   const mailed = drop && open ? { ...drop, link: open } : drop;
-  const sent = await deps.send({ userId: scope.userId, to, ...(own && mailed ? dropAlertEmail(facts.name, open ? dropLinkBase(deps.appUrl) : deps.appUrl, mailed) : alertEmail(alert, facts.name, deps.appUrl, mailed)),
+  // The email of several contacts opens a conversation of its own: what the person does from it is answered there (lead-drop-thread.ts).
+  const ownEmail = own && mailed ? dropAlertEmail(facts.name, open ? dropLinkBase(deps.appUrl) : deps.appUrl, mailed) : null;
+  const sent = await deps.send({ userId: scope.userId, to, ...(ownEmail && drop ? { ...ownEmail, headers: dropThread({ dropId: drop.id, date: today, subject: ownEmail.subject }).headers } : alertEmail(alert, facts.name, deps.appUrl, mailed)),
     ...(attachments ? { attachments } : {}) });
   const other = sent.ok && rest ? await deps.send({ userId: scope.userId, to, ...alertEmail(rest, facts.name, deps.appUrl) }) : null;
   const failure = !sent.ok ? sent : other && !other.ok ? other : null;

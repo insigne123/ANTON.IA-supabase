@@ -110,6 +110,8 @@ test('«O con su teléfono»: the same lookup asks for the mobile too, as an ope
   assert.deepEqual(await enrichDropLead(client, scope, DROP, LEAD, { ...route.deps, phone: true }), { outcome: 'found', email: 'pedro.araya@mineraandina.cl', consumed: 8 });
   assert.equal(route.requests[0].headers['Idempotency-Key'], `lead-drop:${DROP}:${LEAD}:email-phone:0`);
   assert.deepEqual([route.requests[0].body.revealEmail, route.requests[0].body.revealPhone], [true, true]);
+  // The drop knows its mobile was asked: when it lands, it goes to the person's inbox with the script of its call (lead-drop-ready.ts).
+  assert.deepEqual(tables.lead_drops[0].items[0].phoneLookup, { attempt: 0, at: route.deps.now.toISOString() });
   // The mobile is on its way: the page says so, and shows it once it lands. A contact not looked up has nothing to say.
   const waiting = await mailDropView(client, scope, DROP);
   assert.deepEqual(waiting.items.map(entry => entry.phone), [{ state: 'pending' }, undefined]);

@@ -36,6 +36,24 @@ test('the message is multipart, UTF-8, with the subject encoded and nothing of p
   assert.doesNotMatch(mime, /List-Unsubscribe|X-Anton-Dispatch/i);
 });
 
+test('an email of a conversation carries its thread headers, in one line each, and never one that says who it is for', async () => {
+  const { selfMime, ownHeaders, sendReportEmail } = await load();
+  const headers = { References: '<contactos.1@contactos.anton-ia.yago.cl>', 'In-Reply-To': '<contactos.1@contactos.anton-ia.yago.cl>', 'Thread-Topic': 'Tu contacto de hoy: Gerente de Operación',
+    'Thread-Index': 'AdxWk4AAAAA=', Bcc: 'otro@example.com', 'X-Roto\r\nBcc': 'otro@example.com', Vacio: ' ', 'X-Dos': 'uno\r\nBcc: otro@example.com' };
+  assert.deepEqual(ownHeaders(headers), [['References', '<contactos.1@contactos.anton-ia.yago.cl>'], ['In-Reply-To', '<contactos.1@contactos.anton-ia.yago.cl>'],
+    ['Thread-Topic', `=?UTF-8?B?${Buffer.from('Tu contacto de hoy: Gerente de Operación').toString('base64')}?=`], ['Thread-Index', 'AdxWk4AAAAA='], ['X-Dos', 'uno Bcc: otro@example.com']]);
+  const mime = selfMime({ ...email, headers }, 'b1');
+  assert.match(mime, /\r\nReferences: <contactos\.1@contactos\.anton-ia\.yago\.cl>\r\nIn-Reply-To: <contactos\.1@contactos\.anton-ia\.yago\.cl>\r\nThread-Topic: =\?UTF-8\?B\?[^\r]+\r\nThread-Index: AdxWk4AAAAA=\r\nX-Dos: uno Bcc: otro@example\.com\r\nMIME-Version: 1\.0\r\n/);
+  assert.doesNotMatch(mime, /\r\nBcc:/);
+  // Through Resend they go as the API's own `headers`.
+  const calls: any[] = [];
+  const fetcher = (async (url: string, init: any) => { calls.push({ url, init }); return new Response('{}', { status: 200 }); }) as any;
+  await sendReportEmail({} as any, { ...email, headers }, { fetch: fetcher, env: { RESEND_API_KEY: 're_test' } });
+  assert.deepEqual(Object.keys(JSON.parse(calls[0].init.body).headers), ['References', 'In-Reply-To', 'Thread-Topic', 'Thread-Index', 'X-Dos']);
+  await sendReportEmail({} as any, email, { fetch: fetcher, env: { RESEND_API_KEY: 're_test' } });
+  assert.equal(JSON.parse(calls[1].init.body).headers, undefined);
+});
+
 test('it goes from the person\'s own Gmail or Outlook, and says plainly what is missing', async () => {
   const { sendSelfEmail } = await load();
   const calls: any[] = [];

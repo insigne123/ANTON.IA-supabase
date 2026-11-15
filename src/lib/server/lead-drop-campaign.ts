@@ -2,7 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { CampaignInputSchema, defaultAudience } from '@/lib/bulk-campaigns';
 import { dropCampaignEmail } from '@/lib/lead-drop-campaign-email';
-import { dropCampaignMessages, dropName, dropSchedule, type DropItem } from '@/lib/lead-drops';
+import { dropThread } from '@/lib/lead-drop-thread';
+import { dropCampaignMessages, dropName, dropSchedule, dropSubject, type DropItem } from '@/lib/lead-drops';
 import { deterministicMessagingUuid } from '@/lib/messaging-contracts';
 import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { AuthError, type AuthContext } from '@/lib/server/auth-utils';
@@ -160,7 +161,9 @@ export async function mailDropCampaign(client: Client, scope: DropScope, dropId:
     appUrl: dropLinkBase(appUrl, env), now: deps.now, link: dropLinkUrl(appUrl, dropId, { now: deps.now, env }),
   });
   if (!email) return skipped('not_due');
-  const sent = await (deps.send ?? (input => sendReportEmail(client, input)))({ userId: scope.userId, to, subject: email.subject, html: email.html, text: email.text });
+  // In the conversation of the morning email (src/lib/lead-drop-thread.ts): its subject, answered, and the drop's thread.
+  const thread = dropThread({ dropId, date: drop.drop_date, subject: dropSubject(drop.items), reply: true, now: deps.now });
+  const sent = await (deps.send ?? (input => sendReportEmail(client, input)))({ userId: scope.userId, to, subject: thread.subject, headers: thread.headers, html: email.html, text: email.text });
   if (!sent.ok) return skipped('send_failed');
   // Read again before the stamp: the person may have approved the campaign while the email went out, and that must not be undone.
   const fresh = await readDrop(client, scope, dropId);

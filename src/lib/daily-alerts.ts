@@ -1,7 +1,7 @@
 import { dayInZone, shiftDay } from '@/lib/admin/chile-time';
 import { isOpportunityAdmin } from '@/lib/commercial-opportunities/workspace';
 import { opportunityAssignHref } from '@/lib/commercial-opportunities/workspace-url';
-import { emailShell } from '@/lib/email-shell';
+import { emailButton, emailShell } from '@/lib/email-shell';
 import { dropEmailSection, dropHref, dropSubject, type DropItem } from '@/lib/lead-drops';
 import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } from '@/lib/weekly-goals';
 
@@ -344,7 +344,7 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
     + '</p>').join('');
   const open = inbox ? '' : section
     ? `<p style="margin:24px 0 0;font-size:14px"><a href="${escape(link('/dashboard'))}" style="color:#2563eb;text-decoration:none">Abrir ANTON.IA &rsaquo;</a></p>`
-    : `<p style="margin:24px 0 0"><a href="${escape(link('/dashboard'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Abrir ANTON.IA</a></p>`;
+    : `<div style="margin:24px 0 0">${emailButton(link('/dashboard'), 'Abrir ANTON.IA', { color: '#111827' })}</div>`;
   const html = emailShell(`<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
     + `<p style="margin:0 0 16px;font-size:15px;line-height:22px;color:#6b7280">${escape(intro)}.</p>`
     + (lines.length ? `<div style="border-bottom:1px solid #e5e7eb">${rows}</div>` : '')
