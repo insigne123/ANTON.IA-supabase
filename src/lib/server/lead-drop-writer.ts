@@ -30,13 +30,37 @@ export type DropSeller = {
 };
 
 export const DROP_EMAIL_DAYS = [1, 3, 7, 11];
+
+/** What each email of a sequence is for: the first, a short one that adds one thing, another angle with a call, and the close. */
+export type SequenceRole = 'first' | 'short' | 'angle' | 'close';
+/** Four emails are the usual sequence; with three or more the last one closes, and the ones between alternate. */
+export function sequenceRoles(count: number): SequenceRole[] {
+  return Array.from({ length: Math.max(1, count) }, (_, index): SequenceRole =>
+    index === 0 ? 'first' : count >= 3 && index === count - 1 ? 'close' : index % 2 ? 'short' : 'angle');
+}
+/**
+ * The sequence to write when it is not the four emails of a recommended contact: a campaign (17 Nov 2026, the owner: «quiero que cada
+ * correo sea personalizado y distinto, que se haga de cero») gives how many emails, on which days, what it is after and the texts the
+ * person left as a base for the whole group. Those are guidance: every recipient gets emails written for them.
+ */
+export type SequencePlan = {
+  /** The day of each email counted from the first, which is day 1. */
+  days: number[];
+  /** False when the mailbox adds the signature on sending (campaigns): then no closing is written. */
+  sign?: boolean;
+  campaign?: { objective?: string | null; audience?: string | null; /** They already got emails from the seller. */ recontact?: boolean;
+    guide?: Array<{ subject: string; body: string }> };
+  /** How long the model may take to write and to correct, in ms. */
+  timeouts?: [number, number];
+};
+const DROP_PLAN: SequencePlan = { days: DROP_EMAIL_DAYS, sign: true };
 /** The model that writes them: a stronger one than Cowork's default, since they are few and each one is read. */
 export const dropWriterModel = (env: Record<string, string | undefined> = process.env) => env.LEAD_DROPS_WRITER_MODEL?.trim() || 'claude-haiku-5-5';
 /** `off` sends the contacts back to Cowork's Writer. */
 export const dropWriterEnabled = (env: Record<string, string | undefined> = process.env) => env.LEAD_DROPS_WRITER !== 'off';
 
-const emailsSchema = z.object({
-  emails: z.array(z.object({ day: z.number().int().min(1).max(60), subject: z.string().min(3).max(120), body: z.string().min(40).max(1800) }).strict()).min(4).max(4),
+const emailsSchemaOf = (count: number) => z.object({
+  emails: z.array(z.object({ day: z.number().int().min(1).max(400), subject: z.string().min(3).max(120), body: z.string().min(40).max(1800) }).strict()).min(count).max(count),
 }).strict();
 type Email = { day: number; subject: string; body: string };
 
@@ -54,6 +78,31 @@ export const DROP_WRITER_RULES = [
   'Antes de responder revisa cada correo: ¿la primera frase dice por qué le escribo a él y solo podría ir a esta empresa o a este cargo? ¿Alguna frase le explica lo que ya sabe o le describe su empresa? ¿Nombré un servicio concreto o repetí una consigna? ¿La petición se contesta en una línea? ¿Repetí una frase, un servicio, una prueba o una pregunta de otro correo? Corrige lo que falle y responde JSON conforme al contrato. Si recibes «correcciones», arregla exactamente eso y deja igual lo demás.',
 ];
 
+const ROLE_RULE: Record<SequenceRole, string> = {
+  first: 'por qué le escribes, el servicio que le toca, una prueba si hay, y la pregunta de interés; de 45 a 80 palabras.',
+  short: 'muy corto, de 25 a 45 palabras; retoma lo anterior en media frase («Te escribí hace unos días por…») y agrega una sola cosa nueva y concreta: otro servicio que le toca a su cargo, o una prueba que no usaste, dicho con lo que es en la práctica (qué hacen, dónde, con quién) y no solo con su nombre, con una pregunta distinta e igual de fácil.',
+  angle: 'otro ángulo, desde lo que investigacion dice que le importa a su cargo, dicho como lo que el vendedor hace ahí y no como una lección, y le ofrece verlo en una llamada de 15 minutos; de 40 a 75 palabras.',
+  close: 'cierre de 25 a 45 palabras; dice en una frase que es el último correo que le mandas y pregunta si es otra persona quien ve esto, para escribirle a ella. Nada más.',
+};
+const ORDINAL = ['Primero', 'Segundo', 'Tercero', 'Cuarto', 'Quinto', 'Sexto', 'Séptimo'];
+const CAMPAIGN_RULE = 'Esto es una campaña: el vendedor le escribe a varias personas y cada una recibe correos escritos solo para ella. campana.objetivo dice qué quiere conseguir y campana.guia son los correos que dejó como base para todo el grupo. De la guía toma qué ofrece, qué prueba usa, qué pide (una respuesta, una llamada, una reunión) y su tono; no copies sus frases ni su orden: cada correo parte de este contacto, y dos personas de la misma campaña nunca deben recibir el mismo texto con otro nombre. Los asuntos son tuyos: salvo el del cierre, ninguno empieza con las palabras del asunto de la guía ni es ese asunto con el nombre de su empresa; nombra lo propio de este contacto (su área, su operación, el servicio que elegiste para él). Lo que la campaña ofrece y pide manda: si es una invitación, un aviso, una reactivación u otra cosa que no es ofrecer un servicio, eso es lo que dices y pides, y el resto de estas reglas se aplica a cómo lo dices. Un dato que la guía afirma y vendedor no trae (un precio, un plazo, una fecha, un lugar, un evento) se dice tal como viene, sin agrandarlo. Si campana.ya_le_escribiste es verdadero, esta persona ya recibió correos del vendedor: no finjas que es la primera vez; retoma el contacto en media frase y trae algo nuevo.';
+
+/** The rules for a plan: the ones of a recommended contact as they are, or the same with its own number of emails and its campaign. */
+export function sequenceRules(plan: SequencePlan = DROP_PLAN): string[] {
+  const count = plan.days.length;
+  const same = !plan.campaign && count === DROP_EMAIL_DAYS.length && plan.days.every((day, index) => day === DROP_EMAIL_DAYS[index]);
+  if (same) return DROP_WRITER_RULES;
+  const roles = sequenceRoles(count);
+  const sequence = count === 1
+    ? `Un solo correo (day ${plan.days[0]}): ${ROLE_RULE.first}`
+    : `Los ${count} correos, cada uno con su papel y sin repetir frases, servicios, pruebas ni preguntas de los otros. ${roles.map((role, index) => `${ORDINAL[index] ?? `Correo ${index + 1}`} (day ${plan.days[index]}): ${ROLE_RULE[role]}`).join(' ')}`;
+  return DROP_WRITER_RULES.flatMap((rule, index) => {
+    if (index === 0) return [rule.replace('una secuencia de cuatro correos', count === 1 ? 'un correo' : `una secuencia de ${count} correos`)];
+    if (rule.startsWith('Los cuatro correos')) return [sequence, ...(plan.campaign ? [CAMPAIGN_RULE] : [])];
+    return [rule];
+  });
+}
+
 const clip = (value: unknown, max: number) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const list = (values: unknown, count: number, max: number) => (Array.isArray(values) ? values : []).map(value => clip(value, max)).filter(Boolean).slice(0, count);
 const fold = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -62,8 +111,10 @@ const firstName = (name: string) => clip(name, 80).split(' ')[0] || '';
 /** What the writer reads: the seller, the contact and what is known of their company; only what there is. */
 export function dropWriterPrompt(input: { item: DropItem; seller: DropSeller | null; ownSamples?: string[]; issues?: string[]; previous?: Email[];
   /** Which contact of the day this is (0, 1, 2…): each one starts from a different proof, so six emails read together do not open alike. */
-  variant?: number }) {
+  variant?: number; plan?: SequencePlan }) {
   const { item, seller } = input;
+  const plan = input.plan ?? DROP_PLAN;
+  const campaign = plan.campaign;
   const turned = <T,>(values: T[]) => { const by = values.length ? (input.variant ?? 0) % values.length : 0; return [...values.slice(by), ...values.slice(0, by)]; };
   const brief = item.brief;
   const news = brief?.news ? { texto: clip(brief.news.text, 300), fecha: brief.news.date || null, fuente: brief.news.source || null } : null;
@@ -86,11 +137,15 @@ export function dropWriterPrompt(input: { item: DropItem; seller: DropSeller | n
       empresa: clip(brief?.company || item.summary, 400) || null, novedad: news,
       por_que_le_sirve: clip(brief?.fit || item.companyWhy, 300) || null, que_le_importa_a_su_cargo: clip(brief?.role, 300) || null,
       como_abrir: clip(brief?.opener || item.approach, 300) || null,
-      otros_datos: (item.research || []).map(fact => clip(fact, 240)).filter(Boolean).slice(0, 3),
+      otros_datos: (item.research || []).map(fact => clip(fact, campaign ? 320 : 240)).filter(Boolean).slice(0, campaign ? 6 : 3),
       ...(item.expanded ? { rubro_vecino: `Su empresa es de un rubro vecino a los del vendedor (${item.expanded}): no des por hecho que conoce al vendedor ni su rubro.` } : {}),
     },
     ...(input.ownSamples?.length ? { voz_del_vendedor: input.ownSamples.slice(0, 3).map(sample => clip(sample, 900)) } : {}),
-    dias: DROP_EMAIL_DAYS,
+    ...(campaign ? { campana: {
+      objetivo: clip(campaign.objective, 1200) || null, a_quienes: clip(campaign.audience, 500) || null, ya_le_escribiste: Boolean(campaign.recontact),
+      guia: (campaign.guide || []).slice(0, plan.days.length).map(message => ({ asunto: clip(message.subject, 200), cuerpo: String(message.body || '').trim().slice(0, 1500) })),
+    } } : {}),
+    dias: plan.days,
     ...(input.issues?.length ? { correcciones: input.issues, borrador_anterior: input.previous } : {}),
   });
 }
@@ -119,8 +174,9 @@ function knownNumbers(prompt: string) {
  * What is wrong with the emails, each as a sentence the writer can fix; nothing when they are fine. The checks are of form and of
  * honesty (a figure the data does not have), never of style.
  */
-export function dropEmailIssues(emails: Email[], input: { item: DropItem; seller: DropSeller | null; prompt: string }): string[] {
+export function dropEmailIssues(emails: Email[], input: { item: DropItem; seller: DropSeller | null; prompt: string; plan?: SequencePlan }): string[] {
   const issues: string[] = [];
+  const roles = sequenceRoles(emails.length);
   const refers = input.item.role === 'refer';
   const numbers = knownNumbers(input.prompt);
   const company = clip(input.seller?.companyName, 120);
@@ -137,13 +193,13 @@ export function dropEmailIssues(emails: Email[], input: { item: DropItem; seller
     if (asked.length !== 1) issues.push(`${which}: lleva ${asked.length} preguntas. Debe cerrar con una sola petición, en su propio párrafo.`);
     for (const question of asked) {
       if (FACT_QUESTION.test(question)) issues.push(`${which}: «${question}» le pide un dato de su operación. Cambia por una pregunta que se conteste en una línea sin ir a buscar nada.`);
-      if (!refers && index < 3 && WHO_QUESTION.test(question)) issues.push(`${which}: «${question}» le pregunta quién hace algo que es su propio cargo. Pregúntale a él si le interesa o le sirve lo que ofreces.`);
+      if (!refers && roles[index] !== 'close' && WHO_QUESTION.test(question)) issues.push(`${which}: «${question}» le pregunta quién hace algo que es su propio cargo. Pregúntale a él si le interesa o le sirve lo que ofreces.`);
       const key = fold(question).replace(/[^a-z ]/g, '').split(' ').filter(word => word.length > 3).slice(0, 6).join(' ');
       if (key && questions.includes(key)) issues.push(`${which}: repite la pregunta de otro correo. Cada correo pide lo suyo con otras palabras.`);
       questions.push(key);
     }
     const length = wordCount(text);
-    const [min, max] = index === 0 ? [35, 105] : index === 1 ? [15, 65] : index === 2 ? [30, 100] : [15, 60];
+    const [min, max] = { first: [35, 105], short: [15, 65], angle: [30, 100], close: [15, 60] }[roles[index]];
     if (length > max) issues.push(`${which}: tiene ${length} palabras y debe tener a lo más ${max}. Quita lo que no sea propio de este contacto.`);
     if (length < min) issues.push(`${which}: quedó en ${length} palabras; le falta decir qué ofreces o qué pides.`);
     if (FORMAL.test(text)) issues.push(`${which}: le habla de usted («${(text.match(FORMAL) || [''])[0]}»). De tú de principio a fin: «la tuya», «tu faena», «te sirve».`);
@@ -158,10 +214,25 @@ export function dropEmailIssues(emails: Email[], input: { item: DropItem; seller
     }
     if (company && new RegExp(`\\b${company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(email.subject)) issues.push(`${which}: el asunto nombra a la empresa del vendedor. Debe hablar de la empresa o del tema del contacto.`);
     if (wordCount(email.subject) > 9) issues.push(`${which}: el asunto es largo. De 3 a 7 palabras.`);
-    if (index === 3 && !LAST.test(text)) issues.push(`${which}: debe decir, sin drama, que es el último correo.`);
+    if (roles[index] === 'close' && !LAST.test(text)) issues.push(`${which}: debe decir, sin drama, que es el último correo.`);
   });
   const subjects = emails.map(email => fold(email.subject));
   if (new Set(subjects).size !== subjects.length) issues.push('Dos correos tienen el mismo asunto. Cada uno dice de qué trata el suyo.');
+  // A campaign: the texts of the group are a guide. An email that repeats one of them is the template again, with another name.
+  const guide = input.plan?.campaign?.guide || [];
+  const plain = (text: string) => fold(text.replace(/\{\{\s*empresa\s*\}\}/gi, input.item.company || '').replace(/\{\{[^{}]*\}\}/g, '')).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+  const grams = (words: string[]) => new Set(words.slice(0, -2).map((_, at) => words.slice(at, at + 3).join(' ')));
+  emails.forEach((email, index) => {
+    const base = guide[index];
+    if (!base) return;
+    const [subject, theirs] = [plain(email.subject), plain(base.subject)];
+    if (index < emails.length - 1 && subject.length >= 2 && subject.slice(0, 3).join(' ') === theirs.slice(0, 3).join(' ')) {
+      issues.push(`Correo ${index + 1}: el asunto repite el de la guía («${base.subject}»). Escribe uno propio de este contacto: su área, su operación o el servicio que elegiste para él.`);
+    }
+    const [mine, guided] = [grams(plain(email.body)), grams(plain(base.body))];
+    const shared = [...mine].filter(gram => guided.has(gram)).length;
+    if (mine.size >= 12 && shared / mine.size > 0.4) issues.push(`Correo ${index + 1}: repite frases de la guía. Dilo con otras palabras y desde lo que se sabe de este contacto.`);
+  });
   return issues;
 }
 
@@ -169,7 +240,7 @@ export function dropEmailIssues(emails: Email[], input: { item: DropItem; seller
  * The emails as they are kept: the seller's company written as the profile writes it («BRYSA» → «Brysa»), no sign-off of the model's,
  * and the same closing in all of them, with the name of whoever signs.
  */
-export function finishDropEmails(emails: Email[], seller: DropSeller | null): Email[] {
+export function finishDropEmails(emails: Email[], seller: DropSeller | null, plan: SequencePlan = DROP_PLAN): Email[] {
   const company = clip(seller?.companyName, 120);
   const named = company.length > 2 ? new RegExp(`(?<![\\p{L}\\p{N}])${company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu') : null;
   const signer = clip(seller?.fullName, 120);
@@ -180,32 +251,41 @@ export function finishDropEmails(emails: Email[], seller: DropSeller | null): Em
       const first = part.split('\n')[0].trim();
       return !(SIGN_OFF.test(first) || (signer && fold(first) === fold(signer)) || (signer && fold(first) === fold(firstName(signer))));
     });
-    const body = [...kept, signer ? `Saludos,\n${signer}` : 'Saludos,'].join('\n\n');
+    const body = [...kept, ...(plan.sign === false ? [] : [signer ? `Saludos,\n${signer}` : 'Saludos,'])].join('\n\n');
     const fix = (text: string) => (named ? text.replace(named, company) : text);
-    return { day: DROP_EMAIL_DAYS[index] ?? email.day, subject: fix(email.subject.replace(/\s+/g, ' ').trim()).slice(0, 200), body: fix(body).slice(0, 4000) };
+    return { day: plan.days[index] ?? email.day, subject: fix(email.subject.replace(/\s+/g, ' ').trim()).slice(0, 200), body: fix(body).slice(0, 4000) };
   });
 }
 
 /**
- * Four emails for one contact: written, read by the checks and corrected once when they found something; of the two versions the
- * one with fewer points stays. Throws when the model gives nothing usable, so the caller can fall back.
+ * The emails of a plan for one contact: written, read by the checks and corrected once when they found something; of the two versions
+ * the one with fewer points stays. Throws when the model gives nothing usable, so the caller can fall back.
  */
-export async function writeDropEmails(input: { item: DropItem; seller: DropSeller | null; generate: Generate; ownSamples?: string[]; model?: string; variant?: number }):
-Promise<{ draft: { subject: string; body: string }; followUps: DropFollowUp[]; issues: string[] }> {
+export async function writeSequence(input: { item: DropItem; seller: DropSeller | null; generate: Generate; ownSamples?: string[]; model?: string; variant?: number;
+  plan?: SequencePlan }): Promise<{ emails: Email[]; issues: string[] }> {
+  const plan = input.plan ?? DROP_PLAN;
   const model = input.model || dropWriterModel();
-  const systemPrompt = DROP_WRITER_RULES.join('\n');
+  const schema = emailsSchemaOf(plan.days.length);
+  const systemPrompt = sequenceRules(plan).join('\n');
   const prompt = dropWriterPrompt(input);
+  const [writing, correcting] = plan.timeouts ?? [70_000, 60_000];
   const ask = async (text: string, timeoutMs: number) => {
-    const answer = emailsSchema.parse(await input.generate({ schema: emailsSchema, systemPrompt, prompt: text, openAiModel: model, reasoningEffort: 'medium', maxOutputTokens: 6000, timeoutMs }));
+    const answer = schema.parse(await input.generate({ schema, systemPrompt, prompt: text, openAiModel: model, reasoningEffort: 'medium', maxOutputTokens: 1500 * plan.days.length, timeoutMs }));
     return answer.emails as Email[];
   };
-  let emails = await ask(prompt, 70_000);
-  let issues = dropEmailIssues(emails, { item: input.item, seller: input.seller, prompt });
+  let emails = await ask(prompt, writing);
+  let issues = dropEmailIssues(emails, { item: input.item, seller: input.seller, prompt, plan });
   if (issues.length) {
-    const corrected = await ask(dropWriterPrompt({ ...input, issues: issues.slice(0, 8), previous: emails }), 60_000).catch(() => null);
-    const left = corrected ? dropEmailIssues(corrected, { item: input.item, seller: input.seller, prompt }) : issues;
+    const corrected = await ask(dropWriterPrompt({ ...input, issues: issues.slice(0, 8), previous: emails }), correcting).catch(() => null);
+    const left = corrected ? dropEmailIssues(corrected, { item: input.item, seller: input.seller, prompt, plan }) : issues;
     if (corrected && left.length < issues.length) { emails = corrected; issues = left; }
   }
-  const [first, ...rest] = finishDropEmails(emails, input.seller);
+  return { emails: finishDropEmails(emails, input.seller, plan), issues };
+}
+
+/** The four emails of a recommended contact: the first as its draft, the rest as its follow-ups. */
+export async function writeDropEmails(input: { item: DropItem; seller: DropSeller | null; generate: Generate; ownSamples?: string[]; model?: string; variant?: number }):
+Promise<{ draft: { subject: string; body: string }; followUps: DropFollowUp[]; issues: string[] }> {
+  const { emails: [first, ...rest], issues } = await writeSequence(input);
   return { draft: { subject: first.subject, body: first.body }, followUps: rest.map(email => ({ day: email.day, subject: email.subject, body: email.body })), issues };
 }

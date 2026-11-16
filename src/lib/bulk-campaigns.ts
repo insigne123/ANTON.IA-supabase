@@ -51,7 +51,10 @@ export const CampaignInputSchema = z.object({
     email: z.string().trim().email().transform(value => value.toLowerCase()),
     messageIndex: z.number().int().min(0).max(6),
     subject: z.string().trim().min(1).max(300), body: z.string().trim().min(1).max(12000),
-  }).strict()).max(500).default([]),
+  // Every email of every person when the campaign is written for each of them (src/lib/bulk-campaign-personal.ts): 100 × 7.
+  }).strict()).max(700).default([]),
+  /** False: the person chose to send the same text to everyone. Absent, each recipient gets emails written for them. */
+  personalize: z.boolean().optional(),
 }).strict().superRefine((value, ctx) => {
   const overrideKeys = new Set<string>();
   for (const override of value.overrides) {

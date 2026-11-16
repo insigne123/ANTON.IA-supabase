@@ -110,6 +110,8 @@ export async function approveDropCampaign(auth: Pick<AuthContext, 'supabase' | '
     name: text(`Contacto del día · ${who}`, 120), description: 'Un contacto recomendado, con su primer correo y sus seguimientos.',
     objective: text(`Primer contacto con ${[item.title, item.company].filter(Boolean).join(' de ') || who}.`, 400),
     criteria: defaultAudience, emails: [email], messages, provider: mailbox.resolved, overrides: [],
+    // These emails were already written for this one person (lead-drop-writer.ts): the campaign has nothing left to write.
+    personalize: false,
   });
   if (!definition.success) throw new LeadDropsError('Revisa los correos: falta un asunto o un texto.', 400);
   const authContext = { ...auth, organizationIds: [auth.organizationId] } as AuthContext;

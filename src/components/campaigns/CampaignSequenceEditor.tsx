@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { CampaignMessageSchema, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 import { DEFAULT_FOLLOW_UP_DELAYS, validateSequenceProposal } from '@/lib/bulk-campaign-assist';
+import { personalMissing } from '@/lib/bulk-campaign-personal';
 import { chipClass } from '@/components/ui/chip';
 import { cn } from '@/lib/utils';
 
@@ -66,6 +68,8 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
   const firstWritten = Boolean(definition.messages[0]?.subject.trim() && definition.messages[0]?.body.trim());
   const emptyFollowUps = definition.messages.filter((value, index) => index > 0 && !hasText(value) && !isLocked(index)).length;
   const recipients = definition.emails.length === 1 ? 1 : 2;
+  // People who still read the base: saving writes their own emails (src/lib/bulk-campaign-personal.ts).
+  const toWrite = reviseMode || definition.personalize === false ? 0 : personalMissing(definition).length;
 
   useEffect(() => { setInstruction(''); setProposal(null); setMessageError(''); setMessageFeedback(''); }, [messageIndex]);
   useEffect(() => { if (sequenceError || sequenceFeedback || sequenceProposal) sequenceResultRef.current?.focus(); }, [sequenceError, sequenceFeedback, sequenceProposal]);
@@ -163,7 +167,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
 
   return <>
     <header className="space-y-2"><h2 className="text-xl font-semibold">{reviseMode ? 'Edita los mensajes pendientes' : 'Prepara tu secuencia de correos'}</h2>
-      <p className="text-sm text-muted-foreground">{reviseMode ? 'Los mensajes enviados o en curso están bloqueados. Los cambios pendientes volverán a revisión.' : 'Elige los seguimientos, genera la secuencia y ajusta cada correo antes de aprobar.'}</p>
+      <p className="text-sm text-muted-foreground">{reviseMode ? 'Los mensajes enviados o en curso están bloqueados. Los cambios pendientes volverán a revisión.' : 'Di qué quieres conseguir y deja una base. Con ella escribimos un correo distinto para cada persona, a partir de su cargo y de su empresa.'}</p>
     </header>
     <div className="space-y-3">
       <Label htmlFor="objective">¿Qué quieres conseguir con la campaña?</Label>
@@ -237,8 +241,14 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
         <SelectContent><SelectItem value="google">Mi cuenta de Gmail conectada</SelectItem><SelectItem value="outlook">Mi cuenta de Outlook conectada</SelectItem></SelectContent>
       </Select>
     </div>}
-    {(definition.overrides || []).length > 0 && <p className="text-sm text-muted-foreground">Cambiar la plantilla reemplazará las ediciones individuales. Podrás ajustarlas nuevamente en la revisión.</p>}
+    {!reviseMode && <div className="flex min-h-11 items-center gap-3">
+      <Checkbox id="same-for-all" disabled={busy} checked={definition.personalize === false} onCheckedChange={checked => onChange({ personalize: checked === true ? false : undefined })} />
+      <Label htmlFor="same-for-all" className="font-normal">Enviar este mismo texto a todos, sin escribir uno para cada persona</Label>
+    </div>}
+    {(definition.overrides || []).length > 0 && <p className="text-sm text-muted-foreground">{reviseMode || definition.personalize === false
+      ? 'Si cambias un correo, se reemplazan las ediciones individuales de ese correo. Podrás ajustarlas nuevamente en la revisión.'
+      : 'Si cambias el objetivo o un correo de la base, los correos de cada persona se vuelven a escribir al guardar.'}</p>}
     {!canSave && <p className="text-sm text-muted-foreground">Elige la cantidad de seguimientos y completa el asunto, el texto y los días de espera de cada correo para continuar.</p>}
-    <div className="sticky bottom-0 z-10 -mx-1 flex justify-between gap-3 border-t bg-card/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80"><Button variant="ghost" disabled={busy} onClick={onBack}>{reviseMode ? 'Cancelar edición' : 'Atrás'}</Button><Button disabled={busy || !canSave} onClick={onSave}>{busy && !job ? 'Preparando…' : reviseMode ? 'Guardar pendientes y volver a revisión' : 'Guardar y revisar correos'}</Button></div>
+    <div className="sticky bottom-0 z-10 -mx-1 flex justify-between gap-3 border-t bg-card/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80"><Button variant="ghost" disabled={busy} onClick={onBack}>{reviseMode ? 'Cancelar edición' : 'Atrás'}</Button><Button disabled={busy || !canSave} onClick={onSave}>{busy && !job ? 'Preparando…' : reviseMode ? 'Guardar pendientes y volver a revisión' : !toWrite ? 'Guardar y revisar correos' : definition.emails.length === 1 ? 'Escribir sus correos' : toWrite === definition.emails.length ? 'Escribir un correo para cada persona' : `Escribir los correos de ${toWrite} ${toWrite === 1 ? 'persona' : 'personas'}`}</Button></div>
   </>;
 }

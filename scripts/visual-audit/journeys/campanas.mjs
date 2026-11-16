@@ -36,6 +36,44 @@ const SEQUENCE = { messages: [
   { subject: 'Cierro el tema por ahora', body: 'Hola {{nombre}},\n\nNo quiero llenar tu bandeja. Si más adelante revisar antecedentes se vuelve un cuello de botella, aquí estoy.', delayDays: 7 },
 ] };
 
+// A campaign written for each person (17 Nov 2026): the server answers a request of up to five people with their own emails. One of
+// them fails here, so the review shows who stayed with the base. Saving answers with the campaign as the server would keep it.
+const personalEmails = (name, company, about) => [
+  { subject: `Ingresos de temporada en ${company}`, body: `Hola ${name},\n\nTe escribo porque ${about}. AXIS consulta los antecedentes laborales de los postulantes en el PJUD y procesa 1.000 personas en unos 30 minutos.\n\n¿Te interesa que te cuente cómo lo usan otros equipos de selección?` },
+  { subject: 'Un resumen de una página', body: `Hola ${name},\n\nTe escribí hace unos días por la revisión de antecedentes. Puedo mandarte un resumen de una página con lo que revisa AXIS y lo que no.\n\n¿Te sirve?` },
+  { subject: `Diciembre en ${company}`, body: `Hola ${name},\n\nEn temporada alta, una cadena de retail revisó 800 postulantes en una tarde con AXIS.\n\n¿Lo vemos en una llamada de 15 minutos?` },
+  { subject: 'Cierro por ahora', body: `Hola ${name},\n\nEste es el último correo que te mando sobre esto. ¿Es otra persona quien ve los ingresos en ${company}, para escribirle a ella?` },
+];
+const PERSONAL = {
+  'andrea.soto@retailandino.cl': personalEmails('Andrea', 'Retail Andino', 'llevas Personas en Retail Andino y diciembre trae los ingresos más grandes del año'),
+  'matias.rojas@logisticasur.cl': personalEmails('Matías', 'Logística Sur', 'el reclutamiento de Logística Sur pasa por ti y cada turno nuevo trae un grupo de postulantes'),
+};
+const personalize = async page => {
+  let asked = 0;
+  await page.route('**/api/campaigns/bulk/personalize', async route => {
+    const { emails } = route.request().postDataJSON();
+    // The first request takes longer than the bench waits for the page to settle, so the step's image shows the writing under way.
+    await new Promise(resolve => setTimeout(resolve, asked++ ? 300 : 9000));
+    await route.fulfill(json({ written: emails.filter(email => PERSONAL[email]).map(email => ({ email, messages: PERSONAL[email] })),
+      failed: emails.filter(email => !PERSONAL[email]).map(email => ({ email, reason: 'La IA tardó más de lo esperado.' })) }));
+  });
+  await page.route('**/api/campaigns/bulk', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const definition = route.request().postDataJSON();
+    const recipients = definition.emails.map((email, at) => {
+      const who = PEOPLE.find(item => item.email === email);
+      return { ...who, messages: definition.messages.map((message, index) => {
+        const own = (definition.overrides || []).find(item => item.email === email && item.messageIndex === index);
+        const text = value => value.replaceAll('{{nombre}}', who.name.split(' ')[0]).replaceAll('{{empresa}}', who.company).replaceAll('{{cargo}}', who.title);
+        return { delayDays: message.delayDays, subject: own?.subject ?? text(message.subject), body: own?.body ?? text(message.body), draftId: uuid(5000 + at * 10 + index), versionId: uuid(6000 + at * 10 + index) };
+      }) };
+    });
+    const now = new Date().toISOString();
+    return route.fulfill(json({ campaign: { id: uuid(4100), organization_id: uuid(1), user_id: uuid(2), revision: 1, status: 'draft', definition: { overrides: [], ...definition }, recipients,
+      review_hash: 'bench', approved_at: null, created_at: now, updated_at: now } }));
+  });
+};
+
 const openList = async c => { await c.go('/campaigns'); await c.see('Reclutamiento masivo'); };
 const newCampaign = async c => { await openList(c); await c.click('Nueva campaña'); await c.seeRole('heading', '¿A quién quieres contactar?'); };
 
@@ -80,6 +118,34 @@ const journeys = () => [
       { say: 'Paso a los correos', do: async c => { await c.click('Continuar a correos'); await c.seeRole('heading', 'Prepara tu secuencia de correos'); } },
       { say: 'Genero la secuencia con IA', do: async c => { await c.click('Generar secuencia con IA'); await c.see('Secuencia generada'); } },
       { say: 'Miro un seguimiento', do: async c => { await c.click({ name: /^Seguimiento 2/ }); } },
+    ] },
+  { id: 'campanas-nueva-personal', persona: 'owner', title: 'Crear una campaña con un correo escrito para cada persona', goal: 'Que nadie reciba el mismo texto con otro nombre.',
+    steps: [
+      { say: 'Empiezo una campaña nueva', do: async c => { await answer(c.page, '**/api/campaigns/bulk/audience/rank', RANKED); await answer(c.page, '**/api/campaigns/bulk/assist', SEQUENCE); await personalize(c.page); await newCampaign(c); } },
+      { say: 'Busco con IA y paso a los correos', do: async c => {
+        await c.fill('Describe tu lead ideal', 'Gerentes de Personas y jefes de reclutamiento de retail y logística en Chile');
+        await c.click('Buscar leads ideales'); await c.see('Andrea Soto'); await c.click('Continuar a correos');
+        await c.see('Con ella escribimos un correo distinto para cada persona');
+      } },
+      { say: 'Dejo la base con IA', do: async c => { await c.click('Generar secuencia con IA'); await c.see('Secuencia generada'); await c.see('Enviar este mismo texto a todos, sin escribir uno para cada persona'); } },
+      { say: 'Pido un correo para cada persona', do: async c => { await c.click('Escribir un correo para cada persona'); await c.see('Escribiendo un correo para cada persona'); } },
+      { say: 'Reviso cómo le llega a cada una', do: async c => {
+        await c.see('Qué pasa al aprobar');
+        await c.see('Ingresos de temporada en Retail Andino');
+        await c.see('1 persona tiene todavía el texto base.');
+        c.check('Quien quedó con la base se distingue en la lista', await c.page.getByText('Texto base', { exact: true }).count() === 1);
+      } },
+      { say: 'Miro a otra persona', do: async c => { await c.click({ name: /Matías Rojas/ }); await c.see('Ingresos de temporada en Logística Sur'); } },
+    ] },
+  { id: 'campanas-nueva-personal-telefono', persona: 'owner', viewport: 'phone', title: 'Un correo para cada persona (móvil)',
+    steps: [
+      { say: 'Empiezo una campaña nueva en el teléfono', do: async c => { await answer(c.page, '**/api/campaigns/bulk/audience/rank', RANKED); await answer(c.page, '**/api/campaigns/bulk/assist', SEQUENCE); await personalize(c.page); await newCampaign(c); } },
+      { say: 'Busco, dejo la base y pido los correos', do: async c => {
+        await c.fill('Describe tu lead ideal', 'Gerentes de Personas de retail en Chile'); await c.click('Buscar leads ideales'); await c.see('Andrea Soto');
+        await c.click('Continuar a correos'); await c.click('Generar secuencia con IA'); await c.see('Secuencia generada');
+        await c.click('Escribir un correo para cada persona'); await c.see('Escribiendo un correo para cada persona');
+      } },
+      { say: 'Reviso', do: async c => { await c.see('Qué pasa al aprobar'); await c.see('Ingresos de temporada en Retail Andino'); } },
     ] },
   { id: 'campanas-nueva-ia-telefono', persona: 'owner', viewport: 'phone', title: 'Crear una campaña (móvil)',
     steps: [
