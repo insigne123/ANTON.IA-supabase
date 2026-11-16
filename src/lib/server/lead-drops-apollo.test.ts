@@ -110,6 +110,49 @@ test('writing it: a first email and three follow-ups, to the first name while th
   assert.match(doc, /Si no responde: 3 seguimientos[\s\S]*Día 3 · [\s\S]*Re: ingresos[\s\S]*Día 11 · [\s\S]*Cierro aquí/);
 });
 
+test('the emails of a recommended contact come from the drops\' own writer, with what the profile says may be named; when it fails, from Cowork\'s Writer as before', async () => {
+  const ANA = '00000000-0000-4000-8000-00000000000a';
+  const world = () => memory({ ...seed(), organization_members: [{ organization_id: ORG, user_id: ANA, role: 'admin' }],
+    profiles: [{ ...profile(ANA, { targetRoles: 'Gerente de Personas', targetIndustries: 'retail', targetLocations: 'Chile', proofPoints: 'Más de 200 empresas atendidas',
+      referenceClients: 'Tiendas Ejemplo, Logística Sur', painPoints: 'Revisar antecedentes uno por uno' }), full_name: 'Ana Pérez' }] }, unique);
+  const email = (subject: string, text: string, ask: string) => ({ subject, body: `Hola {{nombre}},\n\n${text}\n\n${ask}` });
+  const four = [
+    { day: 1, ...email('Ingresos de fin de año', 'Te escribo porque llevas las personas de una cadena de tiendas y en AXIS revisamos los antecedentes laborales de quienes ingresan, con más de 200 empresas atendidas hasta hoy.', '¿Te interesa que te cuente cómo lo hacemos?') },
+    { day: 3, ...email('Antecedentes en lote', 'Te escribí hace unos días por los ingresos. También revisamos un grupo completo de una vez, antes de su primer día.', '¿Te sirve un resumen de una página?') },
+    { day: 7, ...email('Respaldo de cada consulta', 'Cada consulta que hacemos queda con su respaldo, para cuando alguien pregunta cómo se revisó a una persona que ya entró a trabajar.', '¿Lo vemos en una llamada de 15 minutos?') },
+    { day: 11, ...email('Con quién hablar', 'Este es el último correo que te mando sobre esto.', '¿Es otra persona quien ve los ingresos, para escribirle a ella?') },
+  ];
+  const read: any[] = [];
+  const own = async (options: any) => {
+    if (options.prompt.includes('"companies"')) return { companies: [] };
+    if (String(options.systemPrompt).startsWith('Le explicas a un vendedor')) return { contacts: [] };
+    const prompt = JSON.parse(options.prompt);
+    if (!prompt.vendedor) throw new Error('Cowork\'s Writer is not asked when the drops\' writer answers');
+    read.push({ prompt, model: options.openAiModel });
+    return { emails: four };
+  };
+  const first = world();
+  await planOrganizationDrops(first.client, ORG, [ANA], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0 });
+  assert.equal((await writeDrop(first.client, first.tables.lead_drops[0], { generate: own, now: TUESDAY })).written, 1);
+  const [item] = first.tables.lead_drops[0].items;
+  assert.equal(read.length, 1);
+  assert.equal(read[0].model, 'claude-haiku-5-5');
+  assert.deepEqual([read[0].prompt.vendedor.nombre, read[0].prompt.vendedor.clientes_que_puede_nombrar, read[0].prompt.vendedor.problemas_que_resuelve],
+    ['Ana Pérez', ['Tiendas Ejemplo', 'Logística Sur'], ['Revisar antecedentes uno por uno']]);
+  assert.equal(item.draft.subject, 'Ingresos de fin de año');
+  assert.match(item.draft.body, /^Hola \{\{nombre\}\},[\s\S]*¿Te interesa que te cuente cómo lo hacemos\?\n\nSaludos,\nAna Pérez$/);
+  assert.deepEqual(item.followUps.map((step: any) => [step.day, step.subject]), [[3, 'Antecedentes en lote'], [7, 'Respaldo de cada consulta'], [11, 'Con quién hablar']]);
+
+  // The drops' writer down: the contact still gets its emails, from Cowork's Writer.
+  const second = world();
+  writerPrompts.length = 0;
+  const down = async (options: any) => { if (options.prompt.includes('"vendedor"') && !options.prompt.includes('"brief"')) throw new Error('down'); return fakeGenerate(options); };
+  await planOrganizationDrops(second.client, ORG, [ANA], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0 });
+  assert.equal((await writeDrop(second.client, second.tables.lead_drops[0], { generate: down, now: TUESDAY })).written, 1);
+  assert.equal(second.tables.lead_drops[0].items[0].draft.subject, 'Ingresos en temporada alta');
+  assert.equal(writerPrompts[0].brief.kind, 'sequence');
+});
+
 test('«Enriquecer y guardar»: kept as a saved contact once, then tied to the contact the lookup put in «Por escribir»', async () => {
   const { client, tables } = memory(seed(), unique);
   await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0 });
