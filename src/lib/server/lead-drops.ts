@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { dayInZone } from '@/lib/admin/chile-time';
@@ -23,7 +23,8 @@ import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
-import { dropLessons, dropWishes, finderSearchTerms, scoreDropCandidates, type FinderLessons, type FinderPreferences } from '@/lib/server/lead-drop-finder';
+import { ACCOUNTS_OPENED, ACCOUNT_FIT, accountDomain, accountsOf, accountsToOpen, expansionIndustries, readAccounts, saveAccounts, scoreAccounts, type DropAccount } from '@/lib/server/lead-drop-accounts';
+import { dropLessons, dropWishes, finderSearchTerms, scoreDropCandidates, type FinderLessons, type FinderPreferences, type FinderSeller } from '@/lib/server/lead-drop-finder';
 import { profileTargetNotes } from '@/lib/profile/profile-mappings';
 import { briefNewsLine, type DropResearch, type DropResearchInput } from '@/lib/server/lead-drop-research';
 import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
@@ -252,6 +253,20 @@ const searchInput = (criteria: DropCriteria, count: number, broad = false): Lead
   personLocations: criteria.locations, employeeRanges: broad ? [] : criteria.sizes, includeSimilarTitles: true, maxResults: count,
 });
 
+/**
+ * A customer's industries as Apollo can be asked for them (16 Nov 2026): the ones it has a tag for go together, and the rest go as
+ * words of the company in a search of their own, since a tag and a word in the same search leave almost nobody. Until then an
+ * industry the provider's list does not name («forestal», «celulosa», «puertos») was left out of the search without saying.
+ */
+export function industrySets(criteria: DropCriteria): string[][] {
+  const named = [...new Set(criteria.industries.map(value => leadsFinderIndustry(value) || value.replace(/\s+/g, ' ').trim().toLowerCase()).filter(Boolean))];
+  const tagged = named.filter(name => resolveApolloIndustryFilters([name]).tagIds.length > 0);
+  const worded = named.filter(name => !tagged.includes(name));
+  return [tagged, worded].filter(set => set.length > 0);
+}
+/** The heads of a company (one or two a company): a search by them lists the companies of an industry, not the staff of the largest. */
+const COMPANY_HEADS = ['owner', 'founder', 'c_suite'];
+
 /** What the company's customer is chosen from: its «Ficha de la empresa», the team (admins first, for ties) and what it saved. */
 async function teamOf(client: Client, organizationId: string) {
   const [members, saved]: any[] = await Promise.all([
@@ -347,8 +362,9 @@ const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.s
 /** What the finder's first search asks for, and each of its two extra ones (the roles as people write them, the words of their area). */
 const FINDER_BASE = 300;
 const FINDER_EXTRA = 100;
-/** What one group's search, classification and score may take at worst (ten pages twice, and the model's timeouts). */
-const GROUP_MS = 90_000;
+/** What one group's search, classification and score may take at worst (ten pages twice, its companies opened, and the model's timeouts). */
+export const FINDER_GROUP_MS = 120_000;
+const GROUP_MS = FINDER_GROUP_MS;
 const criteriaKey = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort().join(',')).join('|');
 
 /** What the team did with the contacts of its drops of the last six months (dropLessons); nothing when it cannot be read. */
@@ -368,6 +384,12 @@ const ownNotes = (profile: Record<string, unknown> | null | undefined) => {
 /** Two people with the same customer and different words are scored apart: what each wrote is theirs. */
 const preferencesKey = (preferences: FinderPreferences) => [preferences.notes || '', preferences.teamNotes || '', ...(preferences.wishes || [])].join('¦');
 
+/** What a person sells, as Cowork reads it: for the scores of the finder. */
+async function sellerFor(client: Client, organizationId: string, userId: string): Promise<FinderSeller | null> {
+  const context = await loadCoworkUserContext(client, { organizationId, userId }, { memories: false, mailbox: false }).catch(() => null);
+  return context ? { company: context.companyName, offer: context.offer, services: context.services, differentiators: context.differentiators, sector: context.sector } : null;
+}
+
 /**
  * The finder's choice for a group: every usable candidate scored for each person's customer (one scoring per different customer,
  * with what that person sells), then the picker by score with its slots for roles next to the customer's.
@@ -376,6 +398,10 @@ async function finderPicks(client: Client, organizationId: string, input: {
   candidates: DropCandidate[]; members: string[]; known: KnownPeople; size: number; own: (userId: string) => DropCriteria; lessons: FinderLessons; generate?: Generate;
   /** What each person says they look for, in their words: read by the score, so the same search serves each one differently. */
   preferences?: (userId: string) => FinderPreferences;
+  /** What a person sells, read once for the group (sellerFor). */
+  seller?: (userId: string) => Promise<FinderSeller | null>;
+  /** The score a candidate's company already has for this customer (lead-drop-accounts.ts): the score of the person starts from it. */
+  accountOf?: (candidate: DropCandidate) => { score: number; reason: string | null } | null;
 }) {
   const usable = usableDrops(input.candidates, input.known);
   const scores = new Map<string, Map<string, DropScore>>();
@@ -384,10 +410,9 @@ async function finderPicks(client: Client, organizationId: string, input: {
   const keyOf = (userId: string) => `${criteriaKey(input.own(userId))}¦${preferencesKey(preferencesOf(userId))}`;
   for (const userId of input.members) if (!customers.has(keyOf(userId))) customers.set(keyOf(userId), { criteria: input.own(userId), userId });
   await Promise.all([...customers].map(async ([key, { criteria, userId }]) => {
-    const context = await loadCoworkUserContext(client, { organizationId, userId }, { memories: false, mailbox: false });
-    const seller = context ? { company: context.companyName, offer: context.offer, services: context.services, differentiators: context.differentiators, sector: context.sector } : null;
-    scores.set(key, await scoreDropCandidates({ candidates: usable, criteria, seller, lessons: input.lessons, preferences: preferencesOf(userId), generate: input.generate })
-      .catch(() => new Map<string, DropScore>()));
+    const seller = await (input.seller ?? (id => sellerFor(client, organizationId, id)))(userId);
+    scores.set(key, await scoreDropCandidates({ candidates: usable, criteria, seller, lessons: input.lessons, preferences: preferencesOf(userId), generate: input.generate,
+      accountOf: input.accountOf }).catch(() => new Map<string, DropScore>()));
   }));
   const scoreOf = (userId: string, leadId: string) => scores.get(keyOf(userId))?.get(leadId) ?? null;
   const picks = pickRankedDrops(usable, input.members, input.known, input.size, { criteriaOf: input.own, scoreOf: (userId, item) => scoreOf(userId, item.leadId) });
@@ -414,6 +439,11 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
    * GROUP_MS left once another was made: its people get no row today yet, so the next run plans them.
    */
   timeLeft?: () => number;
+  /**
+   * Someone is waiting for the answer on screen («Hoy», pullDrop): the companies already known are opened, half as many, and no
+   * new ones are looked for or scored, nor the search widened to other industries. The morning run does all of that.
+   */
+  quick?: boolean;
 }) {
   const today = dayInZone(deps.now);
   const plan = deps.plan ?? await dropPlanFor(client, organizationId);
@@ -450,12 +480,21 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     // The run's cap, not its cost (that comes from what it returns): one person's search is too small for a cap of its
     // own, which Apify refuses under its minimum, so never below an ordinary search's (leadsFinderMaxRunUsd).
     const searchDeps = (wanted: number) => ({ fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: Math.max(leadsFinderMaxRunUsd(), Math.min(1, wanted * usdPerLead * 1.5)) });
+    // The finder asks each kind of industry in a search of its own (industrySets); a team of one contact searches as before.
+    const sets = finder ? industrySets(criteria) : [];
+    const perSet = (input: LeadSearchInput): LeadSearchInput[] => (sets.length ? sets.map(set => ({ ...input, industryKeywords: set })) : [input]);
+    const searchAll = async (inputs: LeadSearchInput[], wanted: number): Promise<Awaited<ReturnType<Search>>> => {
+      const answers = await Promise.all(inputs.map(input => search(input, searchDeps(wanted))));
+      const seen = new Set<string>();
+      return { results: answers.flatMap(answer => answer.results).filter(entry => !seen.has(entry.lead.id) && Boolean(seen.add(entry.lead.id))),
+        costUsd: answers.reduce((sum, answer) => sum + answer.costUsd, 0) };
+    };
     try {
       const narrow = searchInput(criteria, count);
-      found = await search(narrow, searchDeps(count));
+      found = await searchAll(perSet(narrow), count);
       narrowIds = new Set(found.results.map(entry => entry.lead.id));
       // Nobody with those industries or sizes: once more with the titles and places only.
-      if (!found.results.length && (narrow.industryKeywords.length || narrow.employeeRanges.length)) {
+      if (!found.results.length && (narrow.industryKeywords.length || sets.length || narrow.employeeRanges.length)) {
         const broad = await search(searchInput(criteria, count, true), searchDeps(count));
         found = { ...broad, costUsd: found.costUsd + broad.costUsd };
       }
@@ -467,23 +506,109 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     const entries = new Map<string, VaultEntry>(found.results.map(entry => [entry.lead.id, entry]));
     let scoreOf: (userId: string, leadId: string) => DropScore | null = () => null;
     let assigned: Map<string, Array<DropCandidate & { track?: 'explore'; role?: 'refer' }>>;
+    // By company (lead-drop-accounts.ts): what is told of the search, why each company, and who came from an industry next to the customer's.
+    let accountsNote: DropCriteria['accounts'];
+    const companyWhy = new Map<string, string>();
+    const expandedIds = new Map<string, string>();
     if (finder) {
       // The same customer asked two more ways (free): its roles as people write them, and the words of their area as a title.
       const terms = await finderSearchTerms(criteria, deps.generate).catch(() => ({ titles: [] as string[], keywords: [] as string[] }));
       const extra = await Promise.all([
-        terms.titles.length ? search(searchInput({ ...criteria, titles: terms.titles }, FINDER_EXTRA), searchDeps(FINDER_EXTRA)).catch(() => null) : null,
-        terms.keywords.length ? search({ ...searchInput({ ...criteria, titles: terms.keywords }, FINDER_EXTRA), includeSimilarTitles: false }, searchDeps(FINDER_EXTRA)).catch(() => null) : null,
+        terms.titles.length ? searchAll(perSet(searchInput({ ...criteria, titles: terms.titles }, FINDER_EXTRA)), FINDER_EXTRA).catch(() => null) : null,
+        terms.keywords.length ? searchAll(perSet({ ...searchInput({ ...criteria, titles: terms.keywords }, FINDER_EXTRA), includeSimilarTitles: false }), FINDER_EXTRA).catch(() => null) : null,
       ]);
       for (const more of extra) for (const entry of more?.results || []) if (!entries.has(entry.lead.id)) { entries.set(entry.lead.id, entry); narrowIds.add(entry.lead.id); }
+
+      // ── By company: the customer's companies found, scored once, and the best ones opened to bring their people ──
+      const quiet = (inputs: LeadSearchInput[], wanted: number) => searchAll(inputs, wanted).then(answer => answer.results).catch(() => null);
+      const customerKey = createHash('sha1').update(criteriaKey(criteria)).digest('hex').slice(0, 16);
+      const sellers = new Map<string, Promise<FinderSeller | null>>();
+      const seller = (userId: string) => sellers.get(userId) ?? sellers.set(userId, sellerFor(client, organizationId, userId)).get(userId)!;
+      const teamWords: FinderPreferences = { notes: preferences(members[0]).notes, teamNotes: preferences(members[0]).teamNotes };
+      const accounts = await readAccounts(client, organizationId, customerKey);
+      const touched = new Set<string>(), opened = new Set<string>();
+      const accountFor = (domain: unknown) => accounts.get(accountDomain(domain) || '') ?? null;
+      const learn = (list: DropAccount[]) => {
+        for (const account of list) {
+          const kept = accounts.get(account.domain);
+          if (kept) { kept.about ||= account.about; kept.industry ||= account.industry; kept.size ??= account.size; }
+          else { accounts.set(account.domain, account); touched.add(account.domain); }
+        }
+      };
+      const scoreNew = async () => {
+        const pending = [...accounts.values()].filter(account => account.score === null);
+        if (!pending.length) return;
+        await scoreAccounts({ accounts: pending, criteria, seller: await seller(members[0]), lessons, preferences: teamWords, generate: deps.generate, now: deps.now }).catch(() => 0);
+        for (const account of pending) if (account.score !== null) touched.add(account.domain);
+      };
+      const take = (entry: VaultEntry) => {
+        if (entries.has(entry.lead.id)) return;
+        const account = accountFor(entry.lead.organization_domain);
+        entries.set(entry.lead.id, entry);
+        if (account?.origin === 'expansion') expandedIds.set(entry.lead.id, account.segment || 'rubro vecino');
+        else narrowIds.add(entry.lead.id);
+      };
+      // A company opened: everyone the search has there in the customer's places, whatever the title (four companies at a time), and
+      // the customer's roles across all of them, which a large company would otherwise hide among its first hundred people.
+      const open = async (list: DropAccount[]) => {
+        if (!list.length) return;
+        const base = searchInput(criteria, 100, true);
+        const roles = [...new Set([...criteria.titles, ...terms.titles])].slice(0, 20);
+        const asked = quiet([{ ...searchInput({ ...criteria, titles: roles }, FINDER_BASE, true), organizationDomains: list.map(account => account.domain) }], FINDER_BASE);
+        for (let start = 0; start < list.length; start += 4) {
+          const batch = list.slice(start, start + 4);
+          const staff = await Promise.all(batch.map(account => quiet([{ ...base, titles: [], includeSimilarTitles: false, organizationDomains: [account.domain] }], 100)));
+          staff.forEach((people, index) => {
+            // A search that failed says nothing of the company: it is opened again another day.
+            if (!people) return;
+            for (const entry of people) take(entry);
+            batch[index].openedAt = deps.now.toISOString(); touched.add(batch[index].domain); opened.add(batch[index].domain);
+          });
+        }
+        for (const entry of await asked || []) take(entry);
+      };
+      // With little of the run left the companies wait for the next one: the drop is made by role, as before.
+      const hurried = Boolean(deps.timeLeft && deps.timeLeft() < GROUP_MS - 20_000);
+      if (!deps.quick && !hurried) {
+        if (sets.length) {
+          const heads = await quiet(perSet({ ...searchInput(criteria, FINDER_BASE), titles: [], seniorities: COMPANY_HEADS, includeSimilarTitles: false }), FINDER_BASE);
+          for (const entry of heads || []) if (!entries.has(entry.lead.id)) { entries.set(entry.lead.id, entry); narrowIds.add(entry.lead.id); }
+        }
+        learn(accountsOf([...entries.values()].filter(entry => narrowIds.has(entry.lead.id))));
+        await scoreNew();
+      }
+      if (!hurried) await open(accountsToOpen([...accounts.values()].filter(account => account.origin === 'customer'), deps.now, deps.quick ? ACCOUNTS_OPENED / 2 : ACCOUNTS_OPENED));
+
       // Too few people the team does not have yet: the titles and places only, before choosing, so the score reads them all at once.
       const needed = members.length * plan.size * 3;
       if (usableDrops([...entries.values()].map(candidateOf), known).length < needed) {
         const wider = await search(searchInput(criteria, count, true), searchDeps(count)).catch(() => null);
         for (const entry of wider?.results || []) if (!entries.has(entry.lead.id)) entries.set(entry.lead.id, entry);
       }
+      const accountOf = (candidate: DropCandidate) => { const account = accountFor(candidate.domain); return account && account.score !== null ? { score: account.score, reason: account.reason } : null; };
+      const choose = () => finderPicks(client, organizationId, { candidates: [...entries.values()].map(candidateOf), members, known, size: plan.size,
+        own: userId => own.get(userId)!, lessons, preferences, generate: deps.generate, seller, accountOf });
+      let chosen = await choose();
+      const worth = () => usableDrops([...entries.values()].map(candidateOf), known).filter(item => members.some(userId => chosen.scoreOf(userId, item.leadId)));
+      // The customer's own industries have less than two days of people worth offering: the industries next to them (expansionIndustries),
+      // and of those only the people of the companies that fit. Said in the drop, so nobody takes them for a mistake.
+      if (!deps.quick && worth().length < members.length * plan.size * 2 && (!deps.timeLeft || deps.timeLeft() > GROUP_MS)) {
+        const next = await expansionIndustries({ criteria, seller: await seller(members[0]), lessons, preferences: teamWords, generate: deps.generate }).catch(() => []);
+        const fresh: VaultEntry[] = [];
+        for (const { industry, keywords } of next) {
+          const base = { ...searchInput(criteria, FINDER_EXTRA, true), companyKeywords: keywords };
+          const [roles, heads] = await Promise.all([quiet([base], FINDER_EXTRA), quiet([{ ...base, titles: [], seniorities: COMPANY_HEADS, includeSimilarTitles: false }], FINDER_EXTRA)]);
+          const people = [...(roles || []), ...(heads || [])].filter(entry => !entries.has(entry.lead.id));
+          learn(accountsOf(people, 'expansion', industry));
+          fresh.push(...people);
+        }
+        await scoreNew();
+        const before = entries.size;
+        for (const entry of fresh) if ((accountFor(entry.lead.organization_domain)?.score ?? -1) >= ACCOUNT_FIT) take(entry);
+        await open(accountsToOpen([...accounts.values()].filter(account => account.origin === 'expansion'), deps.now, 6));
+        if (entries.size > before) chosen = await choose();
+      }
       found = { ...found, results: [...entries.values()] };
-      const chosen = await finderPicks(client, organizationId, { candidates: found.results.map(candidateOf), members, known, size: plan.size,
-        own: userId => own.get(userId)!, lessons, preferences, generate: deps.generate });
       assigned = chosen.picks;
       scoreOf = chosen.scoreOf;
       // Whoever the score left with nobody (the model down, or no title it knows) gets them as a team of one contact does, by the words of the title.
@@ -493,6 +618,19 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         const plain = assignDrops(found.results.map(candidateOf).filter(item => !taken.has(item.leadId)), without, known, criteria, plan.size, userId => own.get(userId)!);
         for (const [userId, picks] of plain) if (picks.length) assigned.set(userId, picks);
       }
+      // What was learnt of the companies opened: how many people worth offering each still has after today, so one that ran out
+      // rests and the next ones get their turn. Only when the score answered: without it nobody would look worth offering.
+      const stock = worth();
+      if (stock.length) {
+        const picked = new Set([...assigned.values()].flat().map(pick => pick.leadId));
+        const left = new Map<string, number>();
+        for (const item of stock) { const domain = accountDomain(item.domain); if (domain && !picked.has(item.leadId)) left.set(domain, (left.get(domain) || 0) + 1); }
+        for (const domain of opened) accounts.get(domain)!.peopleLeft = left.get(domain) || 0;
+      }
+      await saveAccounts(client, organizationId, customerKey, [...touched].map(domain => accounts.get(domain)!), deps.now);
+      const fitting = [...accounts.values()].filter(account => (account.score ?? -1) >= ACCOUNT_FIT);
+      if (fitting.length) accountsNote = { fit: fitting.length, opened: opened.size };
+      for (const account of fitting) if (account.reason) companyWhy.set(account.domain, account.reason);
     } else {
       assigned = assignDrops(found.results.map(candidateOf), members, known, criteria, plan.size, userId => own.get(userId)!);
     }
@@ -524,7 +662,10 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       // Leads Finder's people wait in the vault with their email; Apollo's have none to keep yet.
       const vaulted = picks.map(pick => entries.get(pick.leadId)).filter((entry): entry is VaultEntry => Boolean(entry) && isLeadsFinderId(entry!.lead.id));
       if (vaulted.length) await storeInVault(client, { organizationId, userId, entries: vaulted, now: deps.now.getTime() });
-      results.push({ userId, status: 'pending', cost: share, criteria: mine, items: picks.map(pick => {
+      // The industries next to theirs this person's contacts came from, if any: said with how the search went.
+      const widened = [...new Set(picks.map(pick => expandedIds.get(pick.leadId)).filter((industry): industry is string => Boolean(industry)))];
+      const searched = accountsNote ? { ...mine, accounts: { ...accountsNote, ...(widened.length ? { expanded: widened } : {}) } } : mine;
+      results.push({ userId, status: 'pending', cost: share, criteria: searched, items: picks.map(pick => {
         // The industry as the actor names it: «servicios transitorios» searched as «staffing & recruiting» fits «Reclutamiento y personal».
         const actorIndustry = text(entries.get(pick.leadId)?.lead.organization_industry, 160).toLowerCase();
         const { emailKey: _email, linkedinKey: _linkedin, about, ...shown } = pick;
@@ -535,7 +676,11 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         const titleClass = scoreOf(userId, pick.leadId)?.titleClass;
         const fit = searchedFit(dropFit(person, mine, wanted => Boolean(actorIndustry) && leadsFinderIndustry(wanted) === actorIndustry), kept)
           .map(entry => entry.criterion === 'Cargo' && titleClass && entry.match !== 'unknown' ? { ...entry, match: titleClass === 'related' ? 'partial' as const : 'yes' as const } : entry);
-        return { ...person, why: whyText(person, mine, fit), research: researchFacts({ ...person, about: null }), draft: null, fit, description: about };
+        // Why this company, as the finder scored it, and whether it came from an industry next to the customer's.
+        const companyReason = companyWhy.get(accountDomain(pick.domain) || '');
+        const neighbour = expandedIds.get(pick.leadId);
+        const extras = { ...(companyReason ? { companyWhy: companyReason } : {}), ...(neighbour ? { expanded: neighbour } : {}) };
+        return { ...person, ...extras, why: whyText({ ...person, ...extras }, mine, fit), research: researchFacts({ ...person, about: null }), draft: null, fit, description: about };
       }) });
     }
   }
@@ -891,7 +1036,7 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
   const plan = async () => {
     await planOrganizationDrops(client, scope.organizationId, [scope.userId], {
       now: deps.now, search: deps.search, budgetUsd: dropsMonthlyUsd(), spentUsd: await monthSpend(client, deps.now), claimed: true, plan: teamPlan,
-      generate: deps.generate,
+      generate: deps.generate, quick: true,
     });
     const row = await read();
     if (!row) throw new LeadDropsError('No pudimos preparar tu contacto del día.', 503);

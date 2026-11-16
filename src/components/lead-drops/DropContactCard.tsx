@@ -93,6 +93,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
   const reasons = [brief?.fit, brief?.role, ...(item.reasons || [])].filter((line): line is string => Boolean(line)).slice(0, 3);
   const opener = brief?.opener || item.approach || null;
   const about = brief?.company || item.summary || null;
+  // Why the finder chose this company (the search by company): said unless the research of the contact already says it.
+  const companyWhy = !brief?.fit && item.companyWhy ? item.companyWhy : null;
   const person = [item.seniority, item.department, placeLabel(item)].filter(Boolean).join(' · ');
   const run = async (kind: NonNullable<typeof working>, work: () => Promise<unknown>) => { setWorking(kind); try { await work(); } finally { setWorking(null); } };
   const copy = async (index: number) => {
@@ -153,6 +155,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
             <DropStageChip stage={stage} />
             {item.role === 'refer' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Trabaja en el área que buscas: no decide la compra, pero puede decirte quién la ve o presentarte">Puede derivarte</span> : null}
             {item.track === 'explore' && item.role !== 'refer' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Un cargo vecino a los que buscas, para probar si también te sirve">Para explorar</span> : null}
+            {item.expanded ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title={`${item.expanded}: un rubro vecino a los tuyos. Ampliamos la búsqueda porque de tus rubros ya te mostramos a casi todos`}>Rubro vecino</span> : null}
           </div>
           <p className="text-sm text-foreground/80">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
           {person || mail?.email ? <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
@@ -191,9 +194,10 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
                 <CircleCheck className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><span>{reason}</span></li>)}</ul> : null}
               <p className={cn('text-sm leading-6', reasons.length ? 'mt-2 text-muted-foreground' : 'mt-2')}>{item.why}</p>
             </section>
-            {about || brief?.news || item.website ? <section className={box} aria-labelledby={`${uid}-about`}>
+            {about || companyWhy || brief?.news || item.website ? <section className={box} aria-labelledby={`${uid}-about`}>
               <p id={`${uid}-about`} className={labelClass}>{item.company ? `Sobre ${item.company}` : 'Sobre la empresa'}</p>
               {about ? <p className="mt-2 text-sm leading-6">{about}</p> : null}
+              {companyWhy ? <p className={cn('text-sm leading-6', about ? 'mt-2 text-muted-foreground' : 'mt-2')}><span className="font-medium text-foreground">Por qué esta empresa: </span>{companyWhy}</p> : null}
               {brief?.news ? <div className="mt-3 rounded-lg border-l-2 border-amber-400 bg-amber-50 px-3 py-2 dark:bg-amber-500/10">
                 <p className="text-sm leading-6"><span className="font-medium">Ahora: </span>{brief.news.text}</p>
                 <a href={brief.news.url} target="_blank" rel="noopener noreferrer" className={cn(linkClass, 'mt-0.5 text-xs text-foreground/70')}>

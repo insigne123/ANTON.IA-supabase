@@ -33,7 +33,7 @@ const REFERS_FROM = 6;
 const DECIDES_FROM = 7;
 
 const SCORE_CHUNK = 40;
-const MAX_SCORED = 120;
+const MAX_SCORED = 200;
 // A score is the class of the title plus the two notes: 20 + 10 × 4.5 + 10 × 3.5 = 100 at most.
 const CLASS_BASE: Record<DropScore['titleClass'], number> = { exact: 20, similar: 16, related: 8 };
 const ROLE_WEIGHT = 4.5;
@@ -91,6 +91,8 @@ const SCORE_PROMPT = [
   '- 3 a 5: no la conoces o faltan datos para decirlo.',
   '- 1 o 2: improbable.',
   '- 0: no calza: otro país, competidor del vendedor o un rubro sin relación.',
+  'Si la persona trae «evaluacion_empresa» (la nota que su empresa ya tiene para este vendedor), parte de ella y cámbiala solo si «en_sus_palabras»',
+  'o «pedidos» dicen otra cosa de esa clase de empresa.',
   '',
   'Usa el aprendizaje: sube a quienes se parecen a los que le sirvieron y baja a quienes se parecen a los que descartó, sobre todo por el motivo que',
   'dio. Si viene «en_sus_palabras» (lo que el vendedor y su equipo escribieron sobre qué ofrecen y a quién buscan) o «pedidos» (lo que el vendedor',
@@ -106,6 +108,8 @@ const SCORE_PROMPT = [
  */
 export async function scoreDropCandidates(input: {
   candidates: DropCandidate[]; criteria: DropCriteria; seller: FinderSeller | null; lessons?: FinderLessons; preferences?: FinderPreferences; generate?: Generate;
+  /** The score the candidate's company already has for this customer (lead-drop-accounts.ts): the best companies are read first. */
+  accountOf?: (candidate: DropCandidate) => { score: number; reason: string | null } | null;
 }): Promise<Map<string, DropScore>> {
   const scores = new Map<string, DropScore>();
   const asked = input.criteria.titles.filter(Boolean);
@@ -117,7 +121,9 @@ export async function scoreDropCandidates(input: {
   });
   // The model reads the closest ones first, and at most MAX_SCORED: the rest keep the class alone.
   const order = { exact: 0, similar: 1, related: 2 } as const;
-  classed.sort((a, b) => order[a.titleClass] - order[b.titleClass] || Number(b.candidate.hasPhone) - Number(a.candidate.hasPhone));
+  const account = (candidate: DropCandidate) => input.accountOf?.(candidate) ?? null;
+  classed.sort((a, b) => order[a.titleClass] - order[b.titleClass] || (account(b.candidate)?.score ?? MIDDLE) - (account(a.candidate)?.score ?? MIDDLE)
+    || Number(b.candidate.hasPhone) - Number(a.candidate.hasPhone));
   for (const { candidate, titleClass } of classed) scores.set(candidate.leadId, { titleClass, score: scoreOf(titleClass, MIDDLE, MIDDLE, candidate.hasPhone) });
 
   const generate = input.generate;
@@ -143,6 +149,7 @@ export async function scoreDropCandidates(input: {
       prompt: JSON.stringify({ ...context, personas: chunk.map(({ candidate }, i) => ({
         i, cargo: candidate.title, nivel: candidate.seniority || null, area: candidate.department || null, empresa: candidate.company, rubro: candidate.industry,
         empleados: candidate.size, lugar: [candidate.city, candidate.country].filter(Boolean).join(', ') || null, descripcion: clip(candidate.about, 240) || null,
+        ...(account(candidate) ? { evaluacion_empresa: account(candidate)!.score } : {}),
       })) }),
     }).catch(() => null);
     const parsed = answer ? scoreSchema.safeParse(answer) : null;

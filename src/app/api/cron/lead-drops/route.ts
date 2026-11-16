@@ -3,7 +3,7 @@ import { generateStructured } from '@/ai/openai-json';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { DEFAULT_DROP_PLAN, dropDay, groupByDropSize, planOfPerson } from '@/lib/lead-drops';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
-import { dropPlans, dropsEnabled, dropsMonthlyUsd, monthSpend, personDropPlans, personPlanKey, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
+import { FINDER_GROUP_MS, dropPlans, dropsEnabled, dropsMonthlyUsd, monthSpend, personDropPlans, personPlanKey, planOrganizationDrops, restingPeople, writeDrop } from '@/lib/server/lead-drops';
 import { dropBriefEnabled, researchDropContact } from '@/lib/server/lead-drop-research';
 import { canEmailEveryone, isTestAddress } from '@/lib/server/self-email';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -126,7 +126,8 @@ export async function POST(request: Request) {
       for (const [organizationId, people] of byOrg) {
         // Whoever gets several goes first and with the finder; the rest, as a team of one contact does.
         for (const group of groupByDropSize(people, userId => planOf(organizationId, userId).size)) {
-          if (timeLeft() < 90_000) break;
+          // A group of several contacts searches by company too (lead-drop-accounts.ts): it is not started without the time it may take.
+          if (timeLeft() < (group.size > 1 ? FINDER_GROUP_MS + 10_000 : 90_000)) break;
           const plan = { size: group.size, weekdays: planOf(organizationId).weekdays };
           const planned = await planOrganizationDrops(admin, organizationId, group.people, { now, budgetUsd: budget, spentUsd: spent, plan, generate, timeLeft });
           spent += planned.spentUsd; result.spentUsd += planned.spentUsd; result.planned += planned.planned; result.empty += planned.empty;

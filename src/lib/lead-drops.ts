@@ -74,7 +74,12 @@ export function nextDropDay(now: Date, plan: DropPlan = DEFAULT_DROP_PLAN) {
 /** Who the contacts are for: from the person's «Perfil», a teammate's, or the contacts the team already saved. */
 /** `perfil`: a person's own customer. From 27 to 29 Oct 2026 everyone got the company's; since then each person's own when they declared one,
  * and the company's otherwise, sharing a search with whoever has a similar one (groupDropPeople). */
-export type DropCriteria = { titles: string[]; industries: string[]; locations: string[]; sizes: string[]; source: 'perfil' | 'equipo' | 'empresa' | 'contactos' };
+export type DropCriteria = { titles: string[]; industries: string[]; locations: string[]; sizes: string[]; source: 'perfil' | 'equipo' | 'empresa' | 'contactos';
+  /**
+   * The search by company of that day (16 Nov 2026, server/lead-drop-accounts.ts): how many companies of the customer fit what the
+   * team sells, how many were opened to bring their people, and the industries next to the customer's it widened to, if any.
+   */
+  accounts?: { fit: number; opened: number; expanded?: string[] } };
 export type IcpDeclared = { roles?: string | null; industries?: string | null; locations?: string | null; size?: string | null };
 
 /** One contact of a drop, as the person sees it before saving it: never the email or the phone, which stay in the vault. */
@@ -130,6 +135,11 @@ export type DropItem = {
    * buscan»): someone who works in the area but does not decide the purchase. Their email asks for the way in, it does not sell.
    */
   role?: 'refer';
+  // Since 16 Nov 2026: the search by company (server/lead-drop-accounts.ts).
+  /** Why this company would need what the team sells, in one sentence, as the finder scored it. */
+  companyWhy?: string | null;
+  /** The industry next to the customer's it came from, when the customer's own had few people left («Construcción»). */
+  expanded?: string | null;
   /** What the person said of this contact, with their reason: the finder learns from it. */
   /** `wish`: what the person would like to get instead, in their words (16 Nov 2026): the finder reads the last ones of each person. */
   feedback?: { useful: boolean; reason?: string | null; wish?: string | null; at: string };
@@ -514,13 +524,19 @@ export function tidyCompany(name: string | null | undefined) {
  * repeating the role the screen shows beside it. With the fit (dropFit), only the industry and the place that do match: a
  * company in «sector público» for a customer in retail is not a reason (it said so until 3 Nov 2026, next to a table that said «No calza»).
  */
-export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city' | 'track' | 'role'>, criteria: DropCriteria, fit?: DropFit[]) {
+export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city' | 'track' | 'role' | 'expanded'>, criteria: DropCriteria, fit?: DropFit[]) {
   const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo'
     : criteria.source === 'empresa' ? 'el cliente ideal de tu empresa' : 'los contactos que guarda tu equipo';
   const fits = (criterion: DropFit['criterion']) => {
     const entry = fit?.find(candidate => candidate.criterion === criterion);
     return !entry || entry.match === 'yes' || entry.match === 'partial';
   };
+  // From an industry next to the customer's, because theirs had few people left: said first, so nobody takes it for a mistake.
+  if (item.expanded) {
+    const what = item.role === 'refer' ? 'Trabaja en el área que buscas: no decide la compra, pero puede decirte quién la ve o presentarte'
+      : item.track === 'explore' ? 'Su cargo es vecino a los que buscas' : 'Su cargo es de los que buscas';
+    return `${what}. Su empresa es de un rubro vecino a los tuyos (${item.expanded.toLowerCase()}): ampliamos la búsqueda porque de tus rubros ya te mostramos a casi todos.`;
+  }
   // Someone of the area who does not decide: said as what they are for, so nobody takes a junior role for a mistake.
   if (item.role === 'refer') {
     const where = [item.industry && fits('Rubro') ? `en tu rubro objetivo (${item.industry.toLowerCase()})` : null, item.city && fits('Lugar') ? `en ${item.city}` : null].filter(Boolean).join(', ');
@@ -690,6 +706,16 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
 
 /** «el lun 16, el vie 20 y el mar 24 nov» would repeat the month: «lun 16 nov, vie 20 nov y mar 24 nov», joined as a sentence. */
 const listed = (values: string[]) => values.length <= 1 ? values.join('') : `${values.slice(0, -1).join(', ')} y ${values[values.length - 1]}`;
+/** How the search by company went that day (server/lead-drop-accounts.ts), said in a sentence or two; nothing for a drop without it. */
+export function accountsLine(accounts: DropCriteria['accounts']) {
+  if (!accounts || !accounts.fit) return null;
+  const fit = accounts.fit === 1 ? '1 empresa calza' : `${accounts.fit} empresas calzan`;
+  const opened = accounts.opened === 1 ? 'abrimos 1 para traer a su gente' : `abrimos ${accounts.opened} para traer a su gente`;
+  const base = `Buscamos por empresa: ${fit} con lo que vendes${accounts.opened ? ` y hoy ${opened}, no solo a quien tiene el cargo exacto` : ''}.`;
+  return accounts.expanded?.length
+    ? `${base} De tus rubros ya te mostramos a casi todos, así que sumamos ${accounts.expanded.length === 1 ? 'un rubro vecino' : 'rubros vecinos'}: ${listed(accounts.expanded)}.`
+    : base;
+}
 export const firstLines = (body: string, max: number) => { const flat = body.replace(/\s+/g, ' ').trim(); return flat.length > max ? `${flat.slice(0, max).replace(/\s+\S*$/, '')}…` : flat; };
 /**
  * An email as its reader would get it, to read before it goes: «{{nombre}}» as the first name, «{{empresa}}» and «{{cargo}}» as the
@@ -762,7 +788,7 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
     ...(bulk ? ['', `${bulk.title}. ${bulk.lead}`, ...[bulk.all, bulk.phones, bulk.app].filter((entry): entry is { label: string; href: string } => Boolean(entry)).map(entry => `${entry.label}: ${entry.href}`)] : []),
     ...cards.flatMap(({ item, why, news, opener, campaign, href, action }) => [
       '',
-      `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.role === 'refer' ? ' (puede derivarte)' : item.track === 'explore' ? ' (para explorar)' : ''}`,
+      `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.role === 'refer' ? ' (puede derivarte)' : item.track === 'explore' ? ' (para explorar)' : item.expanded ? ' (rubro vecino)' : ''}`,
       `Por qué: ${why}`,
       ...(news ? [`Ahora: ${news}`] : []),
       ...(opener ? [`Cómo abrir: ${opener}`] : []),
@@ -778,7 +804,7 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   // click away, on its page and in the PDF; the text version keeps them for the clients that show no HTML.
   const card = ({ item, why, newsNow, campaign, steps, href, action }: typeof cards[number]) => `<div style="margin:0 0 12px;padding:16px;border:1px solid #e5e7eb;border-radius:14px;background-color:#ffffff">`
     + emailPerson({ initials: escape(dropInitials(item)), tint: dropTint(item.leadId, EMAIL_AVATAR_TINTS), name: escape(dropName(item)),
-      role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: item.role === 'refer' ? 'puede derivarte' : item.track === 'explore' ? 'para explorar' : null })
+      role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: item.role === 'refer' ? 'puede derivarte' : item.track === 'explore' ? 'para explorar' : item.expanded ? 'rubro vecino' : null })
     + (newsNow ? emailCallout({ label: 'Ahora', body: escape(newsNow.text), foot: newsNow.source ? escape(newsNow.source) : null }) : '')
     + `<p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(why)}</p>`
     + (campaign ? `<p style="margin:10px 0 0;padding:10px 0 0;border-top:1px solid #f3f4f6;font-size:13px;line-height:19px;color:#6b7280">`
