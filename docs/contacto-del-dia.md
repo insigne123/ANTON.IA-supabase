@@ -348,6 +348,27 @@ su nombre interno. Pruebas: `drop-contact-card.test.ts`, `drop-mail-flow.test.ts
 `lead-drops.test.ts`, `lead-drop-ready-email.test.ts`; recorridos `contactos-seis`, `contactos-para-llamar`,
 `contactos-desde-el-correo*` (incluye `contactos-desde-el-correo-llamar`) y `contactos-en-hoy`, en escritorio y teléfono.
 
+### Desde el 16 de noviembre: la página del correo, dentro del marco de la app
+
+El dueño, al ver la página rediseñada: «sigue sin estar como dentro de la app en sí, no hay forma de acceder al resto de la app
+desde este link… esto es una forma de facilitarle al usuario el gasto de créditos y además una forma de acercarlo a la app».
+Hasta ese día la página era a propósito una isla, sin menú. Ahora va dentro del marco de la app (`DropAppFrame`, que envuelve
+a `DropMailFlow` en `src/app/contactos/[token]/page.tsx`):
+
+- **En pantalla ancha**, el menú de la app al costado, con su logo: las pantallas de trabajo que tiene todo equipo («Hoy»,
+  «Buscar prospectos», «Por escribir», «Tabla de datos», «Conversaciones», «Campañas», «Pipeline»), tomadas de
+  `NAV_SECTIONS`. No van las que dependen del plan del equipo o de un rol (Cowork, Oportunidades, Administración), porque a
+  quien no ha iniciado sesión no se le puede preguntar. Bajo «Hoy» se marca «Tus contactos de hoy» como el lugar donde está.
+- **En el teléfono**, el logo y «Entrar a ANTON.IA» arriba, y las mismas pantallas en una fila que se desliza.
+- **«Hoy» y «Entrar a ANTON.IA»** llevan a `/dashboard?contactos=<enlace>`: «Hoy» con estos mismos contactos a la vista. Las
+  demás entradas son la dirección propia de cada pantalla. Sin sesión, la app pide entrar y después abre esa pantalla
+  (`/login?next=…`). Con una sesión en el navegador, el botón dice «Abrir ANTON.IA».
+- Nada de la página pide iniciar sesión: enriquecer, aprobar y llamar siguen funcionando con el enlace del correo. La línea
+  «¿Prefieres trabajarlos dentro de ANTON.IA?» del pie se quitó: el marco la reemplaza.
+
+Quien ya tiene la sesión iniciada como la persona del enlace sigue llegando directo a «Hoy», como desde el 13 de noviembre.
+Prueba: «the page of the email sits in the app's frame» en `drop-mail-flow.test.ts`; recorrido `contactos-desde-el-correo`.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

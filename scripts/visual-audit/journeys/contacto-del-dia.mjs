@@ -268,7 +268,12 @@ const mailSteps = [
     c.check('se queda en la página del correo, no pide iniciar sesión', new URL(c.page.url()).pathname === `/contactos/${TOKEN}`);
     c.check('la lista trae a los seis, y se trabaja uno a la vez', await railCount(c) === 6 && await c.page.locator('article').count() === 1);
     c.check('arriba dice cómo va el día, en números', await c.page.locator('dl').first().locator('> div').allTextContents().then(values => values.join(' · ') === 'Por enriquecer5 · Por aprobar1 · En marcha0'));
-    c.check('no hay menú ni partes de la app que aprender', await c.page.locator('aside').count() === 0 && await c.page.locator('nav').count() === 1 && !(await c.has('Por escribir')));
+    // Since 16 Nov 2026 the page sits in the app's frame (DropAppFrame): nobody has to sign in, but the rest of the app is a click away.
+    const menu = c.page.getByRole('navigation', { name: 'Secciones de ANTON.IA' });
+    c.check('va dentro del marco de la app: su menú lleva al resto de ANTON.IA', await menu.getByRole('link', { name: 'Buscar prospectos' }).count() === 1
+      && await menu.getByRole('link', { name: 'Por escribir' }).count() === 1 && await menu.getByRole('link', { name: 'Campañas' }).count() === 1);
+    c.check('«Hoy» del menú trae estos mismos contactos', await menu.getByRole('link', { name: 'Hoy', exact: true }).getAttribute('href') === `/dashboard?contactos=${TOKEN}`);
+    c.check('ofrece entrar a ANTON.IA', await c.page.getByRole('link', { name: 'Entrar a ANTON.IA' }).count() === 1);
     c.check('nada se sale de la pantalla', await fits(c));
     c.check('el contacto del botón llega con su campaña a la vista', await card(c, 'Paula Reyes').getByText('Primer correo ·').count() === 1);
     c.check('quien ya tiene correo lo muestra', await card(c, 'Paula Reyes').getByText('paula.reyes@cobresdelloa.example').count() === 1);
@@ -298,6 +303,13 @@ const mailSteps = [
     await c.see('Dijiste que no te sirve (el cargo no decide): lo tendremos en cuenta.');
     const kept = c.table('lead_drops').find(row => row.id === DROP).items.find(item => item.leadId === id(5)).feedback;
     c.check('quedó guardado para el buscador', kept?.useful === false && kept?.reason === 'El cargo no decide');
+  } },
+  { say: 'Desde el menú voy a «Buscar prospectos»: me pide entrar y recuerda adónde iba', do: async c => {
+    await c.clickOn(c.page.getByRole('navigation', { name: 'Secciones de ANTON.IA' }).getByRole('link', { name: 'Buscar prospectos' }));
+    await c.page.waitForURL(/\/login/);
+    const url = new URL(c.page.url());
+    c.check('pide iniciar sesión', url.pathname === '/login');
+    c.check('después de entrar abre «Buscar prospectos»', url.searchParams.get('next') === '/search');
   } },
   { say: 'Un enlace que no es mío no abre nada', do: async c => {
     await c.go(`/contactos/${'A'.repeat(48)}`);
