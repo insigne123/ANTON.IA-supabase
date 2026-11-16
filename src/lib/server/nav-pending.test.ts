@@ -19,8 +19,8 @@ async function load(entry: string, stubs: Record<string, string>) {
   return compiled.exports;
 }
 
-const world: { replies: any[]; repliesFail: boolean; cowork: boolean; runs: any[]; hidden: string[]; opportunities: any; asked: string[] } = {
-  replies: [], repliesFail: false, cowork: true, runs: [], hidden: [], opportunities: null, asked: [],
+const world: { replies: any[]; repliesFail: boolean; cowork: boolean; runs: any[]; hidden: string[]; opportunities: any; asked: string[]; drop: any } = {
+  replies: [], repliesFail: false, cowork: true, runs: [], hidden: [], opportunities: null, asked: [], drop: null,
 };
 (globalThis as any).__nav = world;
 
@@ -28,6 +28,7 @@ const loaded = load(`export { readNavPending } from './src/lib/server/nav-pendin
   '/cowork/runs': `export async function listCoworkRuns(auth, { hiddenRootIds }) { globalThis.__nav.asked.push('runs:' + hiddenRootIds.join(',')); return globalThis.__nav.runs.filter(run => !hiddenRootIds.includes(run.root_run_id)) }`,
   '/cowork/thread-settings': `export async function readCoworkThreadSettings() { return { hiddenRootIds: globalThis.__nav.hidden } }`,
   './home-opportunities': `export async function readHomeOpportunities() { const value = globalThis.__nav.opportunities; if (value instanceof Error) throw value; return value }`,
+  './lead-drops': `export async function latestDropPending(client, scope) { const value = globalThis.__nav.drop; if (value instanceof Error) throw value; globalThis.__nav.asked.push('drop:' + scope.organizationId + ':' + scope.userId); return value }`,
 });
 
 const supabase = {
@@ -58,14 +59,21 @@ test('each section counts what waits for the person there', async () => {
     run('r3', 'r3', 'waiting_approval', '2026-10-22T10:00:00Z'),
   ];
   world.opportunities = { attention: 3 };
-  assert.deepEqual(await readNavPending(scope()), { conversations: 1, cowork: 1, opportunities: 3 });
-  assert.deepEqual(world.asked, ['runs:r3'], 'a deleted conversation does not count');
+  // «Tus contactos de hoy», under «Hoy»: the person's last contacts, with how many still wait for them.
+  world.drop = { id: 'drop-1', date: '2026-10-23', left: 4 };
+  assert.deepEqual(await readNavPending(scope()), { conversations: 1, cowork: 1, opportunities: 3, contacts: 4 });
+  assert.deepEqual(world.asked.sort(), ['drop:org-1:u1', 'runs:r3'], 'a deleted conversation does not count; the contacts are the person\'s own');
+  // All of them handled: the screen stays in the menu, without a number.
+  world.drop = { id: 'drop-1', date: '2026-10-23', left: 0 };
+  assert.equal((await readNavPending(scope())).contacts, 0);
 });
 
 test('without access, or when a read fails, that number stays out', async () => {
   const { readNavPending } = await loaded;
-  world.repliesFail = true; world.cowork = false; world.opportunities = null;
-  assert.deepEqual(await readNavPending(scope()), { conversations: null, cowork: null, opportunities: null });
+  world.repliesFail = true; world.cowork = false; world.opportunities = null; world.drop = null;
+  assert.deepEqual(await readNavPending(scope()), { conversations: null, cowork: null, opportunities: null, contacts: null });
+  world.drop = new Error('down');
+  assert.equal((await readNavPending(scope())).contacts, null, 'no contacts this week, or a failed read: the menu does not list the screen');
   world.opportunities = new Error('down');
   assert.equal((await readNavPending(scope())).opportunities, null);
 });

@@ -71,7 +71,7 @@ export default () => [
   { id: 'app-contacto-ajeno', persona: 'owner', title: 'Un contacto del día que no es mío lleva al de hoy',
     goal: 'Salir de un enlace vencido o ajeno hacia mi contacto de hoy, sin un «Reintentar» que no cambia nada (V7).',
     steps: [
-      { say: 'Abro un enlace que no es mío', do: async c => { await c.go('/search/contactos/00000000-0000-4000-8000-00000000dead'); await c.see('No encontramos esos contactos'); } },
+      { say: 'Abro un enlace que no es mío', do: async c => { await c.go('/dashboard/contactos/00000000-0000-4000-8000-00000000dead'); await c.see('No encontramos esos contactos'); } },
       { say: 'Miro qué me ofrece', do: async c => {
         c.check('ofrece mi contacto de hoy', await visible(c.page.getByRole('link', { name: 'Ver mi contacto de hoy' })));
         c.check('no ofrece reintentar lo mismo', !(await c.page.getByRole('button', { name: 'Reintentar' }).first().isVisible().catch(() => false)));

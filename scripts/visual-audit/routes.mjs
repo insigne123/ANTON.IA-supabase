@@ -11,7 +11,7 @@ export function routeList(ctx) {
     app('/', 'Inicio'),
     app('/search', 'Búsqueda'),
     // Today's «Contacto del día», found with Apollo (fixtures/lead-drops.mjs): «Enriquecer y guardar» and its follow-ups.
-    app(`/search/contactos/${AUDIT_DROP_ID}`, 'Contacto del día'),
+    app(`/dashboard/contactos/${AUDIT_DROP_ID}`, 'Contacto del día'),
     app('/saved/leads', 'Por completar'),
     app('/saved/leads/enriched', 'Por escribir'),
     app('/leads/import', 'Importar contactos'),

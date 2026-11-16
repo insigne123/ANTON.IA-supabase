@@ -5,9 +5,12 @@ import { groupCoworkThreads } from '@/lib/cowork/presentation';
 import { listCoworkRuns } from '@/lib/server/cowork/runs';
 import { readCoworkThreadSettings } from '@/lib/server/cowork/thread-settings';
 import { readHomeOpportunities } from './home-opportunities';
+import { latestDropPending } from './lead-drops';
 
 /** The numbers beside three entries of the menu (APP-23); null where the person has no access or the read failed: then nothing shows. */
-export type NavPending = { conversations: number | null; cowork: number | null; opportunities: number | null };
+export type NavPending = { conversations: number | null; cowork: number | null; opportunities: number | null;
+  /** «Tus contactos de hoy», under «Hoy»: how many of the person's last contacts still wait for them; null without contacts this week. */
+  contacts: number | null };
 
 type Scope = { supabase: SupabaseClient; admin: SupabaseClient; user: { id: string }; organizationId: string; now: Date };
 
@@ -30,10 +33,11 @@ async function cowork({ supabase, user, organizationId }: Scope) {
 }
 
 export async function readNavPending(scope: Scope): Promise<NavPending> {
-  const [replies, approvals, opportunities] = await Promise.all([
+  const [replies, approvals, opportunities, contacts] = await Promise.all([
     conversations(scope).catch(() => null),
     cowork(scope).catch(() => null),
     readHomeOpportunities(scope.admin, scope.user, scope.organizationId, scope.now).then(today => today ? today.attention : null).catch(() => null),
+    latestDropPending(scope.admin, { organizationId: scope.organizationId, userId: scope.user.id }, scope.now).then(found => found ? found.left : null).catch(() => null),
   ]);
-  return { conversations: replies, cowork: approvals, opportunities };
+  return { conversations: replies, cowork: approvals, opportunities, contacts };
 }

@@ -298,7 +298,7 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     assert.equal(links.length, 3, 'one button per contact and the way to all of them');
     assert.deepEqual([...new Set(links.map(match => match[1]))].length, 1);
     assert.deepEqual(readDropLink(links[0][1], { now: TUESDAY }), { dropId: DROP, expiresAt: new Date(TUESDAY.getTime() + 14 * 86_400_000) });
-    assert.ok(!String(sent[0].html).includes('/search/contactos/') && !String(sent[0].text).includes('/search/contactos/') && !String(sent[0].html).includes('enriquecer=1'));
+    assert.ok(!String(sent[0].html).includes('/dashboard/contactos/') && !String(sent[0].text).includes('/dashboard/contactos/') && !String(sent[0].html).includes('enriquecer=1'));
     assert.equal(sent[0].attachments.length, 1);
     assert.equal(several.tables.lead_drops[0].status, 'sent');
 
@@ -355,7 +355,7 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     const single = memory(drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya')]), { unique: UNIQUE });
     const one = sender();
     assert.deepEqual(await deliverDailyAlert(single.client, SCOPE, { ...deps(one.send), now: TUESDAY }), { status: 'sent' });
-    assert.ok(String(one.sent[0].html).includes(`https://app.antonia.ai/search/contactos/${DROP}`));
+    assert.ok(String(one.sent[0].html).includes(`https://app.antonia.ai/dashboard/contactos/${DROP}`));
     const oneBusyData = drop([contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya')]);
     oneBusyData.contacted_leads.push(reply('r-new', '2026-10-19T22:00:00Z'));
     const oneBusy = sender();

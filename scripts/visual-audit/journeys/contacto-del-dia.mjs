@@ -18,7 +18,7 @@ async function answerSaved(page) {
 }
 
 const steps = [
-  { say: 'Abro mi contacto del día', do: async c => { await c.go(`/search/contactos/${DROP}`); await c.see('Por qué te lo recomendamos'); } },
+  { say: 'Abro mi contacto del día', do: async c => { await c.go(`/dashboard/contactos/${DROP}`); await c.see('Por qué te lo recomendamos'); } },
   { say: 'Leo por qué me lo recomiendan y cuánto cuesta ver su correo', do: async c => {
     c.check('dice que ver su correo usa 1 crédito', await c.has('Ver su correo y guardarlo usa 1 crédito'));
     c.check('no muestra el apellido con asteriscos', !(await c.has('***')));
@@ -109,7 +109,7 @@ const pick = async (c, name) => { await c.clickOn(rail(c, name)); await card(c, 
 /** Nothing is wider than the screen: the list slides inside its own row. */
 const fits = c => c.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
 const sixSteps = [
-  { say: 'Abro mis seis contactos del día', do: async c => { await answerSix(c.page); await c.go(`/search/contactos/${DROP}`); await c.see('6 contactos nuevos'); } },
+  { say: 'Abro mis seis contactos del día', do: async c => { await answerSix(c.page); await c.go(`/dashboard/contactos/${DROP}`); await c.see('6 contactos nuevos'); } },
   { say: 'Veo a los seis en una lista y leo por qué me recomiendan al primero', do: async c => {
     c.check('la lista trae a los seis', await railCount(c) === 6);
     c.check('la lista dice dónde va cada uno', await railCount(c, 'Por enriquecer') === 5 && await railCount(c, 'Campaña por aprobar') === 1);
@@ -184,7 +184,7 @@ async function answerCalls(page) {
   });
 }
 const callSteps = [
-  { say: 'Abro mis contactos del día', do: async c => { await answerCalls(c.page); await c.go(`/search/contactos/${DROP}`); await c.see('6 contactos nuevos'); } },
+  { say: 'Abro mis contactos del día', do: async c => { await answerCalls(c.page); await c.go(`/dashboard/contactos/${DROP}`); await c.see('6 contactos nuevos'); } },
   { say: 'Veo que al que aún no enriquezco puedo buscarle también el teléfono', do: async c => {
     c.check('el correo solo sigue siendo el botón', await card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 1);
     c.check('con su teléfono es la opción secundaria y dice cuánto cuesta', await card(c, 'Rodrigo S.').getByRole('button', { name: 'O con su teléfono · 8 créditos' }).count() === 1);
@@ -230,15 +230,34 @@ const mailToken = (dropId, days = 14) => {
   return Buffer.concat([body, createHmac('sha256', key).update(body).digest().subarray(0, 16)]).toString('base64url');
 };
 const TOKEN = mailToken(DROP);
-const inAppPath = `/search/contactos/${DROP}`;
+const inAppPath = `/dashboard/contactos/${DROP}`;
 const arrived = async c => { await c.page.waitForURL(url => url.pathname === inAppPath && !url.search); };
+// «Tus contactos de hoy» is a screen of «Hoy» (16 Nov 2026): the menu lists it under «Hoy» while the person has contacts, with how
+// many still wait, and the screen it opens shows the person's last ones. Answered here as GET /api/nav/pending and /api/lead-drops/latest do.
+async function answerMenu(page) {
+  await page.route('**/api/nav/pending', async route => {
+    const response = await route.fetch();
+    const body = await response.json().catch(() => ({}));
+    return route.fulfill(answered({ ...body, contacts: 5 }));
+  });
+  await page.route('**/api/lead-drops/latest', route => route.fulfill(answered({ drop: null, pull: null, latestId: DROP })));
+}
+const wide = c => (c.page.viewportSize()?.width ?? 0) >= 1100;
+const menuEntry = c => c.page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link', { name: /Tus contactos de hoy/ });
 const mailSteps = [
   { say: 'Con la sesión iniciada, toco el botón de un contacto en el correo de la mañana', do: async c => {
-    await answerSix(c.page); await c.go(`/contactos/${TOKEN}?c=${id(2)}`); await c.see('6 contactos nuevos');
+    await answerMenu(c.page); await answerSix(c.page); await c.go(`/contactos/${TOKEN}?c=${id(2)}`); await c.see('6 contactos nuevos');
     await arrived(c);
     c.check('quedo dentro de la app, en mis contactos', new URL(c.page.url()).pathname === inAppPath);
     c.check('el enlace no queda en la dirección', new URL(c.page.url()).search === '');
-    c.check('es la app de verdad: su menú con el resto de ANTON.IA', await c.page.getByRole('link', { name: 'Campañas' }).count() >= 1 || await c.page.getByRole('button', { name: /menú/i }).count() >= 1);
+    if (wide(c)) {
+      await menuEntry(c).waitFor();
+      c.check('el menú la muestra bajo «Hoy», como la pantalla en que estoy', await menuEntry(c).getAttribute('aria-current') === 'page');
+      c.check('con cuántos me quedan por revisar', /5 por revisar/.test(await menuEntry(c).textContent() || ''));
+      c.check('«Hoy» queda al lado, sin marcarse', await c.page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link', { name: 'Hoy', exact: true }).getAttribute('aria-current') === null);
+      c.check('es la app de verdad: Cowork y Campañas a un clic', await c.page.getByRole('link', { name: /^Cowork/ }).count() === 1 && await c.page.getByRole('link', { name: 'Campañas' }).count() === 1);
+    }
+    c.check('la vuelta es a «Hoy»', await c.page.getByRole('main').getByRole('link', { name: 'Hoy', exact: true }).getAttribute('href') === '/dashboard');
     c.check('el contacto del botón llega abierto, en su campaña', await card(c, 'Paula Reyes').getByText('Primer correo ·').count() === 1);
     c.check('la lista trae a los seis', await railCount(c) === 6);
     c.check('abrir no enriquece a nadie', await railCount(c, 'Por enriquecer') === 5);
@@ -248,6 +267,25 @@ const mailSteps = [
     await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }));
     await c.see('Campaña de Paula Reyes programada desde Gmail');
     c.check('la lista lo dice', await railCount(c, 'Campaña en curso') === 1);
+  } },
+];
+const menuSteps = [
+  { say: 'Estoy en «Hoy»: el menú trae «Tus contactos de hoy» debajo', do: async c => {
+    await answerMenu(c.page); await answerSix(c.page); await c.go('/dashboard'); await menuEntry(c).waitFor();
+    c.check('está bajo «Hoy», sin marcarse todavía', await menuEntry(c).getAttribute('aria-current') === null);
+    c.check('lleva a su pantalla dentro de «Hoy»', await menuEntry(c).getAttribute('href') === '/dashboard/contactos');
+  } },
+  { say: 'La abro desde el menú: mis últimos contactos, en la misma app', do: async c => {
+    await c.clickOn(menuEntry(c)); await c.see('6 contactos nuevos');
+    c.check('sigo dentro de la app, en la pantalla de «Hoy»', new URL(c.page.url()).pathname === '/dashboard/contactos');
+    c.check('el menú la marca', await menuEntry(c).getAttribute('aria-current') === 'page');
+    c.check('trae a los seis', await railCount(c) === 6);
+    c.check('nada se sale de la pantalla', await fits(c));
+  } },
+  { say: 'Desde ahí paso a Cowork con un clic', do: async c => {
+    await c.clickOn(c.page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link', { name: /^Cowork/ }));
+    await c.page.waitForURL(/\/cowork/);
+    c.check('quedo en Cowork', new URL(c.page.url()).pathname.startsWith('/cowork'));
   } },
 ];
 const mailBulkSteps = [
@@ -341,7 +379,7 @@ export default () => [
   { id: 'contacto-apollo-guardado', persona: 'owner', title: 'Después de «Enriquecer y guardar»',
     goal: 'Con su correo ya en «Por escribir», el siguiente paso es escribirle desde ANTON.IA.',
     steps: [
-      { say: 'Abro el contacto ya enriquecido', do: async c => { await answerSaved(c.page); await c.go(`/search/contactos/${DROP}`); await c.see('Carolina Vega'); } },
+      { say: 'Abro el contacto ya enriquecido', do: async c => { await answerSaved(c.page); await c.go(`/dashboard/contactos/${DROP}`); await c.see('Carolina Vega'); } },
       { say: 'El siguiente paso es investigarlo y escribirle', do: async c => {
         c.check('«Investigar y escribirle» lleva a «Por escribir»', await c.page.locator(`a[href="/saved/leads/enriched?investigar=${ENRICHED}&empezar=1"]`).count() > 0);
         c.check('ya no ofrece enriquecerlo de nuevo', !(await c.has('Enriquecer y guardar · 1 crédito')));
@@ -365,6 +403,8 @@ export default () => [
     steps: mailSteps },
   { id: 'contactos-del-correo-a-la-app-telefono', persona: 'owner', viewport: 'phone', title: 'Del correo a mis contactos, dentro de la app (móvil)',
     goal: 'Lo mismo desde el teléfono, donde se lee el correo.', steps: mailSteps },
+  { id: 'contactos-desde-el-menu', persona: 'owner', title: '«Tus contactos de hoy», una pantalla de «Hoy» en el menú',
+    goal: 'Ver mis contactos como parte de la app: bajo «Hoy» en el menú, y con Cowork y el resto a un clic.', steps: menuSteps },
   { id: 'contactos-del-correo-todos', persona: 'owner', title: 'Enriquecer a todos desde el correo, dentro de la app',
     goal: 'Tocar «Con sus teléfonos» en el correo de la mañana, confirmar en la app cuánto se usa y ver qué se encontró.', steps: mailBulkSteps },
   { id: 'contactos-del-correo-todos-telefono', persona: 'owner', viewport: 'phone', title: 'Enriquecer a todos desde el correo (móvil)',

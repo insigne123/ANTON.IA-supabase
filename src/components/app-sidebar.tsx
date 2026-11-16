@@ -16,6 +16,9 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   useSidebar,
 } from '@/components/ui/sidebar';
 import { BookOpen, ChevronRight, LogOut, PlayCircle } from 'lucide-react';
@@ -26,7 +29,7 @@ import { WorkspaceSwitcher } from '@/components/organization/WorkspaceSwitcher';
 import { useProductTour } from '@/components/onboarding/ProductTour';
 import type { NavAccess } from '@/hooks/use-nav-access';
 import type { NavPendingCounts } from '@/hooks/use-nav-pending';
-import { NAV_SECTIONS, isNavItemActive } from '@/lib/navigation';
+import { NAV_SECTIONS, isNavItemActive, isNavSubItemActive } from '@/lib/navigation';
 
 const itemClass = 'h-8 rounded-xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/80 transition-colors duration-200 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground';
 const activeItemClass = 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]';
@@ -97,7 +100,11 @@ export function AppSidebar({ access,adminUsage=false,pending=null }: { access: N
               {open && <SidebarGroupContent>
                 <SidebarMenu className="gap-0.5">
                   {section.items.map((item) => {
-                    const isActive = isNavItemActive(item, pathname);
+                    // Its screens inside (16 Nov 2026: «Tus contactos de hoy» under «Hoy»): listed while the person has something
+                    // there, and on those screens. Folded to a rail there is no room for them: «Hoy» is lit in their place.
+                    const inside = (item.sub || []).filter((child) => isNavSubItemActive(child, pathname) || pending?.[child.pending.key] != null);
+                    const insideActive = inside.some((child) => isNavSubItemActive(child, pathname));
+                    const isActive = isNavItemActive(item, pathname) || (rail && insideActive);
                     // What waits there (APP-23): a quiet number beside the name, a dot on the icon when the menu is a rail.
                     const waiting = item.pending ? pending?.[item.pending.key] ?? 0 : 0;
 
@@ -120,6 +127,25 @@ export function AppSidebar({ access,adminUsage=false,pending=null }: { access: N
                             <LinkPending />
                           </Link>
                         </SidebarMenuButton>
+                        {inside.length ? <SidebarMenuSub className="mx-0 ml-[1.35rem] mt-0.5 gap-0.5 border-sidebar-border/70 py-0 pl-2 pr-0">
+                          {inside.map((child) => {
+                            const childActive = isNavSubItemActive(child, pathname);
+                            const left = pending?.[child.pending.key] ?? 0;
+                            return <SidebarMenuSubItem key={child.href}>
+                              <SidebarMenuSubButton asChild isActive={childActive}
+                                className={cn('h-8 translate-x-0 rounded-xl px-2.5 text-[0.9rem] font-medium text-sidebar-foreground/80 transition-colors duration-200 hover:bg-sidebar-accent/75 [&>svg]:text-current', childActive && activeItemClass)}>
+                                <Link href={child.href} onClick={closeOnPhone} aria-current={childActive ? 'page' : undefined}>
+                                  <child.icon aria-hidden="true" />
+                                  <span>{child.label}</span>
+                                  {left > 0 ? <>
+                                    <span aria-hidden="true" className="ml-auto min-w-5 rounded-full bg-primary/10 px-1.5 text-center text-[11px] font-semibold leading-5 tabular-nums text-primary">{left > 99 ? '99+' : left}</span>
+                                    <span className="sr-only">: {left} {child.pending.label}</span>
+                                  </> : null}
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>;
+                          })}
+                        </SidebarMenuSub> : null}
                       </SidebarMenuItem>
                     );
                   })}

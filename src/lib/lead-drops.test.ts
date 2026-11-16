@@ -168,7 +168,7 @@ test('the email table escapes what came from outside and links to the drop', () 
   assert.match(bare.html, />Ver y guardar</);
   // Several: a card each with its own way in (below), and one link to all of them. Their email came with the search, so each is to save.
   const two = dropEmailSection([item, { ...item, leadId: 'lf_2' }], 'drop-1', 'https://app.antonia.ai/');
-  assert.match(two.html, /href="https:\/\/app\.antonia\.ai\/search\/contactos\/drop-1\?c=lf_2"[^>]*>Ver y guardar<\/a>/);
+  assert.match(two.html, /href="https:\/\/app\.antonia\.ai\/dashboard\/contactos\/drop-1\?c=lf_2"[^>]*>Ver y guardar<\/a>/);
   assert.match(two.html, />Ver los 2 juntos</);
   assert.match(two.text, /^2 contactos nuevos para ti:/);
   assert.match(two.text, /Guardarlos no gasta créditos\.$/);
@@ -305,16 +305,16 @@ test('the email of several contacts: a card each with who it is, what is happeni
     base('3', 'Ana Rojas', 'Forestal Sur', { savedLeadId: 'e-3', campaign: { id: 'c-1', provider: 'google' as const, approvedAt: '2026-11-12T12:00:00Z' }, draft: null, followUps: [] }),
   ];
   const section = dropEmailSection(items as any, 'drop-1', 'https://app.test/', { now: new Date('2026-11-12T12:00:00.000Z') });
-  assert.equal(section.link, 'https://app.test/search/contactos/drop-1');
-  assert.equal(dropContactHref(section.link, items[0] as any), 'https://app.test/search/contactos/drop-1?c=lf_000000000000000000000001&enriquecer=1');
+  assert.equal(section.link, 'https://app.test/dashboard/contactos/drop-1');
+  assert.equal(dropContactHref(section.link, items[0] as any), 'https://app.test/dashboard/contactos/drop-1?c=lf_000000000000000000000001&enriquecer=1');
   // The text version, as a phone's preview reads it.
   assert.match(section.text, /^3 contactos nuevos para ti, cada uno con su campaña lista:\n\nPedro A\., Gerente HSE en Minera Andina\nPor qué: Una planta nueva suma áreas que proteger\.\nAhora: Anunció una planta concentradora nueva \(Diario Financiero, 3 nov 2026\)\.\nCómo abrir: Pregúntale por la planta nueva\.\nPrimer correo: «Brigadas en <faena>»\. Hola Pedro, ¿Cómo cubren/,
     'the preview reads as the contact would get it: their first name, not «{{nombre}}»');
-  assert.match(section.text, /2 seguimientos si no responde: lun 16 nov y vie 20 nov\.\nEnriquecer y revisar · 1 crédito: https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000001&enriquecer=1/);
-  assert.match(section.text, /Luisa Soto, Gerente HSE en Puerto Sur \(para explorar\)\nPor qué: Su cargo decide la contratación de brigadas\.\nPrimer correo:[\s\S]*Revisar y aprobar: https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000002\n/,
+  assert.match(section.text, /2 seguimientos si no responde: lun 16 nov y vie 20 nov\.\nEnriquecer y revisar · 1 crédito: https:\/\/app\.test\/dashboard\/contactos\/drop-1\?c=lf_000000000000000000000001&enriquecer=1/);
+  assert.match(section.text, /Luisa Soto, Gerente HSE en Puerto Sur \(para explorar\)\nPor qué: Su cargo decide la contratación de brigadas\.\nPrimer correo:[\s\S]*Revisar y aprobar: https:\/\/app\.test\/dashboard\/contactos\/drop-1\?c=lf_000000000000000000000002\n/,
     'with its email already: no lookup asked, and the step is to approve');
   assert.match(section.text, /Ana Rojas, Gerente HSE en Forestal Sur\nPor qué: Calza con tu cliente ideal por su cargo\.\nVer su campaña: /);
-  assert.match(section.text, /Verlos todos: https:\/\/app\.test\/search\/contactos\/drop-1\nEnriquecer busca su correo y usa 1 crédito por contacto\. Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde\. Los correos completos van en el PDF adjunto\.$/);
+  assert.match(section.text, /Verlos todos: https:\/\/app\.test\/dashboard\/contactos\/drop-1\nEnriquecer busca su correo y usa 1 crédito por contacto\. Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde\. Los correos completos van en el PDF adjunto\.$/);
   // The preview is cut at a word, and what came from outside is escaped.
   const preview = section.text.match(/Primer correo: «[^»]*»\. ([^\n]*)/)![1];
   assert.ok(preview.length <= 151 && preview.endsWith('…'));
@@ -327,7 +327,7 @@ test('the email of several contacts: a card each with who it is, what is happeni
   assert.match(section.html, />Ahora<\/p><p[^>]*>Anunció una planta concentradora nueva\.<\/p><p[^>]*>Diario Financiero · 3 nov 2026<\/p>/);
   assert.match(section.html, />Una planta nueva suma áreas que proteger\.<\/p>/);
   assert.doesNotMatch(section.html, /Cómo abrir|Pregúntale por la planta nueva|¿Cómo cubren los turnos de noche/);
-  assert.match(section.html, /href="https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000001&amp;enriquecer=1"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
+  assert.match(section.html, /href="https:\/\/app\.test\/dashboard\/contactos\/drop-1\?c=lf_000000000000000000000001&amp;enriquecer=1"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
   assert.match(section.html, /· para explorar/);
   assert.match(section.html, /Ver los 3 juntos/);
   // Inside another alert the heading is the alert's.
@@ -338,7 +338,7 @@ test('the email of several contacts: a card each with who it is, what is happeni
   assert.equal(open.link, 'https://app.test/contactos/TOKEN');
   assert.match(open.html, /href="https:\/\/app\.test\/contactos\/TOKEN\?c=lf_000000000000000000000001"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
   assert.match(open.text, /Verlos todos: https:\/\/app\.test\/contactos\/TOKEN\n/);
-  assert.ok(!open.html.includes('enriquecer=1') && !open.text.includes('enriquecer=1') && !open.html.includes('/search/contactos/') && !open.text.includes('/search/contactos/'));
+  assert.ok(!open.html.includes('enriquecer=1') && !open.text.includes('enriquecer=1') && !open.html.includes('/dashboard/contactos/') && !open.text.includes('/dashboard/contactos/'));
   assert.equal(dropContactHref('https://app.test/contactos/TOKEN', items[0] as any, true), 'https://app.test/contactos/TOKEN?c=lf_000000000000000000000001');
 });
 
