@@ -493,6 +493,46 @@ servidor (RLS activa, sin políticas).
 Pruebas: `lead-drop-accounts.test.ts`, y en `lead-drops-apollo.test.ts` «by company…» (dos días seguidos: la que se agota
 descansa, y sin nadie que decida quedan quienes pueden derivar) y «when the customer's industries run out…».
 
+### Desde el 16 de noviembre: una redactora propia para los correos de recomendados
+
+El dueño, leyendo los de su cuenta de prueba: «no se notan muy buenos… la idea es que los usuarios no tengan que modificar tanto
+los mails». Los escribía la Redactora de Cowork (`cowork/writer.ts`), cuyas reglas se afinaron para un correo que va a muchas
+personas de un rubro y con los ejemplos de un solo producto. Con una persona investigada al frente producía una plantilla. En los
+24 correos reales de ese día (seis contactos, cuatro correos cada uno):
+
+| | Antes | Ahora |
+|---|---|---|
+| Abren con una hipótesis o una lección («cuando ocurre X, tu Y define Z») | 23 | 0 |
+| Le preguntan «¿quién coordina…?» a quien justamente lo coordina | 11 | 0 |
+| Le piden un dato de su operación («¿cuánto les toma…?») | 5 | 0 |
+| Asuntos repetidos entre contactos | 4 | 1 |
+
+Además: la misma prueba en todos («más de 15 años»), aunque el perfil tenía otras mejores; ningún seguimiento sabía del
+anterior; la empresa del vendedor escrita de dos maneras y la firma irregular; y un ejemplo de las reglas se coló en otro rubro
+(«si la nómina coincide con un cambio de turno», a una minera).
+
+`src/lib/server/lead-drop-writer.ts` escribe ahora esos cuatro correos:
+
+- **Parte de la persona.** El primero dice por qué se le escribe a ella: une algo cierto de su empresa (la novedad que encontró
+  la investigación) o de su cargo con el servicio que le toca. No le describe su empresa ni le explica su trabajo.
+- **Un servicio concreto y una prueba del perfil**, cada prueba una sola vez en la secuencia y distinta para cada contacto del
+  día (`variant`). Lee también los clientes que el perfil permite nombrar y los problemas que dice resolver, que el contexto de
+  Cowork no trae (`dropSellerOf`), y «En tus palabras».
+- **Una petición que se contesta en una línea.** Primero una pregunta de interés; después un resumen de una página, una llamada
+  de 15 minutos y, al cierre, si es otra persona quien lo ve. A quien «puede derivarte» solo se le pide eso.
+- **Sus propias revisiones** (`dropEmailIssues`): hipótesis al abrir, preguntas de dato o de «quién», cifras que no vienen en
+  los datos, trato de usted, largo, asuntos. Con observaciones corrige una vez y se queda con la versión que tenga menos.
+- **Cierre igual en todos** (`finishDropEmails`): la empresa como la escribe el perfil y «Saludos,» con el nombre de quien firma.
+- Las reglas no nombran ningún rubro ni producto, para que nada se cuele (lo vigila una prueba).
+
+Modelo: `claude-haiku-5-5` (`LEAD_DROPS_WRITER_MODEL` lo cambia), que en la medición escribió más natural que Luna al mismo
+precio. Una secuencia toma de 15 a 40 segundos y una o dos llamadas, menos que antes (redactora, revisora, corrección y pasada
+de voz). Si el modelo falla, el contacto recibe sus correos de la Redactora de Cowork, como antes; `LEAD_DROPS_WRITER=off`
+vuelve a ella del todo. Los modelos más caros siguen bloqueados en toda la app (`src/ai/blocked-models.ts`).
+
+Pruebas: `lead-drop-writer.test.ts` y, en `lead-drops-apollo.test.ts`, «the emails of a recommended contact come from the drops'
+own writer…» (con su respaldo).
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
