@@ -108,3 +108,9 @@ export function dropCallText(script: DropCallScript, name: string) {
     '', 'WhatsApp', script.whatsapp,
   ].join('\n');
 }
+
+/** «Rotación en temporada alta: cada salida…» → its theme and what is said of it, so a list of points can be scanned by theme. */
+export function splitTopic(line: string): { topic: string | null; rest: string } {
+  const match = /^([^:.¿?]{3,70}):\s+([\s\S]+)$/.exec(line.trim());
+  return match ? { topic: match[1].trim(), rest: match[2].trim() } : { topic: null, rest: line.trim() };
+}

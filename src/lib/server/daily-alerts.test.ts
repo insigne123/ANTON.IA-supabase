@@ -319,7 +319,7 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     // (15 Nov 2026): all of them looked up at once, with their mobiles or without, or the same contacts in «Hoy».
     assert.equal(sent.length, 1);
     assert.equal(sent[0].subject, '2 contactos nuevos para ti');
-    assert.match(sent[0].text, /^Hola, Ana\. Tus contactos del día ya están listos\.\n\n\nSigue desde este correo o desde la app\./);
+    assert.match(sent[0].text, /^Hola, Ana\. Tus contactos del día ya están listos\.\n\n\nEnriquécelos de una vez\. Te respondemos en esta misma conversación/);
     const token = links[0][1];
     assert.ok(sent[0].text.includes(`Enriquecer los 2 · 2 créditos: https://app.antonia.ai/contactos/${token}?todos=correo\nCon sus teléfonos · 16 créditos: https://app.antonia.ai/contactos/${token}?todos=telefono\nAbrir en ANTON.IA: https://app.antonia.ai/dashboard?contactos=${token}\n\nPedro Araya, Gerente HSE en Minera Andina`));
     assert.match(sent[0].html, new RegExp(`<td bgcolor="#2563eb"[^>]*><a href="https://app\\.antonia\\.ai/contactos/${token}\\?todos=correo"[^>]*>Enriquecer los 2 · 2 créditos</a>`));

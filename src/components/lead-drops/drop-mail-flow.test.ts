@@ -44,10 +44,15 @@ const shared: Record<string, unknown> = {
   '@/lib/leads-workspace/enrichment-provider': provider,
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
 };
+// The page's own pieces are the real ones: the app's tabs, the avatar and the stage chip, the list of contacts and their card.
+shared['@/hooks/use-scroll-edge-fade'] = { useScrollEdgeFade: () => [() => {}, undefined] };
+shared['@/components/ui/segmented-tabs'] = await compile('../ui/segmented-tabs.tsx', shared);
+shared['./drop-contact-parts'] = await compile('./drop-contact-parts.tsx', shared);
 const callPanel = await compile('./DropCallPanel.tsx', shared);
 const card = await compile('./DropContactCard.tsx', { ...shared, './DropCallPanel': callPanel });
 const bulkPanel = await compile('./DropBulkEnrich.tsx', shared);
-const flow = await compile('./DropMailFlow.tsx', { ...shared, './DropContactCard': card, './DropBulkEnrich': bulkPanel });
+const workspace = await compile('./DropContactsWorkspace.tsx', shared);
+const flow = await compile('./DropMailFlow.tsx', { ...shared, './DropContactCard': card, './DropBulkEnrich': bulkPanel, './DropContactsWorkspace': workspace });
 
 const LEAD = '6accdbfcd5f5d80001cf6901', OTHER = '6accdbfcd5f5d80001cf6902';
 const contact = (leadId: string, name: string, extra: Record<string, unknown> = {}) => ({ leadId, name, title: 'Gerente HSE', company: 'Minera Andina', domain: null, industry: 'Minería', size: null, city: null,
@@ -57,6 +62,8 @@ const viewOf = (items: unknown[], extra: Record<string, unknown> = {}) => ({ dat
 const text = () => (dom.window.document.body.textContent || '').replace(/\s+/g, ' ');
 const button = (label: string | RegExp) => [...dom.window.document.querySelectorAll('button')].find(entry => typeof label === 'string' ? entry.textContent === label : label.test(entry.textContent || ''));
 const press = async (target: Element) => { await act(async () => { target.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); }); };
+/** The list of contacts at the side of the page: who they are and where each stands. */
+const rail = () => [...dom.window.document.querySelectorAll('nav[aria-label="Tus contactos"] button')];
 const settle = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
 /** The server, answered by hand: what each button asked, in order. */
 const server = (answer: (body: any) => { status?: number; body: any }) => {
@@ -80,13 +87,24 @@ test('opened from the email: the contacts with their steps, nothing leading into
   const root = await mount(viewOf([contact(LEAD, 'Pedro Araya'), contact(OTHER, 'Luisa Soto')]), { focus: OTHER });
   try {
     const document = dom.window.document;
-    assert.match(text(), /ANTON\.IA\s*Tus contactos de hoy\s*Elegidos para ti el viernes, 13 de noviembre\. 2 por enriquecer\./);
-    assert.equal(document.querySelectorAll('article').length, 2);
-    assert.equal([...document.querySelectorAll('button')].filter(entry => entry.textContent === 'Enriquecer · 1 crédito').length, 2);
+    // Where the day stands, in three numbers (16 Nov 2026, the redesign: they replace a sentence that had to be read).
+    assert.match(text(), /ANTON\.IA\s*Tus contactos de hoy\s*Elegidos para ti el viernes, 13 de noviembre\.\s*Por enriquecer\s*2\s*Por aprobar\s*0\s*En marcha\s*0/);
+    // The contacts are a list at the side, each with where it stands, and one card to read and act on at a time.
+    assert.deepEqual(rail().map(entry => [entry.textContent, entry.getAttribute('aria-current')]),
+      [['PAPor enriquecerPedro ArayaGerente HSE · Minera AndinaPor enriquecer', null], ['LSPor enriquecerLuisa SotoGerente HSE · Minera AndinaPor enriquecer', 'true']]);
+    assert.equal(document.querySelectorAll('article').length, 1);
+    assert.equal([...document.querySelectorAll('button')].filter(entry => entry.textContent === 'Enriquecer · 1 crédito').length, 1);
     assert.match(text(), /Busca su correo de trabajo para poder escribirle\./);
-    // The contact the email linked to has its campaign in view; the address keeps the link and nothing else.
+    // The contact the email linked to is the one open, with its campaign in view; the address keeps the link and nothing else.
     assert.ok(document.getElementById(`contacto-${OTHER}`)!.textContent!.includes('Hola Luisa,'));
+    assert.equal(document.getElementById(`contacto-${LEAD}`), null);
+    // Another one is a tap on the list away, and opens on why it is recommended.
+    await press(rail()[0]);
+    assert.deepEqual(rail().map(entry => entry.getAttribute('aria-current')), ['true', null]);
+    assert.match(document.getElementById(`contacto-${LEAD}`)!.textContent || '', /^PAPedro ArayaPor enriquecer[\s\S]*Por qué te lo recomendamos/);
     assert.ok(!document.getElementById(`contacto-${LEAD}`)!.textContent!.includes('Hola Pedro,'));
+    assert.equal(document.getElementById(`contacto-${OTHER}`), null);
+    assert.match(text(), /Anterior\s*1 de 2\s*Siguiente/, 'on a phone the list is a row of faces, with the way to the next one under the card');
     assert.equal(dom.window.location.pathname + dom.window.location.search, `/contactos/${TOKEN}`);
     assert.deepEqual([...document.querySelectorAll('a')].map(link => link.getAttribute('href')), [], 'no way into the app is offered: there is nothing to sign in to');
     assert.equal(asked.length, 0, 'opening the page asks the server for nothing');
@@ -103,7 +121,8 @@ test('whoever prefers the app gets one quiet line to the same contacts in «Hoy�
     assert.deepEqual(links.map(link => [link.getAttribute('href'), link.textContent]), [[href, 'Ábrelos en «Hoy»']]);
     assert.match(text(), /¿Prefieres trabajarlos dentro de ANTON\.IA\? Ábrelos en «Hoy»: te pedirá iniciar sesión\./);
     // Everything still works here, without it.
-    assert.equal([...dom.window.document.querySelectorAll('button')].filter(entry => entry.textContent === 'Enriquecer · 1 crédito').length, 2);
+    assert.equal([...dom.window.document.querySelectorAll('button')].filter(entry => entry.textContent === 'Enriquecer · 1 crédito').length, 1);
+    assert.equal(rail().length, 2);
   } finally { await act(async () => root.unmount()); }
 });
 
@@ -132,13 +151,14 @@ test('«Enriquecer» is one tap: found, it says so with the address and the next
   const root = await mount(viewOf([contact(LEAD, 'Pedro Ar***a'), contact(OTHER, 'Luisa Soto')]));
   try {
     const document = dom.window.document;
-    assert.match(document.getElementById(`contacto-${LEAD}`)!.textContent || '', /^Pedro A\./);
+    assert.match(document.getElementById(`contacto-${LEAD}`)!.textContent || '', /^PAPedro A\.Por enriquecer/);
     await press(document.querySelector('article button')!);
     await settle();
     assert.deepEqual(asked, [{ url: '/api/lead-drops/link', method: 'POST', token: TOKEN, action: 'enrich', leadId: LEAD }]);
     assert.match(document.querySelector('[role="status"]')!.textContent || '', /^Listo: encontramos el correo de Pedro Araya\. Revisa su campaña y apruébala\. Se descontó 1 crédito de ANTON\.IA\.$/);
     assert.match(document.getElementById(`contacto-${LEAD}`)!.textContent || '', /pedro\.araya@mineraandina\.cl/);
-    assert.match(text(), /1 por enriquecer · 1 campaña lista para aprobar\./);
+    assert.match(text(), /Por enriquecer\s*1\s*Por aprobar\s*1\s*En marcha\s*0/);
+    assert.match(rail()[0].textContent || '', /Pedro Araya.*Campaña por aprobar$/, 'the list says where each contact stands');
     // No mailbox yet: the step is to connect one, and each button goes to its consent with the link that names the person.
     assert.equal(button('Aprobar y programar'), undefined);
     assert.deepEqual([...document.querySelectorAll('a')].map(link => [link.textContent, link.getAttribute('href')]), [

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -293,7 +293,7 @@ test('a contact\'s emails as a campaign sends them: the first at once, each foll
   assert.deepEqual(['2026-11-12', '2026-11-14', '2026-12-01'].map(shortDay), ['jue 12 nov', 'sáb 14 nov', 'mar 1 dic']);
 });
 
-test('the email of several contacts: a card each with why, what is happening, how to open and its campaign, and its own way in', () => {
+test('the email of several contacts: a card each with who it is, what is happening, why and its campaign in a line, and its own way in', () => {
   const base = (id: string, name: string, company: string, extra: Record<string, unknown> = {}) => ({ ...candidate(id, company), name, title: 'Gerente HSE', why: 'Calza con tu cliente ideal por su cargo.',
     research: [], provider: 'apollo' as const, draft: { subject: 'Brigadas en <faena>', body: `Hola {{nombre}},\n\n${'¿Cómo cubren los turnos de noche? '.repeat(12)}` },
     followUps: [{ day: 3, subject: 'Uno', body: 'A' }, { day: 7, subject: 'Dos', body: 'B' }], ...extra });
@@ -320,12 +320,19 @@ test('the email of several contacts: a card each with why, what is happening, ho
   assert.ok(preview.length <= 151 && preview.endsWith('…'));
   assert.match(section.html, /Brigadas en &lt;faena&gt;/);
   assert.doesNotMatch(section.html, /<faena>/);
-  assert.equal((section.html.match(/Campaña lista<\/p>/g) || []).length, 2, 'the one without emails has no campaign block');
+  assert.equal((section.html.match(/Campaña lista<\/strong> · «Brigadas en &lt;faena&gt;» · primer correo y 2 seguimientos<\/p>/g) || []).length, 2, 'the one without emails has no campaign line');
+  // The card is scanned, not read (16 Nov 2026): the initials of each on a tint, the news apart with its source, one line of why.
+  // How to open and the email itself stay in the text version, on the page and in the PDF.
+  assert.deepEqual([...section.html.matchAll(/line-height:40px;text-align:center">([^<]+)<\/td>/g)].map(match => match[1]), ['PA', 'LS', 'AR']);
+  assert.match(section.html, />Ahora<\/p><p[^>]*>Anunció una planta concentradora nueva\.<\/p><p[^>]*>Diario Financiero · 3 nov 2026<\/p>/);
+  assert.match(section.html, />Una planta nueva suma áreas que proteger\.<\/p>/);
+  assert.doesNotMatch(section.html, /Cómo abrir|Pregúntale por la planta nueva|¿Cómo cubren los turnos de noche/);
   assert.match(section.html, /href="https:\/\/app\.test\/search\/contactos\/drop-1\?c=lf_000000000000000000000001&amp;enriquecer=1"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
   assert.match(section.html, /· para explorar/);
   assert.match(section.html, /Ver los 3 juntos/);
   // Inside another alert the heading is the alert's.
-  assert.doesNotMatch(dropEmailSection(items as any, 'drop-1', 'https://app.test', { heading: false }).html, /<h2/);
+  assert.match(section.html, />Contacto del día<\/p><p[^>]*>3 contactos nuevos para ti, cada uno con su campaña lista<\/p>/);
+  assert.doesNotMatch(dropEmailSection(items as any, 'drop-1', 'https://app.test', { heading: false }).html, /Contacto del día|3 contactos nuevos para ti/);
   // Used from the inbox (server/lead-drop-link.ts): every button opens the drop's own page, and arriving there looks nothing up.
   const open = dropEmailSection(items as any, 'drop-1', 'https://app.test/', { now: new Date('2026-11-12T12:00:00.000Z'), link: 'https://app.test/contactos/TOKEN' });
   assert.equal(open.link, 'https://app.test/contactos/TOKEN');
@@ -351,7 +358,8 @@ test('from the inbox the person chooses how to go on: all of them looked up at o
   assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="${link.replace(/\./g, '\\.')}\\?todos=telefono"[^>]*>Con sus teléfonos · 24 créditos</a>`));
   assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="https://app\\.test/dashboard\\?contactos=${token}"[^>]*>Abrir en ANTON\\.IA</a>`));
   assert.equal((all.html.match(/<td bgcolor="#ffffff"[^>]*><a href="[^"]+\?c=lf_[0-9]+"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/g) || []).length, 3);
-  assert.match(all.text, /Sigue desde este correo o desde la app\. Si los enriqueces de una vez, te respondemos en esta misma conversación/);
+  assert.match(all.text, /Enriquécelos de una vez\. Te respondemos en esta misma conversación con el correo de cada uno y su campaña lista para aprobar\. Con teléfonos, también el guion de cada llamada\./);
+  assert.match(all.html, /font-weight:600;color:#111827">Enriquécelos de una vez<\/p>/);
   assert.match(all.text, /con su teléfono, 8 por ambos\. Nada se cobra al abrir: confirmas en la página\./);
   // Some already looked up: the button counts the ones that are left. With one left, its own button is the main one.
   const some = dropEmailSection([{ ...three[0], savedLeadId: 'e-1' }, three[1], three[2]] as any, 'drop-1', 'https://app.test', { link });
@@ -361,10 +369,10 @@ test('from the inbox the person chooses how to go on: all of them looked up at o
   assert.doesNotMatch(last.html, /todos=/);
   assert.match(last.html, /<td bgcolor="#2563eb"[^>]*><a href="[^"]+\?c=lf_000000000000000000000003"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
   assert.match(last.html, />Abrir en ANTON\.IA</);
-  assert.match(last.text, /Sigue desde este correo, con el botón de cada contacto, o desde la app\./);
+  assert.match(last.text, /Sigue como prefieras\. Desde este correo, con el botón de cada contacto, o desde la app\./);
   // Without a page that needs no session, the email is as before: every button opens the app.
   const inApp = dropEmailSection(three as any, 'drop-1', 'https://app.test');
-  assert.doesNotMatch(inApp.html, /todos=|Abrir en ANTON\.IA|Sigue desde este correo/);
+  assert.doesNotMatch(inApp.html, /todos=|Abrir en ANTON\.IA|Enriquécelos de una vez|Sigue como prefieras/);
   assert.equal((inApp.html.match(/<td bgcolor="#2563eb"/g) || []).length, 3);
 });
 
@@ -386,4 +394,14 @@ test('a line for whoever sells says what is known, never what the search did not
     'Entrega evidencia digital de cada inspección a sus clientes.']) assert.equal(withoutSourceTalk(line), line);
   assert.equal(withoutSourceTalk(''), null);
   assert.equal(withoutSourceTalk(null), null);
+});
+
+test('a contact is recognised by its initials and by a tint of its own, the same in the app and in its emails', () => {
+  assert.equal(dropInitials({ name: 'Pedro Araya Soto' }), 'PA');
+  assert.equal(dropInitials({ name: 'Claudio Sa***s' }), 'CS', 'a surname the search hid still gives its letter');
+  assert.equal(dropInitials({ name: 'ángela' }), 'Á');
+  assert.equal(dropInitials({ name: '  ' }), '·');
+  const tints = ['6accdbfcd5f5d80001cf6901', '6accdbfcd5f5d80001cf6902', 'lf_1', ''].map(id => dropTint(id, 6));
+  assert.ok(tints.every(tint => Number.isInteger(tint) && tint >= 0 && tint < 6));
+  assert.equal(dropTint('6accdbfcd5f5d80001cf6901', 6), dropTint('6accdbfcd5f5d80001cf6901', 6));
 });

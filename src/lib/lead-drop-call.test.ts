@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS, dropCallPrompt, dropCallScriptSchema, dropCallText, dropPhoneOf } from './lead-drop-call';
+import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS, dropCallPrompt, dropCallScriptSchema, dropCallText, dropPhoneOf, splitTopic } from './lead-drop-call';
 
 const NOW = Date.parse('2026-11-15T15:00:00.000Z');
 
@@ -52,4 +52,12 @@ test('the script of a call: what the model is asked carries the seller, the cont
   const text = dropCallText(SCRIPT, 'Marta R.');
   assert.match(text, /^Guion de llamada · Marta R\.\n\nPuntos de interés\n- Rotación[\s\S]*\nAl contestar\n[\s\S]*\nPreguntas\n- [\s\S]*\nSi te dice…\n- «Mándame un correo»: [\s\S]*\nSi no contesta\n[\s\S]*\nWhatsApp\n/);
   assert.doesNotMatch(dropCallText({ ...SCRIPT, objections: [] }, 'Marta R.'), /Si te dice/);
+});
+
+test('a point of interest is read by its theme: what comes before the colon, apart from what is said of it', () => {
+  assert.deepEqual(splitTopic('Turnos de noche: quién responde ante una emergencia.'), { topic: 'Turnos de noche', rest: 'quién responde ante una emergencia.' });
+  // No theme to set apart: a sentence, a question, or a colon too far in to be a title.
+  assert.deepEqual(splitTopic('  Cada salida obliga a repetir la selección. '), { topic: null, rest: 'Cada salida obliga a repetir la selección.' });
+  assert.deepEqual(splitTopic('¿Quién decide?: el gerente.'), { topic: null, rest: '¿Quién decide?: el gerente.' });
+  assert.equal(splitTopic(`${'Un tema demasiado largo para ser un título '.repeat(2)}: resto`).topic, null);
 });

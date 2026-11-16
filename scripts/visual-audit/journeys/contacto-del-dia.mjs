@@ -25,8 +25,8 @@ const steps = [
     c.check('la acción principal es «Enriquecer y guardar · 1 crédito»', await c.has('Enriquecer y guardar · 1 crédito'));
     c.check('ofrece buscar también su teléfono, con lo que cuesta', await c.has('O con su teléfono · 8 créditos'));
   } },
-  { say: 'Abro «Para llamar» y le preparo el guion', do: async c => {
-    await c.click({ name: /^Para llamar/ });
+  { say: 'Abro «Llamada» y le preparo el guion', do: async c => {
+    await c.click({ name: /^Llamada/ });
     await c.see('Preparar guion de llamada');
     c.check('dice que el guion no usa créditos', await c.has('No usa créditos.'));
   } },
@@ -93,38 +93,59 @@ async function answerSix(page) {
   });
 }
 const card = (c, name) => c.page.locator('article').filter({ hasText: name });
+// Since 16 Nov 2026 several contacts are a list at the side («Tus contactos») with one card open at a time, and a card's sections
+// (why, its campaign, its call) are tabs: a contact is picked from the list, and a section by its tab.
+const rail = (c, name) => c.page.getByRole('navigation', { name: 'Tus contactos' }).getByRole('button', { name: new RegExp(name) });
+const railCount = (c, text) => c.page.getByRole('navigation', { name: 'Tus contactos' }).getByRole('button', text ? { name: new RegExp(text) } : undefined).count();
+const tabOf = (c, name) => c.page.getByRole('tab', { name: new RegExp(`^${name}`) });
+const pick = async (c, name) => { await c.clickOn(rail(c, name)); await card(c, name).waitFor(); };
+/** Nothing is wider than the screen: the list slides inside its own row. */
+const fits = c => c.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
 const sixSteps = [
   { say: 'Abro mis seis contactos del día', do: async c => { await answerSix(c.page); await c.go(`/search/contactos/${DROP}`); await c.see('6 contactos nuevos'); } },
-  { say: 'Leo por qué me recomiendan al primero y qué le está pasando a su empresa', do: async c => {
-    c.check('hay una tarjeta por contacto', await c.page.locator('article').count() === 6);
+  { say: 'Veo a los seis en una lista y leo por qué me recomiendan al primero', do: async c => {
+    c.check('la lista trae a los seis', await railCount(c) === 6);
+    c.check('la lista dice dónde va cada uno', await railCount(c, 'Por enriquecer') === 5 && await railCount(c, 'Campaña por aprobar') === 1);
+    c.check('se trabaja un contacto a la vez', await c.page.locator('article').count() === 1);
+    c.check('nada se sale de la pantalla', await fits(c));
+    c.check('dice cómo abrir', await c.has('Pregúntale cómo van a cubrir la respuesta ante emergencias en la planta nueva.'));
     c.check('dice por qué le sirve lo que vendo', await c.has('Una planta nueva suma áreas y turnos que hoy no tienen brigada.'));
     c.check('la novedad trae su medio y su fecha', await c.has('Diario del Norte, 3 nov 2026'));
-    c.check('dice cómo abrir', await c.has('Pregúntale cómo van a cubrir la respuesta ante emergencias en la planta nueva.'));
-    c.check('los cargos vecinos se dicen como exploración', await c.page.getByText('Para explorar').count() === 2);
+    c.check('cómo calza con mi cliente ideal está a la vista', await card(c, 'Rodrigo S.').getByText('Cómo calza con tu cliente ideal').count() === 1);
     c.check('sin su correo, el paso es enriquecer', await card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 1);
   } },
-  { say: 'Abro la campaña del segundo: el primer correo y cuándo saldría cada seguimiento', do: async c => {
-    await card(c, 'Paula Reyes').getByRole('button', { name: /Campaña lista/ }).click();
-    await c.see('Seguimiento 3 ·');
-    c.check('cada seguimiento dice que va solo si no responde', await card(c, 'Paula Reyes').getByText('si no responde').count() === 3);
+  { say: 'Elijo a la segunda y abro su campaña: los pasos con su día, y un correo a la vez', do: async c => {
+    await pick(c, 'Paula Reyes');
+    await c.clickOn(tabOf(c, 'Campaña'));
+    await c.see('Seguimiento 3');
+    const sequence = card(c, 'Paula Reyes').getByRole('list', { name: 'Correos de la campaña' });
+    c.check('la campaña tiene sus cuatro correos', await sequence.getByRole('button').count() === 4);
+    c.check('cada seguimiento dice que va solo si no responde', await sequence.getByText(/si no responde/).count() === 3);
+    c.check('parte por el primer correo', await card(c, 'Paula Reyes').getByText('Respuesta ante emergencias en Cobres del Loa').count() === 1);
+    await c.clickOn(sequence.getByRole('button', { name: /Seguimiento 1/ }));
+    c.check('al elegir un seguimiento se lee ese correo', await card(c, 'Paula Reyes').getByText('¿Quién ve hoy los planes de emergencia de las faenas nuevas?').count() === 1);
+    await c.clickOn(sequence.getByRole('button', { name: /Primer correo/ }));
   } },
   { say: 'Cambio el asunto del primer correo y lo guardo', do: async c => {
-    await card(c, 'Paula Reyes').getByRole('button', { name: 'Editar los correos' }).click();
+    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Editar los correos' }));
     await card(c, 'Paula Reyes').getByLabel('Asunto').first().fill('Brigadas para los turnos de noche');
-    await card(c, 'Paula Reyes').getByRole('button', { name: 'Guardar cambios' }).click();
+    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Guardar cambios' }));
     await c.see('Guardamos tus cambios en los correos de Paula Reyes.');
     c.check('el correo muestra mi asunto', await card(c, 'Paula Reyes').getByText('Brigadas para los turnos de noche').count() === 1);
   } },
   { say: 'Apruebo y programo su campaña', do: async c => {
-    await card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }).click();
+    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }));
     await c.see('Campaña de Paula Reyes programada desde Gmail');
     c.check('dice cuándo salen los seguimientos', await c.has('los seguimientos el lun 16 nov, el vie 20 nov y el mar 24 nov'));
     c.check('la tarjeta queda con su campaña en curso', await card(c, 'Paula Reyes').getByText('Campaña en curso').count() === 1);
+    c.check('la lista también lo dice', await railCount(c, 'Campaña en curso') === 1);
     c.check('lleva a «Campañas»', await card(c, 'Paula Reyes').getByRole('link', { name: 'Ver la campaña' }).count() === 1);
   } },
   { say: 'Digo que uno no me sirve, y por qué', do: async c => {
-    await card(c, 'Ignacio M.').getByRole('button', { name: 'No me sirve' }).click();
-    await card(c, 'Ignacio M.').getByRole('button', { name: 'El cargo no decide' }).click();
+    await pick(c, 'Ignacio M.');
+    c.check('un cargo vecino se dice como exploración', await card(c, 'Ignacio M.').getByText('Para explorar').count() === 1);
+    await c.clickOn(card(c, 'Ignacio M.').getByRole('button', { name: 'No me sirve' }));
+    await c.clickOn(card(c, 'Ignacio M.').getByRole('button', { name: 'El cargo no decide' }));
     await c.see('Dijiste que no te sirve (el cargo no decide): lo tendremos en cuenta.');
   } },
 ];
@@ -161,25 +182,31 @@ const callSteps = [
     c.check('el correo solo sigue siendo el botón', await card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 1);
     c.check('con su teléfono es la opción secundaria y dice cuánto cuesta', await card(c, 'Rodrigo S.').getByRole('button', { name: 'O con su teléfono · 8 créditos' }).count() === 1);
   } },
-  { say: 'Abro «Para llamar» de quien ya tiene su teléfono: el número, cómo llamar o escribir, y el guion', do: async c => {
-    c.check('el número se ve antes de abrir', await card(c, 'Paula Reyes').getByRole('button', { name: /Para llamar · \+56 9 8765 4321/ }).count() === 1);
-    await card(c, 'Paula Reyes').getByRole('button', { name: /^Para llamar/ }).click();
+  { say: 'Abro «Llamada» de quien ya tiene su teléfono: el número, cómo llamar o escribir, y el guion por bloques', do: async c => {
+    await pick(c, 'Paula Reyes');
+    c.check('la pestaña avisa que ya hay teléfono', await tabOf(c, 'Llamada').getByText('(con teléfono)').count() === 1);
+    await c.clickOn(tabOf(c, 'Llamada'));
     await c.see('Puntos de interés');
     c.check('puedo llamar', await card(c, 'Paula Reyes').getByRole('link', { name: /Llamar a Paula Reyes/ }).count() === 1);
     c.check('puedo escribir por WhatsApp', await card(c, 'Paula Reyes').getByRole('link', { name: /Escribir a Paula Reyes por WhatsApp/ }).count() === 1);
     c.check('el guion trae qué decir, qué preguntar y qué responder', await c.has('Al contestar') && await c.has('Preguntas') && await c.has('Si te dice…') && await c.has('Si no contesta') && await c.has('Primer WhatsApp'));
+    c.check('cada punto de interés parte por su tema', await card(c, 'Paula Reyes').getByText('Turnos de noche:', { exact: true }).count() === 1);
+    c.check('cada objeción va con su respuesta al lado', await card(c, 'Paula Reyes').locator('dl dt').count() === 2);
     c.check('se puede copiar y pedir otra versión', await card(c, 'Paula Reyes').getByRole('button', { name: 'Otra versión' }).count() === 1);
+    c.check('nada se sale de la pantalla', await fits(c));
   } },
   { say: 'A otra que ya enriquecí le busco el teléfono', do: async c => {
-    await card(c, 'Marcela Díaz').getByRole('button', { name: /^Para llamar/ }).click();
-    await card(c, 'Marcela Díaz').getByRole('button', { name: 'Buscar su teléfono · 8 créditos' }).click();
+    await pick(c, 'Marcela Díaz');
+    await c.clickOn(tabOf(c, 'Llamada'));
+    await c.clickOn(card(c, 'Marcela Díaz').getByRole('button', { name: 'Buscar su teléfono · 8 créditos' }));
     await c.see('Buscando el teléfono de Marcela Díaz');
-    c.check('dice que llega solo y cuánto usa', await c.has('aparece solo en «Para llamar». Usa 8 créditos.'));
+    c.check('dice que llega solo y cuánto usa', await c.has('aparece solo en «Llamada». Usa 8 créditos.'));
     c.check('la tarjeta lo muestra en camino', await card(c, 'Marcela Díaz').getByText('Buscando su teléfono: suele tardar unos minutos').count() === 1);
   } },
   { say: 'Le preparo el guion mientras llega su teléfono', do: async c => {
-    await card(c, 'Marcela Díaz').getByRole('button', { name: 'Preparar guion de llamada' }).click();
-    await card(c, 'Marcela Díaz').getByText('Puntos de interés').waitFor();
+    await c.clickOn(card(c, 'Marcela Díaz').getByRole('button', { name: 'Preparar guion de llamada' }));
+    // «Otra versión» only exists once the script is there (the empty state also speaks of its «puntos de interés»).
+    await card(c, 'Marcela Díaz').getByRole('button', { name: 'Otra versión' }).waitFor();
     c.check('el guion es para ella', await card(c, 'Marcela Díaz').getByText(/Hola Marcela, soy Camila/).count() >= 1);
   } },
 ];
@@ -239,19 +266,25 @@ const mailSteps = [
     await c.see('Tus contactos de hoy');
     await answerMail(c);
     c.check('se queda en la página del correo, no pide iniciar sesión', new URL(c.page.url()).pathname === `/contactos/${TOKEN}`);
-    c.check('hay una tarjeta por contacto', await c.page.locator('article').count() === 6);
-    c.check('no hay menú ni partes de la app que aprender', await c.page.locator('nav, aside').count() === 0 && !(await c.has('Por escribir')));
+    c.check('la lista trae a los seis, y se trabaja uno a la vez', await railCount(c) === 6 && await c.page.locator('article').count() === 1);
+    c.check('arriba dice cómo va el día, en números', await c.page.locator('dl').first().locator('> div').allTextContents().then(values => values.join(' · ') === 'Por enriquecer5 · Por aprobar1 · En marcha0'));
+    c.check('no hay menú ni partes de la app que aprender', await c.page.locator('aside').count() === 0 && await c.page.locator('nav').count() === 1 && !(await c.has('Por escribir')));
+    c.check('nada se sale de la pantalla', await fits(c));
     c.check('el contacto del botón llega con su campaña a la vista', await card(c, 'Paula Reyes').getByText('Primer correo ·').count() === 1);
     c.check('quien ya tiene correo lo muestra', await card(c, 'Paula Reyes').getByText('paula.reyes@cobresdelloa.example').count() === 1);
-    c.check('abrir la página no enriquece a nadie', await c.page.getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 5);
+    c.check('abrir la página no enriquece a nadie', await railCount(c, 'Por enriquecer') === 5);
   } },
-  { say: 'Enriquezco al primero con un toque', do: async c => {
+  { say: 'Elijo al primero en la lista y lo enriquezco con un toque', do: async c => {
+    await pick(c, 'Rodrigo S.');
+    c.check('llega en «Por qué», con cómo abrir primero', await card(c, 'Rodrigo S.').getByText('Cómo abrir').count() === 1);
     await c.clickOn(card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }));
     await c.see('Listo: encontramos el correo de Rodrigo Salcedo.');
     c.check('dice el crédito que usó', await c.has('Se descontó 1 crédito de ANTON.IA.'));
     c.check('la tarjeta muestra su correo', await card(c, 'Rodrigo Salcedo').getByText('rodrigo.salcedo@mineraaurora.example').count() === 1);
+    c.check('la lista lo pasa a «Campaña por aprobar»', await railCount(c, 'Campaña por aprobar') === 2);
   } },
   { say: 'Para aprobar me pide conectar mi correo, ahí mismo y una sola vez', do: async c => {
+    await pick(c, 'Paula Reyes');
     const paula = card(c, 'Paula Reyes');
     c.check('ofrece Gmail y Outlook con el enlace del correo', await paula.locator(`a[href="/api/auth/connect/google?enlace=${TOKEN}"]`).count() === 1
       && await paula.locator(`a[href="/api/auth/connect/azure?enlace=${TOKEN}"]`).count() === 1);
@@ -259,6 +292,7 @@ const mailSteps = [
     c.check('sin correo conectado no ofrece aprobar', await c.page.getByRole('button', { name: 'Aprobar y programar' }).count() === 0);
   } },
   { say: 'Digo que uno no me sirve, y por qué', do: async c => {
+    await pick(c, 'Ignacio M.');
     await c.clickOn(card(c, 'Ignacio M.').getByRole('button', { name: 'No me sirve' }));
     await c.clickOn(card(c, 'Ignacio M.').getByRole('button', { name: 'El cargo no decide' }));
     await c.see('Dijiste que no te sirve (el cargo no decide): lo tendremos en cuenta.');
@@ -306,7 +340,8 @@ const mailBulkSteps = [
     c.check('viene elegido «Correo y teléfono»', await c.page.getByRole('radio', { name: /Correo y teléfono · 40 créditos/ }).isChecked());
     c.check('ofrece también solo el correo, con su costo', await c.page.getByRole('radio', { name: /Solo correo · 5 créditos/ }).count() === 1);
     c.check('el botón dice cuánto usa', await c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }).count() === 1);
-    c.check('llegar no enriquece a nadie', bulkAsked.length === 0 && await c.page.getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 5);
+    c.check('llegar no enriquece a nadie', bulkAsked.length === 0 && await railCount(c, 'Por enriquecer') === 5);
+    c.check('nada se sale de la pantalla', await fits(c));
   } },
   { say: 'Cambio a solo correo y vuelvo a correo y teléfono: el botón sigue el costo', do: async c => {
     await c.page.getByRole('radio', { name: /Solo correo/ }).check();
@@ -362,7 +397,7 @@ const seedHoy = (tables, ctx) => {
   tables.enriched_leads = [...(tables.enriched_leads || []), { id: ENRICHED, organization_id: ctx.ORG, user_id: ctx.OWNER, email: 'paula.reyes@cobresdelloa.example', full_name: 'Paula Reyes' }];
 };
 const hoy = c => c.page.locator('section#contactos-de-hoy');
-const counts = async c => (await hoy(c).locator('dl > div').allTextContents()).join(' · ');
+const counts = async c => (await hoy(c).locator('dl').first().locator('> div').allTextContents()).join(' · ');
 const hoySteps = [
   { say: 'Entro a «Hoy»: mis seis contactos son lo primero', do: async c => {
     await answerSix(c.page); await c.go('/dashboard'); await c.see('6 contactos nuevos para ti');
@@ -378,7 +413,9 @@ const hoySteps = [
     await card(c, 'Rodrigo S.').getByRole('button', { name: /Ver por qué y su campaña/ }).click();
     await c.see('Diario del Norte, 3 nov 2026');
     c.check('dice cómo abrir', await c.has('Pregúntale cómo van a cubrir la respuesta ante emergencias en la planta nueva.'));
+    c.check('abierta, la fila es la misma ficha: por qué, su campaña y su llamada', await card(c, 'Rodrigo S.').getByRole('tab').count() === 3);
     c.check('sin su correo, el paso es enriquecer', await card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }).count() === 1);
+    c.check('nada se sale de la pantalla', await fits(c));
   } },
   { say: 'Apruebo la campaña de la que ya tiene correo, sin salir de «Hoy»', do: async c => {
     await card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }).click();
@@ -395,6 +432,36 @@ const hoyLinkSteps = [
     c.check('el enlace no queda en la dirección', new URL(c.page.url()).search === '');
     c.check('el contacto del botón llega abierto, en su campaña', await card(c, 'Marcela D.').getByText('Primer correo ·').count() === 1);
     c.check('los demás siguen como fila', await card(c, 'Rodrigo S.').getByRole('button', { name: /Ver por qué y su campaña/ }).count() === 1);
+  } },
+];
+
+// ─── «Llamar» of the email that brought a mobile (16 Nov 2026): the card opens on its call ──────────────────────────────────────
+// The page read for real: the second contact has its mobile in «Por escribir» and its script kept in the drop, as after «Con sus
+// teléfonos». Nobody is signed in, so the number's two ways are plain links.
+const seedMailCall = (tables, ctx) => {
+  seedMail({ mailbox: true })(tables, ctx);
+  tables.lead_drops = tables.lead_drops.map(row => row.id === DROP ? { ...row, items: row.items.map(item => item.leadId === id(2) ? { ...item, call: { script: CALL_SCRIPT, at: '2026-11-13T12:00:00.000Z' } } : item) } : row);
+  tables.enriched_leads = tables.enriched_leads.map(row => row.id === ENRICHED ? { ...row, primary_phone: '+56 9 8765 4321', phone_numbers: [{ sanitized_number: '+56987654321' }] } : row);
+};
+const mailCallSteps = [
+  { say: 'En el correo «Para llamar» toco «Abrir el guion completo»: la ficha abre en su llamada', do: async c => {
+    await c.go(`/contactos/${TOKEN}?c=${id(2)}`);
+    await c.see('Tus contactos de hoy');
+    await c.clickOn(tabOf(c, 'Llamada'));
+    await c.see('Guion de llamada');
+    const paula = card(c, 'Paula Reyes');
+    c.check('el número va grande, con «Llamar» y «WhatsApp» al lado', await paula.getByText('+56 9 8765 4321').count() === 1
+      && await paula.locator('a[href="tel:+56987654321"]').count() === 1 && await paula.locator('a[href^="https://wa.me/56987654321?text="]').count() === 1);
+    c.check('lo primero es qué decir al contestar', await paula.getByText('Al contestar').count() === 1);
+    c.check('puntos de interés y preguntas van lado a lado, cada punto por su tema', await paula.getByText('Fiscalización:', { exact: true }).count() === 1 && await paula.getByText('Preguntas').count() === 1);
+    c.check('cada objeción va con su respuesta', await paula.locator('dl dt').count() === 2);
+    c.check('cierra con el buzón de voz y el primer WhatsApp', await paula.getByText('Si no contesta').count() === 1 && await paula.getByText('Primer WhatsApp').count() === 1);
+    c.check('nada se sale de la pantalla', await fits(c));
+  } },
+  { say: 'Paso a su campaña sin perder la ficha', do: async c => {
+    await c.clickOn(tabOf(c, 'Campaña'));
+    await c.see('Primer correo');
+    c.check('el guion deja la pantalla: una sección a la vez', !(await c.has('Guion de llamada')));
   } },
 ];
 
@@ -441,4 +508,9 @@ export default () => [
   { id: 'contactos-desde-el-correo-aprobar', persona: 'visitor', title: 'Aprobar, cambiar y detener una campaña desde el correo',
     goal: 'Con mi correo ya conectado: cambiar un correo, aprobar la campaña y detenerla, todo desde la página del correo.',
     seed: seedMail({ mailbox: true }), passWrites: MAIL_PASS, steps: mailApproveSteps },
+  { id: 'contactos-desde-el-correo-llamar', persona: 'visitor', title: 'El guion de la llamada, desde el correo',
+    goal: 'Abrir desde el correo la ficha de un contacto con su teléfono y leer el guion de un vistazo: qué decir, qué le importa, qué preguntar y qué responder.',
+    seed: seedMailCall, passWrites: MAIL_PASS, steps: mailCallSteps },
+  { id: 'contactos-desde-el-correo-llamar-telefono', persona: 'visitor', viewport: 'phone', title: 'El guion de la llamada, desde el correo (móvil)',
+    goal: 'Lo mismo desde el teléfono, que es desde donde se llama.', seed: seedMailCall, passWrites: MAIL_PASS, steps: mailCallSteps },
 ];

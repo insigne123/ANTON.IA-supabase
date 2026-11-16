@@ -1,5 +1,5 @@
 import { DROP_EMAIL_AND_PHONE_CREDITS, type DropCallScript, type DropPhone } from '@/lib/lead-drop-call';
-import { emailButton } from '@/lib/email-shell';
+import { EMAIL_AVATAR_TINTS, emailButton, emailCallout, emailLabel, emailPerson } from '@/lib/email-shell';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { displayLeadName } from '@/lib/lead-name';
 
@@ -674,13 +674,20 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
 
 /** «el lun 16, el vie 20 y el mar 24 nov» would repeat the month: «lun 16 nov, vie 20 nov y mar 24 nov», joined as a sentence. */
 const listed = (values: string[]) => values.length <= 1 ? values.join('') : `${values.slice(0, -1).join(', ')} y ${values[values.length - 1]}`;
-const firstLines = (body: string, max: number) => { const flat = body.replace(/\s+/g, ' ').trim(); return flat.length > max ? `${flat.slice(0, max).replace(/\s+\S*$/, '')}…` : flat; };
+export const firstLines = (body: string, max: number) => { const flat = body.replace(/\s+/g, ' ').trim(); return flat.length > max ? `${flat.slice(0, max).replace(/\s+\S*$/, '')}…` : flat; };
 /**
  * An email as its reader would get it, to read before it goes: «{{nombre}}» as the first name, «{{empresa}}» and «{{cargo}}» as the
  * contact's (the campaign fills them the same way when it sends). What is kept and changed is the text with its variables.
  */
 export const dropEmailPreview = (text: string, item: Pick<DropItem, 'name' | 'company' | 'title'>) => text
   .replace(/\{\{\s*nombre\s*\}\}/g, dropName(item).split(' ')[0] || '').replace(/\{\{\s*empresa\s*\}\}/g, item.company || '').replace(/\{\{\s*cargo\s*\}\}/g, item.title || '');
+/** «Claudio Sa***s» → «CS»: the first letter of the first two words of a name, whatever the search hid of the surname. */
+export function dropInitials(item: Pick<DropItem, 'name'>) {
+  const words = dropName(item).replace(/[^\p{L}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  return ((words[0]?.[0] || '') + (words[1]?.[0] || '')).toUpperCase() || '·';
+}
+/** A steady number under `count` for a contact: the tint it is shown with, the same in the app and in its emails. */
+export const dropTint = (key: string, count: number) => [...key].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 9973, 7) % count;
 /** The same contacts inside the app, from the address of the page that needs no session: «Hoy» asks to sign in and brings them into view. */
 export const dropAppHref = (link: string) => link.replace(/\/contactos\/([A-Za-z0-9_-]{48})(?:[?#].*)?$/, '/dashboard?contactos=$1');
 /** Where «Enriquecer los N» of the morning email sends: the page with that choice made and a button to confirm it, never the arrival. */
@@ -705,13 +712,15 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
     const brief = item.brief;
     const why = brief?.fit || item.reasons?.[0] || item.why;
     const news = brief?.news ? `${brief.news.text.replace(/[.\s]+$/, '')}${[brief.news.source, brief.news.date].some(Boolean) ? ` (${[brief.news.source, brief.news.date].filter(Boolean).join(', ')})` : ''}.` : null;
+    const newsNow = brief?.news ? { text: `${brief.news.text.replace(/[.\s]+$/, '')}.`, source: [brief.news.source, brief.news.date].filter(Boolean).join(' · ') || null } : null;
     const opener = brief?.opener || item.approach || null;
     const days = dropSchedule(item, now).slice(1).map(shortDay);
+    const steps = days.length ? `primer correo y ${days.length === 1 ? '1 seguimiento' : `${days.length} seguimientos`}` : 'un correo';
     const campaign = item.draft ? { subject: dropEmailPreview(item.draft.subject, item), preview: firstLines(dropEmailPreview(item.draft.body, item), 150),
       followUps: days.length ? `${days.length === 1 ? 'Seguimiento' : `${days.length} seguimientos`} si no responde: ${listed(days)}.` : null } : null;
     // The step each contact is at: its email still to look up, its campaign to approve, already going, or (the email came with the search) to save.
     const action = needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
-    return { item, why, news, opener, campaign, href: dropContactHref(link, item, options.open), action };
+    return { item, why, news, newsNow, opener, campaign, steps, href: dropContactHref(link, item, options.open), action };
   });
   // From the inbox the person chooses how to go on (15 Nov 2026, the owner: «la idea es que tenga la opción de continuar desde el mail
   // o desde la app»): all of them looked up at once, with their mobiles or without, or the same contacts inside the app. The answer to
@@ -721,15 +730,16 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
     all: pending >= 2 ? { label: `Enriquecer ${pending === items.length ? `los ${pending}` : `los ${pending} que faltan`} · ${pending} créditos`, href: dropBulkHref(link, false) } : null,
     phones: pending >= 2 ? { label: `Con sus teléfonos · ${pending * DROP_EMAIL_AND_PHONE_CREDITS} créditos`, href: dropBulkHref(link, true) } : null,
     app: { label: 'Abrir en ANTON.IA', href: dropAppHref(link) },
+    title: pending >= 2 ? 'Enriquécelos de una vez' : 'Sigue como prefieras',
     lead: pending >= 2
-      ? 'Sigue desde este correo o desde la app. Si los enriqueces de una vez, te respondemos en esta misma conversación con el correo de cada uno, su campaña lista para aprobar y, si pides teléfonos, el guion de cada llamada.'
-      : 'Sigue desde este correo, con el botón de cada contacto, o desde la app.',
+      ? 'Te respondemos en esta misma conversación con el correo de cada uno y su campaña lista para aprobar. Con teléfonos, también el guion de cada llamada.'
+      : 'Desde este correo, con el botón de cada contacto, o desde la app.',
   } : null;
   const note = [lookup ? `Enriquecer busca su correo y usa 1 crédito por contacto${bulk ? `; con su teléfono, ${DROP_EMAIL_AND_PHONE_CREDITS} por ambos. Nada se cobra al abrir: confirmas en la página` : ''}.` : dropCostNote(items),
     ...(written ? ['Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde.', 'Los correos completos van en el PDF adjunto.'] : [])].join(' ');
   const text = [
     ...(heading ? [`${lead}:`] : []),
-    ...(bulk ? ['', bulk.lead, ...[bulk.all, bulk.phones, bulk.app].filter((entry): entry is { label: string; href: string } => Boolean(entry)).map(entry => `${entry.label}: ${entry.href}`)] : []),
+    ...(bulk ? ['', `${bulk.title}. ${bulk.lead}`, ...[bulk.all, bulk.phones, bulk.app].filter((entry): entry is { label: string; href: string } => Boolean(entry)).map(entry => `${entry.label}: ${entry.href}`)] : []),
     ...cards.flatMap(({ item, why, news, opener, campaign, href, action }) => [
       '',
       `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.track === 'explore' ? ' (para explorar)' : ''}`,
@@ -743,29 +753,27 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
     `Verlos todos: ${link}`,
     note,
   ].join('\n');
-  const line = (label: string, value: string, color = '#374151') => `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:${color}"><strong style="color:#111827">${label}</strong> ${escape(value)}</p>`;
-  const card = ({ item, why, news, opener, campaign, href, action }: typeof cards[number]) => `<div style="margin:0 0 12px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#ffffff">`
-    + `<p style="margin:0;font-size:16px;line-height:22px;font-weight:600;color:#111827">${escape(dropName(item))}`
-    + `${item.track === 'explore' ? ' <span style="font-size:12px;font-weight:400;color:#6b7280">· para explorar</span>' : ''}</p>`
-    + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</p>`
-    + line('Por qué:', why)
-    + (news ? `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:#374151"><strong style="color:#111827">Ahora:</strong> ${escape(news)}</p>` : '')
-    + (opener ? line('Cómo abrir:', opener) : '')
-    + (campaign ? `<div style="margin:10px 0 0;padding:10px 12px;border-radius:10px;background:#f9fafb">`
-      + `<p style="margin:0;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Campaña lista</p>`
-      + `<p style="margin:4px 0 0;font-size:14px;line-height:20px;color:#111827"><strong>${escape(campaign.subject)}</strong></p>`
-      + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape(campaign.preview)}</p>`
-      + (campaign.followUps ? `<p style="margin:6px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(campaign.followUps)}</p>` : '') + '</div>' : '')
-    + `<div style="margin:12px 0 0">${emailButton(href, action, { quiet: Boolean(bulk?.all) })}</div></div>`;
-  const html = (heading ? `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
-      + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
-    + (bulk ? `<div style="margin:0 0 16px;padding:14px 16px 6px;border:1px solid #e5e7eb;border-radius:14px;background-color:#f9fafb">`
-      + `<p style="margin:0 0 12px;font-size:14px;line-height:20px;color:#374151">${escape(bulk.lead)}</p>`
+  // The card of a contact (16 Nov 2026, the redesign the owner asked for: «se siente como mucho texto y poco organizado»): who it is,
+  // the one thing happening at its company, one line of why and its campaign in one line. How to open and the email itself are a
+  // click away, on its page and in the PDF; the text version keeps them for the clients that show no HTML.
+  const card = ({ item, why, newsNow, campaign, steps, href, action }: typeof cards[number]) => `<div style="margin:0 0 12px;padding:16px;border:1px solid #e5e7eb;border-radius:14px;background-color:#ffffff">`
+    + emailPerson({ initials: escape(dropInitials(item)), tint: dropTint(item.leadId, EMAIL_AVATAR_TINTS), name: escape(dropName(item)),
+      role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: item.track === 'explore' ? 'para explorar' : null })
+    + (newsNow ? emailCallout({ label: 'Ahora', body: escape(newsNow.text), foot: newsNow.source ? escape(newsNow.source) : null }) : '')
+    + `<p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(why)}</p>`
+    + (campaign ? `<p style="margin:10px 0 0;padding:10px 0 0;border-top:1px solid #f3f4f6;font-size:13px;line-height:19px;color:#6b7280">`
+      + `<strong style="color:#111827">Campaña lista</strong> · «${escape(campaign.subject)}» · ${steps}</p>` : '')
+    + `<div style="margin:14px 0 0">${emailButton(href, action, { quiet: Boolean(bulk?.all) })}</div></div>`;
+  const html = (heading ? `<div style="margin:28px 0 14px">${emailLabel('Contacto del día')}`
+      + `<p style="margin:4px 0 0;font-size:20px;line-height:27px;font-weight:600;color:#111827">${lead}</p></div>` : '')
+    + (bulk ? `<div style="margin:0 0 16px;padding:16px 16px 8px;border:1px solid #bfdbfe;border-radius:14px;background-color:#eff6ff">`
+      + `<p style="margin:0;font-size:15px;line-height:21px;font-weight:600;color:#111827">${escape(bulk.title)}</p>`
+      + `<p style="margin:3px 0 12px;font-size:14px;line-height:20px;color:#374151">${escape(bulk.lead)}</p>`
       + (bulk.all ? emailButton(bulk.all.href, bulk.all.label) : '') + (bulk.phones ? emailButton(bulk.phones.href, bulk.phones.label, { quiet: true }) : '')
       + emailButton(bulk.app.href, bulk.app.label, { quiet: true }) + '</div>' : '')
     + cards.map(card).join('')
     + `<p style="margin:4px 0 0;font-size:14px;line-height:20px"><a href="${escape(link)}" style="color:#2563eb">Ver los ${items.length} juntos</a></p>`
-    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(note)}</p>`;
+    + `<p style="margin:10px 0 0;font-size:12px;line-height:18px;color:#6b7280">${escape(note)}</p>`;
   return { text, html, link };
 }
 

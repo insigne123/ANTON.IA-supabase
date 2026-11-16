@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
 import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { telHref } from '@/lib/contact-calls';
 import { dropName, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
@@ -10,6 +9,7 @@ import type { MailDropView } from '@/lib/server/lead-drop-mail';
 import { cn } from '@/lib/utils';
 import { DropBulkEnrich } from './DropBulkEnrich';
 import { DropContactCard, type DropContactActions, type DropContactMail } from './DropContactCard';
+import { DropContactsWorkspace } from './DropContactsWorkspace';
 
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 /** A name that closes a sentence: «Rodrigo S.» (a surname the search hid) already brings its full stop. */
@@ -41,13 +41,14 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(mailboxNotice ? MAILBOX_NOTICE[mailboxNotice] ?? null : null);
   const [enriching, setEnriching] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // The contact on screen: the one the email's button named, or the first that still has a step to take.
+  const [selectedId, setSelectedId] = useState(() => focus ?? (initial.items.find(item => !item.campaign) ?? initial.items[0])?.leadId ?? '');
   const [bulkPhone, setBulkPhone] = useState(bulk === 'phone');
   const [bulkRun, setBulkRun] = useState<{ done: number; total: number; mailing: boolean } | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   // The contact the email linked to comes into view; what the address said is read once and leaves it (the link itself stays).
   useEffect(() => {
-    if (focus && !bulk) document.getElementById(`contacto-${focus}`)?.scrollIntoView?.({ block: 'start' });
     if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
   }, [focus, bulk]);
   // The number is dialled once on arrival; from then on its card has «Llamar», «WhatsApp» and the script.
@@ -87,7 +88,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
       const lookup = payload?.lookup as { outcome: 'found' | 'pending' | 'not_found'; consumed: number } | undefined;
       if (!lookup) return;
       const receipt = enrichmentCreditReceipt(lookup.consumed);
-      const phoneNote = withPhone ? ' Su teléfono llega en unos minutos, en «Para llamar».' : '';
+      const phoneNote = withPhone ? ' Su teléfono llega en unos minutos, en «Llamada».' : '';
       if (lookup.outcome === 'found') setNotice({ ok: true, text: `Listo: encontramos el correo de ${closing(named(payload, item))} Revisa su campaña y apruébala.${phoneNote} ${receipt}`.trim() });
       else if (lookup.outcome === 'not_found') setNotice({ ok: false, text: `No encontramos un correo para ${closing(item)} ${receipt || 'No se descontó ningún crédito.'}` });
       else { setNotice({ ok: true, text: `Seguimos buscando el correo de ${dropName(item)}: aparecerá aquí en un momento.` }); await waitFor(item); }
@@ -148,7 +149,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
       if (!found) return;
       const receipt = enrichmentCreditReceipt(found.consumed);
       setNotice(found.outcome === 'found' ? { ok: true, text: `Listo: ya tienes el teléfono de ${closing(item)} ${receipt}`.trim() }
-        : found.outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Para llamar». Usa ${DROP_PHONE_CREDITS} créditos.` }
+        : found.outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Llamada». Usa ${DROP_PHONE_CREDITS} créditos.` }
         : { ok: false, text: `No encontramos un teléfono para ${closing(item)} ${receipt}`.trim() });
     },
     script: async (item, fresh) => { await act({ action: 'script', leadId: item.leadId, ...(fresh ? { fresh: true } : {}) }); },
@@ -187,32 +188,36 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
   const toLook = items.filter(item => needsLookup(item)).length;
   const running = items.filter(item => item.campaign).length;
   const toApprove = items.filter(item => item.savedLeadId && item.draft && !item.campaign).length;
-  const status = [
-    toLook ? `${toLook} por enriquecer` : null,
-    toApprove ? `${toApprove} ${toApprove === 1 ? 'campaña lista' : 'campañas listas'} para aprobar` : null,
-    running ? `${running} ${running === 1 ? 'campaña aprobada' : 'campañas aprobadas'}` : null,
-  ].filter(Boolean).join(' · ');
-  return <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:py-12">
-    <header className="space-y-1">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">ANTON.IA</p>
-      <h1 className="font-headline text-2xl font-semibold tracking-tight">{items.length === 1 ? 'Tu contacto de hoy' : 'Tus contactos de hoy'}</h1>
-      <p className="text-sm text-muted-foreground">{`Elegidos para ti el ${dayLabel(view.date)}.`}{status ? ` ${status}.` : ''}</p>
+  const steps = [{ label: 'Por enriquecer', value: toLook }, { label: 'Por aprobar', value: toApprove }, { label: 'En marcha', value: running }];
+  const several = items.length > 1;
+  const selected = items.find(item => item.leadId === selectedId) ?? items[0];
+  const card = (item: DropItem) => <DropContactCard key={item.leadId} item={item} actions={actions} mail={mailOf(item)} heading="h2"
+    busy={saving || enriching !== null || bulkRun !== null} enriching={enriching === item.leadId} defaultOpen={item.leadId === focus} callOpen={call && item.leadId === focus} />;
+  return <main className={cn('mx-auto w-full px-4 py-6 sm:py-10', several ? 'max-w-6xl' : 'max-w-3xl')}>
+    <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="space-y-1">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">ANTON.IA</p>
+        <h1 className="font-headline text-2xl font-semibold tracking-tight sm:text-3xl">{several ? 'Tus contactos de hoy' : 'Tu contacto de hoy'}</h1>
+        <p className="text-sm text-muted-foreground">{`Elegidos para ti el ${dayLabel(view.date)}.`}</p>
+      </div>
+      {several ? <dl className="grid grid-cols-3 gap-2 sm:w-[22rem]">
+        {steps.map(entry => <div key={entry.label} className="rounded-xl border bg-card px-3 py-2">
+          <dt className="text-xs text-muted-foreground">{entry.label}</dt>
+          <dd className={cn('text-xl font-semibold tabular-nums', !entry.value && 'text-foreground/50')}>{entry.value}</dd>
+        </div>)}
+      </dl> : null}
     </header>
 
     <p role="status" aria-live="polite" className={cn('mt-4 rounded-xl px-4 py-3 text-sm', !notice && 'sr-only', notice && (notice.ok ? 'bg-primary/10 text-foreground' : 'bg-destructive/10 text-foreground'))}>{notice?.text ?? ''}</p>
 
     {toLook >= 2 || bulkRun ? <DropBulkEnrich count={toLook} phone={bulkPhone} onPhone={setBulkPhone} onStart={() => void enrichAll()} running={bulkRun} disabled={saving || (enriching !== null && !bulkRun)} /> : null}
 
-    <Card className="mt-6 rounded-2xl">
-      <CardContent className="divide-y p-0">
-        {items.map(item => <div key={item.leadId} id={`contacto-${item.leadId}`} className="scroll-mt-4">
-          <DropContactCard item={item} actions={actions} mail={mailOf(item)} heading="h2"
-            busy={saving || enriching !== null || bulkRun !== null} enriching={enriching === item.leadId} defaultOpen={item.leadId === focus || items.length === 1} callOpen={call && item.leadId === focus} />
-        </div>)}
-      </CardContent>
-    </Card>
+    <div className="mt-6">
+      {several ? <DropContactsWorkspace items={items} selectedId={selected.leadId} onSelect={setSelectedId}>{card(selected)}</DropContactsWorkspace>
+        : <div id={`contacto-${selected.leadId}`} className="overflow-hidden rounded-2xl border bg-card shadow-sm">{card(selected)}</div>}
+    </div>
 
-    <p className="mt-6 text-xs leading-5 text-muted-foreground">
+    <p className="mt-6 max-w-3xl text-xs leading-5 text-muted-foreground">
       Enriquecer busca el correo de trabajo del contacto y usa 1 crédito; con su teléfono, {DROP_EMAIL_AND_PHONE_CREDITS} por ambos. Al aprobar, los correos salen desde tu propio Gmail u Outlook y las respuestas te llegan ahí.
       Esta página es personal: se abre con el enlace de tu correo, así que no lo reenvíes.
     </p>

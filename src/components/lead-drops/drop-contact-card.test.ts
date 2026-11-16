@@ -33,12 +33,18 @@ const stubs: Record<string, unknown> = {
   '@/components/contact/ContactActions': { ContactActions: ({ phone, whatsappText, contact }: any) => React.createElement('p', { 'data-contact-actions': contact?.leadId || '', 'data-whatsapp': whatsappText || '' }, `Llamar · WhatsApp · ${phone}`) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
 };
-// «Para llamar» is its own component (DropCallPanel), compiled the same way and handed to the card.
-const panelSource = await readFile(new URL('./DropCallPanel.tsx', import.meta.url), 'utf8');
-const panelCode = ts.transpileModule(panelSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-const panel: any = {};
-new Function('require', 'exports', panelCode)((id: string) => id in stubs ? stubs[id] : require(id), panel);
-stubs['./DropCallPanel'] = panel;
+// The card's own pieces are the real ones, compiled the same way and handed to it: the app's tabs (with their arrow keys), the
+// avatar and the stage chip, and «Para llamar» (DropCallPanel).
+const compile = async (file: string) => {
+  const compiled = ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+  const exports: any = {};
+  new Function('require', 'exports', compiled)((id: string) => id in stubs ? stubs[id] : require(id), exports);
+  return exports;
+};
+stubs['@/hooks/use-scroll-edge-fade'] = { useScrollEdgeFade: () => [() => {}, undefined] };
+stubs['@/components/ui/segmented-tabs'] = await compile('../ui/segmented-tabs.tsx');
+stubs['./drop-contact-parts'] = await compile('./drop-contact-parts.tsx');
+stubs['./DropCallPanel'] = await compile('./DropCallPanel.tsx');
 const card: any = {};
 new Function('require', 'exports', code)((id: string) => id in stubs ? stubs[id] : require(id), card);
 
@@ -52,6 +58,9 @@ const type = async (element: Element, value: string) => act(async () => {
   element.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 });
 const button = (label: string | RegExp) => [...dom.window.document.querySelectorAll('button')].find(entry => typeof label === 'string' ? entry.textContent === label : label.test(entry.textContent || ''))!;
+const tabs = () => [...dom.window.document.querySelectorAll('[role="tab"]')];
+const tab = (label: string) => tabs().find(entry => (entry.textContent || '').startsWith(label))!;
+const steps = () => [...dom.window.document.querySelectorAll('ol[aria-label="Correos de la campaña"] button')];
 const press = async (target: Element) => { await act(async () => { target.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); }); };
 
 test('the person rewrites the emails of a contact: what they typed is what is saved, and a refusal keeps their text on screen', async () => {
@@ -63,11 +72,29 @@ test('the person rewrites the emails of a contact: what they typed is what is sa
   try {
     await act(async () => root.render(React.createElement(card.DropContactCard, { item, actions, busy: false, enriching: false, defaultOpen: true })));
     const document = dom.window.document;
-    // Opened from the email, the campaign is in view: both emails, each with its day.
-    assert.match(document.body.textContent || '', /Campaña lista · 2 correos[\s\S]*Primer correo · [\s\S]*Brigadas en faena[\s\S]*Seguimiento 1 · [\s\S]*si no responde/);
-    // To read, each email as the contact would get it; to change (below), the text with its variables.
-    assert.match(document.body.textContent || '', /Hola Pedro,[\s\S]*¿Cómo cubren los turnos de noche\?[\s\S]*Hola Pedro, ¿lo vemos\?/);
-    assert.doesNotMatch(document.body.textContent || '', /\{\{nombre\}\}/);
+    // The card is its person, where it stands and its sections, one at a time (16 Nov 2026, the redesign): opened from the email,
+    // the campaign is the one in view.
+    assert.match(document.querySelector('article')!.textContent || '', /^PAPedro ArayaCampaña por aprobarGerente HSE · Minera Andina/);
+    assert.deepEqual(tabs().map(entry => [entry.textContent, entry.getAttribute('aria-selected')]), [['Por qué', 'false'], ['Campaña2', 'true'], ['Llamada', 'false']]);
+    assert.equal(document.querySelectorAll('[role="tabpanel"]').length, 1);
+    // The campaign is a sequence to walk: its steps with the day each goes, and one email to read at a time, as the contact would
+    // get it; to change (below), the text with its variables.
+    assert.equal(steps().length, 2);
+    assert.match(steps()[0].textContent || '', /^1Primer correo/);
+    assert.match(steps()[1].textContent || '', /^2Seguimiento 1.* · si no responde$/);
+    assert.deepEqual(steps().map(entry => entry.getAttribute('aria-current')), ['step', null]);
+    assert.match(document.body.textContent || '', /Primer correo · [^·]+Asunto: Brigadas en faenaCopiarHola Pedro,\s+¿Cómo cubren los turnos de noche\?/);
+    assert.doesNotMatch(document.body.textContent || '', /¿lo vemos\?/, 'one email at a time');
+    await press(steps()[1]);
+    assert.deepEqual(steps().map(entry => entry.getAttribute('aria-current')), [null, 'step']);
+    assert.match(document.body.textContent || '', /Seguimiento 1 · [^·]+ · si no respondeAsunto: Re: brigadasCopiarHola Pedro, ¿lo vemos\?/);
+    assert.doesNotMatch(document.body.textContent || '', /\{\{nombre\}\}|turnos de noche/);
+    await press(steps()[0]);
+    // Why it is recommended is its own section: the campaign leaves the screen while it is read.
+    await press(tab('Por qué'));
+    assert.match(document.body.textContent || '', /Por qué te lo recomendamosCalza con tu cliente ideal por su cargo\./);
+    assert.equal(steps().length, 0);
+    await press(tab('Campaña'));
     await press(button('Editar los correos'));
     const fields = [...document.querySelectorAll('input, textarea')] as Array<HTMLInputElement | HTMLTextAreaElement>;
     assert.deepEqual(fields.map(field => field.value), ['Brigadas en faena', 'Hola {{nombre}},\n\n¿Cómo cubren los turnos de noche?', 'Re: brigadas', 'Hola {{nombre}}, ¿lo vemos?']);
@@ -117,7 +144,9 @@ test('«Para llamar»: the mobile with the email or after it, the number with it
     assert.ok(button('Enriquecer · 1 crédito'));
     await press(button('O con su teléfono · 8 créditos'));
     assert.deepEqual(asked, ['enrich+phone']);
-    await press(button(/^Para llamar/));
+    // The call is the card's third section: the row of its phone and, under it, the script.
+    await press(tab('Llamada'));
+    assert.equal(tab('Llamada').getAttribute('aria-selected'), 'true');
     assert.match(text(), /Su teléfono se busca al enriquecerlo: junto con el correo \(8 créditos por ambos\) o después \(8 más\)\./);
     // Without a script yet, it is prepared when asked, and costs no credit.
     await press(button('Preparar guion de llamada'));
@@ -141,11 +170,14 @@ test('«Para llamar»: the mobile with the email or after it, the number with it
 
     // Here: the number with «Llamar» and «WhatsApp» (the app's own, which record the call), the WhatsApp line being the script's.
     await show({ ...item, phone: { state: 'found', number: '+56 9 8765 4321', more: 1 }, call: { script: SCRIPT, at: '2026-11-15T12:00:00.000Z' } });
-    assert.match(button(/^Para llamar/).textContent || '', /\+56 9 8765 4321/, 'the number shows before opening the section');
+    assert.match(tab('Llamada').textContent || '', /\(con teléfono\)/, 'the tab says a mobile is there before it is opened');
     const ways = document.querySelector('[data-contact-actions]')!;
     assert.equal(ways.getAttribute('data-contact-actions'), 'e-1');
     assert.equal(ways.getAttribute('data-whatsapp'), SCRIPT.whatsapp);
-    assert.match(text(), /Puntos de interés[\s\S]*Turnos de noche: quién responde[\s\S]*Al contestar[\s\S]*Preguntas[\s\S]*Si te dice…[\s\S]*«Ya tenemos proveedor»[\s\S]*Si no contesta[\s\S]*Primer WhatsApp/);
+    // The script in blocks, in the order of the call: what to say first, then what matters to that person by theme next to what
+    // to ask, the answers to what they may object, and what to leave if nobody picks up.
+    assert.match(text(), /Guion de llamada[\s\S]*Al contestarHola Pedro, soy Ana[\s\S]*Puntos de interésTurnos de noche: quién responde[\s\S]*Preguntas1¿Cuántas personas[\s\S]*2¿Cómo registran[\s\S]*Si te dice…«Ya tenemos proveedor»Perfecto\.[\s\S]*Si no contesta[\s\S]*Primer WhatsApp/);
+    assert.deepEqual([...document.querySelectorAll('dl dt')].map(entry => entry.textContent), ['«Ya tenemos proveedor»']);
     asked.length = 0;
     await press(button('Otra versión'));
     assert.deepEqual(asked, ['script:fresh']);

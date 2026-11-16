@@ -283,14 +283,15 @@ el resto; lo ya encontrado se envía igual.
 
 **La respuesta llega a la misma conversación** (`src/lib/server/lead-drop-ready.ts`, `src/lib/lead-drop-ready-email.ts`):
 
-- **«Listos»**: un correo con cada contacto encontrado: su dirección, su primer correo completo, los días de sus
-  seguimientos y «Revisar y aprobar». Aprobar sigue siendo un botón de la página.
+- **«Listos»**: un correo con cada contacto encontrado: su dirección, su primer correo (completo si es uno; el inicio de
+  cada uno si son varios, desde el 16 de noviembre), los días de sus seguimientos y el botón para aprobar. Aprobar sigue
+  siendo un botón de la página.
 - **«Para llamar»**: cuando llegan los teléfonos (la respuesta del proveedor tarda minutos y entra por
   `src/app/api/apollo-webhook/[token]`), un correo con cada número, «Llamar», «WhatsApp» con su primer mensaje escrito y el
   guion de la llamada; los que quedaron sin teléfono se nombran. Mientras un teléfono pedido hace menos de 10 minutos siga
   en camino, espera para enviarlos juntos. El guion se escribe al confirmar (`prepareDropCalls`), para que esté listo cuando
   llegue el número.
-- «Llamar» abre la ficha del contacto con «Para llamar» abierto y marca desde la página (`?c=<contacto>&llamar=1`): los
+- «Llamar» abre la ficha del contacto en su sección «Llamada» y marca desde la página (`?c=<contacto>&llamar=1`): los
   lectores de correo neutralizan los enlaces `tel:` (visto el 15 de noviembre en Gmail). El número va además como texto.
 
 Cada contacto va una vez en cada correo: se marca en el drop antes de enviar (`campaignMailedAt`, `callMailedAt`), bajo la
@@ -305,6 +306,47 @@ Outlook (`sendMail`) no se pueden enviar encabezados propios: ahí agrupa el asu
 
 **Botones visibles en cualquier lector** (`emailButton` en `src/lib/email-shell.ts`): el color va como atributo de la celda
 y como `background-color`; con el atajo `background` un intermediario lo quitó y quedó texto blanco sobre blanco.
+
+### Desde el 16 de noviembre: rediseño de la ficha, de la página y de los correos
+
+El dueño vio la página real con el guion de una llamada y dijo: «no me gusta que se vea así como una columna… se siente como
+mucho texto y poco organizado, cuesta leerlo». Seis tarjetas una bajo otra eran seis veces el mismo muro de texto. Lo que
+cambió, en todas las vistas (la página del correo, «Buscar prospectos» y «Hoy»):
+
+- **Varios contactos son un espacio de trabajo, no una columna** (`DropContactsWorkspace`). A un lado, la lista «Tus
+  contactos»: iniciales sobre un color propio, nombre, cargo y empresa, y **dónde va cada uno** en una sola etiqueta
+  (`dropStage`: «Por enriquecer», «Sin correo», «Por guardar», «Guardado», «Campaña por aprobar», «Campaña en curso»,
+  «Campaña detenida»). Al centro, **un contacto a la vez**. En el teléfono la lista es una fila de caras que se desliza, con
+  «Anterior / N de M / Siguiente» bajo la ficha. Llega abierto el contacto del botón del correo; si no, el primero que
+  todavía necesita un paso.
+- **La ficha (`DropContactCard`) tiene tres secciones en pestañas** (`SegmentedTabs`, con flechas del teclado): «Por qué»,
+  «Campaña» (con su número de correos) y «Llamada» (con un punto cuando ya hay teléfono). Arriba quedan quién es, su
+  etiqueta de estado y **una sola acción** con su nota. Un botón del correo abre la sección que le corresponde: «Revisar y
+  aprobar» la campaña, «Llamar» la llamada.
+  - **Por qué**: «Cómo abrir» destacado primero; luego, lado a lado, «Por qué te lo recomendamos» y «Sobre <empresa>» con
+    la novedad en un recuadro ámbar con su fuente; y «Cómo calza con tu cliente ideal» a la vista, sin desplegar.
+  - **Campaña**: los pasos a la izquierda (primer correo y cada seguimiento con su día) y **un correo a la vez** a la
+    derecha. «Editar los correos» sigue igual.
+  - **Llamada** (`DropCallPanel`): la fila del teléfono (número grande, «Llamar» y «WhatsApp») y el guion **por bloques, en
+    el orden de la llamada**: «Al contestar» destacado; «Puntos de interés» (cada uno por su tema, `splitTopic`) junto a
+    «Preguntas» numeradas; «Si te dice…» como tabla objeción | respuesta; y «Si no contesta» junto a «Primer WhatsApp».
+- **Arriba de la página**, tres números («Por enriquecer», «Por aprobar», «En marcha») reemplazan la frase de estado, y
+  «Enriquecer los N de una vez» es una banda horizontal (`DropBulkEnrich`).
+- **«Hoy»** mantiene sus filas plegadas; al abrir una, es la misma ficha con sus pestañas.
+- **Los correos** (`src/lib/email-shell.ts`: `emailPerson`, `emailCallout`, `emailLabel`): cada tarjeta parte por las
+  iniciales del contacto con el mismo color que en la app (`dropInitials`, `dropTint`).
+  - *El de la mañana*: la novedad de la empresa en un recuadro «Ahora» con su fuente, una línea de por qué y la campaña en
+    una línea («Campaña lista · «asunto» · primer correo y N seguimientos»). «Cómo abrir» y el adelanto del correo ya no
+    van en el HTML: están a un clic, en la página y en el PDF, y siguen en la versión de texto.
+  - *«Listos»*: con un contacto, su primer correo completo; con varios, el inicio de cada uno y «Leer completo y aprobar»
+    (seis correos completos eran otro muro de texto). La versión de texto los trae completos.
+  - *«Para llamar»*: el número grande con sus dos botones, «Al contestar» destacado, los puntos por tema y las preguntas
+    numeradas. Objeciones y buzón de voz quedan en la ficha («Abrir el guion completo») y en la versión de texto.
+
+La sección de la llamada se llama «Llamada» en todas partes (antes «Para llamar»); el correo que trae los teléfonos conserva
+su nombre interno. Pruebas: `drop-contact-card.test.ts`, `drop-mail-flow.test.ts`, `lead-drop-flow-ui.test.ts`,
+`lead-drops.test.ts`, `lead-drop-ready-email.test.ts`; recorridos `contactos-seis`, `contactos-para-llamar`,
+`contactos-desde-el-correo*` (incluye `contactos-desde-el-correo-llamar`) y `contactos-en-hoy`, en escritorio y teléfono.
 
 ## Cómo funciona
 

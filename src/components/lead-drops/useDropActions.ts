@@ -47,7 +47,7 @@ export function useDropActions({ dropId, call, setItems, single }: {
       const linked = await post({ action: 'link', leadId: item.leadId });
       setItems(linked.items);
       const found = completion.moved.some(lead => lead.email);
-      const phoneNote = withPhone && linked.linked ? ' Su teléfono llega en unos minutos: lo verás en «Para llamar».' : '';
+      const phoneNote = withPhone && linked.linked ? ' Su teléfono llega en unos minutos: lo verás en «Llamada».' : '';
       setNotice(linked.linked && found
         ? { ok: true, text: `Listo: ya tienes su correo y quedó en «Por escribir».${phoneNote} ${enrichmentCreditReceipt(completion.consumed)}`.trim() }
         : linked.linked ? { ok: true, text: `Quedó en «Por escribir»: su correo sigue en búsqueda y aparecerá allí en unos minutos.${phoneNote}` }
@@ -85,7 +85,7 @@ export function useDropActions({ dropId, call, setItems, single }: {
       if (!outcome) return;
       const receipt = enrichmentCreditReceipt(Number(done.phone.consumed) || 0);
       setNotice(outcome === 'found' ? { ok: true, text: `Listo: ya tienes el teléfono de ${dropName(item)}. ${receipt}`.trim() }
-        : outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Para llamar». Usa ${DROP_PHONE_CREDITS} créditos.` }
+        : outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Llamada». Usa ${DROP_PHONE_CREDITS} créditos.` }
         : { ok: false, text: `No encontramos un teléfono para ${dropName(item)}. ${receipt}`.trim() });
     },
     script: async (item, fresh) => { await act({ action: 'script', leadId: item.leadId, ...(fresh ? { fresh: true } : {}) }, 'No pudimos preparar el guion. Inténtalo de nuevo.'); },
