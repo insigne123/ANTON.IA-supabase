@@ -67,12 +67,14 @@ const SIX = [
   contact(2, 'Paula Reyes', 'Superintendenta de Seguridad', 'Cobres del Loa', { savedLeadId: ENRICHED, keptLeadId: 'kept-2' }),
   contact(3, 'Marcela Di***z', 'Jefa de Prevención de Riesgos', 'Energía Atacama', { industry: 'Energía' }),
   contact(4, 'Tomás Ib***a', 'Jefe de Emergencias', 'Forestal Los Robles', { industry: 'Forestal', city: 'Concepción', brief: undefined, role: 'refer',
+    companyWhy: 'Opera plantaciones y aserraderos con brigadas propias contra incendios.',
     why: 'Trabaja en el área que buscas, en tu rubro objetivo (forestal), en Concepción: no decide la compra, pero puede decirte quién la ve o presentarte.' }),
   contact(5, 'Ignacio Mu***z', 'Jefe de Mantención de Planta', 'Celulosa Biobío', { track: 'explore', industry: 'Celulosa', city: 'Concepción',
     why: 'Su cargo es vecino a los que buscas, en tu rubro objetivo (celulosa), en Concepción: te lo proponemos para probar si también te sirve.',
     fit: [{ criterion: 'Cargo', theirs: 'Jefe de Mantención de Planta', wanted: 'Gerente HSE, Jefe de Prevención de Riesgos y 3 más', match: 'partial' }] }),
-  contact(6, 'Valentina Co***s', 'Encargada de Protección Industrial', 'Puerto Mejillones', { track: 'explore', industry: 'Puertos',
-    why: 'Su cargo es vecino a los que buscas, en tu rubro objetivo (puertos): te lo proponemos para probar si también te sirve.' }),
+  contact(6, 'Valentina Co***s', 'Encargada de Protección Industrial', 'Puerto Mejillones', { track: 'explore', industry: 'Puertos', expanded: 'Puertos', brief: undefined,
+    companyWhy: 'Terminal de graneles con operación continua y cargas peligrosas.',
+    why: 'Su cargo es vecino a los que buscas. Su empresa es de un rubro vecino a los tuyos (puertos): ampliamos la búsqueda porque de tus rubros ya te mostramos a casi todos.' }),
 ];
 const answered = body => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 /** The six contacts and what each action answers; the page keeps what the last answer said, as with the server. */
@@ -80,7 +82,8 @@ async function answerSix(page) {
   let items = SIX;
   await page.route(`**/api/lead-drops/${DROP}`, async route => {
     if (route.request().method() === 'GET') return route.fulfill(answered({ id: DROP, date: '2026-11-13', items,
-      criteria: { titles: ['Gerente HSE', 'Jefe de Prevención de Riesgos', 'Superintendente de Seguridad'], industries: ['Minería', 'Energía', 'Forestal'], locations: ['Chile'], sizes: [], source: 'empresa' } }));
+      criteria: { titles: ['Gerente HSE', 'Jefe de Prevención de Riesgos', 'Superintendente de Seguridad'], industries: ['Minería', 'Energía', 'Forestal'], locations: ['Chile'], sizes: [], source: 'empresa',
+        accounts: { fit: 84, opened: 12, expanded: ['Puertos'] } } }));
     const body = route.request().postDataJSON() || {};
     const change = patch => { items = items.map(item => item.leadId === body.leadId ? { ...item, ...patch(item) } : item); };
     if (body.action === 'approve') {
@@ -338,6 +341,16 @@ const tailorSteps = [
     await c.clickOn(card(c, 'Tomás I.').getByRole('button', { name: 'Guardar', exact: true }));
     await c.see('Pediste: «Jefaturas de operaciones de forestales grandes, no brigadistas»');
     c.check('puedo cambiarlo después', await card(c, 'Tomás I.').getByRole('button', { name: 'Cambiar lo que pediste' }).count() === 1);
+  } },
+  { say: 'Veo que se buscó por empresa, y a quién sumaron de un rubro vecino', do: async c => {
+    c.check('dice por qué esa empresa', await c.has('Por qué esta empresa: Opera plantaciones y aserraderos con brigadas propias contra incendios.'));
+    await c.clickOn(c.page.getByRole('button', { name: /Así los buscamos/ }));
+    await c.see('Buscamos por empresa: 84 empresas calzan con lo que vendes');
+    c.check('dice que amplió a un rubro vecino', await c.has('sumamos un rubro vecino: Puertos.'));
+    await c.clickOn(c.page.getByRole('navigation', { name: 'Tus contactos' }).getByRole('button', { name: /Valentina C\./ }));
+    await c.see('Rubro vecino');
+    c.check('el contacto dice por qué viene de otro rubro', await c.has('ampliamos la búsqueda porque de tus rubros ya te mostramos a casi todos'));
+    c.check('nada se sale de la pantalla', await fits(c));
   } },
   { say: 'En «Perfil» cuento con mis palabras qué ofrezco y a quién busco', do: async c => {
     await c.go('/profile'); await c.see('En tus palabras');

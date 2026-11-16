@@ -451,6 +451,48 @@ Pruebas: `lead-drop-finder.test.ts` («who works in the area without deciding…
 («the mix…»), `lead-drop-campaign.test.ts` (el pedido se guarda), `profile-mappings.test.ts`, `company-profile.test.ts`,
 `user-context.test.ts` y `lead-drop-flow-ui.test.ts`. Recorrido: `contactos-a-medida`.
 
+### Desde el 16 de noviembre: búsqueda por empresa y expansión automática
+
+El dueño: «¿qué pasará cuando ya no halles más leads?, ¿expandirás la búsqueda? Lo mejor para buscar más es buscar por empresa o
+industrias, evaluar cada empresa por separado y obtener todo el listado de trabajadores y ahí sacar los puestos que sean
+interesantes: las empresas son las que pagan». Dos cosas se vieron al revisarlo con la búsqueda gratuita de Apollo:
+
+- Una búsqueda por cargo la copan las dos o tres empresas más grandes: las primeras 25 jefaturas de «forestal» en Chile eran todas
+  de una misma empresa. Cuando esas se agotan, el buscador decía que no había nadie nuevo.
+- Los rubros que el proveedor no tiene en su lista («forestal», «celulosa», «puertos») **no se buscaban**: se dejaban fuera sin
+  decirlo. Ahora van como palabras de la empresa (`industrySets`); un rubro con etiqueta y uno sin ella van en búsquedas
+  separadas, porque juntos no dejan a casi nadie.
+
+Para quien recibe varios contactos al día, el buscador ahora también lleva las empresas del cliente ideal
+(`src/lib/server/lead-drop-accounts.ts`, tabla `lead_drop_accounts`):
+
+1. **Las encuentra por sus cabezas.** Una búsqueda de dueños y gerentes generales de los rubros y lugares del cliente ideal
+   (uno o dos por empresa) lista las empresas del rubro, en vez del personal de la más grande. Se suman las empresas de quienes
+   trajo la búsqueda por cargo.
+2. **Evalúa cada empresa una vez** (`scoreAccounts`, modelo chico): una nota de 0 a 10 de cuánto necesitaría lo que vende el
+   equipo y una razón de una frase, con «En tus palabras» de la ficha a la vista. Distingue a quien opera de quien solo le
+   vende a esos operadores (un proveedor del rubro queda en 3 o menos). La nota se guarda: no se vuelve a pedir.
+3. **Abre las mejores cada día** (`accountsToOpen`: nota de 6 o más, doce por grupo): trae a toda su gente en los lugares del
+   cliente ideal, sea cual sea el cargo, más los cargos buscados entre todas ellas. El puntaje de personas decide quién
+   decide y quién puede derivar, partiendo de la nota de la empresa (`evaluacion_empresa`).
+4. **Recuerda cuáles se agotaron.** Al terminar guarda cuánta gente que valga la pena le queda a cada empresa abierta
+   (`people_left`). Una en cero descansa 30 días y las siguientes toman su turno; entre empresas de igual nota va primero la
+   que hace más tiempo no se abre.
+5. **Amplía sola cuando quedan pocos.** Si al cliente ideal le quedan menos de dos días de gente que valga la pena, el modelo
+   propone hasta cuatro rubros vecinos (`expansionIndustries`), con las palabras con que esas empresas se describen. Solo entra
+   la gente de las empresas que calzan (nota de 6 o más). Esos contactos llevan `expanded` («Rubro vecino») y su porqué lo dice:
+   «ampliamos la búsqueda porque de tus rubros ya te mostramos a casi todos».
+
+Qué ve la persona: en la ficha, «Por qué esta empresa» (`companyWhy`) y la marca «Rubro vecino»; en «Así los buscamos», cuántas
+empresas calzan, cuántas se abrieron hoy y a qué rubros se amplió (`criteria.accounts`, `accountsLine`).
+
+Todas las búsquedas son la gratuita de personas de Apollo: no se usa la búsqueda de empresas, que cuesta créditos. Todo es al
+mejor esfuerzo: sin la tabla o con el modelo caído, el buscador sigue por cargo como antes. La tabla solo la lee y escribe el
+servidor (RLS activa, sin políticas).
+
+Pruebas: `lead-drop-accounts.test.ts`, y en `lead-drops-apollo.test.ts` «by company…» (dos días seguidos: la que se agota
+descansa, y sin nadie que decida quedan quienes pueden derivar) y «when the customer's industries run out…».
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

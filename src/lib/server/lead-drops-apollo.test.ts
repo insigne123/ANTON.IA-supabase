@@ -157,6 +157,8 @@ test('a team with six contacts a day: the customer asked three ways, every candi
   const at = (n: number, title: string, company: string, extra: Record<string, unknown> = {}) => person(n, company, { title, ...extra });
   const finderSearch = async (input: any) => {
     searches.push(input);
+    // The heads of the customer's companies (lead-drop-accounts.ts): these people come without a company site, so none is kept.
+    if (!input.titles.length) return { results: [], costUsd: 0 };
     const asked = input.titles.join('|');
     const found = asked === 'Gerente de Personas'
       ? input.industryKeywords.length
@@ -191,8 +193,9 @@ test('a team with six contacts a day: the customer asked three ways, every candi
     ['Gerente de Personas', 400, true, true],
     ['HR Manager|Gerenta de Personas', 100, true, true],
     ['personas|rrhh', 100, false, true],
+    ['', 300, false, true],
     ['Gerente de Personas', 400, true, false],
-  ], 'the customer\'s roles (a hundred further down Apollo\'s list than the base, for the few people the team has), the ways people write them, the words of their area and, with few new people, the titles and places only');
+  ], 'the customer\'s roles (a hundred further down Apollo\'s list than the base, for the few people the team has), the ways people write them, the words of their area, the heads of its companies and, with few new people, the titles and places only');
   const drop = tables.lead_drops.find((row: any) => row.drop_date === '2026-10-20');
   assert.deepEqual(drop.items.map((item: any) => [item.company, item.title, item.track ?? 'core']), [
     ['Ripley', 'Gerente de Personas', 'core'], ['Easy', 'HR Manager', 'core'], ['Falabella', 'Gerente de Personas', 'core'], ['Paris', 'Gerente de Personas', 'core'],
@@ -208,6 +211,138 @@ test('a team with six contacts a day: the customer asked three ways, every candi
   assert.equal(scoring[0].vendedor.oferta, 'AXIS consulta antecedentes laborales en el PJUD.');
   assert.deepEqual(scoring[0].aprendizaje, { le_sirvieron: ['Gerente de Personas · Retail'], descarto: ['Jefe de Bodega · Logística (no decide)'] });
   assert.ok(!scoring[0].personas.some((entry: any) => ['Lider', 'Hites'].includes(entry.empresa)), 'nobody the team has or without an email is scored');
+});
+
+test('by company: the customer\'s companies found through their heads, each scored once, the best opened to bring their people, and what ran out remembered', async () => {
+  clearTitleAiCache();
+  const searches: any[] = [];
+  const at = (n: number, title: string, company: string, domain: string, extra: Record<string, unknown> = {}) =>
+    person(n, company, { title, organization: { name: company, primary_domain: domain, short_description: `${company} opera tiendas en Chile.` }, ...extra });
+  const search = async (input: any) => {
+    searches.push(input);
+    const domains: string[] = input.organizationDomains || [];
+    // A company opened: everyone there, whatever the title.
+    if (domains.length === 1 && !input.titles.length) {
+      return { results: apolloDropEntries(domains[0] === 'paris.example' ? [at(20, 'Jefe de Personas', 'Paris', 'paris.example'), at(21, 'Analista de Personas', 'Paris', 'paris.example'), at(22, 'Cajero', 'Paris', 'paris.example')]
+        : domains[0] === 'ripley.example' ? [at(1, 'Gerente de Personas', 'Ripley', 'ripley.example'), at(23, 'Coordinadora de Personas', 'Ripley', 'ripley.example')] : []), costUsd: 0 };
+    }
+    // The customer's roles across the companies opened.
+    if (domains.length > 1) return { results: apolloDropEntries([at(2, 'Gerente de Personas', 'Falabella', 'falabella.example')]), costUsd: 0 };
+    // Their heads: one a company, a supplier among them.
+    if (!input.titles.length) return { results: apolloDropEntries([at(30, 'Gerente General', 'Paris', 'paris.example'), at(31, 'Gerente General', 'Insumos del Retail', 'insumos.example')]), costUsd: 0 };
+    return { results: input.titles.join('|') === 'Gerente de Personas' && input.industryKeywords.length
+      ? apolloDropEntries([at(1, 'Gerente de Personas', 'Ripley', 'ripley.example'), at(2, 'Gerente de Personas', 'Falabella', 'falabella.example')]) : [], costUsd: 0 };
+  };
+  const classes: Record<string, string> = { 'Jefe de Personas': 'similar', 'Analista de Personas': 'related', 'Coordinadora de Personas': 'related' };
+  const companyNotes: Record<string, [number, string | null]> = { Ripley: [9, 'Opera tiendas con mucha dotación.'], Falabella: [9, 'Contrata por temporada en todo Chile.'], Paris: [8, 'Multitienda con alta rotación.'], 'Insumos del Retail': [2, null] };
+  const personNotes: Record<string, [number, number]> = { 'Gerente de Personas': [10, 0], 'Jefe de Personas': [8, 0], 'Analista de Personas': [3, 9], 'Coordinadora de Personas': [4, 7] };
+  const scoring: any[] = [], companyScoring: any[] = [];
+  const generate = async (options: any) => {
+    const prompt = JSON.parse(options.prompt);
+    if (prompt.cargoBuscado) return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, match: classes[entry.cargo] ?? 'none' })) };
+    if (prompt.empresas) { companyScoring.push(prompt); return { companies: prompt.empresas.map((entry: any) => ({ i: entry.i, nota: companyNotes[entry.empresa][0], razon: companyNotes[entry.empresa][1] })) }; }
+    if (prompt.personas) { scoring.push(prompt); return { people: prompt.personas.map((entry: any) => ({ i: entry.i, cargo: personNotes[entry.cargo][0], deriva: personNotes[entry.cargo][1], empresa: entry.evaluacion_empresa ?? 5 })) }; }
+    if (prompt.cargos) return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, variants: [], keywords: [] })) };
+    return { rubros: [] };
+  };
+  const ANA = '00000000-0000-4000-8000-00000000000a';
+  const base = seed();
+  const { client, tables } = memory({ ...base, organization_members: [{ organization_id: ORG, user_id: ANA, role: 'admin' }], profiles: [{ ...base.profiles[0], id: ANA }], enriched_leads: [],
+    lead_drop_accounts: [] as any[] }, { unique: { ...unique.unique, lead_drop_accounts: ['organization_id', 'customer_key', 'domain'] } });
+  const planned = await planOrganizationDrops(client, ORG, [ANA], { now: TUESDAY, search: search as any, budgetUsd: 3, spentUsd: 0, generate: generate as any, plan: { size: 6, weekdays: [1, 2, 3, 4, 5] } });
+  assert.equal(planned.planned, 1);
+
+  const heads = searches.find(call => call.seniorities?.length);
+  assert.deepEqual([heads.titles, heads.seniorities, heads.industryKeywords.length > 0], [[], ['owner', 'founder', 'c_suite'], true], 'the companies of the industry, through whoever heads them');
+  assert.deepEqual(companyScoring.flatMap(call => call.empresas.map((entry: any) => entry.empresa)).sort(), ['Falabella', 'Insumos del Retail', 'Paris', 'Ripley'], 'every company scored once, for what the team sells');
+  const openedOne = searches.filter(call => call.organizationDomains?.length === 1).map(call => call.organizationDomains[0]).sort();
+  assert.deepEqual(openedOne, ['falabella.example', 'paris.example', 'ripley.example'], 'the three that fit are opened; the supplier is not');
+  assert.ok(searches.filter(call => call.organizationDomains?.length === 1).every(call => call.titles.length === 0 && call.personLocations.join() === 'Chile'), 'everyone there, in the customer\'s places, whatever the title');
+  assert.deepEqual(searches.find(call => call.organizationDomains?.length === 3).titles, ['Gerente de Personas'], 'and the customer\'s roles across the companies opened');
+
+  const drop = tables.lead_drops.find((row: any) => row.drop_date === '2026-10-20');
+  assert.deepEqual(drop.items.map((item: any) => [item.company, item.title, item.role ?? 'decides']).sort(), [
+    ['Falabella', 'Gerente de Personas', 'decides'], ['Paris', 'Jefe de Personas', 'decides'], ['Ripley', 'Gerente de Personas', 'decides'],
+  ], 'one a company for the person: who decides in each, and Paris came only by opening it');
+  assert.equal(drop.items.find((item: any) => item.company === 'Paris').companyWhy, 'Multitienda con alta rotación.', 'why that company, as it was scored');
+  assert.deepEqual(drop.criteria.accounts, { fit: 3, opened: 3 }, 'the drop says how it searched by company');
+  assert.ok(scoring[0].personas.every((entry: any) => typeof entry.evaluacion_empresa === 'number'), 'the score of each person starts from the one of their company');
+  assert.ok(!scoring[0].personas.some((entry: any) => entry.empresa === 'Insumos del Retail' && entry.cargo !== 'Gerente General'), 'nobody of the supplier but who the search itself brought');
+
+  const kept = new Map<string, any>(tables.lead_drop_accounts.map((row: any) => [row.domain, row]));
+  assert.deepEqual([...kept.keys()].sort(), ['falabella.example', 'insumos.example', 'paris.example', 'ripley.example']);
+  assert.deepEqual(['ripley.example', 'falabella.example', 'paris.example', 'insumos.example'].map(domain => [kept.get(domain).score, Boolean(kept.get(domain).opened_at), kept.get(domain).people_left]), [
+    [9, true, 1], [9, true, 0], [8, true, 1], [2, false, null],
+  ], 'what each company still has after today: Ripley and Paris someone of the area who can refer; Falabella nobody, so it rests');
+  assert.equal(new Set(tables.lead_drop_accounts.map((row: any) => row.customer_key)).size, 1);
+
+  // The next day: the companies are known, so none is scored again, and the one that ran out is not opened.
+  searches.length = 0; companyScoring.length = 0;
+  await planOrganizationDrops(client, ORG, [ANA], { now: new Date('2026-10-21T10:00:00.000Z'), search: search as any, budgetUsd: 3, spentUsd: 0, generate: generate as any, plan: { size: 6, weekdays: [1, 2, 3, 4, 5] } });
+  assert.equal(companyScoring.length, 0);
+  assert.deepEqual(searches.filter(call => call.organizationDomains?.length === 1).map(call => call.organizationDomains[0]).sort(), ['paris.example', 'ripley.example']);
+  const next = tables.lead_drops.find((row: any) => row.drop_date === '2026-10-21');
+  assert.deepEqual(next.items.map((item: any) => [item.company, item.title, item.role ?? 'decides']).sort(), [
+    ['Paris', 'Analista de Personas', 'refer'], ['Ripley', 'Coordinadora de Personas', 'refer'],
+  ], 'with nobody left who decides, the people of the area who can refer, in the companies already opened');
+
+  // Asked from «Hoy», with someone waiting (a month later, when the ones that ran out have rested): the companies already known are
+  // opened, and nothing new is looked for, scored or widened.
+  searches.length = 0;
+  const asked: string[] = [];
+  const watching = async (options: any) => { const prompt = JSON.parse(options.prompt); asked.push(prompt.empresas ? 'empresas' : prompt.personas ? 'personas' : prompt.cargoBuscado ? 'clases' : prompt.cargos ? 'cargos' : 'rubros'); return generate(options); };
+  await planOrganizationDrops(client, ORG, [ANA], { now: new Date('2026-12-01T10:00:00.000Z'), search: search as any, budgetUsd: 3, spentUsd: 0, generate: watching as any,
+    plan: { size: 6, weekdays: [1, 2, 3, 4, 5] }, quick: true });
+  assert.equal(searches.filter(call => call.seniorities?.length).length, 0, 'no search for the heads of new companies');
+  assert.ok(searches.some(call => call.organizationDomains?.length === 1), 'the known ones are opened');
+  assert.ok(!asked.includes('empresas') && !asked.includes('rubros'));
+  // With little of the run left, the companies wait for the next one.
+  searches.length = 0;
+  await planOrganizationDrops(client, ORG, [ANA], { now: new Date('2027-01-05T10:00:00.000Z'), search: search as any, budgetUsd: 3, spentUsd: 0, generate: generate as any,
+    plan: { size: 6, weekdays: [1, 2, 3, 4, 5] }, timeLeft: () => 60_000 });
+  assert.equal(searches.filter(call => call.seniorities?.length || call.organizationDomains?.length).length, 0);
+});
+
+test('when the customer\'s industries run out: the industries next to them, only the people of the companies that fit, and said in the drop', async () => {
+  clearTitleAiCache();
+  const searches: any[] = [];
+  const at = (n: number, title: string, company: string, domain: string) => person(n, company, { title, organization: { name: company, primary_domain: domain } });
+  const search = async (input: any) => {
+    searches.push(input);
+    if ((input.organizationDomains || []).length) return { results: [], costUsd: 0 };
+    if (input.companyKeywords.length) {
+      return { results: input.titles.length ? apolloDropEntries([at(40, 'Gerente de Personas', 'Supermercados del Sur', 'delsur.example'), at(41, 'Gerente de Personas', 'Distribuidora Mayorista', 'mayorista.example')]) : [], costUsd: 0 };
+    }
+    return { results: input.titles.length && input.industryKeywords.length ? apolloDropEntries([at(1, 'Gerente de Personas', 'Ripley', 'ripley.example')]) : [], costUsd: 0 };
+  };
+  const companyNotes: Record<string, number> = { Ripley: 9, 'Supermercados del Sur': 7, 'Distribuidora Mayorista': 3 };
+  const asked: any[] = [];
+  const generate = async (options: any) => {
+    const prompt = JSON.parse(options.prompt);
+    if (prompt.cargoBuscado) return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, match: 'none' })) };
+    if (prompt.empresas) return { companies: prompt.empresas.map((entry: any) => ({ i: entry.i, nota: companyNotes[entry.empresa], razon: `Motivo de ${entry.empresa}.` })) };
+    if (prompt.personas) return { people: prompt.personas.map((entry: any) => ({ i: entry.i, cargo: 9, empresa: entry.evaluacion_empresa })) };
+    if (prompt.cargos) return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, variants: [], keywords: [] })) };
+    asked.push(prompt);
+    return { rubros: [{ rubro: 'Supermercados', palabras: ['supermercados', 'grocery'] }, { rubro: 'Retail', palabras: ['retail'] }] };
+  };
+  const ANA = '00000000-0000-4000-8000-00000000000a';
+  const base = seed();
+  const { client, tables } = memory({ ...base, organization_members: [{ organization_id: ORG, user_id: ANA, role: 'admin' }], profiles: [{ ...base.profiles[0], id: ANA }], enriched_leads: [],
+    lead_drop_accounts: [] as any[] }, { unique: { ...unique.unique, lead_drop_accounts: ['organization_id', 'customer_key', 'domain'] } });
+  await planOrganizationDrops(client, ORG, [ANA], { now: TUESDAY, search: search as any, budgetUsd: 3, spentUsd: 0, generate: generate as any, plan: { size: 6, weekdays: [1, 2, 3, 4, 5] } });
+  assert.equal(asked.length, 1, 'one person worth offering for a day of six: the model is asked for the industries next to the customer\'s');
+  assert.deepEqual(asked[0].cliente_ideal.rubros, ['retail']);
+  const widened = searches.filter(call => call.companyKeywords.length);
+  assert.deepEqual([...new Set(widened.map(call => call.companyKeywords.join('|')))], ['supermercados|grocery'], 'the industry it already searches is not asked again');
+  assert.ok(widened.every(call => call.industryKeywords.length === 0 && call.personLocations.join() === 'Chile'), 'by the words of the company, in the same places');
+  const drop = tables.lead_drops.find((row: any) => row.drop_date === '2026-10-20');
+  assert.deepEqual(drop.items.map((item: any) => [item.company, item.expanded ?? null]), [['Ripley', null], ['Supermercados del Sur', 'Supermercados']], 'the wholesaler does not fit, so its people do not come in');
+  assert.match(drop.items[1].why, /rubro vecino a los tuyos \(supermercados\): ampliamos la búsqueda/);
+  assert.deepEqual(drop.criteria.accounts, { fit: 2, opened: 2, expanded: ['Supermercados'] });
+  assert.deepEqual(tables.lead_drop_accounts.map((row: any) => [row.domain, row.origin, row.segment]).sort(), [
+    ['delsur.example', 'expansion', 'Supermercados'], ['mayorista.example', 'expansion', 'Supermercados'], ['ripley.example', 'customer', null],
+  ]);
 });
 
 test('six a day with the model down: the customer\'s roles by their words, as a team of one contact gets them', async () => {

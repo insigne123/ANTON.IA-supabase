@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, accountsLine, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -432,3 +432,14 @@ test('a contact is recognised by its initials and by a tint of its own, the same
   assert.ok(tints.every(tint => Number.isInteger(tint) && tint >= 0 && tint < 6));
   assert.equal(dropTint('6accdbfcd5f5d80001cf6901', 6), dropTint('6accdbfcd5f5d80001cf6901', 6));
 });
+
+test('the search by company, said to the person: how many companies fit, how many were opened, and the industries it widened to', () => {
+  assert.equal(accountsLine(undefined), null);
+  assert.equal(accountsLine({ fit: 0, opened: 0 }), null);
+  assert.equal(accountsLine({ fit: 84, opened: 12 }), 'Buscamos por empresa: 84 empresas calzan con lo que vendes y hoy abrimos 12 para traer a su gente, no solo a quien tiene el cargo exacto.');
+  assert.equal(accountsLine({ fit: 1, opened: 0 }), 'Buscamos por empresa: 1 empresa calza con lo que vendes.');
+  assert.match(accountsLine({ fit: 9, opened: 3, expanded: ['Construcción', 'Sanitarias'] })!, /De tus rubros ya te mostramos a casi todos, así que sumamos rubros vecinos: Construcción y Sanitarias\.$/);
+  assert.match(whyText({ title: 'Gerente HSE', industry: null, city: 'Temuco', expanded: 'Construcción' }, { titles: ['Gerente HSE'], industries: ['Minería'], locations: ['Chile'], sizes: [], source: 'perfil' }),
+    /^Su cargo es de los que buscas\. Su empresa es de un rubro vecino a los tuyos \(construcción\)/);
+});
+

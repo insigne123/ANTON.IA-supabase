@@ -537,6 +537,24 @@ test('several contacts: a list at the side and one card at a time, with why, the
   } finally { await close(page); }
 });
 
+test('the search by company on screen: why that company, the industry next to theirs said as such, and how it was searched', async () => {
+  answers = [{ status: 200, body: { ...drop, criteria: { ...drop.criteria, accounts: { fit: 84, opened: 12, expanded: ['Construcción'] } },
+    items: [apolloItem(1, { companyWhy: 'Opera dos faenas con brigadas propias.', expanded: 'Construcción' }), apolloItem(2, { brief, companyWhy: 'Ya lo dice la investigación.' })] } }];
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    const first = cardOf(page, 0);
+    assert.match(first.textContent || '', /^PAPersona1 A\.Por enriquecerRubro vecino/);
+    assert.match(first.textContent || '', /Sobre Minera 1Por qué esta empresa: Opera dos faenas con brigadas propias\./);
+    await click(page, /Así los buscamos/);
+    assert.match(page.text(), /Buscamos por empresa: 84 empresas calzan con lo que vendes y hoy abrimos 12 para traer a su gente, no solo a quien tiene el cargo exacto\. De tus rubros ya te mostramos a casi todos, así que sumamos un rubro vecino: Construcción\./);
+    // The research of the contact already says why the company: the finder's line is not repeated.
+    await tap(page, railOf(page)[1]);
+    assert.match(cardOf(page, 0).textContent || '', /Una planta nueva suma áreas que proteger\./);
+    assert.doesNotMatch(cardOf(page, 0).textContent || '', /Por qué esta empresa|Rubro vecino/);
+  } finally { await close(page); }
+});
+
 test('«Aprobar y programar» starts the contact\'s campaign and says from which mailbox and when each email goes', async () => {
   bodies.length = 0;
   answers = [{ status: 200, body: several() }];

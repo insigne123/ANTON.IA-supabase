@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { organizationService } from '@/lib/services/organization-service';
-import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
+import { accountsLine, dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { telHref } from '@/lib/contact-calls';
 import { DropBulkEnrich } from './DropBulkEnrich';
@@ -313,6 +313,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drop, playing]);
   const searched = one || making ? 'Así lo buscamos' : 'Así los buscamos';
+  const byCompany = drop ? accountsLine(drop.criteria.accounts) : null;
   // While the search plays, «Así lo buscamos» is the story: the filters and the steps. Once it ends it is one collapsed row below
   // the contact, since the contact is what the person came for.
   const howSection = drop ? <section aria-labelledby="drop-filters" className="rounded-2xl border">
@@ -345,6 +346,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           <Filter label="Rubro" values={drop.criteria.industries || []} />
           <Filter label="Lugar" values={drop.criteria.locations || []} />
         </dl>
+        {byCompany ? <p className="text-sm leading-6">{byCompany}</p> : null}
         <p className="text-xs text-muted-foreground">{SOURCE[drop.criteria.source] || 'Tu cliente ideal'}. {lookup
           ? 'Revisamos que tengan correo, quitamos a quienes tu equipo ya tiene y escribimos un primer correo con tres seguimientos.'
           : 'Revisamos que tengan correo verificado, quitamos a quienes tu equipo ya tiene y escribimos un primer correo.'}</p>
