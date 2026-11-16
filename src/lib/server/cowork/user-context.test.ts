@@ -179,3 +179,15 @@ test('«Tu agenda» reaches Cowork with its service and when it goes; «never» 
   // The email signature next to it never travels.
   assert.doesNotMatch(JSON.stringify(withAgenda({ url: 'https://calendly.com/x', mode: 'auto' })), /firma/);
 });
+
+test('what the person and their team wrote in their own words reaches Cowork with the ideal customer', () => {
+  // 16 Nov 2026, the owner: «para que con esa info no solo adaptemos los leads recomendados sino también toda la app».
+  const profile = { ...buildProfileUpdate({ ...createEmptyProfileForm(), name: 'Ana Rojas', services: 'Brigadas', targetRoles: 'Gerente HSE',
+    targetNotes: 'Veo las cuentas mineras del norte. No me sirven proveedores.' }, null) };
+  assert.deepEqual(coworkUserContextFromProfile(profile, null, 'El equipo vende a minería y energía.').idealCustomer,
+    { roles: ['Gerente HSE'], inOwnWords: 'Veo las cuentas mineras del norte. No me sirven proveedores.', teamInOwnWords: 'El equipo vende a minería y energía.' });
+  // The team's alone still says who to look for; the same text twice is said once; nothing written adds nothing.
+  assert.deepEqual(coworkUserContextFromProfile({ full_name: 'Leo' }, null, 'El equipo vende a minería.').idealCustomer, { teamInOwnWords: 'El equipo vende a minería.' });
+  assert.deepEqual(coworkUserContextFromProfile(profile, null, 'Veo las cuentas mineras del norte. No me sirven proveedores.').idealCustomer?.teamInOwnWords, undefined);
+  assert.equal(coworkUserContextFromProfile({ full_name: 'Leo' }).idealCustomer, undefined);
+});

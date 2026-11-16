@@ -21,7 +21,8 @@ export type DropContactActions = {
   save: (item: DropItem) => void;
   approve: (item: DropItem) => Promise<void>;
   edit: (item: DropItem, emails: { draft: Email; followUps: Email[] }) => Promise<boolean>;
-  feedback: (item: DropItem, useful: boolean, reason?: string) => Promise<void>;
+  /** `wish`: what the person would like to get instead, in their words; the finder reads it for their next contacts. */
+  feedback: (item: DropItem, useful: boolean, reason?: string, wish?: string) => Promise<void>;
   // «Para llamar» (15 Nov 2026): the mobile of a contact already looked up, the script of its call, and the contacts read again
   // while a mobile is on its way.
   phone: (item: DropItem) => Promise<void>;
@@ -78,6 +79,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
   const [editing, setEditing] = useState<{ draft: Email; followUps: Email[] } | null>(null);
   const [working, setWorking] = useState<'approve' | 'edit' | 'feedback' | 'switch' | null>(null);
   const [asking, setAsking] = useState(false);
+  /** «Qué te gustaría recibir»: the text being written, or null while the field is closed. */
+  const [wish, setWish] = useState<string | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   const Heading = heading;
 
@@ -148,7 +151,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Heading id={`${uid}-name`} className="text-lg font-semibold tracking-tight">{dropName(item)}</Heading>
             <DropStageChip stage={stage} />
-            {item.track === 'explore' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Un cargo vecino a los que buscas, para probar si también te sirve">Para explorar</span> : null}
+            {item.role === 'refer' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Trabaja en el área que buscas: no decide la compra, pero puede decirte quién la ve o presentarte">Puede derivarte</span> : null}
+            {item.track === 'explore' && item.role !== 'refer' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Un cargo vecino a los que buscas, para probar si también te sirve">Para explorar</span> : null}
           </div>
           <p className="text-sm text-foreground/80">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
           {person || mail?.email ? <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
@@ -274,8 +278,23 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
               onClick={() => void run('feedback', () => actions.feedback(item, true))}><ThumbsUp className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Me sirve</Button>
             <Button variant={item.feedback?.useful === false ? 'secondary' : 'ghost'} size="sm" className="h-8" aria-pressed={item.feedback?.useful === false} disabled={working !== null}
               onClick={() => setAsking(true)}><ThumbsDown className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />No me sirve</Button>
+            {/* 16 Nov 2026, the owner: «un parámetro libre que le deje poner qué es lo que le gustaría que le apareciera». */}
+            {item.feedback && wish === null ? <Button variant="ghost" size="sm" className="h-8" disabled={working !== null} onClick={() => setWish(item.feedback?.wish || '')}>
+              <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{item.feedback.wish ? 'Cambiar lo que pediste' : 'Decir qué te gustaría recibir'}</Button> : null}
           </>}
       </div>
+      {item.feedback?.wish && wish === null ? <p className="mt-2 text-xs text-muted-foreground">Pediste: «{item.feedback.wish}». Lo usamos para elegir tus próximos contactos.</p> : null}
+      {wish !== null && item.feedback ? <div className="mt-3 space-y-2">
+        <Label htmlFor={`${uid}-wish`} className="text-sm">¿Qué te gustaría que te apareciera?</Label>
+        <Textarea id={`${uid}-wish`} value={wish} onChange={event => setWish(event.target.value)} maxLength={300} rows={2} aria-describedby={`${uid}-wish-help`}
+          placeholder="Ej. Jefaturas de operaciones de mineras medianas, no proveedores" className="min-h-[4.5rem] text-sm" />
+        <p id={`${uid}-wish-help`} className="text-xs text-muted-foreground">Con tus palabras. Lo leemos al elegir tus próximos contactos.</p>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" className="h-8" disabled={working !== null || !wish.trim()}
+            onClick={() => void run('feedback', async () => { await actions.feedback(item, item.feedback!.useful, item.feedback!.reason || undefined, wish.trim()); setWish(null); })}>Guardar</Button>
+          <Button variant="ghost" size="sm" className="h-8" disabled={working !== null} onClick={() => setWish(null)}>Cancelar</Button>
+        </div>
+      </div> : null}
     </div> : null}
   </article>;
 }

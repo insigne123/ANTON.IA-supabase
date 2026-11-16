@@ -47,6 +47,15 @@ test('«Me sirve» and «No me sirve» are kept with the reason, and the finder 
   await saveDropFeedback(client, scope, DROP, LEAD, { useful: true }, NOW);
   assert.equal(tables.lead_drops[0].items[0].feedback.useful, true);
   await refused(saveDropFeedback(client, scope, DROP, LEAD, { useful: 'sí' }), 400, /no válida/);
+  // «Qué te gustaría recibir» (16 Nov 2026): kept with the answer, and it stays when the person only changes their mind.
+  await saveDropFeedback(client, scope, DROP, LEAD, { useful: false, reason: 'La empresa no calza', wish: '  Mineras medianas, no proveedores  ' }, NOW);
+  assert.deepEqual(tables.lead_drops[0].items[0].feedback, { useful: false, reason: 'La empresa no calza', wish: 'Mineras medianas, no proveedores', at: '2026-11-13T12:00:00.000Z' });
+  await saveDropFeedback(client, scope, DROP, LEAD, { useful: true }, NOW);
+  assert.deepEqual(tables.lead_drops[0].items[0].feedback, { useful: true, reason: null, wish: 'Mineras medianas, no proveedores', at: '2026-11-13T12:00:00.000Z' });
+  // An empty one takes it back.
+  await saveDropFeedback(client, scope, DROP, LEAD, { useful: true, wish: '' }, NOW);
+  assert.deepEqual(tables.lead_drops[0].items[0].feedback, { useful: true, reason: null, at: '2026-11-13T12:00:00.000Z' });
+  await refused(saveDropFeedback(client, scope, DROP, LEAD, { useful: true, wish: 'x'.repeat(301) }), 400, /no válida/);
 });
 
 test('«Aprobar y programar»: a campaign of one person, from the mailbox that sends, with each follow-up so many days after the one before', async () => {

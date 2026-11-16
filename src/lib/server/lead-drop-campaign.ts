@@ -28,7 +28,9 @@ const text = (value: unknown, max: number) => String(value ?? '').replace(/\s+/g
 
 const emailSchema = z.object({ subject: z.string().trim().min(1, 'Escribe un asunto.').max(200), body: z.string().trim().min(1, 'Escribe el correo.').max(4000) }).strict();
 export const dropEmailsSchema = z.object({ draft: emailSchema, followUps: z.array(emailSchema).max(6) }).strict();
-export const dropFeedbackSchema = z.object({ useful: z.boolean(), reason: z.string().trim().max(160).nullable().optional() }).strict();
+/** `wish`: what the person would like to get, in their words (16 Nov 2026); sent alone it is added to the answer already given. */
+export const dropFeedbackSchema = z.object({ useful: z.boolean(), reason: z.string().trim().max(160).nullable().optional(),
+  wish: z.string().trim().max(300).nullable().optional() }).strict();
 
 async function itemOf(client: Client, scope: DropScope, dropId: string, leadId: string) {
   const drop = await readDrop(client, scope, dropId);
@@ -67,7 +69,10 @@ export async function saveDropFeedback(client: Client, scope: DropScope, dropId:
   if (!feedback.success) throw new LeadDropsError('Solicitud no válida.', 400);
   const { drop } = await itemOf(client, scope, dropId, leadId);
   const items = await writeItem(client, dropId, drop.items, leadId, entry => ({
-    ...entry, feedback: { useful: feedback.data.useful, reason: text(feedback.data.reason, 160) || null, at: now.toISOString() },
+    ...entry, feedback: { useful: feedback.data.useful, reason: text(feedback.data.reason, 160) || null,
+      // A wish stays until another replaces it: saying «me sirve» again does not erase what the person asked for.
+      ...(feedback.data.wish !== undefined ? (text(feedback.data.wish, 300) ? { wish: text(feedback.data.wish, 300) } : {}) : entry.feedback?.wish ? { wish: entry.feedback.wish } : {}),
+      at: now.toISOString() },
   }));
   return { items };
 }

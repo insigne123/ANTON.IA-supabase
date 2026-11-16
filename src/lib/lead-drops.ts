@@ -125,8 +125,14 @@ export type DropItem = {
   // Since 12 Nov 2026, for teams with more than one contact a day (the finder, server/lead-drop-finder.ts).
   /** «explore»: a role next to the customer's, offered to learn whether it works; the rest are the customer's own roles. */
   track?: 'explore';
+  /**
+   * «Puede derivarte» (16 Nov 2026, the owner: «leads que podrían referirlos con la persona indicada, involucrados en el área que
+   * buscan»): someone who works in the area but does not decide the purchase. Their email asks for the way in, it does not sell.
+   */
+  role?: 'refer';
   /** What the person said of this contact, with their reason: the finder learns from it. */
-  feedback?: { useful: boolean; reason?: string | null; at: string };
+  /** `wish`: what the person would like to get instead, in their words (16 Nov 2026): the finder reads the last ones of each person. */
+  feedback?: { useful: boolean; reason?: string | null; wish?: string | null; at: string };
   /** The short research of the contact, read from the web before writing to it (server/lead-drop-research.ts). */
   brief?: DropBrief;
   /** The person changed the emails by hand: what goes out is theirs. */
@@ -434,7 +440,9 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
 }
 
 /** What the finder makes of a candidate for one person: how its title relates to the customer's roles, and a score from 0 to 100. */
-export type DropScore = { titleClass: 'exact' | 'similar' | 'related'; score: number };
+export type DropScore = { titleClass: 'exact' | 'similar' | 'related'; score: number;
+  /** Someone of the area who does not decide but can say who does, or introduce the person: offered in the slots that are not the customer's own roles. */
+  role?: 'refer' };
 /** How many of a drop are roles next to the customer's («explore»): none in a drop of one or two, about three in ten of a larger one. */
 export const exploreSlots = (size: number) => (size >= 3 ? Math.max(1, Math.round(size * 0.3)) : 0);
 
@@ -456,11 +464,13 @@ export function pickRankedDrops(candidates: DropCandidate[], people: string[], k
       .map(item => ({ item, score: deps.scoreOf(person, item) }))
       .filter((entry): entry is { item: DropCandidate; score: DropScore } => Boolean(entry.score))
       .sort((a, b) => b.score.score - a.score.score || a.item.leadId.localeCompare(b.item.leadId));
-    return [person, { core: scored.filter(entry => entry.score.titleClass !== 'related'), explore: scored.filter(entry => entry.score.titleClass === 'related') }];
+    const deciding = scored.filter(entry => entry.score.role !== 'refer');
+    return [person, { core: deciding.filter(entry => entry.score.titleClass !== 'related'), explore: deciding.filter(entry => entry.score.titleClass === 'related'),
+      refer: scored.filter(entry => entry.score.role === 'refer') }];
   }));
   const companyOf = (item: DropCandidate) => fold(item.domain || item.company || item.leadId);
   const taken = new Set<string>(), usedCompanies = new Set<string>();
-  const out = new Map<string, Array<DropCandidate & { track?: 'explore' }>>(people.map(person => [person, []]));
+  const out = new Map<string, Array<DropCandidate & { track?: 'explore'; role?: 'refer' }>>(people.map(person => [person, []]));
   const exploring = exploreSlots(size);
   for (const strict of [true, false]) {
     for (let round = 0; round < size; round++) {
@@ -470,13 +480,14 @@ export function pickRankedDrops(candidates: DropCandidate[], people: string[], k
         const companies = new Set(mine.map(companyOf));
         const free = (entry: { item: DropCandidate }) => !taken.has(entry.item.leadId) && !companies.has(companyOf(entry.item))
           && (!strict || !usedCompanies.has(companyOf(entry.item)));
-        const { core, explore } = lists.get(person)!;
-        // The last slots explore; a list that ran out is filled from the other one.
-        const wanted = round >= size - exploring ? [explore, core] : [core, explore];
-        const pick = wanted[0].find(free) ?? wanted[1].find(free);
+        const { core, explore, refer } = lists.get(person)!;
+        // The last slots are for who can refer the person to whoever decides and, without any, for roles next to the customer's; a
+        // list that ran out is filled from the next one.
+        const wanted = round >= size - exploring ? [refer, explore, core] : [core, explore, refer];
+        const pick = wanted[0].find(free) ?? wanted[1].find(free) ?? wanted[2].find(free);
         if (!pick) continue;
         taken.add(pick.item.leadId); usedCompanies.add(companyOf(pick.item));
-        mine.push(pick.score.titleClass === 'related' ? { ...pick.item, track: 'explore' } : pick.item);
+        mine.push(pick.score.role === 'refer' ? { ...pick.item, role: 'refer' } : pick.score.titleClass === 'related' ? { ...pick.item, track: 'explore' } : pick.item);
       }
     }
   }
@@ -503,13 +514,18 @@ export function tidyCompany(name: string | null | undefined) {
  * repeating the role the screen shows beside it. With the fit (dropFit), only the industry and the place that do match: a
  * company in «sector público» for a customer in retail is not a reason (it said so until 3 Nov 2026, next to a table that said «No calza»).
  */
-export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city' | 'track'>, criteria: DropCriteria, fit?: DropFit[]) {
+export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city' | 'track' | 'role'>, criteria: DropCriteria, fit?: DropFit[]) {
   const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo'
     : criteria.source === 'empresa' ? 'el cliente ideal de tu empresa' : 'los contactos que guarda tu equipo';
   const fits = (criterion: DropFit['criterion']) => {
     const entry = fit?.find(candidate => candidate.criterion === criterion);
     return !entry || entry.match === 'yes' || entry.match === 'partial';
   };
+  // Someone of the area who does not decide: said as what they are for, so nobody takes a junior role for a mistake.
+  if (item.role === 'refer') {
+    const where = [item.industry && fits('Rubro') ? `en tu rubro objetivo (${item.industry.toLowerCase()})` : null, item.city && fits('Lugar') ? `en ${item.city}` : null].filter(Boolean).join(', ');
+    return `Trabaja en el área que buscas${where ? `, ${where}` : ''}: no decide la compra, pero puede decirte quién la ve o presentarte.`;
+  }
   // A role next to the customer's (the finder's exploration): said as what it is, so nobody takes it for a mistake.
   if (item.track === 'explore') {
     const where = [item.industry && fits('Rubro') ? `en tu rubro objetivo (${item.industry.toLowerCase()})` : null, item.city && fits('Lugar') ? `en ${item.city}` : null].filter(Boolean).join(', ');
@@ -746,7 +762,7 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
     ...(bulk ? ['', `${bulk.title}. ${bulk.lead}`, ...[bulk.all, bulk.phones, bulk.app].filter((entry): entry is { label: string; href: string } => Boolean(entry)).map(entry => `${entry.label}: ${entry.href}`)] : []),
     ...cards.flatMap(({ item, why, news, opener, campaign, href, action }) => [
       '',
-      `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.track === 'explore' ? ' (para explorar)' : ''}`,
+      `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.role === 'refer' ? ' (puede derivarte)' : item.track === 'explore' ? ' (para explorar)' : ''}`,
       `Por qué: ${why}`,
       ...(news ? [`Ahora: ${news}`] : []),
       ...(opener ? [`Cómo abrir: ${opener}`] : []),
@@ -762,7 +778,7 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   // click away, on its page and in the PDF; the text version keeps them for the clients that show no HTML.
   const card = ({ item, why, newsNow, campaign, steps, href, action }: typeof cards[number]) => `<div style="margin:0 0 12px;padding:16px;border:1px solid #e5e7eb;border-radius:14px;background-color:#ffffff">`
     + emailPerson({ initials: escape(dropInitials(item)), tint: dropTint(item.leadId, EMAIL_AVATAR_TINTS), name: escape(dropName(item)),
-      role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: item.track === 'explore' ? 'para explorar' : null })
+      role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: item.role === 'refer' ? 'puede derivarte' : item.track === 'explore' ? 'para explorar' : null })
     + (newsNow ? emailCallout({ label: 'Ahora', body: escape(newsNow.text), foot: newsNow.source ? escape(newsNow.source) : null }) : '')
     + `<p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(why)}</p>`
     + (campaign ? `<p style="margin:10px 0 0;padding:10px 0 0;border-top:1px solid #f3f4f6;font-size:13px;line-height:19px;color:#6b7280">`

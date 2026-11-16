@@ -21,6 +21,11 @@ export type ProfileFormValues = {
   targetIndustries: string;
   targetCompanySize: string;
   targetLocations: string;
+  /**
+   * «En tus palabras» (16 Nov 2026, the owner: «que él cuente más o menos qué es lo que hacen o qué quiere ofrecer y qué leads busca,
+   * para que con esa info no solo adaptemos los leads recomendados sino también toda la app»): free text beside the lists above.
+   */
+  targetNotes: string;
 };
 
 export const PROFILE_SUGGESTION_FIELDS = [
@@ -82,7 +87,12 @@ const EMPTY_PROFILE: ProfileFormValues = {
   targetIndustries: '',
   targetCompanySize: '',
   targetLocations: '',
+  targetNotes: '',
 };
+
+/** «En tus palabras» as it is kept and read: one text, without the line ends of another system, at most TARGET_NOTES_MAX characters. */
+export const TARGET_NOTES_MAX = 1200;
+export const profileTargetNotes = (value: unknown) => typeof value === 'string' ? value.replace(/\r\n?/g, '\n').trim().slice(0, TARGET_NOTES_MAX) : '';
 
 /** Fields added after the first profile: written only when they have content or already existed, so a profile that never
  * used them round-trips byte for byte (Cowork compares the stored JSON to name what changed). */
@@ -204,6 +214,7 @@ export function mapProfileToForm(profile?: ProfileLike | null): ProfileFormValue
     targetIndustries: joinComma(commaItems(extended.targetIndustries)),
     targetCompanySize: companySize(extended.targetCompanySize),
     targetLocations: joinComma(commaItems(extended.targetLocations)),
+    targetNotes: profileTargetNotes(extended.targetNotes),
   };
 }
 
@@ -231,6 +242,8 @@ export function buildProfileUpdate(form: ProfileFormValues, currentProfile?: Pro
   }
   const size = companySize(form.targetCompanySize);
   keep('targetCompanySize', size, !size);
+  const notes = profileTargetNotes(form.targetNotes);
+  keep('targetNotes', notes, !notes);
 
   return {
     full_name: form.name.trim(),

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { PROFILE_COMPANY_SIZES } from '@/lib/profile/profile-mappings';
+import { PROFILE_COMPANY_SIZES, TARGET_NOTES_MAX } from '@/lib/profile/profile-mappings';
 import type { CompanyProfileField, CompanyProfileFields } from '@/lib/profile/company-profile';
 
 export const FIELD_CLASS = 'rounded-xl bg-background/70';
@@ -135,6 +135,13 @@ export function CompanySections({ values, onChange, onWebsiteBlur, websiteError,
           <Input id="targetLocations" value={values.targetLocations} onChange={change} aria-describedby="targetLocations-help" placeholder="Ej. Chile, Perú" className={`h-11 ${FIELD_CLASS}`} />
         </Field>
       </div>
+      {/* 16 Nov 2026, the owner: the lists above say who; this says it as the person would, and the whole app reads it. */}
+      <Field id="targetNotes" label="En tus palabras" optional
+        hint={company ? 'Qué ofrece el equipo y a quién quiere llegar, como se lo contarías a alguien nuevo. Con esto elegimos los contactos recomendados, escribimos los correos y orientamos a Cowork.'
+          : 'Qué ofreces y a quién quieres llegar, como se lo contarías a alguien nuevo. Con esto elegimos tus contactos recomendados, escribimos tus correos y orientamos a Cowork.'}>
+        <Textarea id="targetNotes" value={values.targetNotes} onChange={change} aria-describedby="targetNotes-help" maxLength={TARGET_NOTES_MAX}
+          placeholder="Ej. Vendemos brigadas y planes de emergencia a faenas mineras. Me sirven jefaturas de prevención y de operaciones de mineras medianas; no proveedores ni consultoras." className={TEXTAREA_CLASS} />
+      </Field>
       {icpExtra}
     </Section>
   </>;

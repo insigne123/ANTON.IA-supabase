@@ -168,3 +168,16 @@ test('the new profile fields round-trip, and a profile that never used them is w
   assert.equal(full.percent, 100);
   assert.equal(full.canDraft, true);
 });
+
+test('«En tus palabras» is kept as the person wrote it, and a profile that never used it is stored as before', () => {
+  // 16 Nov 2026, the owner: «que él cuente más o menos qué es lo que hacen o qué quiere ofrecer y qué leads busca».
+  const form = { ...createEmptyProfileForm(), name: 'Ana Rojas', targetNotes: '  Vendo brigadas a faenas medianas.\r\nNo me sirven proveedores.  ' };
+  const update = buildProfileUpdate(form, null);
+  assert.equal((update.signatures.profile_extended as Record<string, unknown>).targetNotes, 'Vendo brigadas a faenas medianas.\nNo me sirven proveedores.');
+  assert.equal(mapProfileToForm({ full_name: 'Ana Rojas', signatures: update.signatures } as never).targetNotes, 'Vendo brigadas a faenas medianas.\nNo me sirven proveedores.');
+  // Never written while empty, so what Cowork compares to name a change does not move; emptied, it is kept as empty.
+  assert.ok(!('targetNotes' in (buildProfileUpdate(createEmptyProfileForm(), null).signatures.profile_extended as Record<string, unknown>)));
+  const emptied = buildProfileUpdate({ ...form, targetNotes: '' }, { signatures: update.signatures } as never);
+  assert.equal((emptied.signatures.profile_extended as Record<string, unknown>).targetNotes, '');
+  assert.equal(mapProfileToForm({ signatures: { profile_extended: { targetNotes: 'x'.repeat(5000) } } } as never).targetNotes.length, 1200);
+});

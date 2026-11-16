@@ -66,7 +66,8 @@ const SIX = [
   contact(1, 'Rodrigo Sa***o', 'Gerente HSE', 'Minera Aurora'),
   contact(2, 'Paula Reyes', 'Superintendenta de Seguridad', 'Cobres del Loa', { savedLeadId: ENRICHED, keptLeadId: 'kept-2' }),
   contact(3, 'Marcela Di***z', 'Jefa de Prevención de Riesgos', 'Energía Atacama', { industry: 'Energía' }),
-  contact(4, 'Tomás Ib***a', 'Jefe de Emergencias', 'Forestal Los Robles', { industry: 'Forestal', city: 'Concepción', brief: undefined }),
+  contact(4, 'Tomás Ib***a', 'Jefe de Emergencias', 'Forestal Los Robles', { industry: 'Forestal', city: 'Concepción', brief: undefined, role: 'refer',
+    why: 'Trabaja en el área que buscas, en tu rubro objetivo (forestal), en Concepción: no decide la compra, pero puede decirte quién la ve o presentarte.' }),
   contact(5, 'Ignacio Mu***z', 'Jefe de Mantención de Planta', 'Celulosa Biobío', { track: 'explore', industry: 'Celulosa', city: 'Concepción',
     why: 'Su cargo es vecino a los que buscas, en tu rubro objetivo (celulosa), en Concepción: te lo proponemos para probar si también te sirve.',
     fit: [{ criterion: 'Cargo', theirs: 'Jefe de Mantención de Planta', wanted: 'Gerente HSE, Jefe de Prevención de Riesgos y 3 más', match: 'partial' }] }),
@@ -315,6 +316,38 @@ const menuRealSteps = [
     c.check('sin pasar por «Hoy»', new URL(c.page.url()).pathname === inAppPath);
   } },
 ];
+// «A medida» (16 Nov 2026): who can refer the person is said as such, and after rating a contact they can say, in their words, what
+// they would like to get; «Perfil» has the same in their own words for the whole app.
+const tailorSteps = [
+  { say: 'Abro mis contactos: uno viene marcado como alguien que puede derivarme', do: async c => {
+    await answerSix(c.page); await c.go(inAppPath); await c.see('6 contactos nuevos');
+    await c.clickOn(c.page.getByRole('navigation', { name: 'Tus contactos' }).getByRole('button', { name: /Tomás I\./ }));
+    await c.see('Puede derivarte');
+    c.check('dice para qué sirve ese contacto', await c.has('no decide la compra, pero puede decirte quién la ve o presentarte'));
+  } },
+  { say: 'Digo que no me sirve, y con mis palabras qué me gustaría recibir', do: async c => {
+    await c.clickOn(card(c, 'Tomás I.').getByRole('button', { name: 'No me sirve' }));
+    await c.clickOn(card(c, 'Tomás I.').getByRole('button', { name: 'El cargo no decide' }));
+    await c.see('Dijiste que no te sirve');
+    await c.clickOn(card(c, 'Tomás I.').getByRole('button', { name: 'Decir qué te gustaría recibir' }));
+    await c.page.getByLabel('¿Qué te gustaría que te apareciera?').fill('Jefaturas de operaciones de forestales grandes, no brigadistas');
+    c.check('el campo dice para qué se usa', await c.has('Lo leemos al elegir tus próximos contactos.'));
+    c.check('nada se sale de la pantalla', await fits(c));
+  } },
+  { say: 'Lo guardo', do: async c => {
+    await c.clickOn(card(c, 'Tomás I.').getByRole('button', { name: 'Guardar', exact: true }));
+    await c.see('Pediste: «Jefaturas de operaciones de forestales grandes, no brigadistas»');
+    c.check('puedo cambiarlo después', await card(c, 'Tomás I.').getByRole('button', { name: 'Cambiar lo que pediste' }).count() === 1);
+  } },
+  { say: 'En «Perfil» cuento con mis palabras qué ofrezco y a quién busco', do: async c => {
+    await c.go('/profile'); await c.see('En tus palabras');
+    const field = c.page.locator('#targetNotes');
+    await field.scrollIntoViewIfNeeded();
+    await field.fill('Vendo brigadas y planes de emergencia. Me sirven jefaturas de prevención y de operaciones de faenas medianas; no proveedores ni consultoras.');
+    c.check('dice que con esto se eligen los contactos y se escriben los correos', await c.has('elegimos tus contactos recomendados'));
+    c.check('nada se sale de la pantalla', await fits(c));
+  } },
+];
 const mailBulkSteps = [
   { say: 'En el correo toco «Con sus teléfonos»: quedo en la app con esa opción elegida, y todavía no gasta nada', do: async c => {
     await answerSix(c.page); await c.go(`/contactos/${TOKEN}?todos=telefono`); await c.see('Enriquecer los 5 de una vez');
@@ -434,6 +467,9 @@ export default () => [
     goal: 'Ver mis contactos como parte de la app: bajo «Hoy» en el menú, y con Cowork y el resto a un clic.', steps: menuSteps },
   { id: 'contactos-menu-real', persona: 'owner', title: 'Volver a «Tus contactos de hoy» desde otra sección',
     goal: 'Salir a otra sección y volver a mis contactos desde el menú, con los datos de la app y nada respondido por el recorrido.', steps: menuRealSteps },
+  { id: 'contactos-a-medida', persona: 'owner', title: 'Recomendados a medida: quién puede derivarme y qué me gustaría recibir',
+    goal: 'Ver quién decide y quién puede derivarme, decir con mis palabras qué quiero recibir y contarlo en mi perfil.', steps: tailorSteps },
+  { id: 'contactos-a-medida-telefono', persona: 'owner', viewport: 'phone', title: 'Recomendados a medida (móvil)', goal: 'Lo mismo desde el teléfono.', steps: tailorSteps },
   { id: 'contactos-del-correo-todos', persona: 'owner', title: 'Enriquecer a todos desde el correo, dentro de la app',
     goal: 'Tocar «Con sus teléfonos» en el correo de la mañana, confirmar en la app cuánto se usa y ver qué se encontró.', steps: mailBulkSteps },
   { id: 'contactos-del-correo-todos-telefono', persona: 'owner', viewport: 'phone', title: 'Enriquecer a todos desde el correo (móvil)',

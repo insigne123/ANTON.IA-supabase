@@ -5,6 +5,7 @@ import { memoryValueText, profileOffer, profileOfferDetails, readOrganizationOff
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { commaItems } from '@/lib/profile/profile-lists';
+import { profileTargetNotes } from '@/lib/profile/profile-mappings';
 import { bookingProvider, readBookingPreference } from '@/lib/booking-link';
 import { withCompanyProfile } from '@/lib/profile/company-profile';
 import { readCompanyFields } from '@/lib/server/company-profile';
@@ -54,7 +55,7 @@ export async function loadCoworkMemories(client: SupabaseClient, scope: Scope, n
  * to the organization settings. Services, proof points and sector appear only when present, so a
  * turn without them reads exactly as before. Never the email signatures kept in the same column.
  */
-export function coworkUserContextFromProfile(profile: Record<string, unknown> | null, organizationOffer: string | null = null): CoworkUserContext {
+export function coworkUserContextFromProfile(profile: Record<string, unknown> | null, organizationOffer: string | null = null, teamNotes: string | null = null): CoworkUserContext {
   const own = profileOffer(profile);
   const details = profileOfferDetails(profile);
   const services = items(details.services, 6, 120);
@@ -69,6 +70,9 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
     ? (signatures as Record<string, unknown>).profile_extended : null;
   const locations = items(commaItems(extended && typeof extended === 'object' && !Array.isArray(extended)
     ? (extended as Record<string, unknown>).targetLocations : null), 5, 80);
+  // «En tus palabras» (16 Nov 2026): what the person, and their team, say they offer and look for, as they wrote it.
+  const notes = profileTargetNotes(extended && typeof extended === 'object' && !Array.isArray(extended) ? (extended as Record<string, unknown>).targetNotes : null);
+  const team = profileTargetNotes(teamNotes);
   // «Tu agenda» (booking-link.ts): what a reply to a meeting request offers; «never» keeps it out of Cowork too.
   const booking = readBookingPreference(signatures);
   return {
@@ -79,8 +83,9 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
     ...(proofPoints.length ? { proofPoints } : {}),
     ...(sector ? { sector } : {}),
     ...(differentiators.length ? { differentiators } : {}),
-    ...(roles.length || industries.length || locations.length
-      ? { idealCustomer: { ...(roles.length ? { roles } : {}), ...(industries.length ? { industries } : {}), ...(locations.length ? { locations } : {}) } }
+    ...(roles.length || industries.length || locations.length || notes || team
+      ? { idealCustomer: { ...(roles.length ? { roles } : {}), ...(industries.length ? { industries } : {}), ...(locations.length ? { locations } : {}),
+        ...(notes ? { inOwnWords: notes } : {}), ...(team && team !== notes ? { teamInOwnWords: team } : {}) } }
       : {}),
     ...(booking && booking.mode !== 'never' && booking.url ? { booking: { url: booking.url, provider: bookingProvider(booking.url), mode: booking.mode } } : {}),
   };
@@ -108,7 +113,7 @@ export async function loadCoworkUserContext(client: SupabaseClient, scope: Scope
       options.mailbox === false ? null : readMailSenderPreference(client, userId).catch(() => null),
     ]);
     return {
-      ...coworkUserContextFromProfile(profile, organization),
+      ...coworkUserContextFromProfile(profile, organization, company?.targetNotes ?? null),
       // Only when there are some, so a turn without memories reads exactly as before (plan 2, V7).
       ...(memories.length ? { memories } : {}),
       // The mailbox that sends, so Cowork never asks Gmail or Outlook (Plan 5, PR-6b).

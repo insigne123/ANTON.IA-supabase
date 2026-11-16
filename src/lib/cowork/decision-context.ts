@@ -94,7 +94,9 @@ export type CoworkUserContext = {
   sector?: string;
   /** Why choose them and who they sell to, from «Perfil», only when filled in. */
   differentiators?: string[];
-  idealCustomer?: { roles?: string[]; industries?: string[]; locations?: string[] };
+  idealCustomer?: { roles?: string[]; industries?: string[]; locations?: string[];
+    /** «En tus palabras» in «Perfil»: what the person offers and who they look for, as they wrote it; `teamInOwnWords`, the company's. */
+    inOwnWords?: string; teamInOwnWords?: string };
   /** The mailbox that sends (Gmail or Outlook): the one chosen in Conexiones or the only connected one; absent when two
    * are connected and none was chosen, or none is (Plan 5, PR-6b). */
   sender?: string;
@@ -105,7 +107,7 @@ export type CoworkUserContext = {
   booking?: { url: string; provider: string | null; mode: 'auto' | 'on_request' };
 };
 
-const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer y services, sin consultar profile.get ni app.context para eso. proofPoints son resultados que el usuario cargó en su perfil: se pueden citar tal cual. differentiators son razones para elegirlo que el usuario declaró: se pueden usar tal cual. idealCustomer (cargos, industrias y lugares) dice a quién le vende: úsalo para proponer búsquedas y elegir contactos. sender es la cuenta que envía sus correos (Gmail u Outlook): úsala como provider sin preguntar. Un valor null o ausente no se inventa.';
+const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer y services, sin consultar profile.get ni app.context para eso. proofPoints son resultados que el usuario cargó en su perfil: se pueden citar tal cual. differentiators son razones para elegirlo que el usuario declaró: se pueden usar tal cual. idealCustomer (cargos, industrias y lugares) dice a quién le vende: úsalo para proponer búsquedas y elegir contactos. idealCustomer.inOwnWords es lo que el usuario escribió con sus palabras sobre qué ofrece y a quién busca (teamInOwnWords, lo que escribió su equipo): cuando existe manda sobre las listas, tanto para elegir a quién buscar y a quién no como para decidir de qué hablarle a cada contacto. sender es la cuenta que envía sus correos (Gmail u Outlook): úsala como provider sin preguntar. Un valor null o ausente no se inventa.';
 const BOOKING_INSTRUCTION = ' booking es la agenda del usuario (su dirección para tomar un horario, en Firmas y estilo → «Tu agenda»): cuando el usuario pide responder a alguien que pidió una reunión, una llamada o una demo, o que respondió con interés, la respuesta la ofrece con la dirección tal cual (con mode on_request, solo si el usuario la pide), en vez de proponer horarios que no conoces. Nunca en un primer correo en frío.';
 const NO_BOOKING_INSTRUCTION = ' El usuario no guardó su agenda: si pide responder a alguien que pidió una reunión, deja que la otra persona proponga el horario («¿Qué día te acomoda?») y, una vez en la conversación, ofrécele guardar su agenda en Firmas y estilo → «Tu agenda» (Calendly, Google Calendar u otra) para incluirla la próxima vez.';
 const MEMORIES_INSTRUCTION = ' memories son cosas que el usuario aprobó que ANTON.IA recuerde (preferencias, su negocio, cómo quiere que le escriban): síguelas al redactar y decidir, salvo que el pedido de ahora diga otra cosa, y no las presentes como datos consultados en este trabajo.';

@@ -22,6 +22,15 @@ type Generate = (options: { schema: z.ZodTypeAny; systemPrompt: string; prompt: 
 export type FinderSeller = { company?: string | null; offer?: string | null; services?: string[] | null; differentiators?: string[] | null; sector?: string | null };
 /** What the team did with earlier contacts: «Jefe de Prevención de Riesgos · Minería», each at most once, the most repeated first. */
 export type FinderLessons = { liked: string[]; disliked: string[] };
+/**
+ * What one person says they look for, in their words (16 Nov 2026, the owner: «que estas búsquedas se adapten al usuario»): «En tus
+ * palabras» of their «Perfil», the company's, and what they asked for when saying whether a contact was useful, newest first.
+ */
+export type FinderPreferences = { notes?: string | null; teamNotes?: string | null; wishes?: string[] };
+/** A note of «deriva» from here up makes someone who does not decide worth offering as the way in. */
+const REFERS_FROM = 6;
+/** A note of «cargo» from here up is someone who decides: offered as such, whatever they could refer. */
+const DECIDES_FROM = 7;
 
 const SCORE_CHUNK = 40;
 const MAX_SCORED = 120;
@@ -49,12 +58,13 @@ export async function finderSearchTerms(criteria: DropCriteria, generate?: Gener
 }
 
 const scoreSchema = z.object({
-  people: z.array(z.object({ i: z.number().int().min(0), cargo: z.number().int().min(0).max(10), empresa: z.number().int().min(0).max(10) }).strict()).max(SCORE_CHUNK),
+  people: z.array(z.object({ i: z.number().int().min(0), cargo: z.number().int().min(0).max(10), empresa: z.number().int().min(0).max(10),
+    deriva: z.number().int().min(0).max(10).optional() }).strict()).max(SCORE_CHUNK),
 }).strict();
 
 const SCORE_PROMPT = [
   'Ayudas a un vendedor B2B a elegir a quién contactar. Recibes lo que vende (vendedor), a quién le vende (cliente_ideal), lo que su equipo hizo con',
-  'contactos anteriores (aprendizaje) y una lista de personas encontradas. Por cada persona entrega dos notas de 0 a 10. Usa toda la escala: la lista',
+  'contactos anteriores (aprendizaje) y una lista de personas encontradas. Por cada persona entrega tres notas de 0 a 10. Usa toda la escala: la lista',
   'se ordena con tus notas, así que dos personas distintas rara vez merecen la misma.',
   '',
   '«cargo»: cuánto decide esa persona la compra de lo que vende el vendedor.',
@@ -67,6 +77,13 @@ const SCORE_PROMPT = [
   'área («Financieras», «TI», «Comercial», «Marketing», «Personas», una marca o una línea de producto ajena) cambia la función, y entonces la nota es',
   'la de esa función. Un cargo de staff sin relación con lo que se vende es 0 o 1 aunque la empresa sea ideal.',
   '',
+  '«deriva»: cuánto sirve esa persona como puerta de entrada cuando no es ella quien decide: trabaja en el área del problema, lo vive en su día a',
+  'día, conoce a quien decide y suele ser más fácil de alcanzar que una gerencia.',
+  '- 8 a 10: trabaja directamente en esa área, uno o dos niveles bajo quien decide (jefatura de turno, coordinación, especialista, ingeniero o analista del área).',
+  '- 5 a 7: área vecina o cargo de apoyo que trata a diario con quien decide.',
+  '- 0 a 4: no tiene cómo derivar: otra área, practicante o un cargo sin relación.',
+  'Es independiente de «cargo»: una jefatura que decide puede tener las dos notas altas.',
+  '',
   '«empresa»: cuánto necesitaría esa empresa lo que vende, por su rubro, su tamaño, su lugar y su descripción. Si solo viene el nombre, usa lo que',
   'sabes de esa empresa.',
   '- 9 o 10: es del rubro objetivo y tiene la operación que necesita lo que se vende.',
@@ -76,7 +93,9 @@ const SCORE_PROMPT = [
   '- 0: no calza: otro país, competidor del vendedor o un rubro sin relación.',
   '',
   'Usa el aprendizaje: sube a quienes se parecen a los que le sirvieron y baja a quienes se parecen a los que descartó, sobre todo por el motivo que',
-  'dio. Sin explicaciones. Responde JSON conforme al contrato, con el número (i) de cada persona.',
+  'dio. Si viene «en_sus_palabras» (lo que el vendedor y su equipo escribieron sobre qué ofrecen y a quién buscan) o «pedidos» (lo que el vendedor',
+  'dijo que le gustaría recibir, lo más reciente primero), mandan sobre las listas de cargos y rubros: sube a quienes calzan con lo que describen o',
+  'piden, y deja en 2 o menos a quienes dicen que no les sirven (un tipo de empresa, un nivel de cargo, un rubro). Sin explicaciones. Responde JSON conforme al contrato, con el número (i) de cada persona.',
 ].join('\n');
 
 /**
@@ -86,7 +105,7 @@ const SCORE_PROMPT = [
  * Operaciones Financieras» for a team that sells to the plant's operations). With the model failing, the class and the middle of the scale.
  */
 export async function scoreDropCandidates(input: {
-  candidates: DropCandidate[]; criteria: DropCriteria; seller: FinderSeller | null; lessons?: FinderLessons; generate?: Generate;
+  candidates: DropCandidate[]; criteria: DropCriteria; seller: FinderSeller | null; lessons?: FinderLessons; preferences?: FinderPreferences; generate?: Generate;
 }): Promise<Map<string, DropScore>> {
   const scores = new Map<string, DropScore>();
   const asked = input.criteria.titles.filter(Boolean);
@@ -113,6 +132,10 @@ export async function scoreDropCandidates(input: {
     } : null,
     cliente_ideal: { cargos: input.criteria.titles, rubros: input.criteria.industries, lugares: input.criteria.locations, tamanos: input.criteria.sizes },
     aprendizaje: { le_sirvieron: (input.lessons?.liked || []).slice(0, 10), descarto: (input.lessons?.disliked || []).slice(0, 10) },
+    ...(clip(input.preferences?.notes, 1200) || clip(input.preferences?.teamNotes, 1200) ? { en_sus_palabras: {
+      ...(clip(input.preferences?.notes, 1200) ? { vendedor: clip(input.preferences?.notes, 1200) } : {}),
+      ...(clip(input.preferences?.teamNotes, 1200) ? { equipo: clip(input.preferences?.teamNotes, 1200) } : {}) } } : {}),
+    ...((input.preferences?.wishes || []).length ? { pedidos: (input.preferences?.wishes || []).slice(0, 5).map(wish => clip(wish, 300)) } : {}),
   };
   await Promise.all(chunks.map(async chunk => {
     const answer = await generate({
@@ -126,9 +149,13 @@ export async function scoreDropCandidates(input: {
     for (const entry of parsed?.success ? parsed.data.people : []) {
       const target = chunk[entry.i];
       if (!target) continue;
+      // Who does not decide but works in the area is the way in: offered as such, scored by how well they could refer.
+      const refers = entry.cargo < DECIDES_FROM && (entry.deriva ?? 0) >= REFERS_FROM;
       // Someone the model says has little to do (the role or the company) is not offered, whatever the class of the title.
-      if (entry.cargo <= TOO_LOW || entry.empresa <= TOO_LOW) { scores.delete(target.candidate.leadId); continue; }
-      scores.set(target.candidate.leadId, { titleClass: target.titleClass, score: scoreOf(target.titleClass, entry.cargo, entry.empresa, target.candidate.hasPhone) });
+      if ((entry.cargo <= TOO_LOW && !refers) || entry.empresa <= TOO_LOW) { scores.delete(target.candidate.leadId); continue; }
+      scores.set(target.candidate.leadId, refers
+        ? { titleClass: target.titleClass, score: scoreOf(target.titleClass, entry.deriva ?? 0, entry.empresa, target.candidate.hasPhone), role: 'refer' }
+        : { titleClass: target.titleClass, score: scoreOf(target.titleClass, entry.cargo, entry.empresa, target.candidate.hasPhone) });
     }
   }));
   return scores;
@@ -138,6 +165,20 @@ export async function scoreDropCandidates(input: {
  * What the team did with the contacts of earlier drops, as examples for the score: the ones a person saved or marked useful, and
  * the ones marked not useful (with the reason they gave). Each as «cargo · rubro», the most repeated first.
  */
+/** What one person asked for when saying whether a contact was useful (feedback.wish), newest first, each once: at most five. */
+export function dropWishes(rows: Array<{ user_id?: unknown; items?: unknown }>, userId: string): string[] {
+  const found: Array<{ wish: string; at: string }> = [];
+  for (const row of rows) {
+    if (String(row.user_id || '') !== userId) continue;
+    for (const item of (Array.isArray(row.items) ? row.items : []) as DropItem[]) {
+      const wish = clip(item?.feedback?.wish, 300);
+      if (wish) found.push({ wish, at: String(item.feedback?.at || '') });
+    }
+  }
+  const seen = new Set<string>();
+  return found.sort((a, b) => b.at.localeCompare(a.at)).map(entry => entry.wish).filter(wish => !seen.has(wish.toLowerCase()) && Boolean(seen.add(wish.toLowerCase()))).slice(0, 5);
+}
+
 export function dropLessons(rows: Array<{ items?: unknown }>): FinderLessons {
   const liked = new Map<string, number>(), disliked = new Map<string, number>();
   for (const row of rows) {
