@@ -5,6 +5,8 @@ import { requireHomeAuth } from '@/lib/server/home-auth';
 import { LeadDropsError, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
 import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, mailDropCampaign, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
 import { findDropPhone, prepareDropCall, withDropPhones } from '@/lib/server/lead-drop-call';
+import { enrichDropLead } from '@/lib/server/lead-drop-mail';
+import { mailDropCalls, mailDropReady, prepareDropCalls } from '@/lib/server/lead-drop-ready';
 import { requestAuthErrorResponse } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
@@ -43,6 +45,10 @@ const BodySchema = z.discriminatedUnion('action', [
   // «Para llamar» (src/lib/server/lead-drop-call.ts): the mobile of a contact already in «Por escribir», and the script of its call.
   z.object({ action: z.literal('phone'), leadId: LeadId }).strict(),
   z.object({ action: z.literal('script'), leadId: LeadId, fresh: z.boolean().optional() }).strict(),
+  // «Enriquecer los N» (16 Nov 2026): each contact looked up by the server, one after another, as from the email's page; `ready`
+  // sends the one answer for all of them to the person's inbox, in the conversation of the morning email.
+  z.object({ action: z.literal('enrich'), leadId: LeadId, phone: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('ready'), phone: z.boolean().optional() }).strict(),
 ]);
 
 /**
@@ -71,6 +77,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (body.data.action === 'script') {
       return NextResponse.json(await shown(await prepareDropCall(admin, scope, id.data, body.data.leadId, { fresh: body.data.fresh })), { headers: noStore });
+    }
+    if (body.data.action === 'enrich') {
+      const lookup = await enrichDropLead(admin, scope, id.data, body.data.leadId, { phone: body.data.phone });
+      return NextResponse.json(await shown({ lookup, items: (await readDrop(admin, scope, id.data)).items }), { headers: noStore });
+    }
+    if (body.data.action === 'ready') {
+      // Within the request: the page waits for this answer to say the email is on its way. With their mobiles asked, the script
+      // of each call is written now, so the email that brings each number has it (src/lib/server/lead-drop-ready.ts).
+      if (body.data.phone) await prepareDropCalls(admin, scope, id.data).catch(() => null);
+      const mailed = await mailDropReady(admin, scope, id.data, { phones: Boolean(body.data.phone) }).catch(() => ({ sent: false as const }));
+      if (body.data.phone) await mailDropCalls(admin, scope, id.data).catch(() => null);
+      return NextResponse.json(await shown({ mailed: mailed.sent, items: (await readDrop(admin, scope, id.data)).items }), { headers: noStore });
     }
     if (body.data.action === 'link') {
       const leadId = body.data.leadId;

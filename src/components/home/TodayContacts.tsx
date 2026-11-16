@@ -15,11 +15,14 @@ export type DropBoard = { id: string; date: string; items: DropItem[] };
 
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-/** The contacts' own page, outside the app, told not to send the person back here (src/app/contactos/[token]). */
-const ownPage = (token: string, leadId: string | null) => `/contactos/${encodeURIComponent(token)}?aqui=1${leadId ? `&c=${encodeURIComponent(leadId)}` : ''}`;
+/** Those contacts' own page inside the app (LeadDropFlow); a link that names none leaves the person in «Hoy». */
+const ownPage = (token: string, leadId: string | null) => {
+  const dropId = dropIdInLink(token);
+  return dropId ? `${dropHref(dropId)}${leadId ? `?c=${encodeURIComponent(leadId)}` : ''}` : '/dashboard';
+};
 /**
  * What an email's link asks of «Hoy» (`?contactos=<link>&c=<contact>`): the contact to bring into view when its contacts are the ones
- * on screen, or `away`, their own page, when they are not (an earlier email, another team, nothing to show). Null without a link.
+ * on screen, or `away`, their own page in the app, when they are not (an earlier email, nothing to show). Null without a link.
  */
 export function linkedArrival(search: string, boardId: string | null): { focus: string | null; away: string | null } | null {
   const params = new URLSearchParams(search);
@@ -37,8 +40,8 @@ export function linkedArrival(search: string, boardId: string | null): { focus: 
  * its line under the next step (LeadDropBanner).
  *
  * A button of the morning email opens here when the person is signed in (`?contactos=<the email's link>&c=<contact>`): that contact
- * comes into view, open. When the link is of other contacts than the ones on screen (an earlier email, another team), their own
- * page opens them, as the email meant.
+ * comes into view, open. When the link is of other contacts than the ones on screen (an earlier email), their own page in the app
+ * opens them (since 16 Nov 2026: never a page outside the app).
  */
 export function TodayContacts({ board, ready }: { board: DropBoard | null | undefined; /** «Hoy» already knows whether there are contacts. */ ready: boolean }) {
   // The address is read once, as the page opened: it is cleared below, and the contact it named stays open.

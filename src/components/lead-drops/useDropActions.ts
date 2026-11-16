@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { dropName, shortDay, type DropItem } from '@/lib/lead-drops';
+import { dropName, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
 import { DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { completeSavedContacts, completionSummary } from '@/lib/leads-workspace/complete-contacts';
 import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
@@ -9,6 +9,7 @@ import { supabaseService } from '@/lib/supabase-service';
 import type { DropContactActions } from './DropContactCard';
 
 export type DropNotice = { ok: boolean; text: string } | null;
+export type DropBulkRun = { done: number; total: number; mailing: boolean };
 
 /**
  * What a signed-in person does with the contacts of a «Contacto del día», wherever the app shows them: its own page in «Buscar
@@ -25,11 +26,13 @@ export function useDropActions({ dropId, call, setItems, single }: {
   /** The contact whose email is being looked up. */
   const [enriching, setEnriching] = useState<string | null>(null);
   const [notice, setNotice] = useState<DropNotice>(null);
+  /** «Enriquecer los N» on its way: how many are done, and whether the answer to the inbox is being sent. */
+  const [bulk, setBulk] = useState<DropBulkRun | null>(null);
 
   const post = async (body: Record<string, unknown>) => {
     const response = await call(`/api/lead-drops/${encodeURIComponent(dropId || '')}`, { method: 'POST', body: JSON.stringify(body) });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.error || 'No pudimos guardarlo.');
+    if (!response.ok) throw Object.assign(new Error(payload?.error || 'No pudimos guardarlo.'), { status: response.status });
     return payload;
   };
   // «Enriquecer y guardar»: kept as a saved contact, its email looked up as any saved contact's (1 credit), then tied to this drop.
@@ -67,6 +70,56 @@ export function useDropActions({ dropId, call, setItems, single }: {
           : body.saved === 1 ? 'Quedó en «Por escribir», con su correo.' : `Quedaron ${body.saved} en «Por escribir», con su correo.` });
     } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
     finally { setSaving(false); }
+  };
+  /**
+   * «Enriquecer los N» (16 Nov 2026, the owner: the email's buttons lead into the app, so the app does what its page did): each
+   * contact without an email is looked up by the server, one after another, and the answer goes to the person's inbox in the
+   * conversation of the morning email (src/lib/server/lead-drop-ready.ts). A refusal the next one would get too (no credits, today's
+   * quota) stops it there; anything else skips that contact and goes on.
+   */
+  const enrichAll = async (items: DropItem[], withPhone: boolean) => {
+    if (!dropId || saving || enriching || bulk) return;
+    const targets = items.filter(item => needsLookup(item));
+    if (targets.length < 2) return;
+    setNotice(null);
+    let found = 0, consumed = 0, failed = 0, stopped: string | null = null;
+    const missed: DropItem[] = [];
+    for (let index = 0; index < targets.length; index++) {
+      const item = targets[index];
+      setBulk({ done: index, total: targets.length, mailing: false });
+      setEnriching(item.leadId);
+      try {
+        const payload = await post({ action: 'enrich', leadId: item.leadId, ...(withPhone ? { phone: true } : {}) });
+        if (Array.isArray(payload?.items)) setItems(payload.items);
+        const lookup = payload?.lookup as { outcome: 'found' | 'pending' | 'not_found'; consumed: number } | undefined;
+        consumed += Number(lookup?.consumed) || 0;
+        if (lookup?.outcome === 'found') found++;
+        else if (lookup?.outcome === 'not_found') missed.push(item);
+      } catch (e) {
+        if ([404, 409, 410, 429].includes(Number((e as { status?: number })?.status))) { stopped = e instanceof Error ? e.message : null; break; }
+        failed++;
+      }
+    }
+    setEnriching(null);
+    let mailed = false;
+    if (found) {
+      setBulk({ done: targets.length, total: targets.length, mailing: true });
+      const payload = await post({ action: 'ready', ...(withPhone ? { phone: true } : {}) }).catch(() => null);
+      if (Array.isArray(payload?.items)) setItems(payload.items);
+      mailed = Boolean(payload?.mailed);
+    }
+    setBulk(null);
+    const stop = (item: DropItem) => { const name = dropName(item); return name.endsWith('.') ? name : `${name}.`; };
+    const parts = [
+      found ? `Listo: encontramos el correo de ${found === targets.length ? `tus ${found} contactos` : `${found} de ${targets.length}`} y quedaron en «Por escribir».` : stopped ? null : 'No encontramos el correo de ninguno.',
+      found ? (mailed ? 'También te los enviamos a tu correo, con cada campaña lista para aprobar.' : 'Revisa aquí cada campaña y apruébala.') : null,
+      found && withPhone ? 'Sus teléfonos llegan en unos minutos: los verás en «Llamada», con el guion de cada llamada.' : null,
+      missed.length ? `Sin correo: ${missed.slice(0, -1).map(item => `${dropName(item)}, `).join('')}${stop(missed[missed.length - 1])}` : null,
+      failed ? `${failed === 1 ? 'Una búsqueda no respondió' : `${failed} búsquedas no respondieron`}: inténtalas de nuevo desde su ficha.` : null,
+      stopped ? `Nos detuvimos antes de terminar. ${stopped}` : null,
+      enrichmentCreditReceipt(consumed) || null,
+    ].filter(Boolean);
+    setNotice({ ok: found > 0, text: parts.join(' ') });
   };
   // What a card does with its contact (DropContactCard): each answers with the drop's contacts as they are now.
   const act = async (body: Record<string, unknown>, failed: string) => {
@@ -110,5 +163,5 @@ export function useDropActions({ dropId, call, setItems, single }: {
     },
     feedback: async (item, useful, reason) => { await act({ action: 'feedback', leadId: item.leadId, feedback: { useful, reason: reason ?? null } }, 'No pudimos guardar tu opinión. Inténtalo de nuevo.'); },
   };
-  return { saving, enriching, notice, setNotice, enrich, save, actions };
+  return { saving, enriching, notice, setNotice, enrich, enrichAll, bulk, save, actions };
 }

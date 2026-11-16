@@ -87,6 +87,13 @@ async function answerSix(page) {
       change(() => ({ campaign }));
       return route.fulfill(answered({ items, campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-16', '2026-11-20', '2026-11-24'] }));
     }
+    // «Enriquecer los N»: every lookup found except the last one, which has no email anywhere; then the one answer to the inbox.
+    if (body.action === 'enrich') {
+      if (body.leadId === id(6)) { change(() => ({ lookup: { attempt: 1, at: '2026-11-13T12:00:00.000Z', missed: true } })); return route.fulfill(answered({ items, lookup: { outcome: 'not_found', email: null, consumed: 0 } })); }
+      change(() => ({ savedLeadId: `00000000-0000-4000-8000-0000000030${body.leadId.slice(-2)}`, keptLeadId: `kept-${body.leadId.slice(-2)}`, ...(body.phone ? { phone: { state: 'pending' } } : {}) }));
+      return route.fulfill(answered({ items, lookup: { outcome: 'found', email: null, consumed: body.phone ? 8 : 1 } }));
+    }
+    if (body.action === 'ready') return route.fulfill(answered({ items, mailed: true }));
     if (body.action === 'edit') change(item => ({ edited: true, draft: body.emails.draft, followUps: item.followUps.map((step, index) => ({ day: step.day, ...body.emails.followUps[index] })) }));
     if (body.action === 'feedback') change(() => ({ feedback: { ...body.feedback, at: '2026-11-13T12:00:00.000Z' } }));
     return route.fulfill(answered({ items }));
@@ -211,10 +218,10 @@ const callSteps = [
   } },
 ];
 
-// ─── Used from the inbox, without signing in (13 Nov 2026): the page a button of the email opens ──────────────────────────────────
-// The real page, read by the server from the bench's database with a link signed as the app signs it (src/lib/server/lead-drop-link.ts,
-// with the bench's INTERNAL_API_SECRET). Nobody is signed in. What the person says of a contact and the emails they change are kept
-// for real; the lookup (a provider and a credit) and the campaign (a mailbox) are answered here with what the server answers.
+// ─── From the inbox into the app (16 Nov 2026): every button of the emails opens the contacts inside the app ──────────────────────
+// The address of the email (`/contactos/<link>`) shows nothing of its own: it checks the link, signed as the app signs it
+// (src/lib/server/lead-drop-link.ts, with the bench's INTERNAL_API_SECRET), and sends the person to those contacts in their account.
+// Signed in, they land on them; without a session the app asks to sign in and then opens them.
 const mailToken = (dropId, days = 14) => {
   const key = createHmac('sha256', 'audit-unused').update('lead-drop-link:v1').digest();
   const body = Buffer.alloc(20);
@@ -223,180 +230,69 @@ const mailToken = (dropId, days = 14) => {
   return Buffer.concat([body, createHmac('sha256', key).update(body).digest().subarray(0, 16)]).toString('base64url');
 };
 const TOKEN = mailToken(DROP);
-const MAIL_PASS = [{ pattern: /^\/api\/lead-drops\/link$/, actions: ['read', 'feedback', 'edit'] }];
-/** The owner's drop with six contacts, the second already with its email; `mailbox: false` leaves the person with none connected. */
-const seedMail = ({ mailbox }) => (tables, ctx) => {
-  tables.lead_drops = tables.lead_drops.map(row => row.id === DROP ? { ...row, drop_date: '2026-11-13', items: structuredClone(SIX) } : row);
-  tables.enriched_leads = [...(tables.enriched_leads || []), { id: ENRICHED, organization_id: ctx.ORG, user_id: ctx.OWNER, email: 'paula.reyes@cobresdelloa.example', full_name: 'Paula Reyes' }];
-  if (!mailbox) tables.provider_tokens = (tables.provider_tokens || []).filter(row => row.user_id !== ctx.OWNER);
-};
-/** The lookup and the campaign, answered over what the server really has: the page keeps what the last answer said. */
-async function answerMail(c) {
-  const over = {}, emails = {};
-  const view = async () => {
-    const real = await (await c.page.request.post(`${new URL(c.page.url()).origin}/api/lead-drops/link`, { data: { token: TOKEN, action: 'read' } })).json();
-    return { ...real.view, emails: { ...real.view.emails, ...emails }, items: real.view.items.map(item => ({ ...item, ...(over[item.leadId] || {}) })) };
-  };
-  await c.page.route('**/api/lead-drops/link', async route => {
-    const body = route.request().postDataJSON() || {};
-    const patch = change => { over[body.leadId] = { ...(over[body.leadId] || {}), ...change }; };
-    if (body.action === 'enrich') {
-      patch({ name: 'Rodrigo Salcedo', keptLeadId: 'kept-1', savedLeadId: '00000000-0000-4000-8000-000000002002' });
-      emails[body.leadId] = 'rodrigo.salcedo@mineraaurora.example';
-      return route.fulfill(answered({ view: await view(), lookup: { outcome: 'found', email: emails[body.leadId], consumed: 1 } }));
-    }
-    if (body.action === 'approve') {
-      patch({ campaign: { id: '00000000-0000-4000-8000-00000000c001', provider: 'google', approvedAt: '2026-11-13T12:00:00.000Z' } });
-      return route.fulfill(answered({ view: await view(), provider: 'Gmail', schedule: ['2026-11-13', '2026-11-16', '2026-11-20', '2026-11-24'] }));
-    }
-    if (body.action === 'pause' || body.action === 'resume') {
-      patch({ campaign: { ...over[body.leadId].campaign, pausedAt: body.action === 'pause' ? '2026-11-13T13:00:00.000Z' : null } });
-      return route.fulfill(answered({ view: await view() }));
-    }
-    // What the person says and writes goes to the server; its answer carries what was answered here too.
-    const response = await route.fetch();
-    const payload = await response.json();
-    if (payload.view) payload.view = await view();
-    return route.fulfill({ status: response.status(), contentType: 'application/json', body: JSON.stringify(payload) });
-  });
-}
+const inAppPath = `/search/contactos/${DROP}`;
+const arrived = async c => { await c.page.waitForURL(url => url.pathname === inAppPath && !url.search); };
 const mailSteps = [
-  { say: 'Toco el botón del correo de la mañana, sin haber iniciado sesión', do: async c => {
-    await c.go(`/contactos/${TOKEN}?c=${id(2)}`);
-    await c.see('Tus contactos de hoy');
-    await answerMail(c);
-    c.check('se queda en la página del correo, no pide iniciar sesión', new URL(c.page.url()).pathname === `/contactos/${TOKEN}`);
-    c.check('la lista trae a los seis, y se trabaja uno a la vez', await railCount(c) === 6 && await c.page.locator('article').count() === 1);
-    c.check('arriba dice cómo va el día, en números', await c.page.locator('dl').first().locator('> div').allTextContents().then(values => values.join(' · ') === 'Por enriquecer5 · Por aprobar1 · En marcha0'));
-    // Since 16 Nov 2026 the page sits in the app's frame (DropAppFrame): nobody has to sign in, but the rest of the app is a click away.
-    const menu = c.page.getByRole('navigation', { name: 'Secciones de ANTON.IA' });
-    c.check('va dentro del marco de la app: su menú lleva al resto de ANTON.IA', await menu.getByRole('link', { name: 'Buscar prospectos' }).count() === 1
-      && await menu.getByRole('link', { name: 'Por escribir' }).count() === 1 && await menu.getByRole('link', { name: 'Campañas' }).count() === 1);
-    c.check('«Hoy» del menú trae estos mismos contactos', await menu.getByRole('link', { name: 'Hoy', exact: true }).getAttribute('href') === `/dashboard?contactos=${TOKEN}`);
-    c.check('ofrece entrar a ANTON.IA', await c.page.getByRole('link', { name: 'Entrar a ANTON.IA' }).count() === 1);
+  { say: 'Con la sesión iniciada, toco el botón de un contacto en el correo de la mañana', do: async c => {
+    await answerSix(c.page); await c.go(`/contactos/${TOKEN}?c=${id(2)}`); await c.see('6 contactos nuevos');
+    await arrived(c);
+    c.check('quedo dentro de la app, en mis contactos', new URL(c.page.url()).pathname === inAppPath);
+    c.check('el enlace no queda en la dirección', new URL(c.page.url()).search === '');
+    c.check('es la app de verdad: su menú con el resto de ANTON.IA', await c.page.getByRole('link', { name: 'Campañas' }).count() >= 1 || await c.page.getByRole('button', { name: /menú/i }).count() >= 1);
+    c.check('el contacto del botón llega abierto, en su campaña', await card(c, 'Paula Reyes').getByText('Primer correo ·').count() === 1);
+    c.check('la lista trae a los seis', await railCount(c) === 6);
+    c.check('abrir no enriquece a nadie', await railCount(c, 'Por enriquecer') === 5);
     c.check('nada se sale de la pantalla', await fits(c));
-    c.check('el contacto del botón llega con su campaña a la vista', await card(c, 'Paula Reyes').getByText('Primer correo ·').count() === 1);
-    c.check('quien ya tiene correo lo muestra', await card(c, 'Paula Reyes').getByText('paula.reyes@cobresdelloa.example').count() === 1);
-    c.check('abrir la página no enriquece a nadie', await railCount(c, 'Por enriquecer') === 5);
   } },
-  { say: 'Elijo al primero en la lista y lo enriquezco con un toque', do: async c => {
-    await pick(c, 'Rodrigo S.');
-    c.check('llega en «Por qué», con cómo abrir primero', await card(c, 'Rodrigo S.').getByText('Cómo abrir').count() === 1);
-    await c.clickOn(card(c, 'Rodrigo S.').getByRole('button', { name: 'Enriquecer · 1 crédito' }));
-    await c.see('Listo: encontramos el correo de Rodrigo Salcedo.');
-    c.check('dice el crédito que usó', await c.has('Se descontó 1 crédito de ANTON.IA.'));
-    c.check('la tarjeta muestra su correo', await card(c, 'Rodrigo Salcedo').getByText('rodrigo.salcedo@mineraaurora.example').count() === 1);
-    c.check('la lista lo pasa a «Campaña por aprobar»', await railCount(c, 'Campaña por aprobar') === 2);
+  { say: 'Apruebo su campaña ahí mismo', do: async c => {
+    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }));
+    await c.see('Campaña de Paula Reyes programada desde Gmail');
+    c.check('la lista lo dice', await railCount(c, 'Campaña en curso') === 1);
   } },
-  { say: 'Para aprobar me pide conectar mi correo, ahí mismo y una sola vez', do: async c => {
-    await pick(c, 'Paula Reyes');
-    const paula = card(c, 'Paula Reyes');
-    c.check('ofrece Gmail y Outlook con el enlace del correo', await paula.locator(`a[href="/api/auth/connect/google?enlace=${TOKEN}"]`).count() === 1
-      && await paula.locator(`a[href="/api/auth/connect/azure?enlace=${TOKEN}"]`).count() === 1);
-    c.check('dice que es una sola vez', await paula.getByText('Es una sola vez: los correos salen desde tu propia casilla.').count() === 1);
-    c.check('sin correo conectado no ofrece aprobar', await c.page.getByRole('button', { name: 'Aprobar y programar' }).count() === 0);
+];
+const mailBulkSteps = [
+  { say: 'En el correo toco «Con sus teléfonos»: quedo en la app con esa opción elegida, y todavía no gasta nada', do: async c => {
+    await answerSix(c.page); await c.go(`/contactos/${TOKEN}?todos=telefono`); await c.see('Enriquecer los 5 de una vez');
+    await arrived(c);
+    c.check('quedo dentro de la app', new URL(c.page.url()).pathname === inAppPath);
+    c.check('viene elegido «Correo y teléfono»', await c.page.getByRole('radio', { name: /Correo y teléfono · 40 créditos/ }).isChecked());
+    c.check('ofrece también solo el correo, con su costo', await c.page.getByRole('radio', { name: /Solo correo · 5 créditos/ }).count() === 1);
+    c.check('llegar no enriquece a nadie', await railCount(c, 'Por enriquecer') === 5);
+    c.check('nada se sale de la pantalla', await fits(c));
   } },
-  { say: 'Digo que uno no me sirve, y por qué', do: async c => {
-    await pick(c, 'Ignacio M.');
-    await c.clickOn(card(c, 'Ignacio M.').getByRole('button', { name: 'No me sirve' }));
-    await c.clickOn(card(c, 'Ignacio M.').getByRole('button', { name: 'El cargo no decide' }));
-    await c.see('Dijiste que no te sirve (el cargo no decide): lo tendremos en cuenta.');
-    const kept = c.table('lead_drops').find(row => row.id === DROP).items.find(item => item.leadId === id(5)).feedback;
-    c.check('quedó guardado para el buscador', kept?.useful === false && kept?.reason === 'El cargo no decide');
+  { say: 'Confirmo: busca a cada uno y me dice qué encontró', do: async c => {
+    await c.clickOn(c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }));
+    await c.see('Listo: encontramos el correo de 4 de 5');
+    c.check('dice que quedaron en «Por escribir»', await c.has('quedaron en «Por escribir»'));
+    c.check('dice que también van a mi correo', await c.has('También te los enviamos a tu correo, con cada campaña lista para aprobar.'));
+    c.check('dice que los teléfonos llegan con su guion', await c.has('Sus teléfonos llegan en unos minutos'));
+    c.check('nombra al que quedó sin correo', await c.has('Sin correo:'));
+    c.check('la lista muestra cuatro campañas más por aprobar', await railCount(c, 'Campaña por aprobar') === 5);
+    c.check('queda uno por enriquecer: ya no ofrece «de una vez»', !(await c.has('de una vez')));
   } },
-  { say: 'Desde el menú voy a «Buscar prospectos»: me pide entrar y recuerda adónde iba', do: async c => {
-    await c.clickOn(c.page.getByRole('navigation', { name: 'Secciones de ANTON.IA' }).getByRole('link', { name: 'Buscar prospectos' }));
+];
+const mailCallSteps = [
+  { say: 'En el correo «Para llamar» toco «Llamar»: la app abre a esa persona en su llamada', do: async c => {
+    await answerCalls(c.page); await c.go(`/contactos/${TOKEN}?c=${id(2)}&llamar=1`); await c.see('Guion de llamada');
+    c.check('quedo dentro de la app', new URL(c.page.url()).pathname === inAppPath);
+    c.check('abre la sección «Llamada»', await tabOf(c, 'Llamada').getAttribute('aria-selected') === 'true');
+    c.check('con su número y cómo llamar', await card(c, 'Paula Reyes').getByRole('link', { name: /Llamar a Paula Reyes/ }).count() === 1);
+    c.check('nada se sale de la pantalla', await fits(c));
+  } },
+];
+const mailVisitorSteps = [
+  { say: 'Sin la sesión iniciada, toco el botón del correo', do: async c => {
+    await c.go(`/contactos/${TOKEN}?c=${id(2)}`);
     await c.page.waitForURL(/\/login/);
     const url = new URL(c.page.url());
-    c.check('pide iniciar sesión', url.pathname === '/login');
-    c.check('después de entrar abre «Buscar prospectos»', url.searchParams.get('next') === '/search');
+    c.check('la app pide iniciar sesión', url.pathname === '/login');
+    c.check('y recuerda adónde iba: mis contactos, con ese contacto', url.searchParams.get('next') === `${inAppPath}?c=${id(2)}`);
+    c.check('no muestra ningún contacto sin sesión', await c.page.locator('article').count() === 0);
   } },
   { say: 'Un enlace que no es mío no abre nada', do: async c => {
     await c.go(`/contactos/${'A'.repeat(48)}`);
     await c.see('Este enlace no está disponible');
     c.check('no muestra ningún contacto', await c.page.locator('article').count() === 0);
-  } },
-];
-/** «Enriquecer los N»: every lookup found except one, and the answer to the inbox said as sent; the view is the server's own plus what was answered here. */
-async function answerMailBulk(c) {
-  const over = {}, emails = {}, asked = [];
-  const view = async () => {
-    const real = await (await c.page.request.post(`${new URL(c.page.url()).origin}/api/lead-drops/link`, { data: { token: TOKEN, action: 'read' } })).json();
-    return { ...real.view, emails: { ...real.view.emails, ...emails }, items: real.view.items.map(item => ({ ...item, ...(over[item.leadId] || {}) })) };
-  };
-  await c.page.route('**/api/lead-drops/link', async route => {
-    const body = route.request().postDataJSON() || {};
-    if (body.action === 'enrich') {
-      asked.push(body);
-      // One of them has no email anywhere: it is said, and the rest go on.
-      if (body.leadId === id(6)) { over[body.leadId] = { lookup: { attempt: 1, at: '2026-11-13T12:00:00.000Z', missed: true } }; return route.fulfill(answered({ view: await view(), lookup: { outcome: 'not_found', email: null, consumed: 0 } })); }
-      over[body.leadId] = { savedLeadId: `00000000-0000-4000-8000-0000000030${body.leadId.slice(-2)}`, keptLeadId: `kept-${body.leadId.slice(-2)}`, ...(body.phone ? { phone: { state: 'pending' }, phoneLookup: { attempt: 0, at: '2026-11-13T12:00:00.000Z' } } : {}) };
-      emails[body.leadId] = `contacto${body.leadId.slice(-1)}@empresa.example`;
-      return route.fulfill(answered({ view: await view(), lookup: { outcome: 'found', email: emails[body.leadId], consumed: body.phone ? 8 : 1 } }));
-    }
-    if (body.action === 'ready') { asked.push(body); return route.fulfill(answered({ view: await view(), mailed: true })); }
-    const response = await route.fetch();
-    const payload = await response.json();
-    if (payload.view) payload.view = await view();
-    return route.fulfill({ status: response.status(), contentType: 'application/json', body: JSON.stringify(payload) });
-  });
-  return asked;
-}
-let bulkAsked = [];
-const mailBulkSteps = [
-  { say: 'En el correo de la mañana toco «Con sus teléfonos»: la página abre con esa opción elegida y todavía no gasta nada', do: async c => {
-    await c.go(`/contactos/${TOKEN}?todos=telefono`);
-    await c.see('Enriquecer los 5 de una vez');
-    bulkAsked = await answerMailBulk(c);
-    c.check('se queda en la página del correo, sin pedir sesión', new URL(c.page.url()).pathname === `/contactos/${TOKEN}`);
-    c.check('viene elegido «Correo y teléfono»', await c.page.getByRole('radio', { name: /Correo y teléfono · 40 créditos/ }).isChecked());
-    c.check('ofrece también solo el correo, con su costo', await c.page.getByRole('radio', { name: /Solo correo · 5 créditos/ }).count() === 1);
-    c.check('el botón dice cuánto usa', await c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }).count() === 1);
-    c.check('llegar no enriquece a nadie', bulkAsked.length === 0 && await railCount(c, 'Por enriquecer') === 5);
-    c.check('nada se sale de la pantalla', await fits(c));
-  } },
-  { say: 'Cambio a solo correo y vuelvo a correo y teléfono: el botón sigue el costo', do: async c => {
-    await c.page.getByRole('radio', { name: /Solo correo/ }).check();
-    c.check('solo correo: 5 créditos', await c.page.getByRole('button', { name: 'Enriquecer los 5 · 5 créditos' }).count() === 1);
-    await c.page.getByRole('radio', { name: /Correo y teléfono/ }).check();
-    c.check('correo y teléfono: 40 créditos', await c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }).count() === 1);
-  } },
-  { say: 'Confirmo: busca a cada uno y me avisa que la respuesta va a mi correo', do: async c => {
-    await c.clickOn(c.page.getByRole('button', { name: 'Enriquecer los 5 · 40 créditos' }));
-    await c.see('Listo: encontramos el correo de 4 de 5.');
-    c.check('dice que lo envió a mi correo, en la conversación de la mañana', await c.has('Te lo enviamos a tu correo, en la conversación de esta mañana, con cada campaña lista para aprobar.'));
-    c.check('dice que los teléfonos llegan con su guion', await c.has('Sus teléfonos llegan en unos minutos, con el guion de cada llamada.'));
-    c.check('nombra al que quedó sin correo', await c.has('Sin correo:'));
-    c.check('dice los créditos que usó', await c.has('Se descontaron 32 créditos de ANTON.IA.'));
-    c.check('buscó a los cinco, con teléfono, y pidió la respuesta una vez', bulkAsked.filter(entry => entry.action === 'enrich' && entry.phone && entry.quiet).length === 5 && bulkAsked.filter(entry => entry.action === 'ready' && entry.phone).length === 1);
-    c.check('queda uno por enriquecer: ya no ofrece «de una vez»', !(await c.has('de una vez')));
-  } },
-];
-const mailApproveSteps = [
-  { say: 'Abro «Revisar y aprobar» desde el correo de la campaña lista', do: async c => {
-    await c.go(`/contactos/${TOKEN}?c=${id(2)}`);
-    await c.see('Tus contactos de hoy');
-    await answerMail(c);
-    c.check('dice desde qué correo saldrá', await card(c, 'Paula Reyes').getByText('Sale desde tu Gmail. Se detiene si responde.').count() === 1);
-  } },
-  { say: 'Cambio el asunto del primer correo y lo guardo', do: async c => {
-    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Editar los correos' }));
-    await card(c, 'Paula Reyes').getByLabel('Asunto').first().fill('Brigadas para los turnos de noche');
-    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Guardar cambios' }));
-    await c.see('Guardamos tus cambios en los correos de Paula Reyes.');
-    c.check('quedó guardado mi asunto', c.table('lead_drops').find(row => row.id === DROP).items.find(item => item.leadId === id(2)).draft.subject === 'Brigadas para los turnos de noche');
-  } },
-  { say: 'Apruebo y programo su campaña', do: async c => {
-    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Aprobar y programar' }));
-    await c.see('Campaña de Paula Reyes programada desde tu Gmail');
-    c.check('dice cuándo salen los seguimientos', await c.has('los seguimientos el lun 16 nov, el vie 20 nov y el mar 24 nov'));
-    c.check('la tarjeta queda con su campaña en curso', await card(c, 'Paula Reyes').getByText('Campaña en curso').count() === 1);
-  } },
-  { say: 'Me arrepiento y la detengo desde la misma tarjeta', do: async c => {
-    await c.clickOn(card(c, 'Paula Reyes').getByRole('button', { name: 'Detener la campaña' }));
-    await c.see('Detuvimos la campaña de Paula Reyes: no sale ningún correo más.');
-    c.check('la tarjeta dice que está detenida y ofrece reanudarla', await card(c, 'Paula Reyes').getByText('Campaña detenida').count() === 1
-      && await card(c, 'Paula Reyes').getByRole('button', { name: 'Reanudar la campaña' }).count() === 1);
   } },
 ];
 
@@ -436,46 +332,6 @@ const hoySteps = [
     c.check('la fila queda con su campaña en curso', await card(c, 'Paula Reyes').getByText('Campaña en curso').count() === 1);
   } },
 ];
-const hoyLinkSteps = [
-  { say: 'Con la sesión iniciada, toco el botón de un contacto en el correo', do: async c => {
-    await answerSix(c.page); await c.go(`/contactos/${TOKEN}?c=${id(3)}`); await c.see('6 contactos nuevos para ti');
-    c.check('me deja dentro de la app, en «Hoy»', new URL(c.page.url()).pathname === '/dashboard');
-    await c.page.waitForFunction(() => !window.location.search);
-    c.check('el enlace no queda en la dirección', new URL(c.page.url()).search === '');
-    c.check('el contacto del botón llega abierto, en su campaña', await card(c, 'Marcela D.').getByText('Primer correo ·').count() === 1);
-    c.check('los demás siguen como fila', await card(c, 'Rodrigo S.').getByRole('button', { name: /Ver por qué y su campaña/ }).count() === 1);
-  } },
-];
-
-// ─── «Llamar» of the email that brought a mobile (16 Nov 2026): the card opens on its call ──────────────────────────────────────
-// The page read for real: the second contact has its mobile in «Por escribir» and its script kept in the drop, as after «Con sus
-// teléfonos». Nobody is signed in, so the number's two ways are plain links.
-const seedMailCall = (tables, ctx) => {
-  seedMail({ mailbox: true })(tables, ctx);
-  tables.lead_drops = tables.lead_drops.map(row => row.id === DROP ? { ...row, items: row.items.map(item => item.leadId === id(2) ? { ...item, call: { script: CALL_SCRIPT, at: '2026-11-13T12:00:00.000Z' } } : item) } : row);
-  tables.enriched_leads = tables.enriched_leads.map(row => row.id === ENRICHED ? { ...row, primary_phone: '+56 9 8765 4321', phone_numbers: [{ sanitized_number: '+56987654321' }] } : row);
-};
-const mailCallSteps = [
-  { say: 'En el correo «Para llamar» toco «Abrir el guion completo»: la ficha abre en su llamada', do: async c => {
-    await c.go(`/contactos/${TOKEN}?c=${id(2)}`);
-    await c.see('Tus contactos de hoy');
-    await c.clickOn(tabOf(c, 'Llamada'));
-    await c.see('Guion de llamada');
-    const paula = card(c, 'Paula Reyes');
-    c.check('el número va grande, con «Llamar» y «WhatsApp» al lado', await paula.getByText('+56 9 8765 4321').count() === 1
-      && await paula.locator('a[href="tel:+56987654321"]').count() === 1 && await paula.locator('a[href^="https://wa.me/56987654321?text="]').count() === 1);
-    c.check('lo primero es qué decir al contestar', await paula.getByText('Al contestar').count() === 1);
-    c.check('puntos de interés y preguntas van lado a lado, cada punto por su tema', await paula.getByText('Fiscalización:', { exact: true }).count() === 1 && await paula.getByText('Preguntas').count() === 1);
-    c.check('cada objeción va con su respuesta', await paula.locator('dl dt').count() === 2);
-    c.check('cierra con el buzón de voz y el primer WhatsApp', await paula.getByText('Si no contesta').count() === 1 && await paula.getByText('Primer WhatsApp').count() === 1);
-    c.check('nada se sale de la pantalla', await fits(c));
-  } },
-  { say: 'Paso a su campaña sin perder la ficha', do: async c => {
-    await c.clickOn(tabOf(c, 'Campaña'));
-    await c.see('Primer correo');
-    c.check('el guion deja la pantalla: una sección a la vez', !(await c.has('Guion de llamada')));
-  } },
-];
 
 export default () => [
   { id: 'contacto-apollo', persona: 'owner', title: 'Contacto del día con Apollo: por qué, el correo y sus seguimientos',
@@ -504,25 +360,17 @@ export default () => [
     seed: seedHoy, steps: hoySteps },
   { id: 'contactos-en-hoy-telefono', persona: 'owner', viewport: 'phone', title: 'Mis contactos del día dentro de «Hoy» (móvil)',
     goal: 'Lo mismo en una pantalla angosta, sin desbordes.', seed: seedHoy, steps: hoySteps },
-  { id: 'contactos-del-correo-a-hoy', persona: 'owner', title: 'Del correo a «Hoy», con la sesión iniciada',
-    goal: 'Tocar el botón del correo y, como ya tengo la sesión iniciada, quedar dentro de la app con ese contacto abierto.',
-    seed: seedHoy, steps: hoyLinkSteps },
-  { id: 'contactos-desde-el-correo', persona: 'visitor', title: 'Mis contactos desde el correo, sin iniciar sesión',
-    goal: 'Tocar el botón del correo y, sin entrar a la app ni aprenderla, enriquecer a un contacto, ver qué falta para aprobar y decir cuál no me sirve.',
-    seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailSteps },
-  { id: 'contactos-desde-el-correo-telefono', persona: 'visitor', viewport: 'phone', title: 'Mis contactos desde el correo (móvil)',
-    goal: 'Lo mismo desde el teléfono, donde se lee el correo.', seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailSteps },
-  { id: 'contactos-desde-el-correo-todos', persona: 'visitor', title: 'Enriquecer a todos desde el correo, con sus teléfonos',
-    goal: 'Tocar «Con sus teléfonos» en el correo de la mañana, confirmar en la página cuánto se usa y saber que la respuesta me llega al correo.',
-    seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailBulkSteps },
-  { id: 'contactos-desde-el-correo-todos-telefono', persona: 'visitor', viewport: 'phone', title: 'Enriquecer a todos desde el correo (móvil)',
-    goal: 'Lo mismo desde el teléfono, donde se lee el correo.', seed: seedMail({ mailbox: false }), passWrites: MAIL_PASS, steps: mailBulkSteps },
-  { id: 'contactos-desde-el-correo-aprobar', persona: 'visitor', title: 'Aprobar, cambiar y detener una campaña desde el correo',
-    goal: 'Con mi correo ya conectado: cambiar un correo, aprobar la campaña y detenerla, todo desde la página del correo.',
-    seed: seedMail({ mailbox: true }), passWrites: MAIL_PASS, steps: mailApproveSteps },
-  { id: 'contactos-desde-el-correo-llamar', persona: 'visitor', title: 'El guion de la llamada, desde el correo',
-    goal: 'Abrir desde el correo la ficha de un contacto con su teléfono y leer el guion de un vistazo: qué decir, qué le importa, qué preguntar y qué responder.',
-    seed: seedMailCall, passWrites: MAIL_PASS, steps: mailCallSteps },
-  { id: 'contactos-desde-el-correo-llamar-telefono', persona: 'visitor', viewport: 'phone', title: 'El guion de la llamada, desde el correo (móvil)',
-    goal: 'Lo mismo desde el teléfono, que es desde donde se llama.', seed: seedMailCall, passWrites: MAIL_PASS, steps: mailCallSteps },
+  { id: 'contactos-del-correo-a-la-app', persona: 'owner', title: 'Del correo a mis contactos, dentro de la app',
+    goal: 'Tocar el botón de un contacto en el correo y quedar dentro de la app, en mi cuenta, con ese contacto abierto y el resto de ANTON.IA a un clic.',
+    steps: mailSteps },
+  { id: 'contactos-del-correo-a-la-app-telefono', persona: 'owner', viewport: 'phone', title: 'Del correo a mis contactos, dentro de la app (móvil)',
+    goal: 'Lo mismo desde el teléfono, donde se lee el correo.', steps: mailSteps },
+  { id: 'contactos-del-correo-todos', persona: 'owner', title: 'Enriquecer a todos desde el correo, dentro de la app',
+    goal: 'Tocar «Con sus teléfonos» en el correo de la mañana, confirmar en la app cuánto se usa y ver qué se encontró.', steps: mailBulkSteps },
+  { id: 'contactos-del-correo-todos-telefono', persona: 'owner', viewport: 'phone', title: 'Enriquecer a todos desde el correo (móvil)',
+    goal: 'Lo mismo desde el teléfono.', steps: mailBulkSteps },
+  { id: 'contactos-del-correo-llamar', persona: 'owner', title: 'Llamar desde el correo: la app abre el guion',
+    goal: 'Tocar «Llamar» en el correo que trae un teléfono y quedar en la app, en la llamada de esa persona.', steps: mailCallSteps },
+  { id: 'contactos-del-correo-sin-sesion', persona: 'visitor', title: 'El botón del correo, sin la sesión iniciada',
+    goal: 'Sin sesión, la app pide entrar y después abre mis contactos; un enlace ajeno no abre nada.', steps: mailVisitorSteps },
 ];

@@ -195,7 +195,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null
   return <main className={cn('mx-auto w-full px-4 py-6 sm:py-10', several ? 'max-w-6xl' : 'max-w-3xl')}>
     <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="space-y-1">
-        {/* The brand is the frame's (DropAppFrame): the page says only what it is. */}
+        {/* The page says only what it is. Since 16 Nov 2026 no button of the emails leads here: they open the app (src/app/contactos/[token]). */}
         <h1 className="font-headline text-2xl font-semibold tracking-tight sm:text-3xl">{several ? 'Tus contactos de hoy' : 'Tu contacto de hoy'}</h1>
         <p className="text-sm text-muted-foreground">{`Elegidos para ti el ${dayLabel(view.date)}.`}</p>
       </div>

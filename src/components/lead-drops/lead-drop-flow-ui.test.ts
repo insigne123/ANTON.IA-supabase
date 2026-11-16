@@ -48,6 +48,7 @@ parts['@/hooks/use-scroll-edge-fade'] = { useScrollEdgeFade: () => [() => {}, un
 parts['@/components/ui/segmented-tabs'] = await component('../ui/segmented-tabs.tsx', shared);
 parts['./drop-contact-parts'] = await component('./drop-contact-parts.tsx', shared);
 parts['./DropContactsWorkspace'] = await component('./DropContactsWorkspace.tsx', shared);
+parts['./DropBulkEnrich'] = await component('./DropBulkEnrich.tsx', shared);
 const callPanel = await component('./DropCallPanel.tsx', shared);
 const contactCard = await component('./DropContactCard.tsx', { ...shared, './DropCallPanel': callPanel });
 let home: any = null;
@@ -548,6 +549,68 @@ test('opened from the morning email on one contact: its email is looked up at on
   } finally { await close(plain); }
 });
 
+// Since 16 Nov 2026 every button of the emails lands here, inside the app (src/app/contactos/[token] only redirects): what the
+// email's own page did, the app does.
+test('«Enriquecer los N» of the morning email lands inside the app: the choice arrives made, the button confirms it, and the answer also goes to the inbox', async () => {
+  const items = [apolloItem(1), apolloItem(2), apolloItem(3, { name: 'Raúl Pinto' })];
+  const saved = new Set<string>();
+  const now = () => items.map(item => saved.has(item.leadId) ? { ...item, savedLeadId: `e-${item.leadId.slice(-2)}` } : item);
+  bodies.length = 0;
+  answers = [{ status: 200, body: { ...drop, items } }];
+  const page = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?todos=telefono' });
+  try {
+    await page.settle();
+    const document = page.dom.window.document;
+    assert.match(page.text(), /Enriquecer los 3 de una vez/);
+    assert.deepEqual(([...document.querySelectorAll('input[type="radio"]')] as HTMLInputElement[]).map(radio => radio.checked), [false, true], '«Con sus teléfonos» arrives chosen');
+    assert.equal(page.dom.window.location.search, '', 'coming back to this address does not ask again');
+    assert.equal(bodies.length, 0, 'arriving looks nothing up');
+    // Two are found, the third has no email anywhere; then the one answer for all of them.
+    saved.add(items[0].leadId); const first = now();
+    saved.add(items[1].leadId); const second = now();
+    answers = [{ status: 200, body: { lookup: { outcome: 'found', consumed: 8 }, items: first } }, { status: 200, body: { lookup: { outcome: 'found', consumed: 8 }, items: second } },
+      { status: 200, body: { lookup: { outcome: 'not_found', consumed: 0 }, items: second } }, { status: 200, body: { mailed: true, items: second } }];
+    await click(page, 'Enriquecer los 3 · 24 créditos');
+    for (let turn = 0; turn < 4; turn++) await page.settle();
+    assert.deepEqual(bodies.map(body => [body.action, body.leadId ?? null, body.phone ?? null]),
+      [['enrich', items[0].leadId, true], ['enrich', items[1].leadId, true], ['enrich', items[2].leadId, true], ['ready', null, true]]);
+    assert.match(page.text(), /Listo: encontramos el correo de 2 de 3 y quedaron en «Por escribir»\. También te los enviamos a tu correo, con cada campaña lista para aprobar\. Sus teléfonos llegan en unos minutos: los verás en «Llamada», con el guion de cada llamada\. Sin correo: Raúl Pinto\. Se descontó 16 crédito/);
+    // One left to look up: the band for several is gone, and the list says where each stands.
+    assert.doesNotMatch(page.text(), /de una vez/);
+    assert.deepEqual(railOf(page).map(entry => /Campaña por aprobar$/.test(entry.textContent || '')), [true, true, false]);
+  } finally { await close(page); }
+
+  // A refusal the next one would get too stops it there, and says why; nothing is sent to the inbox without a contact found.
+  bodies.length = 0;
+  answers = [{ status: 200, body: { ...drop, items } }];
+  const refused = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?todos=correo' });
+  try {
+    await refused.settle();
+    assert.deepEqual(([...refused.dom.window.document.querySelectorAll('input[type="radio"]')] as HTMLInputElement[]).map(radio => radio.checked), [true, false]);
+    answers = [{ status: 409, body: { error: 'Tu equipo no tiene créditos disponibles este mes.' } }];
+    await click(refused, 'Enriquecer los 3 · 3 créditos');
+    for (let turn = 0; turn < 3; turn++) await refused.settle();
+    assert.deepEqual(bodies.map(body => body.action), ['enrich']);
+    assert.match(refused.text(), /Nos detuvimos antes de terminar\. Tu equipo no tiene créditos disponibles este mes\./);
+  } finally { await close(refused); }
+});
+
+test('«Llamar» of the email that brought a mobile lands inside the app, on that contact\'s call', async () => {
+  const items = [apolloItem(1), apolloItem(2, { savedLeadId: 'e-2', name: 'Luisa Soto', phone: { state: 'found', number: '+56 9 8765 4321', more: 0 } })];
+  bodies.length = 0;
+  answers = [{ status: 200, body: { ...drop, items } }];
+  const page = await open('drop-1', { url: `https://app.test/search/contactos/drop-1?c=${items[1].leadId}&llamar=1` });
+  try {
+    await page.settle();
+    const document = page.dom.window.document;
+    assert.match(cardOf(page, 0).textContent || '', /^LSLuisa Soto/);
+    assert.equal(tabOf(document, 'Llamada').getAttribute('aria-selected'), 'true');
+    assert.match(document.querySelector('[data-contact-actions]')?.textContent || '', /Llamar · WhatsApp · \+56 9 8765 4321/);
+    assert.equal(page.dom.window.location.search, '');
+    assert.equal(bodies.length, 0, 'arriving asks the server for nothing');
+  } finally { await close(page); }
+});
+
 // «Tus contactos de hoy», the section of «Hoy» for a drop of several contacts, with the same doubles as the drop's own page.
 const todayContacts = await component('../home/TodayContacts.tsx', {
   ...shared,
@@ -651,9 +714,10 @@ test('a button of the morning email opens its contact inside «Hoy», and other 
   assert.deepEqual(linkedArrival(`?contactos=${token}`, BOARD), { focus: null, away: null });
   // An earlier email, another team's contacts, or nothing on screen: their own page, told not to send the person back.
   const other = '33333333-3333-4333-8333-333333333333';
-  assert.deepEqual(linkedArrival(`?contactos=${token}&c=${lead}`, other), { focus: null, away: `/contactos/${token}?aqui=1&c=${lead}` });
-  assert.deepEqual(linkedArrival(`?contactos=${token}`, null), { focus: null, away: `/contactos/${token}?aqui=1` });
-  assert.deepEqual(linkedArrival('?contactos=no-es-un-enlace', BOARD), { focus: null, away: '/contactos/no-es-un-enlace?aqui=1' });
+  assert.deepEqual(linkedArrival(`?contactos=${token}&c=${lead}`, other), { focus: null, away: `/search/contactos/${BOARD}?c=${lead}` });
+  assert.deepEqual(linkedArrival(`?contactos=${token}`, null), { focus: null, away: `/search/contactos/${BOARD}` });
+  // A link that names no contacts leaves the person in «Hoy», without it in the address.
+  assert.deepEqual(linkedArrival('?contactos=no-es-un-enlace', BOARD), { focus: null, away: '/dashboard' });
   assert.equal(leadDrops.dropIdInLink(token), BOARD);
   assert.equal(leadDrops.dropIdInLink('corto'), null);
 });
