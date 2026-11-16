@@ -82,6 +82,7 @@ const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
   './DropCallPanel': callPanel,
   './useDropActions': dropActions,
   '@/context/AuthContext': { useAuth: () => auth },
+  '@/lib/services/organization-service': { organizationService: { setCurrentOrganization: async (organizationId: string) => { switched.push(organizationId); auth = { ...auth, organizationId }; return true; } } },
   '@/components/page-header': { PageHeader: ({ title, description, back }: any) => React.createElement('header', null,
     back ? React.createElement('a', { href: back.href, 'data-back': '' }, back.label) : null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
   '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
@@ -124,6 +125,8 @@ test('«Hoy» for a team with several contacts a day: no email is promised befor
   assert.match(render({ drop: null, pull: 'today', plan: { size: 1, days: 3 } }), /Hoy te toca un contacto nuevo/);
 });
 
+/** The workspaces the page moved to (organizationService.setCurrentOrganization). */
+const switched: string[] = [];
 const drop = { id: 'drop-1', date: '2026-10-21', criteria: { titles: ['Gerente de Personas'], industries: ['Retail'], locations: ['Chile'], sizes: [], source: 'perfil' },
   items: [{ leadId: 'lf_1', name: 'Ana Pérez', title: 'Gerente de Personas', company: 'Ripley', domain: null, industry: 'Retail', size: null, city: 'Santiago',
     hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana' } }] };
@@ -247,6 +250,45 @@ test('an opened contact is the contact: its own title, the subject named, and «
     await fresh.settle();
     assert.equal(fresh.dom.window.document.querySelector('h1')?.textContent, 'Tus contactos de hoy');
   } finally { await close(fresh); }
+});
+
+test('contacts of another of the person\'s workspaces open by moving there; another account\'s are said as such, with nothing to make', async () => {
+  // 16 Nov 2026: the owner opened the email of one account signed in with another, in another workspace. The app loaded, moved,
+  // said it found nothing, and its entry left the menu. Whoever belongs to several workspaces meets the first case with their own email.
+  switched.length = 0; calls.length = 0;
+  let refreshed = 0;
+  const before = auth;
+  auth = { ...auth, organizationId: 'org-1', refreshOrganization: async () => { refreshed += 1; } };
+  answers = [{ status: 409, body: { error: 'Estos contactos son de otro de tus espacios de trabajo.', code: 'other_workspace', organizationId: 'org-2' } }, { status: 200, body: drop }];
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    assert.deepEqual(switched, ['org-2'], 'the app moves to the workspace of those contacts');
+    assert.equal(refreshed, 1);
+    // The session now says the other workspace: the page reads the contacts again with it (here, on its next render).
+    await act(async () => page.root.render(React.createElement(LeadDropFlow, { dropId: 'drop-1' })));
+    await page.settle();
+    assert.deepEqual(calls.filter(call => call === 'GET /api/lead-drops/drop-1').length, 2);
+    assert.match(page.text(), /Ana Pérez/);
+    assert.doesNotMatch(page.text(), /otro de tus espacios/);
+  } finally { await close(page); auth = before; }
+  // Another account's: said, with the way to «Hoy»; never «Ver mi contacto de hoy», which would make one for this account.
+  switched.length = 0;
+  answers = [{ status: 404, body: { error: 'Estos contactos son de otra cuenta de ANTON.IA, no de la que tienes abierta. Cierra sesión y entra con la cuenta que recibió el correo.', code: 'other_account' } }];
+  const other = await open('drop-1');
+  try {
+    await other.settle();
+    assert.match(other.text(), /Estos contactos son de otra cuenta de ANTON\.IA, no de la que tienes abierta\./);
+    const links = [...other.dom.window.document.querySelectorAll('a')].map(link => [link.getAttribute('href'), link.textContent]);
+    assert.ok(links.some(([href, text]) => href === '/dashboard' && text === 'Ir a Hoy'));
+    assert.ok(!links.some(([href]) => href === '/dashboard/contactos/nuevo'), 'no offer to make a contact for the account on screen');
+    assert.deepEqual(switched, []);
+  } finally { await close(other); }
+  // The server tells the two apart only after not finding them for the person, and never shows anything of another account's.
+  const route = readFileSync(new URL('../../app/api/lead-drops/[id]/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /if \(owner && owner\.userId === user\.id && owner\.organizationId !== organizationId\) return \{ moved: owner\.organizationId \};/);
+  assert.match(route, /if \(owner && owner\.userId !== user\.id\) return \{ other: true as const \};/);
+  assert.match(route, /code: 'other_workspace', organizationId: drop\.moved \}, \{ status: 409/);
 });
 
 test('«Tus contactos de hoy» lives under «Hoy»: its own address, the last contacts from the menu, and the old address still opens them', () => {

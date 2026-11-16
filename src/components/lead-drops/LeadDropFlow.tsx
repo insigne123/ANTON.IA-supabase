@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
+import { organizationService } from '@/lib/services/organization-service';
 import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { telHref } from '@/lib/contact-calls';
@@ -92,6 +93,9 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const [error, setError] = useState('');
   /** The drop is not this person's or is no longer there: asking again answers the same, so the way out is today's contact. */
   const [missing, setMissing] = useState(false);
+  /** The contacts are another account's: said, with the way to «Hoy» instead of an offer to make today's. */
+  const [foreign, setForeign] = useState(false);
+  const moved = useRef(false);
   const [step, setStep] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
   const [howOpen, setHowOpen] = useState(false);
@@ -122,15 +126,22 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   }), [organizationId]);
   const load = useCallback(async () => {
     if (!organizationId || !id) return;
-    setError(''); setMissing(false);
+    setError(''); setMissing(false); setForeign(false);
     try {
       const response = await call(`/api/lead-drops/${encodeURIComponent(id)}`);
       const body = await response.json().catch(() => null);
+      // The person's own contacts, of another of their workspaces (an email of that one, opened with this one on screen): the app
+      // moves there, once, and the contacts load again with it.
+      if (response.status === 409 && body?.code === 'other_workspace' && typeof body.organizationId === 'string' && !moved.current) {
+        moved.current = true;
+        if (await organizationService.setCurrentOrganization(body.organizationId).catch(() => false)) { await refreshOrganization(); return; }
+      }
       if (response.status === 404) setMissing(true);
+      if (body?.code === 'other_account') setForeign(true);
       if (!response.ok) throw new Error(body?.error || 'No pudimos abrir tu contacto.');
       setDrop(body);
     } catch (e) { setError(e instanceof Error ? e.message : 'No pudimos abrir tu contacto.'); }
-  }, [call, id, organizationId]);
+  }, [call, id, organizationId, refreshOrganization]);
   useEffect(() => { void load(); }, [load]);
   // Today's drop, made now: another request may be writing it («pending»), so ask again until it is ready or says why not.
   const make = useCallback(async () => {
@@ -351,7 +362,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
 
     {error ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
       <p role="alert" className="text-sm text-muted-foreground">{error}</p>
-      {missing ? <Button asChild variant="outline" size="sm"><Link href={dropHref('nuevo')}>Ver mi contacto de hoy<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
+      {foreign ? <Button asChild variant="outline" size="sm"><Link href="/dashboard">Ir a Hoy</Link></Button>
+        : missing ? <Button asChild variant="outline" size="sm"><Link href={dropHref('nuevo')}>Ver mi contacto de hoy<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
         : <Button variant="outline" size="sm" onClick={() => void (id ? load() : make())}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>}
     </CardContent></Card> : null}
     {noOrganization && !error ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">

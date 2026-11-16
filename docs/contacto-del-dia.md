@@ -373,8 +373,9 @@ porque estos mails solo le llegarán a usuarios que hayan iniciado sesión algun
   confirmar. Busca uno por uno (`action: 'enrich'` en `POST /api/lead-drops/<id>`), y al terminar pide la respuesta al correo
   (`action: 'ready'`): «Listos» en la misma conversación de la mañana y, si se pidieron teléfonos, «Para llamar» cuando lleguen.
   La banda aparece también sin venir del correo, cuando quedan dos o más por enriquecer.
-- **«Enriquecer y revisar · 1 crédito»** de un contacto llega con `?c=…&enriquecer=1`: como exige sesión, la búsqueda parte al
-  llegar (el clic del correo fue de la persona; un lector automático de enlaces no tiene sesión y queda en `/login`).
+- **«Enriquecer y revisar · 1 crédito»** de un contacto llega con `?c=…`: abre a esa persona, y el crédito se usa recién al
+  apretar «Enriquecer» ahí («Nada se cobra al abrir», dice el correo). La dirección acepta además `&enriquecer=1`, que ningún
+  correo trae hoy: con él la búsqueda partiría al llegar, detrás de la sesión.
 - **«Llamar»** del correo «Para llamar» llega con `?c=…&llamar=1`: abre a esa persona en «Llamada» y marca el número una vez.
 - **«Hoy»** (`TodayContacts`), cuando recibe un enlace de contactos que no son los que tiene a la vista, manda a esa misma página.
 
@@ -397,6 +398,20 @@ app y los usuarios puedan entrar a Cowork y todo eso».
   es «Hoy», y el día que llegan se titula «Tus contactos de hoy».
 - **La dirección anterior**, `/search/contactos/<id>` (bajo «Buscar prospectos»), sigue abriendo: reenvía a la nueva con lo que
   el enlace pedía, para los correos ya enviados.
+
+**Directo a los contactos, y qué pasa con otra cuenta u otro espacio de trabajo.** El dueño probó el correo de la cuenta de prueba
+con su propia cuenta abierta, en otro espacio de trabajo: «me llevó a la página principal, luego cargó un rato y como que me llevó
+a otra parte… luego cambié de sección y ya no pude volver a entrar».
+
+- **«Abrir en ANTON.IA»** es ahora la dirección del propio correo (`dropAppHref`): cae directo en la pantalla de los contactos.
+  Los correos anteriores, que abrían «Hoy» con su enlace (`/dashboard?contactos=<enlace>`), pasan por ella desde el middleware,
+  sin cargar «Hoy» primero.
+- **Contactos de otro de tus espacios de trabajo**: `GET /api/lead-drops/<id>` responde 409 `other_workspace` con el espacio al
+  que pertenecen; la pantalla se cambia a él (`organizationService.setCurrentOrganization`) y los abre. Le pasa a quien
+  pertenece a varios equipos y recibe el correo de uno con otro a la vista.
+- **Contactos de otra cuenta**: 404 `other_account`, con «Estos contactos son de otra cuenta de ANTON.IA, no de la que tienes
+  abierta» y la vuelta a «Hoy». No se muestra nada de ellos ni se ofrece crear contactos para la cuenta abierta. La entrada del
+  menú no aparece para esa cuenta si no tiene contactos propios: no es de ella.
 
 Pruebas: «the address of the email shows nothing of its own…» en `drop-mail-flow.test.ts`; «Enriquecer los N of the morning
 email lands inside the app…» y «Llamar of the email…» en `lead-drop-flow-ui.test.ts`; «Tus contactos de hoy is a screen of Hoy» en `navigation.test.ts`.

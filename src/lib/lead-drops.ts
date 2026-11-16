@@ -688,8 +688,12 @@ export function dropInitials(item: Pick<DropItem, 'name'>) {
 }
 /** A steady number under `count` for a contact: the tint it is shown with, the same in the app and in its emails. */
 export const dropTint = (key: string, count: number) => [...key].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 9973, 7) % count;
-/** The same contacts inside the app, from the address of the page that needs no session: «Hoy» asks to sign in and brings them into view. */
-export const dropAppHref = (link: string) => link.replace(/\/contactos\/([A-Za-z0-9_-]{48})(?:[?#].*)?$/, '/dashboard?contactos=$1');
+/**
+ * «Abrir en ANTON.IA»: the same contacts inside the app. Since 16 Nov 2026 the email's own address sends straight to their screen
+ * under «Hoy» (src/app/contactos/[token]); until then this opened «Hoy» with the link (`/dashboard?contactos=`), which loaded «Hoy»
+ * first and only then moved on (the owner: «me llevó a la página principal, luego cargó un rato y como que me llevó a otra parte»).
+ */
+export const dropAppHref = (link: string) => link.replace(/(\/contactos\/[A-Za-z0-9_-]{48})(?:[?#].*)?$/, '$1');
 /** Where «Enriquecer los N» of the morning email sends: the page with that choice made and a button to confirm it, never the arrival. */
 export const dropBulkHref = (link: string, phone: boolean) => `${link}?todos=${phone ? 'telefono' : 'correo'}`;
 /** Where the morning email sends for one contact: its card on the drop's page, and its email looked up on arrival when it still has none. */
