@@ -2,7 +2,7 @@ import { after, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { requireHomeAuth } from '@/lib/server/home-auth';
-import { LeadDropsError, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
+import { LeadDropsError, dropOwner, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
 import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, mailDropCampaign, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
 import { findDropPhone, prepareDropCall, withDropPhones } from '@/lib/server/lead-drop-call';
 import { enrichDropLead } from '@/lib/server/lead-drop-mail';
@@ -24,7 +24,18 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const id = Id.safeParse((await context.params).id);
     if (!id.success) throw new AuthError('No encontramos esos contactos.', 404);
     const admin = getSupabaseAdminClient();
-    const drop = await readDrop(admin, { organizationId, userId: user.id }, id.data);
+    const drop = await readDrop(admin, { organizationId, userId: user.id }, id.data).catch(async (error: unknown) => {
+      if (!(error instanceof LeadDropsError) || error.status !== 404) throw error;
+      // Not this person's in this workspace (16 Nov 2026, the owner opened the email of one account signed in with another, in
+      // another workspace, and the app only said it found nothing). Theirs in another workspace: the app moves there and opens
+      // them. Another account's: said as such, with nothing of them shown.
+      const owner = await dropOwner(admin, id.data).catch(() => null);
+      if (owner && owner.userId === user.id && owner.organizationId !== organizationId) return { moved: owner.organizationId };
+      if (owner && owner.userId !== user.id) return { other: true as const };
+      throw error;
+    });
+    if ('moved' in drop) return NextResponse.json({ error: 'Estos contactos son de otro de tus espacios de trabajo.', code: 'other_workspace', organizationId: drop.moved }, { status: 409, headers: noStore });
+    if ('other' in drop) return NextResponse.json({ error: 'Estos contactos son de otra cuenta de ANTON.IA, no de la que tienes abierta. Cierra sesión y entra con la cuenta que recibió el correo.', code: 'other_account' }, { status: 404, headers: noStore });
     if (!drop.opened_at) await admin.from('lead_drops').update({ opened_at: new Date().toISOString() }).eq('id', drop.id);
     return NextResponse.json({ id: drop.id, date: drop.drop_date, criteria: drop.criteria, items: await withDropPhones(admin, { organizationId, userId: user.id }, drop.items) }, { headers: noStore });
   } catch (error) {

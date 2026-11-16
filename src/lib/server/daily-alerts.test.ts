@@ -295,7 +295,7 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     const { sent, send } = sender();
     assert.deepEqual(await deliverDailyAlert(several.client, SCOPE, { ...deps(send), now: TUESDAY }), { status: 'sent' });
     const links = [...String(sent[0].html).matchAll(/href="https:\/\/app\.antonia\.ai\/contactos\/([A-Za-z0-9_-]{48})(\?c=[0-9a-f]{24})?"/g)];
-    assert.equal(links.length, 3, 'one button per contact and the way to all of them');
+    assert.equal(links.length, 4, 'one button per contact, «Abrir en ANTON.IA» and the way to all of them: the same address, the contacts\' own');
     assert.deepEqual([...new Set(links.map(match => match[1]))].length, 1);
     assert.deepEqual(readDropLink(links[0][1], { now: TUESDAY }), { dropId: DROP, expiresAt: new Date(TUESDAY.getTime() + 14 * 86_400_000) });
     assert.ok(!String(sent[0].html).includes('/dashboard/contactos/') && !String(sent[0].text).includes('/dashboard/contactos/') && !String(sent[0].html).includes('enriquecer=1'));
@@ -310,7 +310,7 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
       data.contacted_leads.push(reply('r-new', '2026-10-19T22:00:00Z'));
       const branded = sender();
       assert.deepEqual(await deliverDailyAlert(memory(data, { unique: UNIQUE }).client, SCOPE, { ...deps(branded.send), now: TUESDAY }), { status: 'sent' });
-      assert.equal([...String(branded.sent[0].html).matchAll(/href="https:\/\/contactos\.example\.test\/contactos\/[A-Za-z0-9_-]{48}(\?c=[0-9a-f]{24})?"/g)].length, 3);
+      assert.equal([...String(branded.sent[0].html).matchAll(/href="https:\/\/contactos\.example\.test\/contactos\/[A-Za-z0-9_-]{48}(\?c=[0-9a-f]{24})?"/g)].length, 4);
       assert.ok(!String(branded.sent[0].html).includes('app.antonia.ai') && !String(branded.sent[0].text).includes('app.antonia.ai'));
       assert.ok(String(branded.sent[1].html).includes('https://app.antonia.ai') && !String(branded.sent[1].html).includes('contactos.example.test'));
     } finally { delete process.env.LEAD_DROPS_PUBLIC_URL; }
@@ -321,9 +321,9 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     assert.equal(sent[0].subject, '2 contactos nuevos para ti');
     assert.match(sent[0].text, /^Hola, Ana\. Tus contactos del día ya están listos\.\n\n\nEnriquécelos de una vez\. Te respondemos en esta misma conversación/);
     const token = links[0][1];
-    assert.ok(sent[0].text.includes(`Enriquecer los 2 · 2 créditos: https://app.antonia.ai/contactos/${token}?todos=correo\nCon sus teléfonos · 16 créditos: https://app.antonia.ai/contactos/${token}?todos=telefono\nAbrir en ANTON.IA: https://app.antonia.ai/dashboard?contactos=${token}\n\nPedro Araya, Gerente HSE en Minera Andina`));
+    assert.ok(sent[0].text.includes(`Enriquecer los 2 · 2 créditos: https://app.antonia.ai/contactos/${token}?todos=correo\nCon sus teléfonos · 16 créditos: https://app.antonia.ai/contactos/${token}?todos=telefono\nAbrir en ANTON.IA: https://app.antonia.ai/contactos/${token}\n\nPedro Araya, Gerente HSE en Minera Andina`));
     assert.match(sent[0].html, new RegExp(`<td bgcolor="#2563eb"[^>]*><a href="https://app\\.antonia\\.ai/contactos/${token}\\?todos=correo"[^>]*>Enriquecer los 2 · 2 créditos</a>`));
-    assert.ok(sent[0].html.includes(`href="https://app.antonia.ai/dashboard?contactos=${token}"`));
+    assert.match(sent[0].html, new RegExp(`<a href="https://app\\.antonia\\.ai/contactos/${token}"[^>]*>Abrir en ANTON\\.IA</a>`), 'straight to the contacts\' screen, not through «Hoy»');
     // It opens a conversation of its own: what the person does from it is answered there (src/lib/lead-drop-thread.ts).
     assert.equal(sent[0].headers.References, `<contactos.${DROP}@contactos.anton-ia.yago.cl>`);
     assert.equal(sent[0].headers['In-Reply-To'], sent[0].headers.References);

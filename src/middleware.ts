@@ -29,6 +29,16 @@ export async function middleware(req: NextRequest) {
         return NextResponse.redirect(redirectTarget, 307);
     }
 
+    // Emails sent until 16 Nov 2026 open «Hoy» with their link (`/dashboard?contactos=<link>`), which loaded «Hoy» and only then moved
+    // on to the contacts. The link's own address sends straight to their screen (src/app/contactos/[token]), so they go through it.
+    const dropLink = pathname === '/dashboard' ? req.nextUrl.searchParams.get('contactos') : null;
+    if (dropLink && /^[A-Za-z0-9_-]{48}$/.test(dropLink)) {
+        const target = new URL(`/contactos/${dropLink}`, req.url);
+        const contact = req.nextUrl.searchParams.get('c');
+        if (contact) target.searchParams.set('c', contact);
+        return NextResponse.redirect(target);
+    }
+
     const res = NextResponse.next();
     const supabase = createMiddlewareClient({ req, res });
 

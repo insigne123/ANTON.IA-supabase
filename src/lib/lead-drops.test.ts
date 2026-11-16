@@ -347,8 +347,9 @@ test('from the inbox the person chooses how to go on: all of them looked up at o
     why: 'Calza.', research: [], provider: 'apollo', draft: { subject: 'Hola', body: 'Hola {{nombre}}' }, ...extra });
   const token = 'A'.repeat(48);
   const link = `https://app.test/contactos/${token}`;
-  assert.equal(dropAppHref(link), `https://app.test/dashboard?contactos=${token}`);
-  assert.equal(dropAppHref(`${link}?c=x`), `https://app.test/dashboard?contactos=${token}`);
+  // «Abrir en ANTON.IA» is the email's own address, which sends straight to the contacts' screen: no stop in «Hoy» on the way.
+  assert.equal(dropAppHref(link), link);
+  assert.equal(dropAppHref(`${link}?c=x`), link);
   assert.equal(dropBulkHref(link, true), `${link}?todos=telefono`);
   const three = [contact('lf_000000000000000000000001'), contact('lf_000000000000000000000002'), contact('lf_000000000000000000000003')];
   const all = dropEmailSection(three as any, 'drop-1', 'https://app.test', { heading: false, link });
@@ -356,7 +357,7 @@ test('from the inbox the person chooses how to go on: all of them looked up at o
   assert.equal((all.html.match(/<td bgcolor="#2563eb"/g) || []).length, 1);
   assert.match(all.html, new RegExp(`<td bgcolor="#2563eb"[^>]*><a href="${link.replace(/\./g, '\\.')}\\?todos=correo"[^>]*>Enriquecer los 3 · 3 créditos</a>`));
   assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="${link.replace(/\./g, '\\.')}\\?todos=telefono"[^>]*>Con sus teléfonos · 24 créditos</a>`));
-  assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="https://app\\.test/dashboard\\?contactos=${token}"[^>]*>Abrir en ANTON\\.IA</a>`));
+  assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="https://app\\.test/contactos/${token}"[^>]*>Abrir en ANTON\\.IA</a>`));
   assert.equal((all.html.match(/<td bgcolor="#ffffff"[^>]*><a href="[^"]+\?c=lf_[0-9]+"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/g) || []).length, 3);
   assert.match(all.text, /Enriquécelos de una vez\. Te respondemos en esta misma conversación con el correo de cada uno y su campaña lista para aprobar\. Con teléfonos, también el guion de cada llamada\./);
   assert.match(all.html, /font-weight:600;color:#111827">Enriquécelos de una vez<\/p>/);

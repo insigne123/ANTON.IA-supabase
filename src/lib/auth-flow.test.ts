@@ -29,6 +29,9 @@ test('«¿Olvidaste tu contraseña?» sends a link back through the callback to 
   assert.match(auth, /encodeURIComponent\('\/restablecer-clave'\)/);
   assert.match(auth, /supabase\.auth\.updateUser\(\{ password \}\)/);
   assert.match(middleware, /pathname === '\/restablecer-clave'/);
+  // An email that opened «Hoy» with its link (until 16 Nov 2026) goes to the link's own address, which sends to the contacts' screen.
+  assert.match(middleware, /const dropLink = pathname === '\/dashboard' \? req\.nextUrl\.searchParams\.get\('contactos'\) : null;/);
+  assert.match(middleware, /const target = new URL\(`\/contactos\/\$\{dropLink\}`, req\.url\);/);
   assert.match(reset, /updatePassword\(password\)/);
   assert.match(reset, /fetch\('\/api\/auth\/recovery', \{ method: 'POST'/, 'the token is spent by a click, never by opening the link');
   assert.match(reset, /href="\/login\?recuperar=1"/, 'an expired link offers a new one');

@@ -730,6 +730,17 @@ export async function readDrop(client: Client, scope: DropScope, dropId: string)
   return result.data as { id: string; drop_date: string; status: string; criteria: DropCriteria; items: DropItem[]; opened_at: string | null; saved_at: string | null };
 }
 
+/**
+ * Whose a drop is, whatever workspace is open: asked only after `readDrop` did not find it for the signed-in person, to tell «it is
+ * yours, in another of your workspaces» (the app moves there) from «it is another account's» (said as such). Null when there is none.
+ */
+export async function dropOwner(client: Client, dropId: string) {
+  const result: any = await client.from('lead_drops').select('organization_id,user_id,status').eq('id', dropId).maybeSingle();
+  if (result.error) throw new LeadDropsError('No pudimos leer tu contacto del día.', 503);
+  if (!result.data || !['ready', 'sent'].includes(result.data.status)) return null;
+  return { organizationId: String(result.data.organization_id), userId: String(result.data.user_id) };
+}
+
 /** The person's latest drop of the last week with something left to save, for «Hoy», with the next one to save. */
 type LatestRow = { id: string; drop_date: string; items: DropItem[] } | null;
 /** The person's last drop of the week that has contacts. */

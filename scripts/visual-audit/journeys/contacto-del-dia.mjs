@@ -288,6 +288,33 @@ const menuSteps = [
     c.check('quedo en Cowork', new URL(c.page.url()).pathname.startsWith('/cowork'));
   } },
 ];
+// The same, with nothing answered here: the menu's number and the last contacts come from the app's own reads over the bench's drop
+// (GET /api/nav/pending and /api/lead-drops/latest). The owner, 16 Nov 2026: «cambié de sección y ya no pude volver a entrar».
+const menuRealSteps = [
+  { say: 'Abro mis contactos y miro el menú', do: async c => {
+    const read = c.page.waitForResponse(response => response.url().includes('/api/nav/pending'));
+    await c.go(inAppPath); await c.see('Por qué te lo recomendamos');
+    const body = await (await read).json().catch(() => null);
+    c.check('el menú sabe que tengo un contacto por revisar', body?.contacts === 1, JSON.stringify(body));
+    await menuEntry(c).waitFor();
+    c.check('la pantalla está en el menú, marcada', await menuEntry(c).getAttribute('aria-current') === 'page');
+  } },
+  { say: 'Me voy a Campañas: la entrada sigue en el menú', do: async c => {
+    await c.clickOn(c.page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link', { name: 'Campañas' }));
+    await c.page.waitForURL(/\/campaigns/);
+    await c.page.waitForTimeout(1500);
+    c.check('«Tus contactos de hoy» sigue bajo «Hoy»', await menuEntry(c).count() === 1);
+  } },
+  { say: 'Vuelvo a mis contactos desde el menú', do: async c => {
+    await c.clickOn(menuEntry(c)); await c.see('Por qué te lo recomendamos');
+    c.check('quedo en la pantalla de «Hoy»', new URL(c.page.url()).pathname === '/dashboard/contactos');
+    c.check('la entrada queda marcada', await menuEntry(c).getAttribute('aria-current') === 'page');
+  } },
+  { say: 'Un correo anterior, que abría «Hoy» con su enlace, cae directo en mis contactos', do: async c => {
+    await c.go(`/dashboard?contactos=${TOKEN}&c=${id(1)}`); await c.see('Por qué te lo recomendamos');
+    c.check('sin pasar por «Hoy»', new URL(c.page.url()).pathname === inAppPath);
+  } },
+];
 const mailBulkSteps = [
   { say: 'En el correo toco «Con sus teléfonos»: quedo en la app con esa opción elegida, y todavía no gasta nada', do: async c => {
     await answerSix(c.page); await c.go(`/contactos/${TOKEN}?todos=telefono`); await c.see('Enriquecer los 5 de una vez');
@@ -405,6 +432,8 @@ export default () => [
     goal: 'Lo mismo desde el teléfono, donde se lee el correo.', steps: mailSteps },
   { id: 'contactos-desde-el-menu', persona: 'owner', title: '«Tus contactos de hoy», una pantalla de «Hoy» en el menú',
     goal: 'Ver mis contactos como parte de la app: bajo «Hoy» en el menú, y con Cowork y el resto a un clic.', steps: menuSteps },
+  { id: 'contactos-menu-real', persona: 'owner', title: 'Volver a «Tus contactos de hoy» desde otra sección',
+    goal: 'Salir a otra sección y volver a mis contactos desde el menú, con los datos de la app y nada respondido por el recorrido.', steps: menuRealSteps },
   { id: 'contactos-del-correo-todos', persona: 'owner', title: 'Enriquecer a todos desde el correo, dentro de la app',
     goal: 'Tocar «Con sus teléfonos» en el correo de la mañana, confirmar en la app cuánto se usa y ver qué se encontró.', steps: mailBulkSteps },
   { id: 'contactos-del-correo-todos-telefono', persona: 'owner', viewport: 'phone', title: 'Enriquecer a todos desde el correo (móvil)',
