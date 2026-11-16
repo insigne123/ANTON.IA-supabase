@@ -22,6 +22,7 @@ import {
   icpFilledByAnton,
   mapProfileToForm,
   normalizeCompanyWebsite,
+  TARGET_NOTES_MAX,
   websiteFromWorkEmail,
   type ProfileFormValues,
   type ProfileSuggestionSelection,
@@ -36,6 +37,7 @@ import { ProfileIcpSummary } from '@/components/profile/ProfileIcpSummary';
 import { IcpResultsPanel } from '@/components/profile/IcpResultsPanel';
 import { appendTerm } from '@/lib/icp/view';
 import { ProfileSuggestionDialog } from '@/components/profile/ProfileSuggestionDialog';
+import { Textarea } from '@/components/ui/textarea';
 import { CompanySections, Field, FIELD_CLASS, Section } from '@/components/profile/ProfileSections';
 import { CompanyProfileReadOnly } from '@/components/profile/CompanyProfileReadOnly';
 import { icpSummary } from '@/lib/profile/icp-summary';
@@ -344,7 +346,17 @@ export default function ProfilePage() {
                   </Section>
 
                   {company && companyActive ? (
-                    <CompanyProfileReadOnly profile={company} canEdit={canEditCompany} picked={picked} onPickedChange={setPicked} />
+                    <>
+                      <CompanyProfileReadOnly profile={company} canEdit={canEditCompany} picked={picked} onPickedChange={setPicked} />
+                      {/* What the team sells comes from its card; who this person looks for, in their own words, is theirs to say. */}
+                      <Section id="focus" icon={Sparkles} title="En tus palabras" description="Lo tuyo dentro del equipo: qué ofreces tú y a quién quieres llegar.">
+                        <Field id="targetNotes" label="Qué ofreces y a quién buscas" optional
+                          hint="Como se lo contarías a alguien nuevo. Con esto elegimos tus contactos recomendados, escribimos tus correos y orientamos a Cowork.">
+                          <Textarea id="targetNotes" value={profile.targetNotes} onChange={(event) => setField('targetNotes', event.target.value)} aria-describedby="targetNotes-help" maxLength={TARGET_NOTES_MAX}
+                            placeholder="Ej. Veo las cuentas mineras del norte. Me sirven jefaturas de prevención y de operaciones de faenas medianas; no proveedores ni consultoras." className={`min-h-28 ${FIELD_CLASS}`} />
+                        </Field>
+                      </Section>
+                    </>
                   ) : (
                     <CompanySections
                       values={profile}

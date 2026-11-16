@@ -161,7 +161,7 @@ export function useDropActions({ dropId, call, setItems, single }: {
       if (done) setNotice({ ok: true, text: `Guardamos tus cambios en los correos de ${dropName(item)}.` });
       return Boolean(done);
     },
-    feedback: async (item, useful, reason) => { await act({ action: 'feedback', leadId: item.leadId, feedback: { useful, reason: reason ?? null } }, 'No pudimos guardar tu opinión. Inténtalo de nuevo.'); },
+    feedback: async (item, useful, reason, wish) => { await act({ action: 'feedback', leadId: item.leadId, feedback: { useful, reason: reason ?? null, ...(wish !== undefined ? { wish } : {}) } }, 'No pudimos guardar tu opinión. Inténtalo de nuevo.'); },
   };
   return { saving, enriching, notice, setNotice, enrich, enrichAll, bulk, save, actions };
 }

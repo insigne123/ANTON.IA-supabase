@@ -10,7 +10,7 @@ import { lineItems } from '@/lib/profile/profile-lists';
 export const COMPANY_PROFILE_FIELDS = [
   'companyName', 'website', 'sector', 'description',
   'services', 'valueProposition', 'painPoints', 'differentiators', 'proofPoints', 'referenceClients',
-  'targetRoles', 'targetIndustries', 'targetCompanySize', 'targetLocations',
+  'targetRoles', 'targetIndustries', 'targetCompanySize', 'targetLocations', 'targetNotes',
 ] as const satisfies ReadonlyArray<keyof ProfileFormValues>;
 export type CompanyProfileField = typeof COMPANY_PROFILE_FIELDS[number];
 export type CompanyProfileFields = Pick<ProfileFormValues, CompanyProfileField>;
@@ -99,7 +99,9 @@ export function withCompanyProfile<T extends ProfileRow | null | undefined>(prof
 /** The same on «Perfil»'s form: what the AI reads for this person, with the products they picked. */
 export function withCompanyFields(form: ProfileFormValues, company: CompanyProfileFields, picked: string[]): ProfileFormValues {
   const next = { ...form };
-  for (const field of COMPANY_PROFILE_FIELDS) if (company[field]) next[field] = company[field];
+  // «En tus palabras» is each one's own: the team's says who the company sells to, the person's who they look for. Whoever reads
+  // both asks for the company's apart (CompanyProfileFields.targetNotes); it never replaces the person's.
+  for (const field of COMPANY_PROFILE_FIELDS) if (field !== 'targetNotes' && company[field]) next[field] = company[field];
   if (company.services) next.services = companyServicesFor(company, picked).join('\n');
   return next;
 }

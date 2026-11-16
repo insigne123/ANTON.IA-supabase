@@ -77,7 +77,7 @@ function Board({ board, focus }: { board: DropBoard; focus: string | null }) {
     save: item => { setActed(item.leadId); actions.save(item); },
     approve: item => { setActed(item.leadId); return actions.approve(item); },
     edit: (item, emails) => { setActed(item.leadId); return actions.edit(item, emails); },
-    feedback: (item, useful, reason) => { setActed(item.leadId); return actions.feedback(item, useful, reason); },
+    feedback: (item, useful, reason, wish) => { setActed(item.leadId); return actions.feedback(item, useful, reason, wish); },
   };
 
   // Where each contact stands: its email to look up, its campaign to approve, or its campaign going out.

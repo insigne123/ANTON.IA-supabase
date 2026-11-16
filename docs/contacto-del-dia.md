@@ -418,6 +418,39 @@ email lands inside the app…» y «Llamar of the email…» en `lead-drop-flow-
 Recorridos: `contactos-desde-el-menu`, `contactos-del-correo-a-la-app`,
 `contactos-del-correo-todos`, `contactos-del-correo-llamar` y `contactos-del-correo-sin-sesion`.
 
+### Desde el 16 de noviembre: recomendados a medida (texto libre y mezcla de cargos)
+
+El dueño, tras ver los filtros de «Así los buscamos»: «les das leads que tienen cargos muy altos, a lo mejor deberíamos hacerlo
+mixto: leads que son directamente el que necesitan y también leads que podrían referirlos con la persona indicada», «cuando el
+usuario da su evaluación… podría haber un parámetro libre que le deje poner qué es lo que le gustaría que le apareciera» y «que él
+cuente más o menos qué es lo que hacen o qué quiere ofrecer y qué leads busca, para que con esa info no solo adaptemos los leads
+recomendados sino también toda la app». Es la primera mitad de un plan de cuatro; faltan la búsqueda por empresa con expansión
+automática y la calidad de los correos.
+
+**«En tus palabras», en «Perfil» y en la ficha de la empresa.** Un texto libre (`targetNotes`, hasta 1.200 caracteres) junto a las
+listas del cliente ideal. Cada uno tiene el suyo: el de la ficha dice a quién le vende el equipo; el de la persona, a quién busca
+ella, y se puede escribir también cuando el equipo tiene ficha (sección «En tus palabras» de «Perfil»). El de la empresa nunca
+reemplaza al de la persona (`withCompanyFields`). Lo leen:
+
+- **el buscador** (`scoreDropCandidates`, `en_sus_palabras`), donde manda sobre las listas de cargos y rubros;
+- **Cowork y el Redactor**, en el contexto del usuario (`idealCustomer.inOwnWords` y `teamInOwnWords`, `user-context.ts`).
+
+**«Qué te gustaría recibir», al evaluar un contacto.** Después de «Me sirve» o «No me sirve», la ficha ofrece «Decir qué te
+gustaría recibir»: un texto de hasta 300 caracteres que queda con la evaluación (`feedback.wish`). El buscador lee los cinco más
+recientes de **esa persona** (`dropWishes`, `pedidos`), no los del equipo. Dos personas con el mismo cliente ideal y distintas
+palabras o pedidos se puntúan aparte (`preferencesKey`).
+
+**Quien decide y quien puede derivarte.** El puntaje pide una tercera nota, «deriva»: cuánto sirve la persona como puerta de
+entrada cuando no decide (trabaja en el área, conoce a quien decide). Con «cargo» bajo 7 y «deriva» de 6 o más, el contacto queda
+como `role: 'refer'`. De seis contactos, cuatro son de quienes deciden y los dos últimos cupos son para quien puede derivar; sin
+ninguno, esos cupos siguen yendo a cargos vecinos («para explorar»), como antes. El contacto se muestra como «Puede derivarte»,
+con su porqué («no decide la compra, pero puede decirte quién la ve o presentarte»), y su correo pide la orientación o la
+presentación en vez de vender (`draftFor`).
+
+Pruebas: `lead-drop-finder.test.ts` («who works in the area without deciding…», «what a person asked for…»), `lead-drops.test.ts`
+(«the mix…»), `lead-drop-campaign.test.ts` (el pedido se guarda), `profile-mappings.test.ts`, `company-profile.test.ts`,
+`user-context.test.ts` y `lead-drop-flow-ui.test.ts`. Recorrido: `contactos-a-medida`.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

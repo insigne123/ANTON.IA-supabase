@@ -490,6 +490,15 @@ const brief = { company: 'Produce cobre en dos faenas del norte.', news: { text:
 const several = () => ({ ...drop, items: [apolloItem(1, { brief }), apolloItem(2, { track: 'explore', savedLeadId: 'e-2', name: 'Luisa Soto' })] });
 const cardOf = (page: Awaited<ReturnType<typeof open>>, index: number) => page.dom.window.document.querySelectorAll('article')[index] as HTMLElement;
 const within = (root: HTMLElement, label: string | RegExp) => [...root.querySelectorAll('button')].find(button => (typeof label === 'string' ? button.textContent === label : label.test(button.textContent || '')))!;
+/**
+ * Typing into a field. This suite opens a new window for each page, after React was loaded without one, so React reads text fields
+ * the old way (no «input» event) and a dispatched one never reaches `onChange`: the handler React keeps on the node is called instead.
+ */
+const type = async (page: Awaited<ReturnType<typeof open>>, field: HTMLTextAreaElement, value: string) => {
+  const props = (field as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[Object.keys(field).find(key => key.startsWith('__reactProps$'))!];
+  await act(async () => { props.onChange({ target: { value } }); });
+  await page.settle();
+};
 const press = async (page: Awaited<ReturnType<typeof open>>, target: Element) => { await act(async () => { target.dispatchEvent(new page.dom.window.MouseEvent('click', { bubbles: true })); }); await page.settle(); };
 
 test('several contacts: a list at the side and one card at a time, with why, the company and how to open, its campaign and its call each in a section', async () => {
@@ -585,6 +594,22 @@ test('the emails are changed in place, and «No me sirve» asks why', async () =
     await press(page, within(cardOf(page, 0), 'El cargo no decide'));
     assert.deepEqual(bodies.at(-1), { action: 'feedback', leadId: '6accdbfcd5f5d80001cf6901', feedback: { useful: false, reason: 'El cargo no decide' } });
     assert.match(cardOf(page, 0).textContent || '', /Dijiste que no te sirve \(el cargo no decide\): lo tendremos en cuenta\./);
+    // Once they answered, they can say what they would like to get, in their words (16 Nov 2026): the finder reads it for them.
+    await press(page, within(cardOf(page, 0), 'Decir qué te gustaría recibir'));
+    const field = cardOf(page, 0).querySelector('textarea[id$="-wish"]') as HTMLTextAreaElement;
+    assert.equal(cardOf(page, 0).querySelector(`label[for="${field.id}"]`)?.textContent, '¿Qué te gustaría que te apareciera?');
+    // The field's own «Guardar», not the one of the card.
+    const wishBox = field.parentElement as HTMLElement;
+    assert.equal((within(wishBox, 'Guardar') as HTMLButtonElement).disabled, true, 'nothing to save yet');
+    await type(page, field, 'Jefaturas de operaciones, no proveedores');
+    answers = [{ status: 200, body: { items: edited.map((item, index) => index === 0
+      ? { ...item, feedback: { useful: false, reason: 'El cargo no decide', wish: 'Jefaturas de operaciones, no proveedores', at: '2026-11-13T12:00:00Z' } } : item) } }];
+    await press(page, within(wishBox, 'Guardar'));
+    assert.deepEqual(bodies.at(-1), { action: 'feedback', leadId: '6accdbfcd5f5d80001cf6901',
+      feedback: { useful: false, reason: 'El cargo no decide', wish: 'Jefaturas de operaciones, no proveedores' } });
+    assert.match(cardOf(page, 0).textContent || '', /Pediste: «Jefaturas de operaciones, no proveedores»\. Lo usamos para elegir tus próximos contactos\./);
+    assert.ok(within(cardOf(page, 0), 'Cambiar lo que pediste'));
+    assert.equal(cardOf(page, 0).querySelector('textarea[id$="-wish"]'), null, 'the field closes once saved');
     answers = [{ status: 200, body: { items: edited } }];
     await tap(page, railOf(page)[1]);
     await press(page, within(cardOf(page, 0), 'Me sirve'));

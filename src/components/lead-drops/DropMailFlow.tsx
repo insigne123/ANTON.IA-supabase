@@ -172,7 +172,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null
       if (done) setNotice({ ok: true, text: `Guardamos tus cambios en los correos de ${closing(item)}` });
       return Boolean(done);
     },
-    feedback: async (item, useful, reason) => { await act({ action: 'feedback', leadId: item.leadId, feedback: { useful, reason: reason ?? null } }); },
+    feedback: async (item, useful, reason, wish) => { await act({ action: 'feedback', leadId: item.leadId, feedback: { useful, reason: reason ?? null, ...(wish !== undefined ? { wish } : {}) } }); },
   };
   const connect = (provider: 'google' | 'azure') => `/api/auth/connect/${provider}?enlace=${encodeURIComponent(token)}`;
   const mailOf = (item: DropItem): DropContactMail => ({

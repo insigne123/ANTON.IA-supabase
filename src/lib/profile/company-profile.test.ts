@@ -90,3 +90,16 @@ test('«Usar» fills the empty fields and adds the products not listed yet; what
   assert.equal(added, 2);
   assert.equal(mergeCompanySuggestion(merged, { services: 'SADT: registro de contratos' }).added, 0);
 });
+
+test('«En tus palabras» is each one\'s own: the company\'s never replaces what the person wrote', () => {
+  const company = companyProfileFields({ companyName: 'Brigadas del Sur', description: 'Brigadas de emergencia.', services: 'Brigadas', targetRoles: 'Gerente HSE',
+    targetNotes: 'El equipo vende a minería y energía.' });
+  assert.equal(company.targetNotes, 'El equipo vende a minería y energía.');
+  assert.ok((COMPANY_PROFILE_FIELDS as readonly string[]).includes('targetNotes'));
+  const mine = buildProfileUpdate({ ...createEmptyProfileForm(), name: 'Ana', targetRoles: 'Jefe de Bodega', targetNotes: 'Yo veo las cuentas del norte.' }, null);
+  const read = mapProfileToForm(withCompanyProfile({ full_name: 'Ana', signatures: mine.signatures } as never, company));
+  assert.equal(read.targetRoles, 'Gerente HSE', 'the lists come from the company\'s card');
+  assert.equal(read.targetNotes, 'Yo veo las cuentas del norte.', 'the person\'s words stay the person\'s');
+  const without = mapProfileToForm(withCompanyProfile({ full_name: 'Leo', signatures: {} } as never, company));
+  assert.equal(without.targetNotes, '', 'and nobody gets the company\'s as if they had written them');
+});

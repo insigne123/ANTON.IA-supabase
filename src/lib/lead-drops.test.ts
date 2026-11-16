@@ -269,6 +269,32 @@ test('the finder\'s pick: the customer\'s own roles by score, and the last slots
   assert.deepEqual(onlyRelated.get('ana')!.map(item => [item.company, item.track]), [['Hites', 'explore'], ['Sodimac', 'explore']]);
 });
 
+test('the mix: whoever decides first, and the last slots for someone of the area who can refer the person to them', () => {
+  // 16 Nov 2026, the owner: «a lo mejor deberíamos hacerlo mixto: leads que son directamente el que necesitan y también leads que
+  // podrían referirlos con la persona indicada».
+  const scores = new Map<string, DropScore>();
+  const scored = (id: string, company: string, score: DropScore) => { const item = candidate(id, company); scores.set(item.leadId, score); return item; };
+  const pool = [
+    scored('1', 'Ripley', { titleClass: 'exact', score: 95 }), scored('2', 'Falabella', { titleClass: 'exact', score: 90 }), scored('3', 'Paris', { titleClass: 'similar', score: 85 }),
+    scored('4', 'Lider', { titleClass: 'exact', score: 80 }), scored('5', 'Tottus', { titleClass: 'exact', score: 75 }),
+    scored('6', 'Jumbo', { titleClass: 'similar', score: 99, role: 'refer' }), scored('7', 'Hites', { titleClass: 'related', score: 70, role: 'refer' }),
+    scored('8', 'Easy', { titleClass: 'similar', score: 60, role: 'refer' }), scored('9', 'Sodimac', { titleClass: 'related', score: 65 }),
+  ];
+  const deps = { criteriaOf: () => criteria, scoreOf: (_person: string, item: DropCandidate) => scores.get(item.leadId) ?? null };
+  const [six] = [...pickRankedDrops(pool, ['ana'], none(), 6, deps).values()];
+  assert.deepEqual(six.map(item => [item.company, item.role ?? item.track ?? 'decide']),
+    [['Ripley', 'decide'], ['Falabella', 'decide'], ['Paris', 'decide'], ['Lider', 'decide'], ['Jumbo', 'refer'], ['Hites', 'refer']],
+    'four who decide, by score, and two who can refer: a referrer never takes the place of someone who decides, whatever its score');
+  // Without anyone to refer, those slots go to the roles next to the customer's, as before; with only referrers, they fill the drop.
+  const none2 = pickRankedDrops(pool.filter(item => scores.get(item.leadId)?.role !== 'refer'), ['ana'], none(), 6, deps).get('ana')!;
+  assert.deepEqual(none2.map(item => [item.company, item.role ?? item.track ?? 'decide']).slice(4), [['Sodimac', 'explore'], ['Tottus', 'decide']]);
+  const only = pickRankedDrops(pool.filter(item => scores.get(item.leadId)?.role === 'refer'), ['ana'], none(), 2, deps).get('ana')!;
+  assert.deepEqual(only.map(item => [item.company, item.role]), [['Jumbo', 'refer'], ['Hites', 'refer']]);
+  // Said as what they are for, in the app and in the emails.
+  assert.equal(whyText({ title: 'Ingeniero de Prevención', industry: 'Minería', city: 'Calama', role: 'refer' }, { ...criteria, source: 'perfil' }),
+    'Trabaja en el área que buscas, en tu rubro objetivo (minería), en Calama: no decide la compra, pero puede decirte quién la ve o presentarte.');
+});
+
 test('a role next to the customer\'s says so, instead of «calza por su cargo»', () => {
   assert.equal(whyText({ title: 'Jefe de Operaciones', industry: 'Retail', city: 'Santiago', track: 'explore' }, criteria),
     'Su cargo es vecino a los que buscas, en tu rubro objetivo (retail), en Santiago: te lo proponemos para probar si también te sirve.');

@@ -23,7 +23,8 @@ import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
-import { dropLessons, finderSearchTerms, scoreDropCandidates, type FinderLessons } from '@/lib/server/lead-drop-finder';
+import { dropLessons, dropWishes, finderSearchTerms, scoreDropCandidates, type FinderLessons, type FinderPreferences } from '@/lib/server/lead-drop-finder';
+import { profileTargetNotes } from '@/lib/profile/profile-mappings';
 import { briefNewsLine, type DropResearch, type DropResearchInput } from '@/lib/server/lead-drop-research';
 import { voiceSamplesFor } from '@/lib/server/voice-own-samples';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
@@ -351,11 +352,21 @@ const GROUP_MS = 90_000;
 const criteriaKey = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort().join(',')).join('|');
 
 /** What the team did with the contacts of its drops of the last six months (dropLessons); nothing when it cannot be read. */
-async function readDropLessons(client: Client, organizationId: string, now: Date): Promise<FinderLessons> {
+async function readDropLessons(client: Client, organizationId: string, now: Date): Promise<FinderLessons & { wishesOf: (userId: string) => string[] }> {
   const since = new Date(now.getTime() - 180 * DAY).toISOString().slice(0, 10);
-  const rows: any = await client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since).limit(2000);
-  return dropLessons(rows.error ? [] : rows.data || []);
+  const rows: any = await client.from('lead_drops').select('user_id,items').eq('organization_id', organizationId).gte('drop_date', since).limit(2000);
+  const read = rows.error ? [] : rows.data || [];
+  // What each person asked for when saying whether a contact was useful: theirs alone, the finder's score reads it for them.
+  return { ...dropLessons(read), wishesOf: userId => dropWishes(read, userId) };
 }
+/** «En tus palabras» of a person's «Perfil» as it is stored (signatures.profile_extended.targetNotes). */
+const ownNotes = (profile: Record<string, unknown> | null | undefined) => {
+  const signatures = profile?.signatures as Record<string, unknown> | null | undefined;
+  const extended = signatures && typeof signatures === 'object' ? signatures.profile_extended as Record<string, unknown> | null | undefined : null;
+  return profileTargetNotes(extended && typeof extended === 'object' ? extended.targetNotes : null);
+};
+/** Two people with the same customer and different words are scored apart: what each wrote is theirs. */
+const preferencesKey = (preferences: FinderPreferences) => [preferences.notes || '', preferences.teamNotes || '', ...(preferences.wishes || [])].join('¦');
 
 /**
  * The finder's choice for a group: every usable candidate scored for each person's customer (one scoring per different customer,
@@ -363,17 +374,22 @@ async function readDropLessons(client: Client, organizationId: string, now: Date
  */
 async function finderPicks(client: Client, organizationId: string, input: {
   candidates: DropCandidate[]; members: string[]; known: KnownPeople; size: number; own: (userId: string) => DropCriteria; lessons: FinderLessons; generate?: Generate;
+  /** What each person says they look for, in their words: read by the score, so the same search serves each one differently. */
+  preferences?: (userId: string) => FinderPreferences;
 }) {
   const usable = usableDrops(input.candidates, input.known);
   const scores = new Map<string, Map<string, DropScore>>();
   const customers = new Map<string, { criteria: DropCriteria; userId: string }>();
-  for (const userId of input.members) if (!customers.has(criteriaKey(input.own(userId)))) customers.set(criteriaKey(input.own(userId)), { criteria: input.own(userId), userId });
+  const preferencesOf = (userId: string): FinderPreferences => input.preferences?.(userId) ?? {};
+  const keyOf = (userId: string) => `${criteriaKey(input.own(userId))}¦${preferencesKey(preferencesOf(userId))}`;
+  for (const userId of input.members) if (!customers.has(keyOf(userId))) customers.set(keyOf(userId), { criteria: input.own(userId), userId });
   await Promise.all([...customers].map(async ([key, { criteria, userId }]) => {
     const context = await loadCoworkUserContext(client, { organizationId, userId }, { memories: false, mailbox: false });
     const seller = context ? { company: context.companyName, offer: context.offer, services: context.services, differentiators: context.differentiators, sector: context.sector } : null;
-    scores.set(key, await scoreDropCandidates({ candidates: usable, criteria, seller, lessons: input.lessons, generate: input.generate }).catch(() => new Map<string, DropScore>()));
+    scores.set(key, await scoreDropCandidates({ candidates: usable, criteria, seller, lessons: input.lessons, preferences: preferencesOf(userId), generate: input.generate })
+      .catch(() => new Map<string, DropScore>()));
   }));
-  const scoreOf = (userId: string, leadId: string) => scores.get(criteriaKey(input.own(userId)))?.get(leadId) ?? null;
+  const scoreOf = (userId: string, leadId: string) => scores.get(keyOf(userId))?.get(leadId) ?? null;
   const picks = pickRankedDrops(usable, input.members, input.known, input.size, { criteriaOf: input.own, scoreOf: (userId, item) => scoreOf(userId, item.leadId) });
   return { picks, scoreOf };
 }
@@ -416,7 +432,8 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const groups = groupDropPeople(people.filter(userId => own.get(userId)).map(userId => ({ id: userId, criteria: own.get(userId)! })), dropsMaxGroups());
 
   const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
-  const lessons = finder && groups.length ? await readDropLessons(client, organizationId, deps.now) : { liked: [], disliked: [] };
+  const lessons = finder && groups.length ? await readDropLessons(client, organizationId, deps.now) : { liked: [], disliked: [], wishesOf: () => [] as string[] };
+  const preferences = (userId: string): FinderPreferences => ({ notes: ownNotes(team.byId.get(userId)) || null, teamNotes: team.company?.targetNotes || null, wishes: lessons.wishesOf(userId) });
   let spent = deps.spentUsd;
   let searched = 0;
   for (const { criteria, people: members } of groups) {
@@ -449,7 +466,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     spent += found.costUsd;
     const entries = new Map<string, VaultEntry>(found.results.map(entry => [entry.lead.id, entry]));
     let scoreOf: (userId: string, leadId: string) => DropScore | null = () => null;
-    let assigned: Map<string, Array<DropCandidate & { track?: 'explore' }>>;
+    let assigned: Map<string, Array<DropCandidate & { track?: 'explore'; role?: 'refer' }>>;
     if (finder) {
       // The same customer asked two more ways (free): its roles as people write them, and the words of their area as a title.
       const terms = await finderSearchTerms(criteria, deps.generate).catch(() => ({ titles: [] as string[], keywords: [] as string[] }));
@@ -466,7 +483,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       }
       found = { ...found, results: [...entries.values()] };
       const chosen = await finderPicks(client, organizationId, { candidates: found.results.map(candidateOf), members, known, size: plan.size,
-        own: userId => own.get(userId)!, lessons, generate: deps.generate });
+        own: userId => own.get(userId)!, lessons, preferences, generate: deps.generate });
       assigned = chosen.picks;
       scoreOf = chosen.scoreOf;
       // Whoever the score left with nobody (the model down, or no title it knows) gets them as a team of one contact does, by the words of the title.
@@ -612,15 +629,23 @@ async function draftFor(item: DropItem, userContext: Record<string, unknown> | n
   const who = `${name}${item.title ? `, ${item.title}` : ''}${item.company ? ` en ${item.company}` : ''}`;
   // What the research found to open with and why the offer helps this company: the Writer's angle, so the email is about them.
   const angle = [item.brief?.opener ? `Para abrir: ${item.brief.opener}` : null, item.brief?.fit ? `Por qué le sirve: ${item.brief.fit}` : null].filter(Boolean).join(' ').slice(0, 400) || null;
+  // Who works in the area but does not decide (DropItem.role): the email asks for the way in, it does not sell to them.
+  const refers = item.role === 'refer';
   const brief: CoworkWriteBrief = {
-    kind: 'sequence', recipients: [name], objective: `Primer correo de prospección para ${who}, y tres seguimientos si no responde.`,
-    angle, tone: null, steps: DROP_SEQUENCE_STEPS, notes: null, findings: null,
+    kind: 'sequence', recipients: [name],
+    objective: refers
+      ? `Primer correo para ${who}, que trabaja en el área pero no decide la compra: pedirle en corto, con respeto por su tiempo, que te oriente sobre quién ve este tema en su empresa o que te presente. Y tres seguimientos breves si no responde.`
+      : `Primer correo de prospección para ${who}, y tres seguimientos si no responde.`,
+    angle, tone: null, steps: DROP_SEQUENCE_STEPS,
+    notes: refers ? 'No le vendas ni le pidas una reunión comercial: di en una frase qué resuelves y para quién, y pregunta quién es la persona indicada. Los seguimientos insisten en esa misma pregunta, cada vez más breves.' : null,
+    findings: null,
   };
   const observations = [{ action: 'leads.recommend', input: '', result: { leads: [{ name, company: item.company || '', title: item.title, industry: item.industry,
     companySize: item.size, city: item.city, companyFacts: item.research } ] } }];
   const models = coworkWriterModels();
   const efforts = coworkWriterEfforts();
-  const request = `Escríbele a ${who} un primer correo y tres seguimientos.`;
+  const request = refers ? `Escríbele a ${who} un primer correo para que te diga quién ve este tema en su empresa, y tres seguimientos.`
+    : `Escríbele a ${who} un primer correo y tres seguimientos.`;
   const written = await runCoworkWriter({
     request,
     brief, userContext, observations, now,
