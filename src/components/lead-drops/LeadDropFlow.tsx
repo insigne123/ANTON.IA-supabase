@@ -10,6 +10,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { telHref } from '@/lib/contact-calls';
+import { DropBulkEnrich } from './DropBulkEnrich';
 import { DropCallPanel } from './DropCallPanel';
 import { DropContactCard } from './DropContactCard';
 import { DropContactsWorkspace } from './DropContactsWorkspace';
@@ -96,11 +98,17 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const [followOpen, setFollowOpen] = useState<string | null>(null);
   const started = useRef(false);
   /** The contact the morning email linked to, and whether that link asked to look its email up: read once, then gone from the address. */
+  // Since 16 Nov 2026 every button of the emails lands here, inside the app (src/app/contactos/[token]): «Enriquecer los N» brings
+  // its choice to confirm (`todos`), and «Llamar» opens its contact on its call (`llamar`).
   const [linked] = useState(() => {
-    if (typeof window === 'undefined') return { leadId: null as string | null, enrich: false };
+    if (typeof window === 'undefined') return { leadId: null as string | null, enrich: false, bulk: null as 'email' | 'phone' | null, call: false };
     const params = new URLSearchParams(window.location.search);
-    return { leadId: params.get('c'), enrich: params.get('enriquecer') === '1' };
+    const todos = params.get('todos');
+    return { leadId: params.get('c'), enrich: params.get('enriquecer') === '1', bulk: todos === 'telefono' ? 'phone' as const : todos === 'correo' ? 'email' as const : null,
+      call: params.get('llamar') === '1' && Boolean(params.get('c')) };
   });
+  /** «Enriquecer los N»: with their mobiles or without. The email's choice arrives made; the button confirms it. */
+  const [bulkPhone, setBulkPhone] = useState(linked.bulk === 'phone');
   const asked = useRef(false);
   const listId = useId();
   // Of several contacts, the one on screen: the one the email linked to, or the first that still has a step to take.
@@ -159,10 +167,11 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     }
     if (!drop) return;
     if (step >= STEPS.length) { markPlayed(drop.id); return; }
-    if (reducedMotion() || wasPlayed(drop.id)) { setStep(STEPS.length); return; }
+    // Whoever comes from an email came to act on a contact: no playback in the way.
+    if (reducedMotion() || wasPlayed(drop.id) || linked.leadId || linked.bulk) { setStep(STEPS.length); return; }
     const timer = setTimeout(() => setStep(value => value + 1), STEP_MS);
     return () => clearTimeout(timer);
-  }, [making, drop, step]);
+  }, [making, drop, step, linked.leadId, linked.bulk]);
 
   // The session answered but the organization could not be read (offline, a failed request): nothing below can start, so say it.
   const noOrganization = !authLoading && !organizationId;
@@ -170,8 +179,10 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const one = drop?.items.length === 1 ? drop.items[0] : null;
   // Found with Apollo: the email is looked up on saving (1 credit), and the screen says so before the click.
   const lookup = Boolean(drop?.items.some(item => item.provider === 'apollo'));
+  /** How many still need their email looked up: two or more can be asked at once. */
+  const toLook = drop?.items.filter(item => needsLookup(item)).length ?? 0;
   // What the person does with the contacts is the same wherever the app shows them (useDropActions): here and in «Hoy».
-  const { saving, enriching, notice, setNotice, enrich, save, actions } = useDropActions({
+  const { saving, enriching, notice, setNotice, enrich, enrichAll, bulk, save, actions } = useDropActions({
     dropId: id, call, single: Boolean(one), setItems: items => setDrop(current => current && { ...current, items }) });
   const copy = async (key: string, email: { subject: string; body: string } | null | undefined) => {
     if (!email) return;
@@ -274,12 +285,15 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   // Opened from the morning email on one contact: it comes into view and, when the link asked for it, its email is looked up at once
   // (the click in the email was the person's; the lookup is the one the button makes, for a contact of theirs).
   useEffect(() => {
-    if (!drop || playing || !linked.leadId || asked.current) return;
+    if (!drop || playing || (!linked.leadId && !linked.bulk) || asked.current) return;
     asked.current = true;
     const item = drop.items.find(entry => entry.leadId === linked.leadId);
     window.history.replaceState(null, '', dropHref(drop.id));
     if (!item) return;
     document.getElementById(`contacto-${item.leadId}`)?.scrollIntoView?.({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    // «Llamar» of the email that brought its mobile: mail clients drop `tel:` links, so the number is dialled here, once.
+    const tel = linked.call && item.phone?.state === 'found' ? telHref(item.phone.number) : null;
+    if (tel) window.location.href = tel;
     if (linked.enrich && needsLookup(item)) void enrich(item);
     // Once, when the contacts are on screen: `enrich` reads the state of that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -410,9 +424,13 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
         </div>
         {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
 
+        {/* All of them looked up at once, with their mobiles or without: the answer also goes to the person's inbox. */}
+        {toLook >= 2 || bulk ? <DropBulkEnrich count={toLook} phone={bulkPhone} onPhone={setBulkPhone} onStart={() => void enrichAll(drop.items, bulkPhone)} running={bulk} disabled={saving || (enriching !== null && !bulk)} /> : null}
+
         {/* The list at the side, one contact to read and act on at a time (DropContactsWorkspace). */}
         <DropContactsWorkspace items={drop.items} selectedId={shownItem(drop.items).leadId} onSelect={setSelectedId}>
-          {(item => <DropContactCard key={item.leadId} item={item} actions={actions} busy={saving || enriching !== null} enriching={enriching === item.leadId} defaultOpen={linked.leadId === item.leadId} />)(shownItem(drop.items))}
+          {(item => <DropContactCard key={item.leadId} item={item} actions={actions} busy={saving || enriching !== null || bulk !== null} enriching={enriching === item.leadId}
+            defaultOpen={linked.leadId === item.leadId} callOpen={linked.call && linked.leadId === item.leadId} />)(shownItem(drop.items))}
         </DropContactsWorkspace>
 
         {howSection}

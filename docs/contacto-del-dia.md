@@ -346,28 +346,47 @@ cambió, en todas las vistas (la página del correo, «Buscar prospectos» y «H
 La sección de la llamada se llama «Llamada» en todas partes (antes «Para llamar»); el correo que trae los teléfonos conserva
 su nombre interno. Pruebas: `drop-contact-card.test.ts`, `drop-mail-flow.test.ts`, `lead-drop-flow-ui.test.ts`,
 `lead-drops.test.ts`, `lead-drop-ready-email.test.ts`; recorridos `contactos-seis`, `contactos-para-llamar`,
-`contactos-desde-el-correo*` (incluye `contactos-desde-el-correo-llamar`) y `contactos-en-hoy`, en escritorio y teléfono.
+`contactos-desde-el-correo*` (incluye `contactos-desde-el-correo-llamar`; desde el cambio de más abajo son `contactos-del-correo-*`) y `contactos-en-hoy`, en escritorio y teléfono.
 
-### Desde el 16 de noviembre: la página del correo, dentro del marco de la app
+### Desde el 16 de noviembre: los botones del correo abren la app, en la cuenta de la persona
 
-El dueño, al ver la página rediseñada: «sigue sin estar como dentro de la app en sí, no hay forma de acceder al resto de la app
-desde este link… esto es una forma de facilitarle al usuario el gasto de créditos y además una forma de acercarlo a la app».
-Hasta ese día la página era a propósito una isla, sin menú. Ahora va dentro del marco de la app (`DropAppFrame`, que envuelve
-a `DropMailFlow` en `src/app/contactos/[token]/page.tsx`):
+El dueño, al ver la página del correo: «sigue sin estar como dentro de la app en sí, no hay forma de acceder al resto de la app
+desde este link… esto es una forma de facilitarle al usuario el gasto de créditos y además una forma de acercarlo a la app». Un
+primer intento le puso a esa página un marco parecido al de la app, y el dueño lo descartó: «lo que hiciste fue crear una
+versión 2 de la app, eso no era lo que quería; lo que quería era que el redireccionamiento lo llevara a su cuenta en la app,
+porque estos mails solo le llegarán a usuarios que hayan iniciado sesión alguna vez». Ese marco (`DropAppFrame`) se quitó.
 
-- **En pantalla ancha**, el menú de la app al costado, con su logo: las pantallas de trabajo que tiene todo equipo («Hoy»,
-  «Buscar prospectos», «Por escribir», «Tabla de datos», «Conversaciones», «Campañas», «Pipeline»), tomadas de
-  `NAV_SECTIONS`. No van las que dependen del plan del equipo o de un rol (Cowork, Oportunidades, Administración), porque a
-  quien no ha iniciado sesión no se le puede preguntar. Bajo «Hoy» se marca «Tus contactos de hoy» como el lugar donde está.
-- **En el teléfono**, el logo y «Entrar a ANTON.IA» arriba, y las mismas pantallas en una fila que se desliza.
-- **«Hoy» y «Entrar a ANTON.IA»** llevan a `/dashboard?contactos=<enlace>`: «Hoy» con estos mismos contactos a la vista. Las
-  demás entradas son la dirección propia de cada pantalla. Sin sesión, la app pide entrar y después abre esa pantalla
-  (`/login?next=…`). Con una sesión en el navegador, el botón dice «Abrir ANTON.IA».
-- Nada de la página pide iniciar sesión: enriquecer, aprobar y llamar siguen funcionando con el enlace del correo. La línea
-  «¿Prefieres trabajarlos dentro de ANTON.IA?» del pie se quitó: el marco la reemplaza.
+**Qué hace ahora cada botón.** La dirección del correo, `/contactos/<enlace>`, ya no muestra nada propio
+(`src/app/contactos/[token]/page.tsx`): comprueba el enlace firmado y manda a esos contactos dentro de la app, en
+`/search/contactos/<id>` (`LeadDropFlow`), con el menú y todo lo demás de ANTON.IA a un clic.
 
-Quien ya tiene la sesión iniciada como la persona del enlace sigue llegando directo a «Hoy», como desde el 13 de noviembre.
-Prueba: «the page of the email sits in the app's frame» en `drop-mail-flow.test.ts`; recorrido `contactos-desde-el-correo`.
+- **Con la sesión iniciada**, la persona queda directo en sus contactos, con el contacto del botón abierto (`?c=`).
+- **Sin sesión**, la app pide entrar (`/login?next=…`) y después abre esos mismos contactos, con lo que el botón pedía.
+- **Con otra cuenta abierta en el navegador**, un aviso dice que el correo llegó para otra cuenta y cómo seguir. No se muestra
+  ningún contacto.
+- **Enlace vencido o que no existe**: el aviso de siempre, con «Entrar a ANTON.IA».
+
+**Lo que la página de la app aprendió para que nada del correo se pierda:**
+
+- **«Enriquecer los N» y «Con sus teléfonos»** del correo de la mañana llegan con `?todos=correo|telefono`: la página muestra
+  «Enriquecer los N de una vez» (`DropBulkEnrich`) con esa opción elegida y el costo total. Los créditos se usan recién al
+  confirmar. Busca uno por uno (`action: 'enrich'` en `POST /api/lead-drops/<id>`), y al terminar pide la respuesta al correo
+  (`action: 'ready'`): «Listos» en la misma conversación de la mañana y, si se pidieron teléfonos, «Para llamar» cuando lleguen.
+  La banda aparece también sin venir del correo, cuando quedan dos o más por enriquecer.
+- **«Enriquecer y revisar · 1 crédito»** de un contacto llega con `?c=…&enriquecer=1`: como exige sesión, la búsqueda parte al
+  llegar (el clic del correo fue de la persona; un lector automático de enlaces no tiene sesión y queda en `/login`).
+- **«Llamar»** del correo «Para llamar» llega con `?c=…&llamar=1`: abre a esa persona en «Llamada» y marca el número una vez.
+- **«Hoy»** (`TodayContacts`), cuando recibe un enlace de contactos que no son los que tiene a la vista, manda a esa misma página.
+
+Las respuestas en la misma conversación («Listos», «Para llamar») no cambian: las escribe el servidor, venga la acción de donde
+venga.
+
+**Qué queda sin uso.** La página sin sesión (`DropMailFlow`) y su ruta (`POST /api/lead-drops/link`) siguen en el código pero
+ningún botón lleva a ellas. Se quitan cuando el dueño lo confirme.
+
+Pruebas: «the address of the email shows nothing of its own…» en `drop-mail-flow.test.ts`; «Enriquecer los N of the morning
+email lands inside the app…» y «Llamar of the email…» en `lead-drop-flow-ui.test.ts`. Recorridos: `contactos-del-correo-a-la-app`,
+`contactos-del-correo-todos`, `contactos-del-correo-llamar` y `contactos-del-correo-sin-sesion`.
 
 ## Cómo funciona
 

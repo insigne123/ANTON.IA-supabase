@@ -9,7 +9,6 @@ import * as contactCalls from '@/lib/contact-calls';
 import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
 import * as provider from '@/lib/leads-workspace/enrichment-provider';
-import * as navigation from '@/lib/navigation';
 
 // «Contacto del día» opened from the person's inbox (DropMailFlow): the page with the real card, and the server answered by hand.
 const TOKEN = 'A'.repeat(48);
@@ -54,10 +53,6 @@ const card = await compile('./DropContactCard.tsx', { ...shared, './DropCallPane
 const bulkPanel = await compile('./DropBulkEnrich.tsx', shared);
 const workspace = await compile('./DropContactsWorkspace.tsx', shared);
 const flow = await compile('./DropMailFlow.tsx', { ...shared, './DropContactCard': card, './DropBulkEnrich': bulkPanel, './DropContactsWorkspace': workspace });
-// The page sits in the app's own frame (16 Nov 2026, the owner: «no hay forma de acceder al resto de la app desde este link… es una
-// forma de acercarlo a la app»): the app's menu and «Entrar», each entry the app's own address.
-const frame = await compile('./DropAppFrame.tsx', { ...shared, '@/components/logo': { __esModule: true, default: () => React.createElement('a', { href: '/', 'data-logo': '' }, 'ANTON.IA') }, '@/lib/navigation': navigation });
-
 const LEAD = '6accdbfcd5f5d80001cf6901', OTHER = '6accdbfcd5f5d80001cf6902';
 const contact = (leadId: string, name: string, extra: Record<string, unknown> = {}) => ({ leadId, name, title: 'Gerente HSE', company: 'Minera Andina', domain: null, industry: 'Minería', size: null, city: null,
   hasEmail: true, hasPhone: false, why: 'Calza con tu cliente ideal por su cargo.', research: [], provider: 'apollo',
@@ -110,56 +105,27 @@ test('opened from the email: the contacts with their steps, nothing leading into
     assert.equal(document.getElementById(`contacto-${OTHER}`), null);
     assert.match(text(), /Anterior\s*1 de 2\s*Siguiente/, 'on a phone the list is a row of faces, with the way to the next one under the card');
     assert.equal(dom.window.location.pathname + dom.window.location.search, `/contactos/${TOKEN}`);
-    assert.deepEqual([...document.querySelectorAll('a')].map(link => link.getAttribute('href')), [], 'the contacts themselves lead nowhere else: the way into the app is the frame\'s (DropAppFrame)');
+    assert.deepEqual([...document.querySelectorAll('a')].map(link => link.getAttribute('href')), [], 'the contacts themselves lead nowhere else: the page has no way out');
     assert.equal(asked.length, 0, 'opening the page asks the server for nothing');
     assert.match(text(), /Esta página es personal/);
   } finally { await act(async () => root.unmount()); }
 });
 
-test('the page of the email sits in the app\'s frame: its menu, where the person is, and the way in', async () => {
-  const href = `/dashboard?contactos=${TOKEN}`;
-  const root = createRoot(dom.window.document.getElementById('root')!);
-  const show = (props: Record<string, unknown>) => act(async () => root.render(React.createElement(frame.DropAppFrame, props, React.createElement('main', null, 'Tus contactos'))));
-  try {
-    await show({ todayHref: href, signedIn: false });
-    const document = dom.window.document;
-    const menu = document.querySelector('aside nav[aria-label="Secciones de ANTON.IA"]')!;
-    // The work screens every team has, in the app's order; «Hoy» brings these same contacts into view.
-    assert.deepEqual([...menu.querySelectorAll('a')].map(link => [link.textContent, link.getAttribute('href')]), [['Hoy', href], ['Buscar prospectos', '/search'],
-      ['Por escribir', '/saved/leads/enriched'], ['Tabla de datos', '/sheet'], ['Conversaciones', '/contacted'], ['Campañas', '/campaigns'], ['Pipeline', '/crm']]);
-    assert.deepEqual([...menu.querySelectorAll('p')].filter(entry => !entry.hasAttribute('aria-current')).map(entry => entry.textContent), ['Centro de mando', 'Prospectar', 'Contactos', 'Seguimiento']);
-    assert.doesNotMatch(menu.textContent || '', /Cowork|Oportunidades|Administración|Perfil/, 'nothing that depends on the team\'s plan or on a role');
-    assert.equal(menu.querySelector('[aria-current="page"]')?.textContent, 'Tus contactos de hoy');
-    // Nobody signed in: the way in says so, and leads to «Hoy» with these contacts.
-    assert.deepEqual([...document.querySelectorAll('aside > div a:not([data-logo])')].map(link => [link.textContent, link.getAttribute('href')]), [['Entrar a ANTON.IA', href]]);
-    assert.match(document.querySelector('aside')!.textContent || '', /Entra con tu cuenta para buscar más prospectos, seguir tus campañas y responder desde un solo lugar\./);
-    // A phone has the same: the brand and the way in at the top, and the screens in a row.
-    const top = document.querySelector('header')!;
-    assert.deepEqual([...top.querySelectorAll('nav a')].map(link => link.textContent), ['Hoy', 'Buscar prospectos', 'Por escribir', 'Tabla de datos', 'Conversaciones', 'Campañas', 'Pipeline']);
-    assert.ok([...top.querySelectorAll('a')].some(link => link.textContent === 'Entrar a ANTON.IA' && link.getAttribute('href') === href));
-    assert.equal(document.querySelector('main')?.textContent, 'Tus contactos', 'the contacts are its content');
-    // With a session on the browser it is opening, not signing in; sent here by «Hoy», «Hoy» is plain «Hoy».
-    await show({ todayHref: '/dashboard', signedIn: true });
-    assert.ok([...document.querySelectorAll('aside a')].some(link => link.textContent === 'Abrir ANTON.IA' && link.getAttribute('href') === '/dashboard'));
-    assert.equal(menu.isConnected ? menu.querySelector('a')?.getAttribute('href') : document.querySelector('aside nav a')?.getAttribute('href'), '/dashboard');
-    assert.doesNotMatch(document.body.textContent || '', /Entrar a ANTON\.IA/);
-  } finally { await act(async () => root.unmount()); }
-});
-
-test('the page of the email: signed in as the person it names, the contacts open in «Hoy»; nobody is asked to sign in', () => {
+test('the address of the email shows nothing of its own: it sends the person to those contacts inside the app, in their account', () => {
   const page = readFileSync(new URL('../../app/contactos/[token]/page.tsx', import.meta.url), 'utf8');
-  // The link is checked first, and only the person it names is sent into the app: another account's session stays on this page.
-  assert.match(page, /const \{ dropId, scope \} = await resolveDropLink\(admin, token\);\s*const viewer = await viewerId\(\);\s*inside = !stay && !bulk && !call && !single\(query\.correo\) && viewer === scope\.userId;/);
-  // «Enriquecer los N» of the morning email is the way on from the inbox: it stays on this page, with the choice made there.
-  assert.match(page, /const bulk = todos === 'telefono' \? 'phone' as const : todos === 'correo' \? 'email' as const : null;/);
-  assert.match(page, /return user\?\.id \?\? null;\s*\} catch \{ return null; \}/);
-  // Sent back by «Hoy» (`aqui=1`) or coming back from connecting a mailbox (`correo`): it stays here, and offers no way back in a loop.
-  assert.match(page, /const stay = single\(query\.aqui\) === '1';/);
-  assert.match(page, /<DropAppFrame todayHref=\{stay \? '\/dashboard' : inApp\(token, null\)\} signedIn=\{Boolean\(viewer\)\}>\s*<DropMailFlow /);
-  assert.match(page, /const inApp = \(token: string, leadId: string \| null\) => `\/dashboard\?contactos=\$\{encodeURIComponent\(token\)\}/);
-  // The redirect is thrown outside the try, so it is never shown as a broken link.
-  assert.ok(page.indexOf('redirect(inApp(token, focus));') > page.indexOf("'Entrar a ANTON.IA'") || page.indexOf('redirect(inApp(token, focus));') > page.indexOf('Entrar a ANTON.IA'));
-  assert.doesNotMatch(page, /redirect\('\/login/);
+  // 16 Nov 2026, the owner: «lo que quería era que el redireccionamiento lo llevara a su cuenta en la app». The link is checked
+  // first, and it only says which contacts: the app's own page shows them, behind the app's own sign-in.
+  assert.match(page, /const \{ dropId, scope \} = await resolveDropLink\(getSupabaseAdminClient\(\), token\);/);
+  assert.match(page, /target = inApp\(dropId, query\);/);
+  assert.match(page, /return `\$\{dropHref\(dropId\)\}\$\{search \? `\?\$\{search\}` : ''\}`;/);
+  // What the button asked for goes with it: its contact (and its lookup, which the app starts behind its session), «Enriquecer los N» with its choice, and the call.
+  assert.match(page, /if \(focus\) params\.set\('c', focus\);\s*if \(todos === 'correo' \|\| todos === 'telefono'\) params\.set\('todos', todos\);[\s\S]{0,160}if \(focus && single\(query\.enriquecer\) === '1'\) params\.set\('enriquecer', '1'\);\s*if \(focus && single\(query\.llamar\) === '1'\) params\.set\('llamar', '1'\);/);
+  // Signed in with another account: said, instead of an app that has no such contacts.
+  assert.match(page, /if \(viewer && viewer !== scope\.userId\) \{\s*return <Notice title="Estos contactos son de otra cuenta"/);
+  // The redirect is thrown outside the try, so it is never shown as a broken link; the page of its own is gone.
+  assert.ok(page.indexOf('redirect(target);') > page.indexOf('Este enlace no está disponible'));
+  assert.doesNotMatch(page, /DropMailFlow|DropAppFrame|mailDropView/);
+  assert.doesNotMatch(page, /redirect\('\/login/, 'the app asks to sign in, and then opens the contacts');
 });
 
 test('«Enriquecer» is one tap: found, it says so with the address and the next step is to connect the mailbox, once, right there', async () => {
