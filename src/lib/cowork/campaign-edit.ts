@@ -14,13 +14,19 @@ export class CoworkCampaignEditRefused extends Error {
 
 const emailText = { subject: z.string().trim().min(1).max(300), body: z.string().trim().min(1).max(12000) };
 
-/** Either the emails of the sequence (the template, for everyone) or the first email of one person. */
+const recipient = z.string().trim().email().max(320).transform(value => value.toLowerCase());
+
+/**
+ * The emails of the sequence (the template, for everyone), the first email of one person, or every email of several people as the
+ * app wrote them for each one (`personal`, 17 Nov 2026: docs/campanas-un-correo-por-persona.md).
+ */
 export const coworkCampaignEditSchema = z.object({
   /** Version seen in the preview. Older clients without it must reload before saving. */
   expectedHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   messages: z.array(z.object(emailText).strict()).min(1).max(7).optional(),
-  person: z.object({ email: z.string().trim().email().max(320).transform(value => value.toLowerCase()), ...emailText }).strict().optional(),
-}).strict().refine(value => Boolean(value.messages) !== Boolean(value.person), 'Edita los correos de la secuencia o el de una persona, uno a la vez.');
+  person: z.object({ email: recipient, ...emailText }).strict().optional(),
+  personal: z.array(z.object({ email: recipient, messages: z.array(z.object(emailText).strict()).min(1).max(7) }).strict()).min(1).max(25).optional(),
+}).strict().refine(value => [value.messages, value.person, value.personal].filter(Boolean).length === 1, 'Edita los correos de la secuencia o los de una persona, uno a la vez.');
 
 /** The staged definition with the person's subjects and bodies: same recipients,
  * number of emails and spacing. `changed` lists the emails that differ. */
@@ -53,5 +59,33 @@ export function coworkEditedCampaignPerson(definition: unknown, person: CoworkCa
   return { next, changed: [0] };
 }
 
+/**
+ * The staged definition with the emails written for several people, one sequence each. Whoever had a first email of their own and
+ * nothing else (written from their research, or by hand) keeps it: only their follow-ups come from here. `changed` lists the steps.
+ */
+export function coworkPersonalCampaignDefinition(definition: unknown, personal: CoworkCampaignPersonal) {
+  const current = CampaignInputSchema.parse(definition);
+  const steps = current.messages.length;
+  let overrides = current.overrides;
+  const changed = new Set<number>();
+  for (const person of personal) {
+    if (!current.emails.includes(person.email)) throw new CoworkCampaignEditRefused(`${person.email} no está entre los destinatarios de esta campaña.`, 400);
+    if (person.messages.length !== steps) throw new CoworkCampaignEditRefused(`La campaña tiene ${steps} correos: cada persona lleva los mismos.`, 400);
+    const mine = overrides.filter(item => item.email === person.email);
+    const keepFirst = mine.some(item => item.messageIndex === 0) && mine.length < steps;
+    const next = person.messages.map((message, messageIndex) => (keepFirst && messageIndex === 0
+      ? mine.find(item => item.messageIndex === 0)!
+      : { email: person.email, messageIndex, subject: message.subject, body: message.body }));
+    next.forEach(item => {
+      const before = mine.find(old => old.messageIndex === item.messageIndex);
+      if (!before || before.subject !== item.subject || before.body !== item.body) changed.add(item.messageIndex);
+    });
+    overrides = [...overrides.filter(item => item.email !== person.email), ...next];
+  }
+  if (!changed.size) return { next: current, changed: [] as number[] };
+  return { next: CampaignInputSchema.parse({ ...current, overrides }), changed: [...changed].sort((a, b) => a - b) };
+}
+
+export type CoworkCampaignPersonal = NonNullable<z.infer<typeof coworkCampaignEditSchema>['personal']>;
 export type CoworkCampaignEdit = NonNullable<z.infer<typeof coworkCampaignEditSchema>['messages']>;
 export type CoworkCampaignPersonEdit = NonNullable<z.infer<typeof coworkCampaignEditSchema>['person']>;

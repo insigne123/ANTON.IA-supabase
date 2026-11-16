@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pencil, Sparkles, TriangleAlert } from 'lucide-react';
+import { personalEstimate, writePersonalEmails, type PersonalizeResult } from '@/lib/bulk-campaign-personal';
 import { CoworkEmailFields, FIELD } from './CoworkBlocks';
 import { CwButton } from './ui';
 import { cn } from '@/lib/utils';
@@ -14,6 +15,17 @@ export type CampaignPerson = {
   /** Its greeting names the person; null without an email (older servers do not send it). */
   greetsByName?: boolean | null;
   problem: string | null;
+  /** Every email of theirs was written for them, and the ones after the first as they go (servers before 17 Nov 2026 send neither). */
+  written?: boolean;
+  rest?: Array<{ subject: string; body: string; delayDays: number }>;
+};
+
+/** What the emails of each person are written from: the campaign as Cowork proposed it (docs/campanas-un-correo-por-persona.md). */
+export type CampaignGuide = {
+  description: string;
+  messages: Array<{ subject: string; body: string; delayDays: number }>;
+  /** The people who still read the common emails; empty when the campaign goes with one text (one person, or an older server). */
+  onGuide: string[];
 };
 
 type Editing = { email: string; subject: string; body: string };
@@ -22,14 +34,20 @@ type Editing = { email: string; subject: string; body: string };
  * The recipients of a proposed campaign, each with the first email they will receive (written for them, or the
  * template with their data). Open one to read it; edit it by hand or ask the AI for a change for that person only.
  * Saving replaces that person's first email and nothing else.
+ *
+ * With several people, the card writes each one's emails when it opens (17 Nov 2026: «que cada correo sea personalizado y distinto,
+ * que se haga de cero»): the campaign Cowork proposed is the guide, the same writer of Campañas writes for each person, and the
+ * approval waits for it. Whoever could not be written keeps the common emails, and the card offers to try again.
  */
-export function CampaignPeople({ runId, people, objective, relationship, definitionHash, locked, onSaved, onEditingChange }: {
+export function CampaignPeople({ runId, people, objective, relationship, definitionHash, locked, onSaved, onEditingChange, guide, onWritingChange }: {
   runId: string; people: CampaignPerson[]; objective: string; relationship: 'never_contacted' | 'previously_contacted';
   definitionHash?: string;
   /** Another edit of the card is open: one at a time. */
   locked: boolean;
   onSaved: () => Promise<void>;
   onEditingChange: (editing: boolean) => void;
+  guide?: CampaignGuide;
+  onWritingChange?: (writing: boolean) => void;
 }) {
   const [editing, setEditingState] = useState<Editing | null>(null);
   const [instruction, setInstruction] = useState('');
@@ -41,6 +59,57 @@ export function CampaignPeople({ runId, people, objective, relationship, definit
     setEditingState(next); setInstruction(''); setProposal(null); setError('');
     onEditingChange(Boolean(next));
   };
+  const [writing, setWriting] = useState<{ done: number; total: number } | null>(null);
+  const [wrote, setWrote] = useState('');
+  const stop = useRef(false);
+  const started = useRef(false);
+  const onGuide = guide?.onGuide ?? [];
+
+  /** Writes the emails of `emails`, one sequence each, and keeps them in the proposal; the card then shows them. */
+  async function write(emails: string[]) {
+    if (!guide || writing || !emails.length) return;
+    stop.current = false; setError(''); setSaved(''); setWrote('');
+    setWriting({ done: 0, total: emails.length }); onWritingChange?.(true);
+    try {
+      // Whoever has a first email of their own keeps it: their follow-ups are written from it.
+      const own = Object.fromEntries(people.filter(person => person.personal && person.first && emails.includes(person.email))
+        .map(person => [person.email, person.first!]));
+      const result = await writePersonalEmails({
+        definition: { objective, description: guide.description, messages: guide.messages, criteria: { relationship } }, emails, own,
+        onProgress: (done, total) => setWriting({ done, total }), stopped: () => stop.current,
+        send: async body => {
+          const response = await fetch('/api/campaigns/bulk/personalize', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body), signal: AbortSignal.timeout(150_000) });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw Object.assign(new Error(data.error || 'No se pudieron escribir sus correos.'), { status: response.status });
+          return data as PersonalizeResult;
+        },
+      });
+      if (result.written.length) {
+        const response = await fetch(`/api/cowork/runs/${runId}/campaign-preview`, {
+          method: 'PATCH', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expectedHash: definitionHash, personal: result.written }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'No se pudieron guardar los correos de cada persona.');
+        await onSaved();
+        setWrote(`Escribimos los correos de ${result.written.length === 1 ? '1 persona' : `${result.written.length} personas`}, a partir de su cargo y de su empresa. Revísalos antes de aprobar.`);
+      }
+      if (result.limit) setError(result.limit);
+      else if (!result.written.length && !result.stopped) setError('No pudimos escribir los correos de cada persona ahora. Puedes intentarlo de nuevo o crear la campaña con los correos comunes.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron escribir los correos de cada persona.');
+    } finally { setWriting(null); onWritingChange?.(false); }
+  }
+  // When the card opens and nobody has their emails yet, they are written without asking: it is what the campaign is for.
+  useEffect(() => {
+    if (started.current || !guide || locked || onGuide.length < 2 || onGuide.length < people.length) return;
+    started.current = true;
+    void write(onGuide);
+    // Once per card: what it reads is what the card opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guide, locked]);
+
   const own = people.filter(person => person.personal).length;
   const complete = !editing || Boolean(editing.subject.trim() && editing.body.trim());
   const nameOf = (email: string) => people.find(person => person.email === email)?.name || email;
@@ -91,6 +160,19 @@ export function CampaignPeople({ runId, people, objective, relationship, definit
       <span className="text-[12px] text-cw-muted">{own === 0 ? 'La plantilla, con el nombre de cada una'
         : own === people.length ? 'Escrito para cada una' : `${own} de ${people.length} escritos para la persona`}</span>
     </div>
+    {writing && <div role="status" aria-live="polite" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cw-border bg-cw-elevated px-3.5 py-2.5">
+      <p className="min-w-0 flex-1 text-[13px] leading-5">
+        <span className="font-medium">Escribiendo un correo para cada persona… {writing.done} de {writing.total}</span>
+        <span className="block text-[12px] text-cw-muted">Cada uno parte de su cargo y de su empresa. Tarda {personalEstimate(writing.total)}.</span>
+      </p>
+      <CwButton size="xs" variant="ghost" onClick={() => { stop.current = true; }}>Detener</CwButton>
+    </div>}
+    {!writing && guide && onGuide.length > 0 && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-cw-elevated px-3.5 py-2.5">
+      <p className="min-w-0 flex-1 text-[12.5px] leading-5 text-cw-muted">{onGuide.length === people.length
+        ? 'Todas las personas tienen los correos comunes.'
+        : `${onGuide.length === 1 ? '1 persona tiene' : `${onGuide.length} personas tienen`} todavía los correos comunes.`}</p>
+      <CwButton size="xs" variant="secondary" disabled={locked || Boolean(editing) || busy !== null} onClick={() => void write(onGuide)}>{onGuide.length === people.length ? 'Escribir un correo para cada persona' : 'Escribir sus correos'}</CwButton>
+    </div>}
     <ul className="space-y-2">
       {people.map((person, index) => {
         const mine = editing?.email === person.email;
@@ -152,8 +234,20 @@ export function CampaignPeople({ runId, people, objective, relationship, definit
                     <p className="text-[13.5px] font-medium">{person.first.subject}</p>
                     <p className="mt-1.5 whitespace-pre-wrap break-words text-[14px] leading-6">{person.first.body}</p>
                   </div>
+                  {person.rest && person.rest.length > 0 && <details className="rounded-lg border border-cw-border">
+                    <summary className="cursor-pointer list-none rounded-lg px-3 py-2 text-[12.5px] font-medium text-cw-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+                      {person.rest.length === 1 ? 'Su seguimiento' : `Sus ${person.rest.length} seguimientos`}, escritos para esta persona
+                    </summary>
+                    <ol className="divide-y divide-cw-border border-t border-cw-border">
+                      {person.rest.map((message, at) => <li key={at} className="px-3 py-2.5">
+                        <p className="text-[12px] text-cw-muted">{message.delayDays === 1 ? '1 día después' : `${message.delayDays} días después`}</p>
+                        <p className="mt-1 text-[13.5px] font-medium">{message.subject}</p>
+                        <p className="mt-1.5 whitespace-pre-wrap break-words text-[14px] leading-6">{message.body}</p>
+                      </li>)}
+                    </ol>
+                  </details>}
                   <div className="flex justify-end">
-                    <CwButton size="xs" variant="secondary" disabled={locked || Boolean(editing) || busy !== null}
+                    <CwButton size="xs" variant="secondary" disabled={locked || Boolean(editing) || busy !== null || Boolean(writing)}
                       onClick={() => { setSaved(''); setEditing({ email: person.email, subject: person.first?.subject || '', body: person.first?.body || '' }); }}>
                       <Pencil aria-hidden="true" />Editar su correo
                     </CwButton>
@@ -165,5 +259,7 @@ export function CampaignPeople({ runId, people, objective, relationship, definit
       })}
     </ul>
     {saved && <p role="status" className="text-[12.5px] text-cw-muted">{saved}</p>}
+    {wrote && <p role="status" className="text-[12.5px] text-cw-muted">{wrote}</p>}
+    {!editing && error && <p role="alert" className="text-[12.5px] text-cw-danger">{error}</p>}
   </section>;
 }

@@ -80,6 +80,8 @@ test('a campaign with only its first email is staged with three follow-ups writt
   assert.equal(asked[0].recipients, 1);
   assert.deepEqual(asked[0].followUpDelays, [3, 4, 7]);
   assert.equal(asked[0].first.subject, 'Turnos en Temuco');
+  // One person: the Writer already wrote to them, so nothing is left for the card to write (docs/campanas-un-correo-por-persona.md).
+  assert.equal(world.stored.personalize, false);
 });
 
 test('«solo un correo» goes without follow-ups, and a failure to write them leaves the campaign as it came', async () => {
@@ -125,6 +127,9 @@ test('a retried turn keeps what was staged, follow-ups included, without writing
   assert.deepEqual(retried, { recipients: 1, provider: 'google', messages: 4, followUpsAdded: 3 });
   await assert.rejects(stageCoworkCampaignDefinition(scope, RUN, { ...one, name: 'Otra campaña' }, 'Sí', { writeFollowUps: async () => followUps }),
     /ya tiene otra definición/);
+  // The emails the card wrote for each person since then are not another definition.
+  world.stored = { ...world.stored, overrides: world.stored.messages.map((_: unknown, messageIndex: number) => ({ email: world.stored.emails[0], messageIndex, subject: 'Propio', body: 'Hola Ana, propio.' })) };
+  assert.equal((await stageCoworkCampaignDefinition(scope, RUN, one, 'Sí', { writeFollowUps: async () => followUps })).messages, 4);
 });
 
 test('after a campaign is created, Cowork proposes activating it right there instead of sending the person to Campañas', async () => {

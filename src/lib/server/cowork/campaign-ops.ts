@@ -10,7 +10,8 @@ import { reviewBulkCampaign, saveBulkCampaign } from '@/lib/server/bulk-campaign
 import { canonicalSha256, deterministicMessagingUuid } from '@/lib/messaging-contracts';
 import { coworkProposalView } from '@/lib/cowork/presentation';
 import {
-  CoworkCampaignEditRefused, coworkEditedCampaignDefinition, coworkEditedCampaignPerson, type CoworkCampaignEdit, type CoworkCampaignPersonEdit,
+  CoworkCampaignEditRefused, coworkEditedCampaignDefinition, coworkEditedCampaignPerson, coworkPersonalCampaignDefinition,
+  type CoworkCampaignEdit, type CoworkCampaignPersonEdit, type CoworkCampaignPersonal,
 } from '@/lib/cowork/campaign-edit';
 import { coworkCampaignRenderProblem } from '@/lib/cowork/campaign-people';
 import { coworkCampaignProvider } from '@/lib/mail-sender';
@@ -109,6 +110,9 @@ export async function stageCoworkCampaignDefinition(
     criteria: draft.criteria, emails: draft.emails, messages: draft.messages,
     provider,
     overrides: draft.firstEmails.map(item => ({ email: item.email, messageIndex: 0, subject: item.subject, body: item.body })),
+    // For one person the Writer already wrote to them; for several, the card writes each one's emails before the approval
+    // (CampaignPeople, docs/campanas-un-correo-por-persona.md).
+    ...(draft.emails.length === 1 ? { personalize: false } : {}),
   });
   // A retried turn finds its campaign already staged: what was staged stands, follow-ups included, and nothing is written again.
   const already = await client.from('cowork_campaign_definitions').select('definition')
@@ -116,7 +120,8 @@ export async function stageCoworkCampaignDefinition(
   if (already.error) throw new Error('No se pudo preparar la propuesta de campaña.');
   if (already.data) {
     const stored = CampaignInputSchema.safeParse(already.data.definition);
-    const comparable = (value: CampaignInput) => (proposed.messages.length === 1 ? { ...value, messages: value.messages.slice(0, 1) } : value);
+    // The emails written for each person after staging are not part of what the model proposed: they are left out of the comparison.
+    const comparable = (value: CampaignInput) => ({ ...value, overrides: [], messages: proposed.messages.length === 1 ? value.messages.slice(0, 1) : value.messages });
     if (!stored.success || canonicalSha256(comparable(stored.data)) !== canonicalSha256(comparable(build(proposed)))) {
       throw new Error('Este trabajo ya tiene otra definición de campaña.');
     }
@@ -177,6 +182,23 @@ export async function editCoworkCampaignPerson(
   auth: AuthContext, runId: string, person: CoworkCampaignPersonEdit, expectedHash?: string,
 ): Promise<{ changed: number[] }> {
   return saveCoworkCampaignEdit(auth, runId, expectedHash, definition => coworkEditedCampaignPerson(definition, person));
+}
+
+/**
+ * The emails the app wrote for each person of a pending proposal (CampaignPeople asks for them when the card opens). They are kept
+ * as each person's own emails, with the guarantees of any edit, and a second event says the app wrote them: the card's «editada por
+ * ti» counts the person's edits only.
+ */
+export async function saveCoworkCampaignPersonal(
+  auth: AuthContext, runId: string, personal: CoworkCampaignPersonal, expectedHash?: string,
+): Promise<{ changed: number[] }> {
+  const saved = await saveCoworkCampaignEdit(auth, runId, expectedHash, definition => coworkPersonalCampaignDefinition(definition, personal));
+  if (saved.changed.length) {
+    const recorded = await getSupabaseAdminClient().from('cowork_run_events').insert({ run_id: runId, user_id: auth.user.id, organization_id: auth.organizationId,
+      kind: 'proposal.personalized', payload: { kind: 'campaign_create', people: personal.length } });
+    if (recorded.error) console.error('[cowork] personal campaign emails saved without their trace event');
+  }
+  return saved;
 }
 
 async function saveCoworkCampaignEdit(

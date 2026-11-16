@@ -53,6 +53,9 @@ export type CoworkCampaignPerson = {
   personal: boolean;
   /** Their first email as they will receive it; null when it cannot be built. */
   first: { subject: string; body: string } | null;
+  /** Every email of theirs was written for them (docs/campanas-un-correo-por-persona.md), and the ones after the first, as they go. */
+  written: boolean;
+  rest: Array<{ subject: string; body: string; delayDays: number }>;
   /** The first line of that email names them (every email greets by the first name); null without an email. */
   greetsByName: boolean | null;
   /** Why their emails cannot be built or sent, in a sentence for the person; null when they can. */
@@ -64,20 +67,23 @@ export function coworkCampaignPeople(definition: CampaignInput, audience: Audien
   const byEmail = new Map(audience.map(person => [person.email.toLowerCase(), person]));
   return definition.emails.map((email): CoworkCampaignPerson => {
     const personal = definition.overrides.some(item => item.email === email && item.messageIndex === 0);
+    const written = definition.messages.every((_, index) => definition.overrides.some(item => item.email === email && item.messageIndex === index));
     const person = byEmail.get(email.toLowerCase());
     if (!person) {
-      return { email, name: '', company: '', title: '', available: false, personal, first: null, greetsByName: null,
+      return { email, name: '', company: '', title: '', available: false, personal, written, rest: [], first: null, greetsByName: null,
         problem: 'Ya no está en tus contactos con este correo, o dejó de calzar con la audiencia.' };
     }
-    const base = { email, name: displayLeadName(person.name).text, company: person.company, title: person.title, available: !person.blockedReason, personal };
+    const base = { email, name: displayLeadName(person.name).text, company: person.company, title: person.title, available: !person.blockedReason, personal, written,
+      rest: [] as CoworkCampaignPerson['rest'] };
     const failure = firstFailure(definition, person);
     if (failure) {
       return { ...base, first: null, greetsByName: null, problem: failure.variable
         ? `Falta ${DATUM[failure.variable]} para ${which(failure.index)}: complétalo en Contactos o quítalo de la campaña.`
         : `No se puede armar ${which(failure.index)}: ${failure.reason || 'revisa el texto'}` };
     }
-    const first = renderCampaignMessage(coworkCampaignMessageFor(definition, email, 0), person);
-    return { ...base, first: { subject: first.subject, body: first.body }, greetsByName: greetsByName(first.body, person.name),
+    const [first, ...rest] = definition.messages.map((_, index) => renderCampaignMessage(coworkCampaignMessageFor(definition, email, index), person));
+    return { ...base, first: { subject: first.subject, body: first.body },
+      rest: written ? rest.map(message => ({ subject: message.subject, body: message.body, delayDays: message.delayDays })) : [], greetsByName: greetsByName(first.body, person.name),
       problem: person.blockedReason ? 'Ya no se le puede escribir: pidió no recibir correos o su correo rebotó.' : null };
   });
 }

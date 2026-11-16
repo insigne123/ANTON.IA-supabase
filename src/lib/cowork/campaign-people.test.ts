@@ -64,3 +64,13 @@ test('someone who left the audience or can no longer be written to is said, not 
   // Availability is checked on its own before staging: the render check skips them.
   assert.equal(coworkCampaignRenderProblem(definition, [audience[0]]), null);
 });
+
+test('someone whose every email was written for them shows their follow-ups as they go; the others, the common ones', () => {
+  const written = CampaignInputSchema.parse({ ...definition, overrides: [...definition.overrides,
+    { email: 'cfuentes@adecco.cl', messageIndex: 1, subject: 'Camila, un resumen', body: 'Hola Camila,\n¿te mando un resumen?' }] });
+  const [camila, rafael] = coworkCampaignPeople(written, audience);
+  assert.deepEqual([camila.written, camila.rest], [true, [{ subject: 'Camila, un resumen', body: 'Hola Camila,\n¿te mando un resumen?', delayDays: 2 }]]);
+  assert.deepEqual([rafael.written, rafael.rest], [false, []]);
+  // A first email of their own is not the whole sequence.
+  assert.deepEqual(coworkCampaignPeople(definition, audience).map(person => person.written), [false, false]);
+});
