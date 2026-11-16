@@ -42,6 +42,12 @@ const shared = {
   '@/components/ui/textarea': { Textarea: (props: any) => React.createElement('textarea', props) },
   '@/components/ui/label': { Label: (props: any) => React.createElement('label', props) },
 };
+// The card's own pieces are the real ones: the app's tabs, the avatar and the stage chip, and the list of several contacts.
+const parts: Record<string, unknown> = shared;
+parts['@/hooks/use-scroll-edge-fade'] = { useScrollEdgeFade: () => [() => {}, undefined] };
+parts['@/components/ui/segmented-tabs'] = await component('../ui/segmented-tabs.tsx', shared);
+parts['./drop-contact-parts'] = await component('./drop-contact-parts.tsx', shared);
+parts['./DropContactsWorkspace'] = await component('./DropContactsWorkspace.tsx', shared);
 const callPanel = await component('./DropCallPanel.tsx', shared);
 const contactCard = await component('./DropContactCard.tsx', { ...shared, './DropCallPanel': callPanel });
 let home: any = null;
@@ -135,6 +141,12 @@ const close = async ({ dom, root }: { dom: JSDOM; root: ReturnType<typeof create
   Object.assign(globalThis, { ...previous, IS_REACT_ACT_ENVIRONMENT: false });
   dom.window.close();
 };
+
+type Page = { dom: JSDOM; settle: () => Promise<void> };
+/** Several contacts are a list at the side («Tus contactos») and one card at a time; a card's sections are tabs. */
+const railOf = (page: Page) => [...page.dom.window.document.querySelectorAll('nav[aria-label="Tus contactos"] button')] as HTMLElement[];
+const tabOf = (root: ParentNode, label: string) => [...root.querySelectorAll('[role="tab"]')].find(entry => (entry.textContent || '').startsWith(label)) as HTMLElement;
+const tap = async (page: Page, target: Element) => { await act(async () => { target.dispatchEvent(new page.dom.window.MouseEvent('click', { bubbles: true })); }); await page.settle(); };
 
 test('opened from «Hoy», today\'s contact is made with its steps in view, then shown with one action at a time', async () => {
   calls.length = 0;
@@ -272,7 +284,7 @@ test('a contact found with Apollo: one credit said before the click, «Enriquece
     assert.doesNotMatch(page.text(), /Correo verificado|no gasta créditos/);
     // A page of one contact has «Para llamar» too: its mobile with the email, said with what it costs, and the script of its call.
     assert.ok([...document.querySelectorAll('button')].some(entry => entry.textContent === 'O con su teléfono · 8 créditos'));
-    assert.match(page.text(), /Para llamar · teléfono y guion/);
+    assert.match(page.text(), /Llamada · teléfono y guion/);
     // The follow-ups wait folded under the first email.
     assert.doesNotMatch(page.text(), /Seguimiento 1 · día 3/);
     await click(page, /Si no responde: 3 seguimientos/);
@@ -320,7 +332,7 @@ test('«Para llamar» in the app: with its mobile the lookup asks for both, and 
     await click(page, 'O con su teléfono · 8 créditos');
     await page.settle();
     assert.deepEqual(lookups.map(entry => entry.lookups), [{ 'saved-1': 'email_phone' }], 'one lookup, of the email and the mobile');
-    assert.match(page.text(), /Listo: ya tienes su correo y quedó en «Por escribir»\. Su teléfono llega en unos minutos: lo verás en «Para llamar»\. Se descontó 8 crédito/);
+    assert.match(page.text(), /Listo: ya tienes su correo y quedó en «Por escribir»\. Su teléfono llega en unos minutos: lo verás en «Llamada»\. Se descontó 8 crédito/);
   } finally { await close(page); }
   // A contact looked up before, without its mobile: asked from its card, to the server, with what it costs said first.
   const saved = two.items.map((item, index) => index ? { ...item, savedLeadId: 'e-10', phone: { state: 'none', missed: false } } : { ...item, savedLeadId: 'e-9', phone: { state: 'pending' } });
@@ -328,15 +340,18 @@ test('«Para llamar» in the app: with its mobile the lookup asks for both, and 
   const again = await open('drop-1');
   try {
     await again.settle();
-    const sections = [...again.dom.window.document.querySelectorAll('button')].filter(entry => /^Para llamar/.test(entry.textContent || ''));
-    assert.match(sections[0].textContent || '', /buscando su teléfono/, 'the first one\'s mobile is on its way');
-    await act(async () => { sections[1].dispatchEvent(new again.dom.window.MouseEvent('click', { bubbles: true })); });
+    // The call is a section of each card («Llamada»): the first one's mobile is on its way, the second's is still to ask.
+    await tap(again, tabOf(again.dom.window.document, 'Llamada'));
+    assert.match(again.dom.window.document.querySelector('article [role="status"]')?.textContent || '', /Buscando su teléfono/, 'the first one\'s mobile is on its way');
+    await tap(again, railOf(again)[1]);
+    assert.match(again.dom.window.document.querySelector('article')!.textContent || '', /Carla Soto/);
+    await tap(again, tabOf(again.dom.window.document, 'Llamada'));
     bodies.length = 0;
     answers = [{ status: 200, body: { phone: { outcome: 'pending', consumed: 8 }, items: saved.map((item, index) => index ? { ...item, phone: { state: 'pending' } } : item) } }];
     await click(again, 'Buscar su teléfono · 8 créditos');
     await again.settle();
     assert.deepEqual(bodies, [{ action: 'phone', leadId: '6accdbfcd5f5d80001cf6960' }]);
-    assert.match(again.text(), /Buscando el teléfono de Carla Soto: suele tardar unos minutos y aparece solo en «Para llamar»\. Usa 8 créditos\./);
+    assert.match(again.text(), /Buscando el teléfono de Carla Soto: suele tardar unos minutos y aparece solo en «Llamada»\. Usa 8 créditos\./);
     bodies.length = 0;
     answers = [{ status: 200, body: { items: saved } }];
     await click(again, 'Preparar guion de llamada');
@@ -405,30 +420,39 @@ const cardOf = (page: Awaited<ReturnType<typeof open>>, index: number) => page.d
 const within = (root: HTMLElement, label: string | RegExp) => [...root.querySelectorAll('button')].find(button => (typeof label === 'string' ? button.textContent === label : label.test(button.textContent || '')))!;
 const press = async (page: Awaited<ReturnType<typeof open>>, target: Element) => { await act(async () => { target.dispatchEvent(new page.dom.window.MouseEvent('click', { bubbles: true })); }); await page.settle(); };
 
-test('several contacts: each card says why, what is happening at the company and how to open, with one step at a time', async () => {
+test('several contacts: a list at the side and one card at a time, with why, the company and how to open, its campaign and its call each in a section', async () => {
   answers = [{ status: 200, body: several() }];
   const page = await open('drop-1');
   try {
     await page.settle();
-    assert.equal(page.dom.window.document.querySelectorAll('article').length, 2);
-    const first = cardOf(page, 0), second = cardOf(page, 1);
-    assert.match(first.textContent || '', /Persona1 A\.[\s\S]*Por qué te lo recomendamos[\s\S]*Una planta nueva suma áreas que proteger\.[\s\S]*Responde por la seguridad de las faenas\.[\s\S]*Su cargo decide/);
-    assert.match(first.textContent || '', /Sobre Minera 1[\s\S]*Produce cobre en dos faenas del norte\.[\s\S]*Ahora: Anunció una planta concentradora nueva\.[\s\S]*Diario Financiero, 3 nov 2026/);
+    // The list is the map: who they are and where each stands. The card is the work: one contact, the one that still needs a step.
+    assert.deepEqual(railOf(page).map(entry => [entry.textContent, entry.getAttribute('aria-current')]),
+      [['PAPor enriquecerPersona1 A.Gerente de Personas · Minera 1Por enriquecer', 'true'], ['LSCampaña por aprobarLuisa SotoGerente de Personas · Minera 2Campaña por aprobar', null]]);
+    assert.equal(page.dom.window.document.querySelectorAll('article').length, 1);
+    const first = cardOf(page, 0);
+    assert.match(first.textContent || '', /^PAPersona1 A\.Por enriquecer/);
+    assert.deepEqual([...first.querySelectorAll('[role="tab"]')].map(entry => [entry.textContent, entry.getAttribute('aria-selected')]), [['Por qué', 'true'], ['Campaña3', 'false'], ['Llamada', 'false']]);
+    // «Por qué»: how to open first, then the reasons next to the company, and how it fits the ideal customer in view.
+    assert.match(first.textContent || '', /Cómo abrirPregúntale cómo cubrirán la planta nueva\.Por qué te lo recomendamosUna planta nueva suma áreas que proteger\.Responde por la seguridad de las faenas\.Su cargo decide/);
+    assert.match(first.textContent || '', /Sobre Minera 1Produce cobre en dos faenas del norte\.Ahora: Anunció una planta concentradora nueva\.Diario Financiero, 3 nov 2026/);
     assert.equal(first.querySelector('a[href="https://diario.example/planta"]')?.getAttribute('rel'), 'noopener noreferrer');
-    assert.match(first.textContent || '', /Cómo abrir[\s\S]*Pregúntale cómo cubrirán la planta nueva\./);
-    // Without its email yet: the step is to look it up. With it: to approve its campaign.
+    assert.match(first.textContent || '', /Cómo calza con tu cliente ideal[\s\S]*Cargo[\s\S]*Calza[\s\S]*Buscas: Gerente HSE/);
+    // Without its email yet: the step is to look it up.
     assert.ok(within(first, 'Enriquecer · 1 crédito'));
     assert.equal(within(first, 'Aprobar y programar'), undefined);
-    assert.ok(within(second, 'Aprobar y programar'));
-    assert.match(second.textContent || '', /Para explorar[\s\S]*En «Por escribir»[\s\S]*Sale desde tu Gmail u Outlook\. Se detiene si responde\./);
-    // The campaign is one row until asked for: three emails, with the day each would go.
-    assert.match(within(first, /Campaña lista/).textContent || '', /Campaña lista · 3 correos, del /);
+    // The campaign is its own section: three emails, one read at a time, with the day each would go.
     assert.doesNotMatch(first.textContent || '', /¿Cómo cubren los turnos de noche\?/);
-    await press(page, within(first, /Campaña lista/));
-    assert.match(first.textContent || '', /Primer correo · [\s\S]*Asunto: Brigadas en faena[\s\S]*¿Cómo cubren los turnos de noche\?[\s\S]*Seguimiento 1 · [\s\S]*si no responde[\s\S]*Re: brigadas[\s\S]*Seguimiento 2/);
-    await press(page, within(first, 'Cómo calza con tu cliente ideal'));
-    assert.match(first.textContent || '', /Cargo[\s\S]*Calza[\s\S]*Buscas: Gerente HSE/);
-    assert.doesNotMatch(first.textContent || '', /¿Cómo cubren los turnos de noche\?/, 'one section open at a time');
+    await tap(page, tabOf(first, 'Campaña'));
+    assert.match(first.textContent || '', /1Primer correo[\s\S]*2Seguimiento 1[\s\S]* · si no responde3Seguimiento 2[\s\S]*Asunto: Brigadas en faena[\s\S]*¿Cómo cubren los turnos de noche\?/);
+    assert.doesNotMatch(first.textContent || '', /Cómo abrir|Sobre Minera 1|¿lo vemos\?/, 'one section, and one email, at a time');
+    await tap(page, [...first.querySelectorAll('ol[aria-label="Correos de la campaña"] button')][1]);
+    assert.match(first.textContent || '', /Asunto: Re: brigadas[\s\S]*Hola Persona1, ¿lo vemos\?/);
+    // Another contact is a tap on the list away. With its email already, its step is to approve its campaign.
+    await tap(page, railOf(page)[1]);
+    assert.deepEqual(railOf(page).map(entry => entry.getAttribute('aria-current')), [null, 'true']);
+    const second = cardOf(page, 0);
+    assert.ok(within(second, 'Aprobar y programar'));
+    assert.match(second.textContent || '', /^LSLuisa SotoCampaña por aprobarPara explorar[\s\S]*Sale desde tu Gmail u Outlook\. Se detiene si responde\./);
   } finally { await close(page); }
 });
 
@@ -440,14 +464,17 @@ test('«Aprobar y programar» starts the contact\'s campaign and says from which
     await page.settle();
     const campaign = { id: '11111111-1111-4111-8111-111111111111', provider: 'google', approvedAt: '2026-11-13T12:00:00.000Z' };
     answers = [{ status: 200, body: { items: several().items.map((item, index) => index === 1 ? { ...item, campaign } : item), campaign, provider: 'Gmail', schedule: ['2026-11-13', '2026-11-16', '2026-11-20'] } }];
-    await press(page, within(cardOf(page, 1), 'Aprobar y programar'));
+    await tap(page, railOf(page)[1]);
+    await press(page, within(cardOf(page, 0), 'Aprobar y programar'));
     assert.deepEqual(bodies.at(-1), { action: 'approve', leadId: '6accdbfcd5f5d80001cf6902' });
     assert.match(page.text(), /Campaña de Luisa Soto programada desde Gmail: el primer correo sale en unos minutos y los seguimientos el lun 16 nov y el vie 20 nov\. Se detiene si responde\./);
-    const second = cardOf(page, 1);
-    assert.match(second.textContent || '', /Campaña en curso/);
+    // It stays on screen, now going; the list says so too.
+    const second = cardOf(page, 0);
+    assert.match(second.textContent || '', /^LSLuisa SotoCampaña en curso/);
+    assert.match(railOf(page)[1].textContent || '', /Campaña en curso$/);
     assert.equal(second.querySelector('a[href="/campaigns?campaign=11111111-1111-4111-8111-111111111111"]')?.textContent, 'Ver la campaña');
     assert.equal(within(second, 'Aprobar y programar'), undefined);
-    await press(page, within(second, /Su campaña/));
+    await tap(page, tabOf(second, 'Su campaña'));
     assert.match(second.textContent || '', /La campaña ya está en curso: para cambiar sus correos o pausarla, ábrela en «Campañas»\./);
     assert.equal(within(second, 'Editar los correos'), undefined);
     // What the campaign refuses is said as it says it.
@@ -462,7 +489,7 @@ test('the emails are changed in place, and «No me sirve» asks why', async () =
   try {
     await page.settle();
     const first = cardOf(page, 0);
-    await press(page, within(first, /Campaña lista/));
+    await tap(page, tabOf(first, 'Campaña'));
     await press(page, within(first, 'Editar los correos'));
     const subject = first.querySelector('input') as HTMLInputElement;
     assert.equal(subject.value, 'Brigadas en faena');
@@ -487,7 +514,8 @@ test('the emails are changed in place, and «No me sirve» asks why', async () =
     assert.deepEqual(bodies.at(-1), { action: 'feedback', leadId: '6accdbfcd5f5d80001cf6901', feedback: { useful: false, reason: 'El cargo no decide' } });
     assert.match(cardOf(page, 0).textContent || '', /Dijiste que no te sirve \(el cargo no decide\): lo tendremos en cuenta\./);
     answers = [{ status: 200, body: { items: edited } }];
-    await press(page, within(cardOf(page, 1), 'Me sirve'));
+    await tap(page, railOf(page)[1]);
+    await press(page, within(cardOf(page, 0), 'Me sirve'));
     assert.deepEqual(bodies.at(-1), { action: 'feedback', leadId: '6accdbfcd5f5d80001cf6902', feedback: { useful: true, reason: null } });
   } finally { await close(page); }
 });
@@ -555,7 +583,7 @@ test('«Hoy» shows several contacts as a section of its own: where each stands,
   try {
     const section = page.dom.window.document.querySelector('section#contactos-de-hoy')!;
     assert.match(section.textContent || '', /Tus contactos de hoy[\s\S]*3 contactos nuevos para ti[\s\S]*Enriquece los que te interesen y aprueba su campaña/);
-    assert.deepEqual([...section.querySelectorAll('dl > div')].map(entry => entry.textContent), ['Por enriquecer1', 'Por aprobar1', 'En marcha1']);
+    assert.deepEqual([...section.querySelector('dl')!.children].map(entry => entry.textContent), ['Por enriquecer1', 'Por aprobar1', 'En marcha1']);
     assert.equal(section.querySelectorAll('article').length, 3);
     // A row, not the whole card: who, one line of why and the step. The rest opens in place.
     const first = cardOf(page, 0);
@@ -568,7 +596,8 @@ test('«Hoy» shows several contacts as a section of its own: where each stands,
     assert.equal(toggle.getAttribute('aria-expanded'), 'false');
     await press(page, toggle);
     assert.equal(within(first, /Ocultar el detalle/).getAttribute('aria-expanded'), 'true');
-    assert.match(first.textContent || '', /Por qué te lo recomendamos[\s\S]*Sobre Minera 1[\s\S]*Cómo abrir[\s\S]*Campaña lista · 3 correos[\s\S]*¿Te sirve este contacto\?/);
+    // Open, the row is the same card as everywhere: its sections as tabs, «Por qué» first.
+    assert.match(first.textContent || '', /Por quéCampaña3Llamada[\s\S]*Cómo abrir[\s\S]*Por qué te lo recomendamos[\s\S]*Sobre Minera 1[\s\S]*¿Te sirve este contacto\?/);
     assert.ok(first.querySelector(`#${toggle.getAttribute('aria-controls')!.replace(/:/g, '\\:')}`), 'the button names what it opens');
     assert.equal(section.querySelector(`a[href="/search/contactos/${BOARD}"]`)?.textContent, 'Ver cómo los buscamos y descargar el PDF');
 
@@ -585,7 +614,7 @@ test('«Hoy» shows several contacts as a section of its own: where each stands,
     answers = [{ status: 409, body: { error: 'Conecta tu Gmail u Outlook para programar la campaña.' } }];
     await press(page, within(cardOf(page, 0), 'Enriquecer · 1 crédito'));
     assert.equal(page.dom.window.document.getElementById('contacto-6accdbfcd5f5d80001cf6901')!.querySelector('[role="alert"]')?.textContent, 'Conecta tu Gmail u Outlook para programar la campaña.');
-    assert.deepEqual([...section.querySelectorAll('dl > div')].map(entry => entry.textContent), ['Por enriquecer1', 'Por aprobar0', 'En marcha2']);
+    assert.deepEqual([...section.querySelector('dl')!.children].map(entry => entry.textContent), ['Por enriquecer1', 'Por aprobar0', 'En marcha2']);
   } finally { await close(page); }
 
   // All approved: it says so. An earlier day's, with something left: how many are left, and which day they are of.
@@ -608,7 +637,8 @@ test('a button of the morning email opens its contact inside «Hoy», and other 
     await page.settle();
     assert.equal(page.dom.window.location.href, 'https://app.test/dashboard', 'the link leaves the address');
     // The contact the email named is open, on its campaign; the others stay a row.
-    assert.match(cardOf(page, 1).textContent || '', /Por qué te lo recomendamos[\s\S]*¿Cómo cubren los turnos de noche\?/);
+    assert.match(cardOf(page, 1).textContent || '', /Por quéCampaña3Llamada[\s\S]*Asunto: Brigadas en faena[\s\S]*¿Cómo cubren los turnos de noche\?/);
+    assert.equal(tabOf(cardOf(page, 1), 'Campaña').getAttribute('aria-selected'), 'true');
     assert.doesNotMatch(cardOf(page, 0).textContent || '', /Cómo abrir/);
     assert.equal(bodies.filter(body => body.action === 'keep').length, 0, 'arriving does nothing by itself');
   } finally { await close(page); }

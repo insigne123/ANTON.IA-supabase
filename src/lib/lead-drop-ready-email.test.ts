@@ -14,7 +14,7 @@ const script = { points: ['Turnos de noche: quién responde ante una emergencia.
   questions: ['¿Cómo cubren hoy la noche?', '¿Quién decide el proveedor?'], objections: [{ objection: 'Ya tenemos proveedor', answer: 'Perfecto, ¿cubre también la ampliación?' }],
   voicemail: 'Hola Pedro, soy Ana de Brigadas. Te escribo un correo.', whatsapp: 'Hola Pedro, soy Ana. ¿Te puedo llamar mañana?' };
 
-test('«Listos»: each contact with its address, its first email as it would go and the days of its follow-ups; approving is a button on the page', () => {
+test('«Listos»: each contact with its address, how its first email starts and the days of its follow-ups; approving is a button on the page', () => {
   const pedro = item('6accdbfcd5f5d80001cf6901', 'Pedro Araya');
   const luisa = item('6accdbfcd5f5d80001cf6902', 'Luisa Soto', { company: 'Puerto Sur' });
   const missed = item('6accdbfcd5f5d80001cf6903', 'Raúl P.', { savedLeadId: null, company: 'Agro Norte' });
@@ -35,7 +35,12 @@ test('«Listos»: each contact with its address, its first email as it would go 
   // One main button, to all of them; each card's own is outlined. Their colour is the cell's attribute too (emailButton).
   assert.equal((email.html.match(/<td bgcolor="#2563eb"/g) || []).length, 1);
   assert.match(email.html, /<td bgcolor="#2563eb"[^>]*><a href="https:\/\/app\.test\/contactos\/TOKEN"[^>]*>Revisar y aprobar las 2 campañas<\/a>/);
-  assert.equal((email.html.match(/<td bgcolor="#ffffff"[^>]*><a href="https:\/\/app\.test\/contactos\/TOKEN\?c=[0-9a-f]{24}"[^>]*>Revisar y aprobar<\/a>/g) || []).length, 2);
+  assert.equal((email.html.match(/<td bgcolor="#ffffff"[^>]*><a href="https:\/\/app\.test\/contactos\/TOKEN\?c=[0-9a-f]{24}"[^>]*>Leer completo y aprobar<\/a>/g) || []).length, 2);
+  // Several contacts: each card is its person, its address and how its first email starts, in one paragraph; the whole email is
+  // in the text version and on its page (16 Nov 2026: six emails in full were a wall of text).
+  assert.deepEqual([...email.html.matchAll(/line-height:40px;text-align:center">([^<]+)<\/td>/g)].map(match => match[1]), ['PA', 'LS']);
+  assert.match(email.html, />Primer correo · sale al aprobar<\/p><p[^>]*>Brigadas en Minera &lt;Andina&gt;<\/p><p[^>]*>Hola Pedro, ¿Cómo cubren los turnos de noche\? Saludos<\/p><\/div>/);
+  assert.match(email.html, />Hola, Ana<\/p><p[^>]*>Encontramos el correo de 2 de tus 3 contactos\.<\/p>/);
   assert.match(email.html, /href="https:\/\/app\.test\/dashboard\?vista=semana"/);
 });
 
@@ -45,6 +50,7 @@ test('«Listos» for one contact, without a mailbox: it says where to connect it
   assert.match(email.text, /^Hola\. Encontramos el correo de Pedro Araya de Minera <Andina>\.\nSu campaña está lista\. Para aprobarla, conecta tu Gmail u Outlook ahí mismo: es una sola vez\./);
   assert.doesNotMatch(email.text, /seguimiento|teléfono/i);
   assert.equal((email.html.match(/<td bgcolor="#2563eb"/g) || []).length, 1, 'its own button is the main one');
+  assert.match(email.html, /<p[^>]*>Hola Pedro,<\/p><p[^>]*>¿Cómo cubren los turnos de noche\?<\/p><p[^>]*>Saludos<\/p>[\s\S]*>Revisar y aprobar<\/a>/, 'one contact: its first email in full, paragraph by paragraph');
   assert.equal(dropReadyEmail([{ item: item('6accdbfcd5f5d80001cf6901', 'Pedro Araya', { draft: null, followUps: [] }), email: 'pedro@mineraandina.cl' }], { link: LINK, appUrl: 'https://app.test', mailbox: null, total: 1 }), null);
   assert.equal(dropReadyEmail([], { link: LINK, appUrl: 'https://app.test', mailbox: 'Gmail', total: 2 }), null);
 });
@@ -66,7 +72,13 @@ test('«Para llamar»: the number to tap, WhatsApp with its first line written, 
   assert.match(email.html, /<td bgcolor="#2563eb"[^>]*><a href="https:\/\/app\.test\/contactos\/TOKEN\?c=6accdbfcd5f5d80001cf6901&amp;llamar=1"[^>]*>Llamar<\/a>/);
   assert.match(email.html, /<a href="https:\/\/wa\.me\/56987654321\?text=Hola%20Pedro[^"]*"[^>]*>WhatsApp<\/a>/);
   assert.match(email.text, /Llamar y anotar cómo te fue: https:\/\/app\.test\/contactos\/TOKEN\?c=6accdbfcd5f5d80001cf6901&llamar=1/);
-  assert.match(email.html, /«Ya tenemos proveedor»/);
+  // The script as it is read with the phone in the hand: what to say first apart, the points by theme and the questions numbered.
+  // What to answer to an objection and the voicemail are on the card «Llamar» opens (and in the text version above).
+  assert.match(email.html, />Al contestar<\/p><p[^>]*>Hola Pedro, te llamo por las brigadas de la ampliación\.<\/p>/);
+  assert.match(email.html, /<strong[^>]*>Turnos de noche:<\/strong> quién responde ante una emergencia\.<\/p>/);
+  assert.match(email.html, />1<\/td><td[^>]*>¿Cómo cubren hoy la noche\?<\/td>/);
+  assert.doesNotMatch(email.html, /Ya tenemos proveedor|soy Ana de Brigadas/);
+  assert.match(email.html, /En su ficha: cómo responder si objeta y qué dejar en el buzón\. <a href="https:\/\/app\.test\/contactos\/TOKEN\?c=6accdbfcd5f5d80001cf6901&amp;llamar=1"[^>]*>Abrir el guion completo<\/a>/);
   // The one without a script still has its number and its buttons.
   assert.match(email.html, /<a href="https:\/\/app\.test\/contactos\/TOKEN\?c=6accdbfcd5f5d80001cf6902&amp;llamar=1"[^>]*>Llamar<\/a>/);
 });

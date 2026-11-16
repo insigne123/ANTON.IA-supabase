@@ -12,6 +12,7 @@ import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCri
 import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { DropCallPanel } from './DropCallPanel';
 import { DropContactCard } from './DropContactCard';
+import { DropContactsWorkspace } from './DropContactsWorkspace';
 import { useDropActions } from './useDropActions';
 import { cn } from '@/lib/utils';
 
@@ -102,6 +103,9 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   });
   const asked = useRef(false);
   const listId = useId();
+  // Of several contacts, the one on screen: the one the email linked to, or the first that still has a step to take.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const shownItem = (items: DropItem[]) => items.find(item => item.leadId === (selectedId ?? linked.leadId)) ?? items.find(item => !item.campaign) ?? items[0];
   const howId = useId();
 
   const call = useCallback((path: string, init?: RequestInit) => authenticatedApiFetch(path, {
@@ -319,7 +323,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
       </div> : null}
     </>}
   </section> : null;
-  return <div className="mx-auto w-full max-w-3xl">
+  return <div className={cn('mx-auto w-full', drop && !one && !playing ? 'max-w-6xl' : 'max-w-3xl')}>
     <PageHeader title={drop && !one ? 'Tus contactos del día' : 'Tu contacto del día'} back={{ href: '/search', label: 'Búsqueda normal' }}
       description={drop ? (lookup ? `${one ? 'Encontrado' : 'Encontrados'} el ${dayLabel(drop.date)} para ti. ${left.length ? dropCostNote(left)
         : one ? 'Ya está en «Por escribir», con su correo.' : 'Ya están en «Por escribir», con su correo.'}`
@@ -406,11 +410,10 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
         </div>
         {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
 
-        <ul id={listId} className="divide-y rounded-2xl border">
-          {drop.items.map(item => <li key={item.leadId} id={`contacto-${item.leadId}`}>
-            <DropContactCard item={item} actions={actions} busy={saving || enriching !== null} enriching={enriching === item.leadId} defaultOpen={linked.leadId === item.leadId} />
-          </li>)}
-        </ul>
+        {/* The list at the side, one contact to read and act on at a time (DropContactsWorkspace). */}
+        <DropContactsWorkspace items={drop.items} selectedId={shownItem(drop.items).leadId} onSelect={setSelectedId}>
+          {(item => <DropContactCard key={item.leadId} item={item} actions={actions} busy={saving || enriching !== null} enriching={enriching === item.leadId} defaultOpen={linked.leadId === item.leadId} />)(shownItem(drop.items))}
+        </DropContactsWorkspace>
 
         {howSection}
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">

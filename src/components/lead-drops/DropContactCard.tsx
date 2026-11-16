@@ -2,15 +2,17 @@
 
 import { useId, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, CalendarClock, Check, ChevronDown, Copy, ExternalLink, Loader2, Mail, MailCheck, Pencil, Send, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, CircleCheck, Copy, ExternalLink, Lightbulb, Loader2, Mail, MailCheck, Pencil, Phone, Send, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SegmentedTabs, tabPanelProps } from '@/components/ui/segmented-tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { dropEmailPreview, dropName, dropSchedule, needsLookup, placeLabel, shortDay, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
 import { DropCallPanel } from './DropCallPanel';
+import { DropAvatar, DropStageChip, dropStage } from './drop-contact-parts';
 
 /** What the card asks its page to do with the contact: each answers when done, and the page shows what happened. */
 export type DropContactActions = {
@@ -69,7 +71,10 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
 }) {
   const uid = useId();
   const [expanded, setExpanded] = useState(!collapsible || defaultOpen);
-  const [open, setOpen] = useState<'campaign' | 'fit' | null>(defaultOpen ? 'campaign' : null);
+  // Its sections, one at a time: why it is worth it, its campaign and its call. A button of an email opens the one it was about.
+  const [tab, setTab] = useState<'why' | 'campaign' | 'call'>(callOpen ? 'call' : defaultOpen ? 'campaign' : 'why');
+  /** The email of the campaign being read. */
+  const [step, setStep] = useState(0);
   const [editing, setEditing] = useState<{ draft: Email; followUps: Email[] } | null>(null);
   const [working, setWorking] = useState<'approve' | 'edit' | 'feedback' | 'switch' | null>(null);
   const [asking, setAsking] = useState(false);
@@ -91,11 +96,6 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
     try { await navigator.clipboard.writeText(`Asunto: ${emails[index].subject}\n\n${emails[index].body}`); setCopied(index); setTimeout(() => setCopied(null), 1800); } catch { /* the text can still be selected */ }
   };
   const saveEdit = () => editing && run('edit', async () => { if (await actions.edit(item, editing)) setEditing(null); });
-  const section = (key: 'campaign' | 'fit', label: string, hint?: string) => <Button variant="ghost" size="sm" className="-ml-2 h-auto min-h-9 justify-start whitespace-normal py-1.5 text-left text-muted-foreground"
-    aria-expanded={open === key} aria-controls={`${uid}-${key}`} onClick={() => setOpen(open === key ? null : key)}>
-    <ChevronDown className={cn('mr-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none', open === key && 'rotate-180')} aria-hidden="true" />
-    <span>{label}{hint ? <span className="font-normal"> · {hint}</span> : null}</span></Button>;
-
   const paused = Boolean(item.campaign?.pausedAt);
   const action = item.campaign
     ? mail ? <Button size="sm" variant="outline" disabled={busy || working !== null} onClick={() => void run('switch', () => mail.switchCampaign(item, paused ? 'resume' : 'pause'))}>
@@ -128,28 +128,43 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
     : item.savedLeadId ? null
     : needsLookup(item) ? (item.lookup?.missed ? 'La última búsqueda no encontró su correo.' : 'Busca su correo de trabajo para poder escribirle.') : null;
 
-  return <article aria-labelledby={`${uid}-name`} className={cn('p-4 sm:p-5', expanded ? 'space-y-4' : 'space-y-2')}>
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0 space-y-1">
-        <Heading id={`${uid}-name`} className="text-base font-semibold">{dropName(item)}</Heading>
-        <p className="text-sm text-muted-foreground">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
-        {person ? <p className="text-xs text-muted-foreground">{person}</p> : null}
-        {mail?.email ? <p className="break-all text-sm">{mail.email}</p> : null}
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />{item.savedLeadId ? 'Con su correo' : item.provider === 'apollo' ? 'Tiene correo' : 'Correo verificado'}</span>
-          {item.track === 'explore' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs" title="Un cargo vecino a los que buscas, para probar si también te sirve">Para explorar</span> : null}
-          {item.campaign ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><CalendarClock className="h-3 w-3" aria-hidden="true" />{paused ? 'Campaña detenida' : 'Campaña en curso'}</span>
-            : item.savedLeadId && !mail ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
+  const stage = dropStage(item);
+  const tabs = [
+    { value: 'why' as const, label: 'Por qué', icon: <Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> },
+    ...(emails.length ? [{ value: 'campaign' as const, label: item.campaign ? 'Su campaña' : 'Campaña', icon: <Mail className="h-3.5 w-3.5" aria-hidden="true" />, count: emails.length }] : []),
+    { value: 'call' as const, label: 'Llamada', icon: <Phone className="h-3.5 w-3.5" aria-hidden="true" />,
+      after: item.phone?.state === 'found' ? <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"><span className="sr-only"> (con teléfono)</span></span> : null },
+  ];
+  const shown = tabs.some(entry => entry.value === tab) ? tab : 'why';
+  const current = Math.min(step, Math.max(0, emails.length - 1));
+  const stepLabel = (index: number) => index === 0 ? 'Primer correo' : `Seguimiento ${index}`;
+  const box = 'rounded-xl border bg-background p-4';
+
+  return <article aria-labelledby={`${uid}-name`} className="p-4 sm:p-6">
+    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div className="flex min-w-0 gap-3.5">
+        <DropAvatar item={item} size="lg" />
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Heading id={`${uid}-name`} className="text-lg font-semibold tracking-tight">{dropName(item)}</Heading>
+            <DropStageChip stage={stage} />
+            {item.track === 'explore' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Un cargo vecino a los que buscas, para probar si también te sirve">Para explorar</span> : null}
+          </div>
+          <p className="text-sm text-foreground/80">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
+          {person || mail?.email ? <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+            {person ? <span>{person}</span> : null}
+            {mail?.email ? <span className="inline-flex items-center gap-1 break-all text-foreground"><MailCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />{mail.email}</span> : null}
+          </p> : null}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col items-stretch gap-1 sm:items-end">
+      <div className="flex shrink-0 flex-col items-stretch gap-1.5 md:max-w-[17rem] md:items-end">
         {action}
-        {actionNote ? <p className="text-xs text-muted-foreground sm:text-right">{actionNote}</p> : null}
+        {actionNote ? <p className="text-xs text-muted-foreground md:text-right">{actionNote}</p> : null}
         {withPhone}
       </div>
     </div>
 
-    {collapsible ? <div className="space-y-1">
+    {collapsible ? <div className="mt-2 space-y-1">
       {expanded ? null : <p className="line-clamp-2 text-sm text-muted-foreground">{reasons[0] || item.why}</p>}
       <Button variant="ghost" size="sm" className="-ml-2 h-auto min-h-9 justify-start whitespace-normal py-1.5 text-left text-muted-foreground" aria-expanded={expanded} aria-controls={`${uid}-detail`}
         onClick={() => setExpanded(value => !value)}>
@@ -157,90 +172,110 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
         <span>{expanded ? 'Ocultar el detalle' : emails.length ? 'Ver por qué y su campaña' : 'Ver por qué te lo recomendamos'}<span className="sr-only">: {dropName(item)}</span></span></Button>
     </div> : null}
 
-    {expanded ? <div id={`${uid}-detail`} className="space-y-4">
-    <div className="space-y-1.5">
-      <p className={labelClass}>Por qué te lo recomendamos</p>
-      {reasons.length ? <ul className="list-disc space-y-1 pl-5 text-sm">{reasons.map(reason => <li key={reason}>{reason}</li>)}</ul> : null}
-      <p className={cn('text-sm', reasons.length && 'text-muted-foreground')}>{item.why}</p>
-    </div>
-
-    {about || brief?.news || item.website ? <div className="space-y-1.5">
-      <p className={labelClass}>{item.company ? `Sobre ${item.company}` : 'Sobre la empresa'}</p>
-      {about ? <p className="text-sm">{about}</p> : null}
-      {brief?.news ? <p className="text-sm"><span className="font-medium">Ahora: </span>{brief.news.text}{' '}
-        <a href={brief.news.url} target="_blank" rel="noopener noreferrer" className={cn(linkClass, 'text-muted-foreground')}>
-          {[brief.news.source || hostOf(brief.news.url), brief.news.date].filter(Boolean).join(', ')}<ExternalLink className="h-3 w-3" aria-hidden="true" /><span className="sr-only"> (se abre en otra pestaña)</span></a></p> : null}
-      {item.website ? <p className="text-sm"><a href={item.website} target="_blank" rel="noopener noreferrer" className={linkClass}>
-        {hostOf(item.website)}<ExternalLink className="h-3 w-3" aria-hidden="true" /><span className="sr-only"> (se abre en otra pestaña)</span></a></p> : null}
-    </div> : null}
-
-    {opener ? <div className="space-y-1.5"><p className={labelClass}>Cómo abrir</p><p className="text-sm">{opener}</p></div> : null}
-
-    <DropCallPanel item={item} actions={actions} busy={busy || working !== null} mail={Boolean(mail)} defaultOpen={callOpen} />
-
-    {emails.length ? <div>
-      {section('campaign', item.campaign ? 'Su campaña' : 'Campaña lista', emails.length === 1 ? 'un correo' : `${emails.length} correos, del ${shortDay(days[0])} al ${shortDay(days[days.length - 1])}`)}
-      {open === 'campaign' ? <div id={`${uid}-campaign`} className="mt-2 space-y-3">
-        {editing ? <form className="space-y-4" onSubmit={event => { event.preventDefault(); void saveEdit(); }}>
-          {[editing.draft, ...editing.followUps].map((email, index) => {
-            const change = (patch: Partial<Email>) => setEditing(current => current && (index === 0 ? { ...current, draft: { ...current.draft, ...patch } }
-              : { ...current, followUps: current.followUps.map((step, at) => at === index - 1 ? { ...step, ...patch } : step) }));
-            return <fieldset key={index} className="space-y-2 rounded-xl border bg-background p-3">
-              <legend className="px-1 text-xs font-medium text-muted-foreground">{index === 0 ? 'Primer correo' : `Seguimiento ${index}`} · {shortDay(days[index])}</legend>
-              <div className="space-y-1"><Label htmlFor={`${uid}-subject-${index}`}>Asunto</Label>
-                <Input id={`${uid}-subject-${index}`} value={email.subject} maxLength={200} required onChange={event => change({ subject: event.target.value })} /></div>
-              <div className="space-y-1"><Label htmlFor={`${uid}-body-${index}`}>Correo</Label>
-                <Textarea id={`${uid}-body-${index}`} value={email.body} maxLength={4000} required rows={Math.min(14, Math.max(6, email.body.split('\n').length + 2))} onChange={event => change({ body: event.target.value })} /></div>
-            </fieldset>;
-          })}
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" size="sm" disabled={working !== null}>{working === 'edit' ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar cambios</Button>
-            <Button type="button" size="sm" variant="ghost" disabled={working !== null} onClick={() => setEditing(null)}>Cancelar</Button>
+    {expanded ? <div id={`${uid}-detail`} className="mt-4">
+      <SegmentedTabs tabs={tabs} value={shown} onChange={setTab} label={`Secciones de ${dropName(item)}`} idPrefix={`${uid}-s`} variant="underline" />
+      <div {...tabPanelProps(`${uid}-s`, shown)} className="pt-4">
+        {shown === 'why' ? <div className="space-y-3">
+          {opener ? <div className="flex gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
+            <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <div className="space-y-1"><p className={cn(labelClass, 'text-primary')}>Cómo abrir</p><p className="text-[15px] leading-7">{opener}</p></div>
+          </div> : null}
+          <div className="grid gap-3 lg:grid-cols-2">
+            <section className={box} aria-labelledby={`${uid}-why`}>
+              <p id={`${uid}-why`} className={labelClass}>Por qué te lo recomendamos</p>
+              {reasons.length ? <ul className="mt-2 space-y-2">{reasons.map(reason => <li key={reason} className="flex gap-2.5 text-sm leading-6">
+                <CircleCheck className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><span>{reason}</span></li>)}</ul> : null}
+              <p className={cn('text-sm leading-6', reasons.length ? 'mt-2 text-muted-foreground' : 'mt-2')}>{item.why}</p>
+            </section>
+            {about || brief?.news || item.website ? <section className={box} aria-labelledby={`${uid}-about`}>
+              <p id={`${uid}-about`} className={labelClass}>{item.company ? `Sobre ${item.company}` : 'Sobre la empresa'}</p>
+              {about ? <p className="mt-2 text-sm leading-6">{about}</p> : null}
+              {brief?.news ? <div className="mt-3 rounded-lg border-l-2 border-amber-400 bg-amber-50 px-3 py-2 dark:bg-amber-500/10">
+                <p className="text-sm leading-6"><span className="font-medium">Ahora: </span>{brief.news.text}</p>
+                <a href={brief.news.url} target="_blank" rel="noopener noreferrer" className={cn(linkClass, 'mt-0.5 text-xs text-foreground/70')}>
+                  {[brief.news.source || hostOf(brief.news.url), brief.news.date].filter(Boolean).join(', ')}<ExternalLink className="h-3 w-3" aria-hidden="true" /><span className="sr-only"> (se abre en otra pestaña)</span></a>
+              </div> : null}
+              {item.website ? <p className="mt-3 text-sm"><a href={item.website} target="_blank" rel="noopener noreferrer" className={linkClass}>
+                {hostOf(item.website)}<ExternalLink className="h-3 w-3" aria-hidden="true" /><span className="sr-only"> (se abre en otra pestaña)</span></a></p> : null}
+            </section> : null}
           </div>
-          <p className="text-xs text-muted-foreground">{'{{nombre}}'} y {'{{empresa}}'} se reemplazan por sus datos al enviar.</p>
-        </form> : <>
-          <ol className="space-y-3">
-            {emails.map((email, index) => <li key={index} className="rounded-xl border bg-background p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium text-muted-foreground">{index === 0 ? 'Primer correo' : `Seguimiento ${index}`} · {shortDay(days[index])}{index ? ' · si no responde' : ''}</p>
-                <Button variant="ghost" size="sm" className="h-7" onClick={() => void copy(index)}>
-                  {copied === index ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}{copied === index ? 'Copiado' : 'Copiar'}</Button>
+          {item.fit?.length ? <section className={box} aria-labelledby={`${uid}-fit`}>
+            <p id={`${uid}-fit`} className={labelClass}>Cómo calza con tu cliente ideal</p>
+            <dl className="mt-2 grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
+              {item.fit.map(entry => <div key={entry.criterion} className="min-w-0">
+                <dt className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">{entry.criterion}
+                  <span className={cn('rounded-full px-1.5 py-px', entry.match === 'yes' ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground/80')}>{FIT[entry.match]}</span></dt>
+                <dd className="mt-0.5 text-sm">{entry.theirs}<span className="block text-xs text-muted-foreground">Buscas: {entry.wanted}</span></dd>
+              </div>)}
+            </dl>
+          </section> : null}
+        </div> : null}
+
+        {shown === 'campaign' ? <div className="space-y-3">
+          {editing ? <form className="space-y-4" onSubmit={event => { event.preventDefault(); void saveEdit(); }}>
+            {[editing.draft, ...editing.followUps].map((email, index) => {
+              const change = (patch: Partial<Email>) => setEditing(now => now && (index === 0 ? { ...now, draft: { ...now.draft, ...patch } }
+                : { ...now, followUps: now.followUps.map((entry, at) => at === index - 1 ? { ...entry, ...patch } : entry) }));
+              return <fieldset key={index} className="space-y-2 rounded-xl border bg-background p-3">
+                <legend className="px-1 text-xs font-medium text-muted-foreground">{stepLabel(index)} · {shortDay(days[index])}</legend>
+                <div className="space-y-1"><Label htmlFor={`${uid}-subject-${index}`}>Asunto</Label>
+                  <Input id={`${uid}-subject-${index}`} value={email.subject} maxLength={200} required onChange={event => change({ subject: event.target.value })} /></div>
+                <div className="space-y-1"><Label htmlFor={`${uid}-body-${index}`}>Correo</Label>
+                  <Textarea id={`${uid}-body-${index}`} value={email.body} maxLength={4000} required rows={Math.min(14, Math.max(6, email.body.split('\n').length + 2))} onChange={event => change({ body: event.target.value })} /></div>
+              </fieldset>;
+            })}
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" size="sm" disabled={working !== null}>{working === 'edit' ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar cambios</Button>
+              <Button type="button" size="sm" variant="ghost" disabled={working !== null} onClick={() => setEditing(null)}>Cancelar</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{'{{nombre}}'} y {'{{empresa}}'} se reemplazan por sus datos al enviar.</p>
+          </form> : <>
+            {/* The campaign as a sequence to walk: its steps with the day each goes, and one email to read at a time. */}
+            <div className="grid gap-3 md:grid-cols-[13.5rem_minmax(0,1fr)]">
+              <ol aria-label="Correos de la campaña" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-col md:overflow-visible md:p-0">
+                {emails.map((email, index) => <li key={index} className="shrink-0 md:shrink">
+                  <button type="button" aria-current={index === current ? 'step' : undefined} onClick={() => setStep(index)}
+                    className={cn('flex w-44 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full',
+                      index === current ? 'border-primary/40 bg-primary/5' : 'bg-background hover:bg-muted/60')}>
+                    <span aria-hidden="true" className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums', index === current ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground/70')}>{index + 1}</span>
+                    <span className="min-w-0"><span className="block truncate text-sm font-medium">{stepLabel(index)}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{shortDay(days[index])}{index ? ' · si no responde' : ''}</span></span>
+                  </button></li>)}
+              </ol>
+              <div className={cn(box, 'min-w-0')}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">{stepLabel(current)} · {shortDay(days[current])}{current ? ' · si no responde' : ''}</p>
+                    <p className="text-base font-semibold leading-6"><span className="sr-only">Asunto: </span>{emails[current].subject}</p>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => void copy(current)}>
+                    {copied === current ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}{copied === current ? 'Copiado' : 'Copiar'}</Button>
+                </div>
+                <p className="mt-3 whitespace-pre-line border-t pt-3 text-sm leading-6">{emails[current].body}</p>
               </div>
-              <p className="mt-1 text-sm"><span className="text-muted-foreground">Asunto: </span><span className="font-medium">{email.subject}</span></p>
-              <p className="mt-1.5 whitespace-pre-line text-sm leading-6">{email.body}</p>
-            </li>)}
-          </ol>
-          {item.campaign ? <p className="text-xs text-muted-foreground">{mail ? 'La campaña ya fue aprobada: sus correos ya no se cambian desde aquí.'
-            : 'La campaña ya está en curso: para cambiar sus correos o pausarla, ábrela en «Campañas».'}</p>
-            : <Button variant="outline" size="sm" onClick={() => item.draft && setEditing({ draft: { ...item.draft }, followUps: (item.followUps || []).map(step => ({ subject: step.subject, body: step.body })) })}>
-              <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Editar los correos</Button>}
-        </>}
-      </div> : null}
-    </div> : null}
+            </div>
+            {item.campaign ? <p className="text-xs text-muted-foreground">{mail ? 'La campaña ya fue aprobada: sus correos ya no se cambian desde aquí.'
+              : 'La campaña ya está en curso: para cambiar sus correos o pausarla, ábrela en «Campañas».'}</p>
+              : <Button variant="outline" size="sm" onClick={() => item.draft && setEditing({ draft: { ...item.draft }, followUps: (item.followUps || []).map(entry => ({ subject: entry.subject, body: entry.body })) })}>
+                <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Editar los correos</Button>}
+          </>}
+        </div> : null}
 
-    {item.fit?.length ? <div>
-      {section('fit', 'Cómo calza con tu cliente ideal')}
-      {open === 'fit' ? <dl id={`${uid}-fit`} className="mt-2 grid gap-x-6 gap-y-3 sm:grid-cols-2">
-        {item.fit.map(entry => <div key={entry.criterion} className="min-w-0">
-          <dt className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">{entry.criterion}
-            <span className={cn('rounded-full px-1.5 py-px', entry.match === 'yes' ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground/80')}>{FIT[entry.match]}</span></dt>
-          <dd className="mt-0.5 text-sm">{entry.theirs}<span className="block text-xs text-muted-foreground">Buscas: {entry.wanted}</span></dd>
-        </div>)}
-      </dl> : null}
-    </div> : null}
+        {shown === 'call' ? <DropCallPanel item={item} actions={actions} busy={busy || working !== null} mail={Boolean(mail)} bare /> : null}
+      </div>
 
-    <div className="flex flex-wrap items-center gap-2 border-t pt-3" role="group" aria-label={`¿Te sirve ${dropName(item)}?`}>
-      <p className="text-xs text-muted-foreground">{item.feedback ? (item.feedback.useful ? 'Dijiste que te sirve: buscaremos más como este.'
-        : `Dijiste que no te sirve${item.feedback.reason ? ` (${item.feedback.reason.toLowerCase()})` : ''}: lo tendremos en cuenta.`) : '¿Te sirve este contacto?'}</p>
-      {asking ? NOT_USEFUL.map(reason => <Button key={reason} variant="outline" size="sm" className="h-8" disabled={working !== null}
-        onClick={() => void run('feedback', async () => { await actions.feedback(item, false, reason); setAsking(false); })}>{reason}</Button>)
-        : <>
-          <Button variant={item.feedback?.useful === true ? 'secondary' : 'ghost'} size="sm" className="h-8" aria-pressed={item.feedback?.useful === true} disabled={working !== null}
-            onClick={() => void run('feedback', () => actions.feedback(item, true))}><ThumbsUp className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Me sirve</Button>
-          <Button variant={item.feedback?.useful === false ? 'secondary' : 'ghost'} size="sm" className="h-8" aria-pressed={item.feedback?.useful === false} disabled={working !== null}
-            onClick={() => setAsking(true)}><ThumbsDown className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />No me sirve</Button>
-        </>}
-    </div>
+      <div className="mt-5 flex flex-wrap items-center gap-2 border-t pt-3" role="group" aria-label={`¿Te sirve ${dropName(item)}?`}>
+        <p className="text-xs text-muted-foreground">{item.feedback ? (item.feedback.useful ? 'Dijiste que te sirve: buscaremos más como este.'
+          : `Dijiste que no te sirve${item.feedback.reason ? ` (${item.feedback.reason.toLowerCase()})` : ''}: lo tendremos en cuenta.`) : '¿Te sirve este contacto?'}</p>
+        {asking ? NOT_USEFUL.map(reason => <Button key={reason} variant="outline" size="sm" className="h-8" disabled={working !== null}
+          onClick={() => void run('feedback', async () => { await actions.feedback(item, false, reason); setAsking(false); })}>{reason}</Button>)
+          : <>
+            <Button variant={item.feedback?.useful === true ? 'secondary' : 'ghost'} size="sm" className="h-8" aria-pressed={item.feedback?.useful === true} disabled={working !== null}
+              onClick={() => void run('feedback', () => actions.feedback(item, true))}><ThumbsUp className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Me sirve</Button>
+            <Button variant={item.feedback?.useful === false ? 'secondary' : 'ghost'} size="sm" className="h-8" aria-pressed={item.feedback?.useful === false} disabled={working !== null}
+              onClick={() => setAsking(true)}><ThumbsDown className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />No me sirve</Button>
+          </>}
+      </div>
     </div> : null}
   </article>;
 }
