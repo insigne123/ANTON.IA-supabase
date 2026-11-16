@@ -15,7 +15,7 @@ const stepTitle = (index: number, delayDays: number) => (index === 0
  * Each person's e-mails as they will receive them (9 Nov 2026 review). Editing one e-mail for one person is a quiet action on
  * that e-mail, and the editor opens in its place, instead of a row of «Editar … de esta persona» buttons above every preview.
  */
-export function CampaignPreview({ recipients, overrides, selected, onSelect, editable, busy, editing, onEdit, editor }: {
+export function CampaignPreview({ recipients, overrides, selected, onSelect, editable, busy, editing, onEdit, editor, personal = false, onGuide = [] }: {
   recipients: CampaignRecipient[];
   overrides: Array<{ email: string; messageIndex: number }>;
   selected: number;
@@ -27,6 +27,10 @@ export function CampaignPreview({ recipients, overrides, selected, onSelect, edi
   onEdit: (email: string, messageIndex: number) => void;
   /** The editor shown in place of the e-mail being edited. */
   editor: ReactNode;
+  /** Every person has emails written for them (src/lib/bulk-campaign-personal.ts): then the exception is whoever still reads the base
+   * (`onGuide`), marked in the list unless it is everyone, which the notice above the list already says. */
+  personal?: boolean;
+  onGuide?: string[];
 }) {
   const person = recipients[selected];
   const name = person ? person.name || person.email : '';
@@ -39,7 +43,7 @@ export function CampaignPreview({ recipients, overrides, selected, onSelect, edi
         </div>
         <ul className="max-h-56 divide-y overflow-y-auto rounded-xl border sm:max-h-[28rem]" aria-label="Personas de la campaña">
           {recipients.map((recipient, index) => {
-            const edited = overrides.some(value => value.email === recipient.email);
+            const mark = personal ? (onGuide.length < recipients.length && onGuide.includes(recipient.email) ? 'Texto base' : '') : overrides.some(value => value.email === recipient.email) ? 'Editado para esta persona' : '';
             const current = index === selected;
             return (
               <li key={recipient.email}>
@@ -48,7 +52,7 @@ export function CampaignPreview({ recipients, overrides, selected, onSelect, edi
                     current && 'bg-muted font-medium')}>
                   <span className="block break-words">{recipient.name || recipient.email}</span>
                   {recipient.name ? <span className="block break-all text-xs font-normal text-muted-foreground">{recipient.email}</span> : null}
-                  {edited ? <Badge variant="neutral" className="mt-1 font-normal">Editado para esta persona</Badge> : null}
+                  {mark ? <Badge variant="neutral" className="mt-1 font-normal">{mark}</Badge> : null}
                 </button>
               </li>
             );
@@ -66,7 +70,7 @@ export function CampaignPreview({ recipients, overrides, selected, onSelect, edi
                 {editable ? (
                   <Button variant="ghost" size="sm" className="-mr-2 text-primary hover:text-primary" disabled={busy || Boolean(editing)}
                     aria-label={`Editar solo para esta persona: ${step} de ${name}`} onClick={() => onEdit(person.email, index)}>
-                    <Pencil aria-hidden="true" />Editar solo para esta persona
+                    <Pencil aria-hidden="true" />{personal ? 'Editar' : 'Editar solo para esta persona'}
                   </Button>
                 ) : null}
               </div>

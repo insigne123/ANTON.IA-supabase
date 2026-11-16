@@ -24,6 +24,7 @@ import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { ACCOUNTS_OPENED, ACCOUNT_FIT, accountDomain, accountsOf, accountsToOpen, expansionIndustries, readAccounts, saveAccounts, scoreAccounts, type DropAccount } from '@/lib/server/lead-drop-accounts';
+import { dropSellerOf } from '@/lib/server/lead-drop-seller';
 import { dropWriterEnabled, writeDropEmails, type DropSeller } from '@/lib/server/lead-drop-writer';
 import { dropLessons, dropWishes, finderSearchTerms, scoreDropCandidates, type FinderLessons, type FinderPreferences, type FinderSeller } from '@/lib/server/lead-drop-finder';
 import { profileTargetNotes } from '@/lib/profile/profile-mappings';
@@ -770,26 +771,6 @@ const addressed = (name: string) => isMaskedName(name) ? name.split(' ')[0] : na
  * sequence: each email with its own role and the day it goes (the first is day 1). When the Writer answers with one email
  * only, that one is the first and there are no follow-ups.
  */
-/**
- * What the writer of the drops knows of whoever sells (lead-drop-writer.ts): what Cowork knows, plus the customers the profile says
- * may be named and the problems it says it solves, which Cowork's context does not carry.
- */
-async function dropSellerOf(client: Client, scope: DropScope, context: CoworkUserContext | null): Promise<DropSeller | null> {
-  if (!context) return null;
-  const [company, profile]: any[] = await Promise.all([
-    readCompanyFields(client, scope.organizationId).catch(() => null),
-    Promise.resolve(client.from('profiles').select('signatures').eq('id', scope.userId).maybeSingle()).catch(() => null),
-  ]);
-  const own = (profile?.data?.signatures?.profile_extended ?? {}) as Record<string, unknown>;
-  const lines = (value: unknown, by: RegExp) => String(value || '').split(by).map(entry => entry.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 6);
-  return {
-    fullName: context.fullName, jobTitle: context.jobTitle, companyName: context.companyName, offer: context.offer, sector: context.sector,
-    services: context.services, proofPoints: context.proofPoints, differentiators: context.differentiators,
-    referenceClients: lines(company?.referenceClients || own.referenceClients, /\n|;|,/), painPoints: lines(company?.painPoints || own.painPoints, /\n|;/),
-    inOwnWords: context.idealCustomer?.inOwnWords ?? null, teamInOwnWords: context.idealCustomer?.teamInOwnWords ?? null,
-  };
-}
-
 async function draftFor(item: DropItem, userContext: Record<string, unknown> | null, generate: Generate, now: Date, ownSamples: string[] = [],
   /** The writer of the drops (lead-drop-writer.ts): with the seller it writes first; Cowork's Writer below is what is left when it fails. */
   own?: { seller: DropSeller | null; variant: number }) {

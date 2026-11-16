@@ -139,7 +139,7 @@ export async function loadAudienceForScope(scope: { client: any; organizationId:
 
 // The industry often comes only inside `data` (115 of 229 contacts of one team on 6 Nov 2026): without it the model sees
 // a hotel as a company with no industry. The region is where a «Biobío» or «Concepción» can match.
-const ENRICHED_COLUMNS = 'id,user_id,email,full_name,title,company_name,organization_name,organization_industry,organization_size,country,state,city,headline,seniority,departments,email_status,updated_at,'
+export const ENRICHED_COLUMNS = 'id,user_id,email,full_name,title,company_name,organization_name,organization_industry,organization_size,country,state,city,headline,seniority,departments,email_status,updated_at,'
   + 'data_industry:data->>industry,org_industry:data->organization->>industry,about:data->organization->>short_description';
 /** How many saved contacts the ranking reads, most recently enriched first; the model sees the first AI_RANK_CANDIDATE_LIMIT that can be written to. */
 const ENRICHED_READ_LIMIT = 1000;

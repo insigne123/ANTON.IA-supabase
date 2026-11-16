@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
 import { withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { keptOverrides, personalEstimate, personalMissing, withPersonalEmails, writePersonalEmails } from '@/lib/bulk-campaign-personal';
 import { campaignProgress } from '@/lib/bulk-campaign-progress';
 import { firstSelection } from '@/lib/campaign-audience-selection';
 import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
@@ -56,16 +58,16 @@ function suggestedCampaignName(definition: Pick<CampaignInput, 'description' | '
 async function request(path: string, body?: unknown, method = 'POST') {
   const response = await fetch(`/api/campaigns/bulk${path}`, body === undefined ? { cache: 'no-store' } : {
     method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    ...(path === '/assist' ? { signal: AbortSignal.timeout(90_000) } : {}),
+    ...(path === '/assist' ? { signal: AbortSignal.timeout(90_000) } : path === '/personalize' ? { signal: AbortSignal.timeout(150_000) } : {}),
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'No se pudo completar la operación.');
+  if (!response.ok) throw Object.assign(new Error(result.error || 'No se pudo completar la operación.'), { status: response.status });
   return result;
 }
 const initial = (): CampaignInput => ({ name: '', description: '', objective: '', criteria: { ...defaultAudience }, emails: [], overrides: [], provider: 'google', messages: [{ subject: '', body: '', delayDays: 0 }] });
 const STEPS = [
   { label: 'Audiencia', hint: 'A quién le escribes' },
-  { label: 'Correos', hint: 'El primer correo y los seguimientos' },
+  { label: 'Correos', hint: 'Qué quieres decir y cada cuánto' },
   { label: 'Revisión', hint: 'Cómo le llega a cada persona' },
 ];
 const MAX_RECIPIENTS = 100;
@@ -116,6 +118,9 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   const [individual, setIndividual] = useState<{ email: string; messageIndex: number; subject: string; body: string } | null>(null);
   const [individualInstruction, setIndividualInstruction] = useState('');
   const [individualProposal, setIndividualProposal] = useState<CampaignMessage | null>(null);
+  // Each person's emails being written (src/lib/bulk-campaign-personal.ts): how many are done, and whether the person stopped it.
+  const [writing, setWriting] = useState<{ done: number; total: number } | null>(null);
+  const stopWriting = useRef(false);
   const frozen = campaign?.status === 'approved' || campaign?.status === 'paused';
   // The mailbox chosen in Conexiones (or the only connected one) starts every new campaign.
   const [defaultProvider, setDefaultProvider] = useState<'google' | 'outlook' | null>(null);
@@ -164,7 +169,10 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   }, [dirty, busy, individual]);
   function change(patch: Partial<CampaignInput>) {
     setDefinition(value => ({ ...value, ...patch,
-      overrides: patch.overrides ?? (patch.messages ? [] : (value.overrides || []).filter(override => !patch.emails || patch.emails.includes(override.email))),
+      // A person's emails follow the guide they were written from: a step that changes takes its emails with it, and so does a new
+      // objective or choosing the same text for everyone. Approved campaigns keep them: there only the edited step changes.
+      overrides: patch.overrides ?? (!reviseMode && (patch.personalize === false || (value.personalize !== false && patch.objective !== undefined && patch.objective.trim() !== value.objective.trim()))
+        ? [] : keptOverrides(value, { emails: patch.emails ?? value.emails, messages: patch.messages ?? value.messages })),
     })); setDirty(true);
   }
   /** A criterion of the audience changed: the results shown no longer answer it. */
@@ -206,6 +214,32 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
         : await request('', parsed.data);
     setCampaign(result.campaign); setDefinition(result.campaign.definition); setDirty(false); setReviseMode(false); setStep(2); setRecipientIndex(0); await refresh();
     if (campaign && reviseMode) setFeedback('Pendientes actualizados. Revisa y vuelve a aprobar para continuar los envíos.');
+  }
+  /**
+   * «Escribir un correo para cada persona»: whoever still reads the guide gets their own emails, and the campaign is saved with
+   * them. A person the writer could not write for keeps the guide, and the review says so.
+   */
+  async function writeAndSave(input = definition) {
+    const parsed = CampaignInputSchema.safeParse(input.name.trim() ? input : { ...input, name: suggestedCampaignName(input) });
+    if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+    let next: CampaignInput = parsed.data;
+    const missing = next.personalize === false || reviseMode ? [] : personalMissing(next);
+    let note = '';
+    if (missing.length) {
+      stopWriting.current = false;
+      try {
+        const result = await writePersonalEmails({ definition: next, emails: missing, send: body => request('/personalize', body),
+          onProgress: (done, total) => setWriting({ done, total }), stopped: () => stopWriting.current });
+        next = { ...next, overrides: withPersonalEmails(next, result.written) };
+        setDefinition(next); setDirty(true);
+        const left = personalMissing(next).length;
+        // Who stayed with the base is said by the review itself, next to the way to write them.
+        note = [result.written.length ? `Escribimos los correos de ${plural(result.written.length, 'persona', 'personas')}.` : '',
+          !left ? 'Revisa cómo le llega a cada una antes de aprobar.' : result.limit || (result.stopped ? 'Detuviste la escritura.' : result.written.length ? '' : 'No pudimos escribir los correos ahora. Puedes intentarlo de nuevo desde esta revisión.')].filter(Boolean).join(' ');
+      } finally { setWriting(null); }
+    }
+    await save(next);
+    if (note) setFeedback(note);
   }
   async function searchAudience(page: number) {
     const criteria = AudienceCriteriaSchema.parse({ ...definition.criteria, ...Object.fromEntries(['titles', 'industries', 'countries', 'sizes', 'seniorities'].map(field => [field, definition.criteria[field as 'titles'].map(value => value.trim()).filter(Boolean)])) });
@@ -301,13 +335,16 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
   const pendingEditable = Boolean(campaign && frozen && campaign.recipients.some(person => person.messages.some(message => !isCampaignMessageLocked(message.draftId, deliveries))));
   const individualName = individual ? (campaign?.recipients.find(person => person.email === individual.email)?.name || individual.email) : '';
   const blockedOnPage = people.filter(person => person.blockedReason).length;
+  // Who still reads the guide in a campaign meant to be written for each person.
+  const personal = definition.personalize !== false;
+  const onGuide = campaign && !frozen && personal ? personalMissing(campaign.definition) : [];
   const selectionOutsideResults = definition.emails.filter(email => !people.some(person => person.email === email)).length;
 
   const individualEditor = individual ? (
     <div className="space-y-4 rounded-xl border border-primary/40 bg-background p-4 shadow-sm sm:p-5">
       <div className="space-y-1">
         <h4 className="font-semibold">Editar solo para {individualName}</h4>
-        <p className="text-xs text-muted-foreground">{individual.messageIndex === 0 ? 'Primer correo' : `Seguimiento ${individual.messageIndex}`}. El resto de la audiencia recibe el correo de la campaña.</p>
+        <p className="text-xs text-muted-foreground">{individual.messageIndex === 0 ? 'Primer correo' : `Seguimiento ${individual.messageIndex}`}. {personal ? 'Los correos de las demás personas no cambian.' : 'El resto de la audiencia recibe el correo de la campaña.'}</p>
       </div>
       <div className="space-y-2"><Label htmlFor="individual-subject">Asunto individual</Label><Input id="individual-subject" disabled={busy} value={individual.subject} onChange={event => { setIndividual({ ...individual, subject: event.target.value }); setIndividualProposal(null); }} /></div>
       <div className="space-y-2"><Label htmlFor="individual-body">Correo individual</Label><Textarea id="individual-body" disabled={busy} className="min-h-48" value={individual.body} onChange={event => { setIndividual({ ...individual, body: event.target.value }); setIndividualProposal(null); }} /></div>
@@ -356,8 +393,18 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
               {badge ? <Badge variant={badge.variant} className="font-medium">{badge.label}</Badge> : <Badge variant="outline" className="font-medium">Nueva campaña</Badge>}
             </span>
           </div>
-          {!frozen && <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !reviseMode} onGo={index => { if (index === 2 && dirty) void run(() => save()); else setStep(index); }} />}
+          {!frozen && <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !reviseMode} onGo={index => { if (index === 2 && dirty) void run(() => (step === 1 ? writeAndSave() : save())); else setStep(index); }} />}
           <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-7" aria-busy={busy}>
+            {writing && <div role="status" aria-live="polite" className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0 space-y-0.5">
+                  <p className="text-sm font-medium">Escribiendo un correo para cada persona… {writing.done.toLocaleString('es-CL')} de {writing.total.toLocaleString('es-CL')}</p>
+                  <p className="text-xs text-muted-foreground">Cada uno parte de su cargo y de su empresa. Tarda {personalEstimate(writing.total)}; deja esta pestaña abierta.</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => { stopWriting.current = true; }}>Detener</Button>
+              </div>
+              <Progress value={writing.total ? Math.round((writing.done / writing.total) * 100) : 0} aria-label="Correos escritos" />
+            </div>}
             {step === 0 && <>
               <header className="space-y-1">
                 <h2 className="text-xl font-semibold">¿A quién quieres contactar?</h2>
@@ -441,17 +488,25 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
             </>}
             {step === 1 && <CampaignSequenceEditor definition={definition} messageIndex={messageIndex} busy={busy} reviseMode={reviseMode}
               isLocked={reviseLocked} onSelect={setMessageIndex} onChange={change} onBusyChange={setBusy}
-              onAssist={input => request('/assist', input)} onSave={() => void run(() => save())} objectiveFromProfile={profileObjective}
+              onAssist={input => request('/assist', input)} onSave={() => void run(() => writeAndSave())} objectiveFromProfile={profileObjective}
               onBack={() => { if (reviseMode) { setReviseMode(false); setStep(2); } else setStep(0); }} />}
             {step === 2 && campaign && !frozen && <>
               <header className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                   <h2 className="break-words text-xl font-semibold">{campaign.definition.name}</h2>
-                  <p className="text-sm text-muted-foreground">{plural(campaign.recipients.length, 'persona', 'personas')} · {plural(campaign.definition.messages.length, 'correo', 'correos')} por persona · desde tu {providerName(campaign.definition.provider)}</p>
+                  <p className="text-sm text-muted-foreground">{plural(campaign.recipients.length, 'persona', 'personas')} · {personal && !onGuide.length ? plural(campaign.definition.messages.length, 'correo escrito para cada una', 'correos escritos para cada una') : `${plural(campaign.definition.messages.length, 'correo', 'correos')} por persona`} · desde tu {providerName(campaign.definition.provider)}</p>
                 </div>
                 <Button variant="ghost" size="sm" disabled={busy || Boolean(individual)} onClick={duplicate}><Copy aria-hidden="true" />Duplicar</Button>
               </header>
+              {onGuide.length > 0 && !writing && !dirty && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-4">
+                {/* Nothing written for anyone yet (a draft from before, or from Cowork with one text) reads as an offer; otherwise it says who is left. */}
+                <p className="min-w-0 flex-1 text-sm">{!(campaign.definition.overrides || []).length
+                  ? 'Todas las personas tienen el mismo texto base. Podemos escribirle a cada una un correo distinto, con lo que sabemos de ella.'
+                  : `${plural(onGuide.length, 'persona tiene', 'personas tienen')} todavía el texto base.`}</p>
+                <Button variant="outline" size="sm" disabled={busy || Boolean(individual)} onClick={() => void run(() => writeAndSave(campaign.definition))}>{!(campaign.definition.overrides || []).length ? 'Escribir un correo para cada persona' : 'Escribir sus correos'}</Button>
+              </div>}
               <CampaignPreview recipients={campaign.recipients} overrides={definition.overrides || []} selected={recipientIndex} onSelect={setRecipientIndex}
+                personal={personal} onGuide={onGuide}
                 editable busy={busy} editing={individual} editor={individualEditor}
                 onEdit={(email, index) => {
                   const message = campaign.recipients.find(person => person.email === email)?.messages[index];
@@ -520,6 +575,7 @@ export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId
                     setFeedback('Se volverá a comprobar el contacto antes de enviar.');
                   })} />
                 : <CampaignPreview recipients={campaign.recipients} overrides={definition.overrides || []} selected={recipientIndex} onSelect={setRecipientIndex}
+                  personal={personal} onGuide={personal ? personalMissing(campaign.definition) : []}
                   editable={false} busy={busy} editing={null} editor={null} onEdit={() => undefined} />}
             </>}
           </section>

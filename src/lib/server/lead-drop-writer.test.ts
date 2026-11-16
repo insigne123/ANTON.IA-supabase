@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { DropItem } from '@/lib/lead-drops';
-import { DROP_EMAIL_DAYS, DROP_WRITER_RULES, dropEmailIssues, dropWriterEnabled, dropWriterModel, dropWriterPrompt, finishDropEmails, writeDropEmails, type DropSeller } from './lead-drop-writer';
+import { DROP_EMAIL_DAYS, DROP_WRITER_RULES, dropEmailIssues, dropWriterEnabled, dropWriterModel, dropWriterPrompt, finishDropEmails, sequenceRoles, sequenceRules, writeDropEmails, writeSequence, type DropSeller, type SequencePlan } from './lead-drop-writer';
 
 const seller: DropSeller = { fullName: 'Carla Muñoz', jobTitle: 'Ejecutiva comercial', companyName: 'Brigadas del Sur', offer: 'Protegemos faenas frente a emergencias.',
   services: ['Planes de emergencia', 'Brigadas de emergencia en faena'], proofPoints: ['Más de 12 años de experiencia', 'Más de 3 millones de horas sin accidentes'],
@@ -107,4 +107,67 @@ test('the model and the switch: Haiku unless a setting says another, and «off»
   assert.equal(dropWriterModel({ LEAD_DROPS_WRITER_MODEL: ' gpt-6-luna ' }), 'gpt-6-luna');
   assert.equal(dropWriterEnabled({}), true);
   assert.equal(dropWriterEnabled({ LEAD_DROPS_WRITER: 'off' }), false);
+});
+
+// A campaign (17 Nov 2026): the same writer with the campaign's own number of emails and days, and its texts as a guide.
+const guide = [
+  { subject: 'Planes de emergencia para {{empresa}}', body: 'Hola {{nombre}},\n\nSomos Brigadas del Sur y armamos planes de emergencia para empresas como {{empresa}}, con brigadas entrenadas en cada turno.\n\n¿Conversamos 20 minutos esta semana?' },
+  { subject: '¿Pudiste ver mi correo?', body: 'Hola {{nombre}},\n\nTe escribí por los planes de emergencia.\n\n¿Te mando un resumen?' },
+  { subject: 'Cierro por ahora', body: 'Hola {{nombre}},\n\nEste es mi último correo. ¿Con quién hablo en {{empresa}}?' },
+];
+const campaignPlan: SequencePlan = { days: [1, 4, 11], sign: false, campaign: { objective: 'Conseguir una llamada de 20 minutos.', audience: 'Gerentes de faenas', guide } };
+
+test('a sequence takes its roles from how many emails it has: the first, short ones and other angles between, and a close from three on', () => {
+  assert.deepEqual(sequenceRoles(1), ['first']);
+  assert.deepEqual(sequenceRoles(2), ['first', 'short']);
+  assert.deepEqual(sequenceRoles(3), ['first', 'short', 'close']);
+  assert.deepEqual(sequenceRoles(4), ['first', 'short', 'angle', 'close']);
+  assert.deepEqual(sequenceRoles(7), ['first', 'short', 'angle', 'short', 'angle', 'short', 'close']);
+});
+
+test('the rules of a recommended contact stay as they are; a campaign gets its own number of emails, its days and the guide as guidance', () => {
+  assert.equal(sequenceRules(), DROP_WRITER_RULES);
+  assert.equal(sequenceRules({ days: DROP_EMAIL_DAYS }), DROP_WRITER_RULES);
+  const rules = sequenceRules(campaignPlan);
+  assert.match(rules[0], /una secuencia de 3 correos/);
+  const roles = rules.find(rule => rule.startsWith('Los 3 correos'))!;
+  assert.match(roles, /Primero \(day 1\).*Segundo \(day 4\).*Tercero \(day 11\): cierre/);
+  assert.doesNotMatch(rules.join(' '), /cuatro correos/);
+  assert.match(rules.join(' '), /Esto es una campaña.*no copies sus frases.*dos personas de la misma campaña nunca deben recibir el mismo texto/);
+  assert.match(sequenceRules({ days: [1], campaign: {} })[0], /escribes como el vendedor.*un correo para ese contacto/i);
+  assert.ok(sequenceRules({ days: [1], campaign: {} }).some(rule => rule.startsWith('Un solo correo (day 1)')));
+  // Four emails on other days are not the plan of a recommended contact.
+  assert.match(sequenceRules({ days: [1, 4, 8, 15] }).join(' '), /Cuarto \(day 15\)/);
+  const read = JSON.parse(dropWriterPrompt({ item, seller, plan: { ...campaignPlan, campaign: { ...campaignPlan.campaign, recontact: true } } }));
+  assert.deepEqual(read.dias, [1, 4, 11]);
+  assert.deepEqual(read.campana, { objetivo: 'Conseguir una llamada de 20 minutos.', a_quienes: 'Gerentes de faenas', ya_le_escribiste: true,
+    guia: guide.map(message => ({ asunto: message.subject, cuerpo: message.body })) });
+  assert.equal(JSON.parse(dropWriterPrompt({ item, seller })).campana, undefined);
+});
+
+test('in a campaign, an email that is the guide again is told: its subject with the company\'s name, or its sentences', () => {
+  const own = [good()[0], good()[1], good()[3]].map((email, index) => ({ ...email, day: [1, 4, 11][index] }));
+  const prompt = dropWriterPrompt({ item, seller, plan: campaignPlan });
+  const issues = (emails: typeof own) => dropEmailIssues(emails, { item, seller, prompt, plan: campaignPlan });
+  // The guide's twenty minutes are a number the emails may say; three emails end with the close.
+  assert.deepEqual(issues(own), []);
+  assert.ok(issues(own.map((email, at) => (at === 0 ? { ...email, subject: 'Planes de emergencia para Minera Aurora' } : email))).some(issue => /Correo 1: el asunto repite el de la guía/.test(issue)));
+  assert.ok(issues(own.map((email, at) => (at === 0 ? { ...email, body: body('Somos Brigadas del Sur y armamos planes de emergencia para empresas como Minera Aurora, con brigadas entrenadas en cada turno, en todo el país y en cada faena.', '¿Conversamos 20 minutos esta semana?') } : email)))
+    .some(issue => /Correo 1: repite frases de la guía/.test(issue)));
+  // The close may be called as the guide calls it.
+  assert.deepEqual(issues(own.map((email, at) => (at === 2 ? { ...email, subject: 'Cierro por ahora' } : email))), []);
+});
+
+test('a campaign\'s emails are kept without a closing: the mailbox adds the signature on sending', async () => {
+  const kept = finishDropEmails([{ day: 9, subject: 'Hola', body: body('Uno.', 'Saludos,\nCarla Muñoz') }], seller, campaignPlan);
+  assert.deepEqual(kept, [{ day: 1, subject: 'Hola', body: 'Hola {{nombre}},\n\nUno.' }]);
+  const own = [good()[0], good()[1], good()[3]];
+  const asked: any[] = [];
+  const written = await writeSequence({ item, seller, plan: campaignPlan, generate: async options => { asked.push(options); return { emails: own }; } });
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].systemPrompt, sequenceRules(campaignPlan).join('\n'));
+  assert.deepEqual(written.emails.map(email => email.day), [1, 4, 11]);
+  assert.ok(written.emails.every(email => !/Saludos/.test(email.body)));
+  // Four emails where the campaign has three is not an answer.
+  await assert.rejects(writeSequence({ item, seller, plan: campaignPlan, generate: async () => ({ emails: good() }) }));
 });
