@@ -3,6 +3,7 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { DropAppFrame } from '@/components/lead-drops/DropAppFrame';
 import { DropMailFlow } from '@/components/lead-drops/DropMailFlow';
 import { Button } from '@/components/ui/button';
 import { mailDropView, resolveDropLink } from '@/lib/server/lead-drop-mail';
@@ -14,12 +15,12 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Tus contactos de hoy', robots: { index: false, follow: false }, referrer: 'no-referrer' };
 
 const single = (value: string | string[] | undefined) => typeof value === 'string' ? value : null;
-/** Whether this browser is signed in as the person the link names. A session that cannot be read is no session. */
-async function signedInAs(userId: string) {
+/** Who is signed in on this browser, if anyone. A session that cannot be read is no session. */
+async function viewerId() {
   try {
     const { data: { user } } = await createServerComponentClient({ cookies }).auth.getUser();
-    return user?.id === userId;
-  } catch { return false; }
+    return user?.id ?? null;
+  } catch { return null; }
 }
 /** «Hoy», told which email's contacts to bring into view (src/components/home/TodayContacts.tsx). */
 const inApp = (token: string, leadId: string | null) => `/dashboard?contactos=${encodeURIComponent(token)}${leadId ? `&c=${encodeURIComponent(leadId)}` : ''}`;
@@ -32,6 +33,8 @@ const inApp = (token: string, leadId: string | null) => `/dashboard?contactos=${
  * Whoever is already signed in as that person gets the same contacts inside the app, in «Hoy» (13 Nov 2026, the owner: «si nos vas a
  * llevar para la app, que sea realmente dentro de la app»); nobody is asked to sign in for it. «Hoy» sends back here, with `aqui=1`,
  * the links it cannot show (an earlier email's, another team's), and coming back from connecting a mailbox (`correo`) stays here.
+ *
+ * Since 16 Nov 2026 the page sits in the app's frame (DropAppFrame): its menu and «Entrar», so the rest of ANTON.IA is a click away.
  */
 export default async function Page({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ token }, query] = await Promise.all([params, searchParams]);
@@ -47,11 +50,14 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   try {
     const admin = getSupabaseAdminClient();
     const { dropId, scope } = await resolveDropLink(admin, token);
-    inside = !stay && !bulk && !call && !single(query.correo) && await signedInAs(scope.userId);
+    const viewer = await viewerId();
+    inside = !stay && !bulk && !call && !single(query.correo) && viewer === scope.userId;
     if (!inside) {
       const view = await mailDropView(admin, scope, dropId);
-      // From «Hoy» there is no way back into it: it sent the person here.
-      return <DropMailFlow token={token} initial={view} focus={focus} mailboxNotice={single(query.correo)} bulk={bulk} call={call} appHref={stay ? null : inApp(token, null)} />;
+      // «Hoy» of the menu brings these same contacts into view; when it was «Hoy» that sent the person here, it is plain «Hoy».
+      return <DropAppFrame todayHref={stay ? '/dashboard' : inApp(token, null)} signedIn={Boolean(viewer)}>
+        <DropMailFlow token={token} initial={view} focus={focus} mailboxNotice={single(query.correo)} bulk={bulk} call={call} />
+      </DropAppFrame>;
     }
   } catch (error) {
     const known = error instanceof LeadDropsError;

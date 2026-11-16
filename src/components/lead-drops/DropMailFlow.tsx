@@ -33,10 +33,9 @@ const POLL_TIMES = 12;
  * from their own Gmail or Outlook, connected right here the first time. The link in the address is who asks (server/lead-drop-link.ts);
  * every step is a button, so arriving does nothing by itself.
  */
-export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = null, bulk = null, call = false }: { token: string; initial: MailDropView; focus: string | null; mailboxNotice: string | null;
+export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null, call = false }: { token: string; initial: MailDropView; focus: string | null; mailboxNotice: string | null;
   /** «Enriquecer los N» of the morning email brought the person here with this choice made (DropBulkEnrich): the button confirms it. */ bulk?: 'email' | 'phone' | null;
-  /** «Llamar» of the email that brought a mobile (lead-drop-ready-email.ts): mail clients drop `tel:` links, so the call starts here, at the contact. */ call?: boolean;
-  /** The same contacts inside the app, for whoever prefers to work there: it asks to sign in. Nothing here needs it. */ appHref?: string | null }) {
+  /** «Llamar» of the email that brought a mobile (lead-drop-ready-email.ts): mail clients drop `tel:` links, so the call starts here, at the contact. */ call?: boolean }) {
   const [view, setView] = useState(initial);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(mailboxNotice ? MAILBOX_NOTICE[mailboxNotice] ?? null : null);
   const [enriching, setEnriching] = useState<string | null>(null);
@@ -196,7 +195,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
   return <main className={cn('mx-auto w-full px-4 py-6 sm:py-10', several ? 'max-w-6xl' : 'max-w-3xl')}>
     <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">ANTON.IA</p>
+        {/* The brand is the frame's (DropAppFrame): the page says only what it is. */}
         <h1 className="font-headline text-2xl font-semibold tracking-tight sm:text-3xl">{several ? 'Tus contactos de hoy' : 'Tu contacto de hoy'}</h1>
         <p className="text-sm text-muted-foreground">{`Elegidos para ti el ${dayLabel(view.date)}.`}</p>
       </div>
@@ -221,8 +220,5 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, appHref = n
       Enriquecer busca el correo de trabajo del contacto y usa 1 crédito; con su teléfono, {DROP_EMAIL_AND_PHONE_CREDITS} por ambos. Al aprobar, los correos salen desde tu propio Gmail u Outlook y las respuestas te llegan ahí.
       Esta página es personal: se abre con el enlace de tu correo, así que no lo reenvíes.
     </p>
-    {appHref ? <p className="mt-2 text-xs leading-5 text-muted-foreground">
-      ¿Prefieres trabajarlos dentro de ANTON.IA? <a href={appHref} className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Ábrelos en «Hoy»</a>: te pedirá iniciar sesión.
-    </p> : null}
   </main>;
 }
