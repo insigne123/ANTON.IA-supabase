@@ -17,7 +17,7 @@ const input = { dropId: DROP, appUrl: 'https://app.ejemplo.cl/', contactEmail: '
 test('the campaign as it would go: every email in full with the contact\'s name and company in place, and the day each would leave', () => {
   const email = dropCampaignEmail(contact(), input)!;
   assert.equal(email.subject, 'Campaña lista para aprobar: Pedro Araya · Minera Andina');
-  assert.equal(email.link, `https://app.ejemplo.cl/search/contactos/${DROP}?c=6accdbfcd5f5d80001cf6901`);
+  assert.equal(email.link, `https://app.ejemplo.cl/dashboard/contactos/${DROP}?c=6accdbfcd5f5d80001cf6901`);
   const lines = email.text.split('\n');
   assert.equal(lines[0], 'Hola, Ana. Encontramos el correo de Pedro Araya: pedro@minera.example.');
   assert.match(lines[1], /sale desde tu Outlook y se detiene si responde\.$/);
@@ -59,7 +59,7 @@ test('from a drop used from the inbox, the button opens its page without signing
   assert.equal(email.link, `${open}?c=6accdbfcd5f5d80001cf6901`);
   assert.ok(email.html.includes(`href="${open}?c=6accdbfcd5f5d80001cf6901"`));
   assert.ok(email.text.includes(`Revisar y aprobar: ${open}?c=6accdbfcd5f5d80001cf6901`));
-  assert.ok(!email.text.includes('/search/contactos/'), 'no way into the app is needed to approve');
+  assert.ok(!email.text.includes('/dashboard/contactos/'), 'no way into the app is needed to approve');
   const unconnected = dropCampaignEmail(contact(), { ...input, link: open, mailbox: null })!;
   assert.match(unconnected.text.split('\n')[1], /conecta tu Gmail u Outlook ahí mismo: es una sola vez\.$/);
   assert.doesNotMatch(unconnected.text, /«Conexiones»/);

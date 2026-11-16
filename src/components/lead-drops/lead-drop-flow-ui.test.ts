@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -75,12 +76,14 @@ const dropActions = await component('./useDropActions.ts', {
   '@/lib/leads-workspace/enrichment-provider': { enrichmentCreditReceipt: (consumed: number) => consumed ? `Se descontó ${consumed} crédito de ANTON.IA.` : '' },
 });
 const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
+  '@/lib/admin/chile-time': chileTime,
   ...shared,
   './DropContactCard': contactCard,
   './DropCallPanel': callPanel,
   './useDropActions': dropActions,
   '@/context/AuthContext': { useAuth: () => auth },
-  '@/components/page-header': { PageHeader: ({ title, description }: any) => React.createElement('header', null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
+  '@/components/page-header': { PageHeader: ({ title, description, back }: any) => React.createElement('header', null,
+    back ? React.createElement('a', { href: back.href, 'data-back': '' }, back.label) : null, React.createElement('h1', null, title), React.createElement('p', null, description)) },
   '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
     calls.push(`${init?.method || 'GET'} ${path}`);
     if (init?.body) bodies.push(JSON.parse(String(init.body)));
@@ -93,12 +96,12 @@ const { LeadDropFlow } = await component('./LeadDropFlow.tsx', {
 test('«Hoy» shows the contact of the day, offers today\'s, the way back to it, or «Perfil» when there is no customer', () => {
   const render = (data: unknown) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner, { data: home })); };
   assert.equal(render({ drop: null, pull: null }), '');
-  assert.match(render({ drop: null, pull: 'first' }), /Contacto del día[\s\S]*href="\/search\/contactos\/nuevo"[^>]*>Ver mi primer contacto/);
+  assert.match(render({ drop: null, pull: 'first' }), /Contacto del día[\s\S]*href="\/dashboard\/contactos\/nuevo"[^>]*>Ver mi primer contacto/);
   assert.match(render({ drop: null, pull: 'today' }), /Hoy te toca un contacto nuevo[\s\S]*Ver mi contacto de hoy/);
   assert.match(render({ drop: null, pull: 'preparing' }), /Estamos preparando tu contacto de hoy[\s\S]*Ver cómo va/);
   assert.match(render({ drop: null, pull: 'profile' }), /href="\/profile#icp-heading"[^>]*>Completar mi cliente ideal/);
   const one = render({ drop: { id: 'd-1', dropDate: '2026-10-20', total: 1, left: 1, next: { name: 'Ana Pérez', company: 'Ripley', why: 'Gerente de Personas en retail: calza con tu cliente ideal.' } }, pull: null });
-  assert.match(one, /Ana Pérez, Ripley[\s\S]*calza con tu cliente ideal\. Ya tiene su correo verificado[\s\S]*href="\/search\/contactos\/d-1"[^>]*>Ver y guardar/);
+  assert.match(one, /Ana Pérez, Ripley[\s\S]*calza con tu cliente ideal\. Ya tiene su correo verificado[\s\S]*href="\/dashboard\/contactos\/d-1"[^>]*>Ver y guardar/);
   assert.match(render({ drop: { id: 'd-1', dropDate: '2026-10-20', total: 5, left: 2 }, pull: null }), /Te faltan guardar 2 de 5/);
 });
 
@@ -106,13 +109,13 @@ test('«Hoy» for a team with several contacts a day: no email is promised befor
   const render = (data: unknown) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner, { data: home })); };
   const several = { id: 'd-6', dropDate: '2026-11-13', total: 6, left: 6, lookup: true, campaigns: true, next: { name: 'Pedro Ar***a', company: 'Minera Andina', why: 'Calza.', lookup: true } };
   const fresh = render({ drop: several, pull: null });
-  assert.match(fresh, /6 contactos nuevos para ti, cada uno con su campaña lista\. Ver el correo de cada uno usa 1 crédito\.[\s\S]*href="\/search\/contactos\/d-6"[^>]*>Revisar mis contactos/);
+  assert.match(fresh, /6 contactos nuevos para ti, cada uno con su campaña lista\. Ver el correo de cada uno usa 1 crédito\.[\s\S]*href="\/dashboard\/contactos\/d-6"[^>]*>Revisar mis contactos/);
   assert.doesNotMatch(fresh, /correo verificado|no gasta créditos/, 'found with Apollo, its email is still to look up');
   assert.match(render({ drop: { ...several, left: 1 }, pull: null }), /Te queda 1 contacto de 6 por revisar\. Ver el correo de cada uno usa 1 crédito\./);
   assert.match(render({ drop: { ...several, left: 4, campaigns: undefined }, pull: null }), /Te quedan 4 contactos de 6 por revisar/);
   // The offers, with the team's plan: six every working day.
   const plan = { size: 6, days: 5 };
-  assert.match(render({ drop: null, pull: 'today', plan }), /Hoy te tocan 6 contactos nuevos, cada uno con por qué te lo recomendamos y su campaña lista\.[\s\S]*href="\/search\/contactos\/nuevo"[^>]*>Ver mis contactos de hoy/);
+  assert.match(render({ drop: null, pull: 'today', plan }), /Hoy te tocan 6 contactos nuevos, cada uno con por qué te lo recomendamos y su campaña lista\.[\s\S]*href="\/dashboard\/contactos\/nuevo"[^>]*>Ver mis contactos de hoy/);
   assert.match(render({ drop: null, pull: 'first', plan }), /6 contactos nuevos elegidos con tu cliente ideal[\s\S]*Ver mis primeros contactos/);
   assert.match(render({ drop: null, pull: 'preparing', plan }), /Estamos preparando tus 6 contactos de hoy[\s\S]*Ver cómo va/);
   assert.match(render({ drop: null, pull: 'profile', plan }), /Cuéntanos a quién le vendes y cada día hábil te elegimos 6 contactos nuevos\.[\s\S]*Completar mi cliente ideal/);
@@ -126,7 +129,7 @@ const drop = { id: 'drop-1', date: '2026-10-21', criteria: { titles: ['Gerente d
     hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana' } }] };
 
 async function open(dropId: string, options: { motion?: boolean; played?: boolean; url?: string } = {}) {
-  const dom = new JSDOM('<div id="root"></div>', { url: options.url || 'https://app.test/search/contactos/nuevo' });
+  const dom = new JSDOM('<div id="root"></div>', { url: options.url || 'https://app.test/dashboard/contactos/nuevo' });
   // Reduced motion by default: once they arrive the contacts show at once, without the playback.
   (dom.window as any).matchMedia = () => ({ matches: !options.motion });
   if (options.played) dom.window.localStorage.setItem('anton:drop-played:drop-1', '1');
@@ -165,7 +168,7 @@ test('opened from «Hoy», today\'s contact is made with its steps in view, then
     gate = null;
     await page.settle();
     assert.deepEqual(calls, ['POST /api/lead-drops/now', 'GET /api/lead-drops/drop-1']);
-    assert.equal(page.dom.window.location.pathname, '/search/contactos/drop-1');
+    assert.equal(page.dom.window.location.pathname, '/dashboard/contactos/drop-1');
     const document = page.dom.window.document;
     assert.equal(document.querySelector('#drop-results')?.textContent, 'Ana Pérez', 'one contact: their name is the title');
     // The research and the first email in view, and one action: save it, then write to them.
@@ -233,7 +236,33 @@ test('an opened contact is the contact: its own title, the subject named, and «
   try {
     await many.settle();
     assert.equal(many.dom.window.document.querySelector('h1')?.textContent, 'Tus contactos del día');
+    // A screen of «Hoy» (16 Nov 2026, the owner: «que sea una subsección de Hoy»): the way back is «Hoy», not a search.
+    const back = many.dom.window.document.querySelector('a[data-back]');
+    assert.deepEqual([back?.getAttribute('href'), back?.textContent], ['/dashboard', 'Hoy']);
   } finally { await close(many); }
+  // On their own day they are «de hoy», as the menu calls the screen.
+  answers = [{ status: 200, body: { ...drop, date: chileTime.dayInZone(new Date()), items: [drop.items[0], { ...drop.items[0], leadId: 'lf_2', name: 'Luis Soto' }] } }];
+  const fresh = await open('drop-1');
+  try {
+    await fresh.settle();
+    assert.equal(fresh.dom.window.document.querySelector('h1')?.textContent, 'Tus contactos de hoy');
+  } finally { await close(fresh); }
+});
+
+test('«Tus contactos de hoy» lives under «Hoy»: its own address, the last contacts from the menu, and the old address still opens them', () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+  assert.equal(leadDrops.dropHref('drop-1'), '/dashboard/contactos/drop-1');
+  assert.match(read('../../app/(app)/dashboard/contactos/[id]/page.tsx'), /return <LeadDropFlow key=\{id\} dropId=\{id\} \/>;/);
+  // From the menu there is no drop to name: the person's last one, read from «Hoy»'s own answer, in the same screen.
+  const latest = read('./LatestDrop.tsx');
+  assert.match(latest, /authenticatedApiFetch\('\/api\/lead-drops\/latest'/);
+  assert.match(latest, /if \(state && state !== 'error' && state\.id\) return <LeadDropFlow key=\{state\.id\} dropId=\{state\.id\} \/>;/);
+  assert.match(latest, /Esta semana no tienes contactos nuevos/);
+  assert.match(read('../../app/api/lead-drops/latest/route.ts'), /latestId: latest\?\.id \?\? null/);
+  // Emails already sent link to where it lived, under «Buscar prospectos»: the same contacts, with what the link asked for.
+  const moved = read('../../app/(app)/search/contactos/[id]/page.tsx');
+  assert.match(moved, /redirect\(`\$\{dropHref\(id\)\}\$\{search \? `\?\$\{search\}` : ''\}`\);/);
+  assert.doesNotMatch(moved, /LeadDropFlow/);
 });
 
 test('the search plays back the first time on this device, and not again when they come back to write to them', async () => {
@@ -370,7 +399,7 @@ test('a contact that is not theirs or is gone leads to today\'s, without a retry
     assert.match(page.text(), /No encontramos esos contactos\./);
     assert.doesNotMatch(page.text(), /Reintentar/);
     const link = [...page.dom.window.document.querySelectorAll('a')].find(a => /Ver mi contacto de hoy/.test(a.textContent || ''));
-    assert.equal(link?.getAttribute('href'), '/search/contactos/nuevo');
+    assert.equal(link?.getAttribute('href'), '/dashboard/contactos/nuevo');
   } finally { await close(page); }
 });
 
@@ -526,7 +555,7 @@ test('opened from the morning email on one contact: its email is looked up at on
   completion = { moved: [{ id: 'saved-1', email: 'p1@minera1.cl' }], notFound: [], expired: 0, failures: [], consumed: 1, markedNotFound: true };
   const linkedItems = several().items.map((item, index) => index === 0 ? { ...item, savedLeadId: 'e-1', name: 'Pedro Araya' } : item);
   answers = [{ status: 200, body: several() }, { status: 200, body: { keptLeadId: 'saved-1', savedLeadId: null, items: several().items } }, { status: 200, body: { linked: true, savedLeadId: 'e-1', items: linkedItems } }];
-  const page = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?c=6accdbfcd5f5d80001cf6901&enriquecer=1' });
+  const page = await open('drop-1', { url: 'https://app.test/dashboard/contactos/drop-1?c=6accdbfcd5f5d80001cf6901&enriquecer=1' });
   try {
     await page.settle();
     await page.settle();
@@ -541,7 +570,7 @@ test('opened from the morning email on one contact: its email is looked up at on
   // A link without the request only brings the contact into view.
   bodies.length = 0;
   answers = [{ status: 200, body: several() }];
-  const plain = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?c=6accdbfcd5f5d80001cf6901' });
+  const plain = await open('drop-1', { url: 'https://app.test/dashboard/contactos/drop-1?c=6accdbfcd5f5d80001cf6901' });
   try {
     await plain.settle();
     assert.equal(bodies.length, 0);
@@ -557,7 +586,7 @@ test('«Enriquecer los N» of the morning email lands inside the app: the choice
   const now = () => items.map(item => saved.has(item.leadId) ? { ...item, savedLeadId: `e-${item.leadId.slice(-2)}` } : item);
   bodies.length = 0;
   answers = [{ status: 200, body: { ...drop, items } }];
-  const page = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?todos=telefono' });
+  const page = await open('drop-1', { url: 'https://app.test/dashboard/contactos/drop-1?todos=telefono' });
   try {
     await page.settle();
     const document = page.dom.window.document;
@@ -583,7 +612,7 @@ test('«Enriquecer los N» of the morning email lands inside the app: the choice
   // A refusal the next one would get too stops it there, and says why; nothing is sent to the inbox without a contact found.
   bodies.length = 0;
   answers = [{ status: 200, body: { ...drop, items } }];
-  const refused = await open('drop-1', { url: 'https://app.test/search/contactos/drop-1?todos=correo' });
+  const refused = await open('drop-1', { url: 'https://app.test/dashboard/contactos/drop-1?todos=correo' });
   try {
     await refused.settle();
     assert.deepEqual(([...refused.dom.window.document.querySelectorAll('input[type="radio"]')] as HTMLInputElement[]).map(radio => radio.checked), [true, false]);
@@ -599,7 +628,7 @@ test('«Llamar» of the email that brought a mobile lands inside the app, on tha
   const items = [apolloItem(1), apolloItem(2, { savedLeadId: 'e-2', name: 'Luisa Soto', phone: { state: 'found', number: '+56 9 8765 4321', more: 0 } })];
   bodies.length = 0;
   answers = [{ status: 200, body: { ...drop, items } }];
-  const page = await open('drop-1', { url: `https://app.test/search/contactos/drop-1?c=${items[1].leadId}&llamar=1` });
+  const page = await open('drop-1', { url: `https://app.test/dashboard/contactos/drop-1?c=${items[1].leadId}&llamar=1` });
   try {
     await page.settle();
     const document = page.dom.window.document;
@@ -662,7 +691,7 @@ test('«Hoy» shows several contacts as a section of its own: where each stands,
     // Open, the row is the same card as everywhere: its sections as tabs, «Por qué» first.
     assert.match(first.textContent || '', /Por quéCampaña3Llamada[\s\S]*Cómo abrir[\s\S]*Por qué te lo recomendamos[\s\S]*Sobre Minera 1[\s\S]*¿Te sirve este contacto\?/);
     assert.ok(first.querySelector(`#${toggle.getAttribute('aria-controls')!.replace(/:/g, '\\:')}`), 'the button names what it opens');
-    assert.equal(section.querySelector(`a[href="/search/contactos/${BOARD}"]`)?.textContent, 'Ver cómo los buscamos y descargar el PDF');
+    assert.equal(section.querySelector(`a[href="/dashboard/contactos/${BOARD}"]`)?.textContent, 'Ver cómo los buscamos y descargar el PDF');
 
     // «Aprobar y programar» right there: the counts move and what happened is said.
     bodies.length = 0;
@@ -714,8 +743,8 @@ test('a button of the morning email opens its contact inside «Hoy», and other 
   assert.deepEqual(linkedArrival(`?contactos=${token}`, BOARD), { focus: null, away: null });
   // An earlier email, another team's contacts, or nothing on screen: their own page, told not to send the person back.
   const other = '33333333-3333-4333-8333-333333333333';
-  assert.deepEqual(linkedArrival(`?contactos=${token}&c=${lead}`, other), { focus: null, away: `/search/contactos/${BOARD}?c=${lead}` });
-  assert.deepEqual(linkedArrival(`?contactos=${token}`, null), { focus: null, away: `/search/contactos/${BOARD}` });
+  assert.deepEqual(linkedArrival(`?contactos=${token}&c=${lead}`, other), { focus: null, away: `/dashboard/contactos/${BOARD}?c=${lead}` });
+  assert.deepEqual(linkedArrival(`?contactos=${token}`, null), { focus: null, away: `/dashboard/contactos/${BOARD}` });
   // A link that names no contacts leaves the person in «Hoy», without it in the address.
   assert.deepEqual(linkedArrival('?contactos=no-es-un-enlace', BOARD), { focus: null, away: '/dashboard' });
   assert.equal(leadDrops.dropIdInLink(token), BOARD);

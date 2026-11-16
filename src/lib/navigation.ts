@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Bot, Briefcase, LayoutDashboard, LayoutGrid, Link2, MailCheck, Megaphone, Search, Send, Settings, Shield, ShieldCheck,
+  Bot, Briefcase, LayoutDashboard, LayoutGrid, Link2, MailCheck, Megaphone, Search, Send, Settings, Shield, ShieldCheck, Sparkles,
   Table as TableIcon, User,
 } from 'lucide-react';
 
@@ -18,9 +18,18 @@ export type NavItem = {
   exact?: boolean;
   /** The number beside it: what waits for the person there (APP-23, hooks/use-nav-pending.ts), and how a screen reader says it. */
   pending?: { key: NavPendingKey; label: string };
+  /** Screens that are part of this one, listed under it. */
+  sub?: NavSubItem[];
 };
 
-export type NavPendingKey = 'conversations' | 'cowork' | 'opportunities';
+/**
+ * A screen inside another one, under it in the menu (16 Nov 2026, the owner: «la idea es que esto de tus contactos de hoy sea una
+ * subsección de Hoy, para que todo conviva en la misma app»). It shows while its number is known, that is, while the person has
+ * something there, and always on its own screens.
+ */
+export type NavSubItem = { href: string; icon: LucideIcon; label: string; pending: { key: NavPendingKey; label: string } };
+
+export type NavPendingKey = 'conversations' | 'cowork' | 'opportunities' | 'contacts';
 
 /** `collapsible`: folded until one of its screens is open, so the work sections fit on a laptop screen. */
 export type NavSection = { label: string; items: NavItem[]; collapsible?: boolean };
@@ -32,7 +41,8 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Centro de mando',
     items: [
-      { href: '/dashboard', icon: LayoutDashboard, label: 'Hoy', tour: 'home' },
+      { href: '/dashboard', icon: LayoutDashboard, label: 'Hoy', tour: 'home',
+        sub: [{ href: '/dashboard/contactos', icon: Sparkles, label: 'Tus contactos de hoy', pending: { key: 'contacts', label: 'por revisar' } }] },
       { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork', pending: { key: 'cowork', label: 'esperan tu aprobación' } },
     ],
   },
@@ -102,10 +112,22 @@ export function isNavItemActive(item: NavItem, pathname: string | null | undefin
     .some((href) => path === href || (!item.exact && href !== '/dashboard' && path.startsWith(`${href}/`)));
 }
 
+/** A screen inside another one is lit on its own path and on the ones below it. */
+export function isNavSubItemActive(item: Pick<NavSubItem, 'href'>, pathname: string | null | undefined) {
+  const path = pathOf(pathname);
+  return Boolean(path) && (path === item.href || path.startsWith(`${item.href}/`));
+}
+
 /** What the phone's top bar calls the screen on view: its menu entry, or the name of a screen outside the menu. */
 export function navLabelFor(pathname: string | null | undefined): string | null {
   const path = pathOf(pathname);
   if (!path) return null;
+  for (const section of NAV_SECTIONS) {
+    for (const entry of section.items) {
+      const inside = entry.sub?.find((child) => isNavSubItemActive(child, path));
+      if (inside) return inside.label;
+    }
+  }
   for (const section of NAV_SECTIONS) {
     const item = section.items.find((entry) => isNavItemActive(entry, path));
     if (item) return item.label;

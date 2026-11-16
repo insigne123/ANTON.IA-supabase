@@ -9,7 +9,7 @@ import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
 
 // The page exists before React is loaded, so the card hears typing as a browser's does (lead-drop-flow-ui.test.ts covers the rest).
-const dom = new JSDOM('<div id="root"></div>', { url: 'https://app.test/search/contactos/drop-1' });
+const dom = new JSDOM('<div id="root"></div>', { url: 'https://app.test/dashboard/contactos/drop-1' });
 const previous = { window: (globalThis as any).window, document: (globalThis as any).document };
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
 const React = (await import('react')).default;

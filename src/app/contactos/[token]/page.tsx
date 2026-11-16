@@ -45,7 +45,7 @@ const Notice = ({ title, text, href, action }: { title: string; text: string; hr
  * The address the buttons of the «Contacto del día» emails open (docs/contacto-del-dia.md). It shows nothing of its own: it sends
  * the person to those contacts inside the app, in their account (16 Nov 2026, the owner: «lo que quería era que el redireccionamiento
  * lo llevara a su cuenta en la app, porque estos mails solo le llegarán a usuarios que hayan iniciado sesión alguna vez»). The signed
- * link says which contacts (src/lib/server/lead-drop-link.ts); the app's own page shows them (`/search/contactos/<id>`, LeadDropFlow),
+ * link says which contacts (src/lib/server/lead-drop-link.ts); the app's own page shows them (`/dashboard/contactos/<id>`, LeadDropFlow),
  * with the contact, «Enriquecer los N» or the call the button asked for. Without a session the app asks to sign in and then opens
  * them; signed in with another account, the person is told which one the email is for, since that account has no such contacts.
  *

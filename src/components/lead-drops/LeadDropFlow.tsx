@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { dayInZone } from '@/lib/admin/chile-time';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
@@ -177,6 +178,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const noOrganization = !authLoading && !organizationId;
   const left = drop?.items.filter(item => !item.savedLeadId) ?? [];
   const one = drop?.items.length === 1 ? drop.items[0] : null;
+  // «de hoy» only on their day: the menu's name for the screen, which opens the last contacts whichever day they are of.
+  const today = drop?.date === dayInZone(new Date());
   // Found with Apollo: the email is looked up on saving (1 credit), and the screen says so before the click.
   const lookup = Boolean(drop?.items.some(item => item.provider === 'apollo'));
   /** How many still need their email looked up: two or more can be asked at once. */
@@ -338,7 +341,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     </>}
   </section> : null;
   return <div className={cn('mx-auto w-full', drop && !one && !playing ? 'max-w-6xl' : 'max-w-3xl')}>
-    <PageHeader title={drop && !one ? 'Tus contactos del día' : 'Tu contacto del día'} back={{ href: '/search', label: 'Búsqueda normal' }}
+    {/* A screen of «Hoy» (16 Nov 2026): the way back is «Hoy», and the menu lists it under it. */}
+    <PageHeader title={drop && !one ? (today ? 'Tus contactos de hoy' : 'Tus contactos del día') : (today ? 'Tu contacto de hoy' : 'Tu contacto del día')} back={{ href: '/dashboard', label: 'Hoy' }}
       description={drop ? (lookup ? `${one ? 'Encontrado' : 'Encontrados'} el ${dayLabel(drop.date)} para ti. ${left.length ? dropCostNote(left)
         : one ? 'Ya está en «Por escribir», con su correo.' : 'Ya están en «Por escribir», con su correo.'}`
         : one ? `Encontrado el ${dayLabel(drop.date)} para ti. Ya tiene su correo verificado: guardarlo no gasta créditos.`

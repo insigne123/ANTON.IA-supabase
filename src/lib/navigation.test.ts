@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { NAV_SECTIONS, isNavItemActive, navLabelFor } from './navigation';
+import { NAV_SECTIONS, isNavItemActive, isNavSubItemActive, navLabelFor } from './navigation';
 
 const item = (href: string) => {
   const found = NAV_SECTIONS.flatMap((section) => section.items).find((entry) => entry.href === href);
@@ -21,6 +21,24 @@ test('an entry stays lit on the screens below it and on its aliases, but «Hoy»
   assert.ok(isNavItemActive(item('/saved/leads/enriched'), '/saved/leads/enriched'));
   assert.ok(!isNavItemActive(item('/search'), '/searching'), 'a shared prefix is not a screen below');
   assert.ok(!isNavItemActive(item('/search'), null));
+});
+
+test('«Tus contactos de hoy» is a screen of «Hoy»: listed under it, lit on its own paths, and named in the phone top bar', () => {
+  // 16 Nov 2026, the owner: «la idea es que esto de tus contactos de hoy sea una subsección de Hoy, para que todo conviva en la misma app».
+  const inside = item('/dashboard').sub || [];
+  assert.deepEqual(inside.map((entry) => [entry.href, entry.label, entry.pending.key]), [['/dashboard/contactos', 'Tus contactos de hoy', 'contacts']]);
+  assert.ok(isNavSubItemActive(inside[0], '/dashboard/contactos'));
+  assert.ok(isNavSubItemActive(inside[0], '/dashboard/contactos/00000000-0000-4000-8000-000000000951?c=x'));
+  assert.ok(!isNavSubItemActive(inside[0], '/dashboard'));
+  assert.ok(!isNavSubItemActive(inside[0], '/dashboard/contactos-otros'), 'a shared prefix is not a screen below');
+  assert.ok(!isNavItemActive(item('/dashboard'), '/dashboard/contactos'), '«Hoy» is not lit beside its own screen');
+  assert.equal(navLabelFor('/dashboard/contactos/00000000-0000-4000-8000-000000000951'), 'Tus contactos de hoy');
+  assert.equal(navLabelFor('/dashboard/contactos'), 'Tus contactos de hoy');
+  // The menu lists it while the person has contacts (its number is known) and on its own screens; a rail has no room: «Hoy» is lit.
+  const sidebar = readFileSync(new URL('../components/app-sidebar.tsx', import.meta.url), 'utf8');
+  assert.match(sidebar, /\(item\.sub \|\| \[\]\)\.filter\(\(child\) => isNavSubItemActive\(child, pathname\) \|\| pending\?\.\[child\.pending\.key\] != null\)/);
+  assert.match(sidebar, /const isActive = isNavItemActive\(item, pathname\) \|\| \(rail && insideActive\);/);
+  assert.match(sidebar, /<SidebarMenuSubButton asChild isActive=\{childActive\}/);
 });
 
 test('«Por completar» is gone: saved contacts without email wait in «Por escribir»', () => {

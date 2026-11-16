@@ -358,7 +358,7 @@ porque estos mails solo le llegarán a usuarios que hayan iniciado sesión algun
 
 **Qué hace ahora cada botón.** La dirección del correo, `/contactos/<enlace>`, ya no muestra nada propio
 (`src/app/contactos/[token]/page.tsx`): comprueba el enlace firmado y manda a esos contactos dentro de la app, en
-`/search/contactos/<id>` (`LeadDropFlow`), con el menú y todo lo demás de ANTON.IA a un clic.
+`/dashboard/contactos/<id>` (`LeadDropFlow`), con el menú y todo lo demás de ANTON.IA a un clic.
 
 - **Con la sesión iniciada**, la persona queda directo en sus contactos, con el contacto del botón abierto (`?c=`).
 - **Sin sesión**, la app pide entrar (`/login?next=…`) y después abre esos mismos contactos, con lo que el botón pedía.
@@ -384,8 +384,23 @@ venga.
 **Qué queda sin uso.** La página sin sesión (`DropMailFlow`) y su ruta (`POST /api/lead-drops/link`) siguen en el código pero
 ningún botón lleva a ellas. Se quitan cuando el dueño lo confirme.
 
+**«Tus contactos de hoy» es una pantalla de «Hoy».** El dueño, al ver el marco todavía en producción: «igual sigue estando en como
+otra app; la idea es que esto de tus contactos de hoy sea una subsección de Hoy, para que de esa manera todo conviva en la misma
+app y los usuarios puedan entrar a Cowork y todo eso».
+
+- **En el menú real**, bajo «Hoy», aparece «Tus contactos de hoy» (`NAV_SECTIONS`, `sub` de «Hoy»; `app-sidebar.tsx`), con el
+  número de contactos que todavía esperan a la persona (su correo por buscar o su campaña por aprobar). Se muestra mientras la
+  persona tenga contactos de la última semana (`contacts` en `GET /api/nav/pending`, `latestDropPending`) y siempre que esté en
+  esa pantalla. Con el menú plegado a íconos no hay lugar para ella: se marca «Hoy».
+- **La pantalla vive bajo «Hoy»**: `/dashboard/contactos/<id>` para unos contactos en particular (los botones del correo, «Hoy»)
+  y `/dashboard/contactos` para los últimos (`LatestDrop`, que los lee de `latestId` en `GET /api/lead-drops/latest`). Su vuelta
+  es «Hoy», y el día que llegan se titula «Tus contactos de hoy».
+- **La dirección anterior**, `/search/contactos/<id>` (bajo «Buscar prospectos»), sigue abriendo: reenvía a la nueva con lo que
+  el enlace pedía, para los correos ya enviados.
+
 Pruebas: «the address of the email shows nothing of its own…» en `drop-mail-flow.test.ts`; «Enriquecer los N of the morning
-email lands inside the app…» y «Llamar of the email…» en `lead-drop-flow-ui.test.ts`. Recorridos: `contactos-del-correo-a-la-app`,
+email lands inside the app…» y «Llamar of the email…» en `lead-drop-flow-ui.test.ts`; «Tus contactos de hoy is a screen of Hoy» en `navigation.test.ts`.
+Recorridos: `contactos-desde-el-menu`, `contactos-del-correo-a-la-app`,
 `contactos-del-correo-todos`, `contactos-del-correo-llamar` y `contactos-del-correo-sin-sesion`.
 
 ## Cómo funciona

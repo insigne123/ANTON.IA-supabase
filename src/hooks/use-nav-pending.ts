@@ -5,9 +5,11 @@ import { useAuth } from '@/context/AuthContext';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 
 /** What waits for the person in three sections, for the numbers in the menu (APP-23); null shows nothing. */
-export type NavPendingCounts = { conversations: number | null; cowork: number | null; opportunities: number | null };
+export type NavPendingCounts = { conversations: number | null; cowork: number | null; opportunities: number | null;
+  /** Contacts of the person's last «Contacto del día» that still ask something of them; null without one: the menu does not list it. */
+  contacts: number | null };
 
-const NONE: NavPendingCounts = { conversations: null, cowork: null, opportunities: null };
+const NONE: NavPendingCounts = { conversations: null, cowork: null, opportunities: null, contacts: null };
 /** Read again at most this often when moving between screens or coming back to the tab, and on its own every few minutes. */
 const FRESH_MS = 60_000;
 const EVERY_MS = 5 * 60_000;
@@ -30,7 +32,7 @@ export function useNavPending(route: string): NavPendingCounts {
       const body = await response.json();
       // Another organization chosen meanwhile: this answer is not for the menu on view.
       if (body?.organizationId !== organizationId) return;
-      setState({ key, counts: { conversations: count(body.conversations), cowork: count(body.cowork), opportunities: count(body.opportunities) } });
+      setState({ key, counts: { conversations: count(body.conversations), cowork: count(body.cowork), opportunities: count(body.opportunities), contacts: count(body.contacts) } });
     } catch { /* the menu keeps what it showed */ }
   }, [key, organizationId]);
 

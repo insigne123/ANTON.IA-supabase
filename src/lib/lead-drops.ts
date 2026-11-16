@@ -619,8 +619,8 @@ export function searchedFit(fit: DropFit[], kept: { industry: boolean; size: boo
 // ─── In the morning alert: a table, the link and the PDF ────────────────────────────────────────────────────────────
 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
-/** «Buscar prospectos» in the drop's mode: the search that found them, with the contacts ready. */
-export const dropHref = (dropId: string) => `/search/contactos/${encodeURIComponent(dropId)}`;
+/** The contacts' own page inside the app: «Tus contactos de hoy», a screen of «Hoy» (since 16 Nov 2026; before, under «Buscar prospectos»). */
+export const dropHref = (dropId: string) => `/dashboard/contactos/${encodeURIComponent(dropId)}`;
 
 /**
  * The drop a link from an email names (server/lead-drop-link.ts: its first 16 bytes), read without checking it: only the server can

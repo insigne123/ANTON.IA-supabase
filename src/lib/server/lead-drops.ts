@@ -763,6 +763,14 @@ export const dropItemPending = (item: DropItem) => !item.savedLeadId || Boolean(
  * en Hoy»): a drop of several contacts (a team's plan), all day on its day, and on the days after while a contact of it still waits
  * for its email or its approval. A drop of one contact keeps its line in «Hoy» (`dropSummary`).
  */
+/**
+ * The person's last contacts of the week, for «Tus contactos de hoy» under «Hoy» in the menu (16 Nov 2026): which drop it opens and
+ * how many of its contacts still wait for the person. Null without one: the menu does not list the screen.
+ */
+export async function latestDropPending(client: Client, scope: DropScope, now: Date) {
+  const row = await latestDropRow(client, scope, now);
+  return row && row.items.length ? { id: row.id, date: row.drop_date, left: row.items.filter(dropItemPending).length } : null;
+}
 function dropBoard(row: LatestRow, now: Date) {
   if (!row || row.items.length < 2) return null;
   if (row.drop_date !== dayInZone(now) && !row.items.some(dropItemPending)) return null;

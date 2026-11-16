@@ -122,7 +122,7 @@ test('once its email is found, the campaign goes to the person\'s inbox to read:
   assert.match(email.text, /sale desde tu Gmail/);
   assert.ok(email.text.includes('Hola Pedro,\n\n¿Cómo cubren los turnos de noche en Minera Andina?'), 'the first email in full, as its reader would get it');
   assert.equal((email.text.match(/^— Seguimiento \d · /gm) || []).length, 3);
-  assert.ok(email.html.includes(`https://app.ejemplo.cl/search/contactos/${DROP}?c=${LEAD}`));
+  assert.ok(email.html.includes(`https://app.ejemplo.cl/dashboard/contactos/${DROP}?c=${LEAD}`));
   assert.equal(tables.lead_drops[0].items[0].campaignMailedAt, '2026-11-13T12:00:00.000Z');
   // «Enriquecer» asked again, or the page linking twice: no second email.
   assert.deepEqual(await mailDropCampaign(client, scope, DROP, LEAD, deps), { sent: false, reason: 'not_due' });
@@ -131,7 +131,7 @@ test('once its email is found, the campaign goes to the person\'s inbox to read:
   const open = seed({ savedLeadId: 'e-1' });
   await mailDropCampaign(open.client, scope, DROP, LEAD, { ...deps, env: { INTERNAL_API_SECRET: 'a-secret-for-tests' } });
   assert.match(sent[1].html, new RegExp(`href="https://app\\.ejemplo\\.cl/contactos/[A-Za-z0-9_-]{48}\\?c=${LEAD}"`));
-  assert.ok(!sent[1].html.includes('/search/contactos/') && !sent[1].text.includes('/search/contactos/'));
+  assert.ok(!sent[1].html.includes('/dashboard/contactos/') && !sent[1].text.includes('/dashboard/contactos/'));
   // With an address of its own for these emails (LEAD_DROPS_PUBLIC_URL), all of it is there: the button and the way to its settings.
   const branded = seed({ savedLeadId: 'e-1' });
   await mailDropCampaign(branded.client, scope, DROP, LEAD, { ...deps, env: { INTERNAL_API_SECRET: 'a-secret-for-tests', LEAD_DROPS_PUBLIC_URL: 'https://contactos.ejemplo.cl' } });

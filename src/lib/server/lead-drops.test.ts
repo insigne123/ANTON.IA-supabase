@@ -241,7 +241,7 @@ test('the morning alert carries the ready contact of the day, with its PDF, and 
   assert.equal(sent[0].subject, `Tu contacto de hoy: Gerente de Personas en ${tables.lead_drops[0].items[0].company}`);
   assert.match(sent[0].html, /Contacto del día/);
   assert.equal(sent[0].attachments[0].filename, 'contacto-del-dia-2026-10-21.pdf');
-  assert.match(sent[0].html, /\/search\/contactos\//);
+  assert.match(sent[0].html, /\/dashboard\/contactos\//);
   assert.equal(sent[0].attachments[0].contentType, 'application/pdf');
   assert.equal(sent[0].attachments[0].content.subarray(0, 4).toString(), '%PDF');
   assert.equal(tables.lead_drops[0].status, 'sent');
