@@ -55,8 +55,10 @@ export async function POST(request: Request) {
   // Each team's days and contacts; a team without a row of its own has the default.
   const [plans, own] = await Promise.all([dropPlans(admin), personDropPlans(admin)]);
   // What a person gets in a workspace: their own plan when they have one, the team's otherwise.
+  // In a team where someone has a plan of their own, whoever has none gets nothing: the team's plan is retired there (planOfPerson).
+  const byPerson = new Set([...own.keys()].map(key => key.split(':')[0]));
   const planOf = (organizationId: string, userId?: string) =>
-    planOfPerson(plans.get(organizationId) ?? DEFAULT_DROP_PLAN, userId ? own.get(personPlanKey(organizationId, userId)) : null);
+    planOfPerson(plans.get(organizationId) ?? DEFAULT_DROP_PLAN, userId ? own.get(personPlanKey(organizationId, userId)) : null, Boolean(userId) && byPerson.has(organizationId));
   const someoneToday = [...own.keys()].some(key => { const [organizationId, userId] = key.split(':'); return dropDay(now, planOf(organizationId, userId)); });
   if (!dropDay(now) && ![...plans.values()].some(plan => dropDay(now, plan)) && !someoneToday) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
   const generate = (options: Parameters<Parameters<typeof writeDrop>[2]['generate']>[0]) =>

@@ -570,6 +570,15 @@ nadie) y `ms`. No se muestra en ninguna pantalla: es para revisar una corrida.
 Para revisar errores de Postgres con el conector, el campo es `log_attributes['parsed.error_severity']` (sin `parsed.` la consulta
 siempre devuelve cero).
 
+### Desde el 18 de noviembre: donde hay planes por persona, el contacto del equipo se retira
+
+El dueño, del contacto único de martes, miércoles y viernes que seguía recibiendo el resto de GrupoExpro: «quitemos ese
+recomendado, ese es antiguo». De 27 enviados en noviembre a sus personas activas se abrió uno.
+
+En un equipo donde alguien tiene un plan propio (`lead_drop_person_plans`), quien no tiene uno deja de recibir contactos: ni correo
+de la mañana ni oferta en «Hoy» (`planOfPerson(..., byPerson)`, `NO_DROP_PLAN`). Un equipo donde nadie tiene plan propio sigue con
+el plan del equipo, como antes. Para darle contactos a alguien de un equipo así se le crea su fila en `lead_drop_person_plans`.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

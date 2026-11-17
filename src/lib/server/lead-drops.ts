@@ -8,7 +8,7 @@ import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/li
 import { renderPdf } from '@/lib/documents/render-pdf';
 import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
-  DEFAULT_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, groupDropPeople, needsLookup, nextDropDay,
+  DEFAULT_DROP_PLAN, NO_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, groupDropPeople, needsLookup, nextDropDay,
   personDropCriteria, personDropPlanOf, planOfPerson, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria,
   type DropFollowUp, type DropItem, type DropPlan, type DropScore, type IcpDeclared, type KnownPeople,
 type PersonDropPlan,
@@ -79,11 +79,15 @@ export async function personDropPlans(client: Client, organizationIds?: string[]
   }
   return plans;
 }
-/** What a team gets, or what one of its people does when `userId` is given and they have a plan of their own. */
+/**
+ * What a team gets, or what one of its people does when `userId` is given: their own plan, the team's, or nothing when others of
+ * the team have a plan of their own and they do not (planOfPerson).
+ */
 export async function dropPlanFor(client: Client, organizationId: string, userId?: string): Promise<DropPlan> {
   const team = (await dropPlans(client, [organizationId])).get(organizationId) ?? DEFAULT_DROP_PLAN;
   if (!userId) return team;
-  return planOfPerson(team, (await personDropPlans(client, [organizationId])).get(personPlanKey(organizationId, userId)));
+  const own = await personDropPlans(client, [organizationId]);
+  return planOfPerson(team, own.get(personPlanKey(organizationId, userId)), own.size > 0);
 }
 
 const DAY = 86_400_000;
@@ -998,8 +1002,11 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
   const last = result.data as { drop_date: string; status: string; criteria: unknown } | null;
   const today = Boolean(last) && String(last!.drop_date) === dayInZone(now);
   if (today && last!.status === 'pending') return 'preparing';
+  // Nothing to offer to whoever gets no contacts (their team gives them by person, and they have no plan of their own).
+  const plan = await dropPlanFor(client, scope.organizationId, scope.userId);
+  if (!plan.size) return null;
   const fresh = !last || withoutCustomer(last);
-  if (!fresh && (today || !dropDay(now, await dropPlanFor(client, scope.organizationId, scope.userId)))) return null;
+  if (!fresh && (today || !dropDay(now, plan))) return null;
   if (!customerFor(await teamOf(client, scope.organizationId), scope.userId)) return 'profile';
   const usdPerLead = dropUsdPerLead();
   if (usdPerLead > 0 && overBudget(await monthSpend(client, now), searchCount(1), usdPerLead, dropsMonthlyUsd())) return null;
@@ -1078,7 +1085,8 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
       const usdPerLead = dropUsdPerLead();
       const broke = dropsEnabled() && usdPerLead > 0 && overBudget(await monthSpend(client, deps.now), searchCount(1), usdPerLead, dropsMonthlyUsd());
       throw new LeadDropsError(!dropsEnabled() ? 'El contacto del día está en pausa.'
-        : broke ? 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes.' : `Tu próximo contacto llega ${nextDropDay(deps.now, teamPlan)}.`, 409);
+        : broke ? 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes.'
+          : teamPlan === NO_DROP_PLAN || !teamPlan.size ? 'Tu equipo no tiene contactos del día activos para ti.' : `Tu próximo contacto llega ${nextDropDay(deps.now, teamPlan)}.`, 409);
     }
     if (drop) {
       const removed = await client.from('lead_drops').delete().eq('id', drop.id).eq('status', 'empty');
