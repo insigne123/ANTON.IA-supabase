@@ -510,6 +510,9 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     let assigned: Map<string, Array<DropCandidate & { track?: 'explore'; role?: 'refer' }>>;
     // By company (lead-drop-accounts.ts): what is told of the search, why each company, and who came from an industry next to the customer's.
     let accountsNote: DropCriteria['accounts'];
+    // What the finder did for this customer, in counts (DropCriteria.trace): kept with each drop, for whoever reviews the run.
+    const trace: Record<string, number | boolean> = {};
+    const groupStarted = Date.now();
     const companyWhy = new Map<string, string>();
     const expandedIds = new Map<string, string>();
     if (finder) {
@@ -519,7 +522,9 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         terms.titles.length ? searchAll(perSet(searchInput({ ...criteria, titles: terms.titles }, FINDER_EXTRA)), FINDER_EXTRA).catch(() => null) : null,
         terms.keywords.length ? searchAll(perSet({ ...searchInput({ ...criteria, titles: terms.keywords }, FINDER_EXTRA), includeSimilarTitles: false }), FINDER_EXTRA).catch(() => null) : null,
       ]);
+      trace.narrow = narrowIds.size; trace.broad = found.results.length > 0 && narrowIds.size === 0;
       for (const more of extra) for (const entry of more?.results || []) if (!entries.has(entry.lead.id)) { entries.set(entry.lead.id, entry); narrowIds.add(entry.lead.id); }
+      trace.terms = terms.titles.length + terms.keywords.length; trace.extra = narrowIds.size - Number(trace.narrow);
 
       // ── By company: the customer's companies found, scored once, and the best ones opened to bring their people ──
       const quiet = (inputs: LeadSearchInput[], wanted: number) => searchAll(inputs, wanted).then(answer => answer.results).catch(() => null);
@@ -528,6 +533,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       const seller = (userId: string) => sellers.get(userId) ?? sellers.set(userId, sellerFor(client, organizationId, userId)).get(userId)!;
       const teamWords: FinderPreferences = { notes: preferences(members[0]).notes, teamNotes: preferences(members[0]).teamNotes };
       const accounts = await readAccounts(client, organizationId, customerKey);
+      trace.known = accounts.size;
       const touched = new Set<string>(), opened = new Set<string>();
       const accountFor = (domain: unknown) => accounts.get(accountDomain(domain) || '') ?? null;
       const learn = (list: DropAccount[]) => {
@@ -571,12 +577,14 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       };
       // With little of the run left the companies wait for the next one: the drop is made by role, as before.
       const hurried = Boolean(deps.timeLeft && deps.timeLeft() < GROUP_MS - 20_000);
+      trace.hurried = hurried;
       if (!deps.quick && !hurried) {
         if (sets.length) {
           const heads = await quiet(perSet({ ...searchInput(criteria, FINDER_BASE), titles: [], seniorities: COMPANY_HEADS, includeSimilarTitles: false }), FINDER_BASE);
           for (const entry of heads || []) if (!entries.has(entry.lead.id)) { entries.set(entry.lead.id, entry); narrowIds.add(entry.lead.id); }
         }
         learn(accountsOf([...entries.values()].filter(entry => narrowIds.has(entry.lead.id))));
+        trace.learnt = touched.size;
         await scoreNew();
       }
       if (!hurried) await open(accountsToOpen([...accounts.values()].filter(account => account.origin === 'customer'), deps.now, deps.quick ? ACCOUNTS_OPENED / 2 : ACCOUNTS_OPENED));
@@ -629,8 +637,10 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         for (const item of stock) { const domain = accountDomain(item.domain); if (domain && !picked.has(item.leadId)) left.set(domain, (left.get(domain) || 0) + 1); }
         for (const domain of opened) accounts.get(domain)!.peopleLeft = left.get(domain) || 0;
       }
-      await saveAccounts(client, organizationId, customerKey, [...touched].map(domain => accounts.get(domain)!), deps.now);
+      const saved = await saveAccounts(client, organizationId, customerKey, [...touched].map(domain => accounts.get(domain)!), deps.now);
       const fitting = [...accounts.values()].filter(account => (account.score ?? -1) >= ACCOUNT_FIT);
+      Object.assign(trace, { accounts: accounts.size, scored: [...accounts.values()].filter(account => account.score !== null).length, fit: fitting.length,
+        opened: opened.size, touched: touched.size, saved, candidates: entries.size, worth: stock.length, plain: without.length, ms: Date.now() - groupStarted });
       if (fitting.length) accountsNote = { fit: fitting.length, opened: opened.size };
       for (const account of fitting) if (account.reason) companyWhy.set(account.domain, account.reason);
     } else {
@@ -666,7 +676,8 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       if (vaulted.length) await storeInVault(client, { organizationId, userId, entries: vaulted, now: deps.now.getTime() });
       // The industries next to theirs this person's contacts came from, if any: said with how the search went.
       const widened = [...new Set(picks.map(pick => expandedIds.get(pick.leadId)).filter((industry): industry is string => Boolean(industry)))];
-      const searched = accountsNote ? { ...mine, accounts: { ...accountsNote, ...(widened.length ? { expanded: widened } : {}) } } : mine;
+      const searched = { ...mine, ...(accountsNote ? { accounts: { ...accountsNote, ...(widened.length ? { expanded: widened } : {}) } } : {}),
+        ...(Object.keys(trace).length ? { trace } : {}) };
       results.push({ userId, status: 'pending', cost: share, criteria: searched, items: picks.map(pick => {
         // The industry as the actor names it: «servicios transitorios» searched as «staffing & recruiting» fits «Reclutamiento y personal».
         const actorIndustry = text(entries.get(pick.leadId)?.lead.organization_industry, 160).toLowerCase();

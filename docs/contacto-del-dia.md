@@ -554,6 +554,22 @@ con tarjetas dibujadas con `div`: sin marca, sin texto de vista previa en la ban
 
 Nada cambia en qué dice cada correo, en sus enlaces ni en la versión de texto.
 
+### Desde el 17 de noviembre: la corrida deja su traza
+
+La primera corrida real con seis personas (17 nov) entregó sus 36 contactos con investigación y correos, pero la tabla de empresas
+(`lead_drop_accounts`) quedó vacía (se leyó dos veces y nunca se escribió) y 32 de los 36 contactos traen el motivo fijo de la
+asignación por cargo («Calza con tu cliente ideal por su cargo»), no el de la nota de la IA. La corrida no dejaba cómo saber por qué.
+
+Desde hoy cada entrega del buscador guarda en `criteria.trace` cómo le fue, en números: `narrow` (personas que trajeron las búsquedas
+por rubro), `broad` (si cayó a cargos y lugares), `terms` y `extra` (las búsquedas con los cargos escritos de otra forma), `hurried`
+(quedaba poco tiempo y las empresas se dejaron para otra corrida), `known`, `learnt`, `scored`, `fit`, `opened`, `touched` y `saved`
+(empresas leídas, nuevas, con nota, que calzan, abiertas, por guardar y si se guardaron), `candidates` y `worth` (personas
+encontradas y las que la nota dio por buenas), `plain` (personas a las que se les asignó por cargo porque la nota no les dejó a
+nadie) y `ms`. No se muestra en ninguna pantalla: es para revisar una corrida.
+
+Para revisar errores de Postgres con el conector, el campo es `log_attributes['parsed.error_severity']` (sin `parsed.` la consulta
+siempre devuelve cero).
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

@@ -309,6 +309,13 @@ test('by company: the customer\'s companies found through their heads, each scor
   ], 'one a company for the person: who decides in each, and Paris came only by opening it');
   assert.equal(drop.items.find((item: any) => item.company === 'Paris').companyWhy, 'Multitienda con alta rotación.', 'why that company, as it was scored');
   assert.deepEqual(drop.criteria.accounts, { fit: 3, opened: 3 }, 'the drop says how it searched by company');
+  // And how the run went, in counts, for whoever reviews it (17 Nov 2026: the first real run left no trace of why it kept no company).
+  const { ms, ...trace } = drop.criteria.trace;
+  assert.ok(typeof ms === 'number' && ms >= 0);
+  assert.equal(trace.hurried, false); assert.equal(trace.broad, false); assert.equal(trace.saved, true); assert.equal(trace.known, 0);
+  assert.ok(trace.narrow > 0 && trace.learnt > 0 && trace.candidates >= trace.narrow, JSON.stringify(trace));
+  assert.equal(trace.fit, 3); assert.equal(trace.opened, 3); assert.equal(trace.plain, 0);
+  assert.ok(trace.scored >= trace.fit && trace.worth > 0, JSON.stringify(trace));
   assert.ok(scoring[0].personas.every((entry: any) => typeof entry.evaluacion_empresa === 'number'), 'the score of each person starts from the one of their company');
   assert.ok(!scoring[0].personas.some((entry: any) => entry.empresa === 'Insumos del Retail' && entry.cargo !== 'Gerente General'), 'nobody of the supplier but who the search itself brought');
 
