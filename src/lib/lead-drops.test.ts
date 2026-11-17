@@ -227,6 +227,10 @@ test('a person\'s own plan: how many contacts they get whatever the team\'s, on 
   assert.deepEqual(planOfPerson(team, { size: 6, weekdays: [1, 2, 3, 4, 5], startsOn: null }), { size: 6, weekdays: [1, 2, 3, 4, 5] });
   assert.equal(planOfPerson(team, null), team);
   assert.equal(planOfPerson(team), team);
+  // Where someone of the team has a plan of their own, whoever has none gets nothing; whoever has one keeps it.
+  assert.deepEqual(planOfPerson(team, null, true), { size: 0, weekdays: [] });
+  assert.deepEqual(planOfPerson(team, { size: 6, weekdays: null, startsOn: null }, true), { size: 6, weekdays: [2, 3, 5] });
+  assert.equal(dropDay(new Date('2026-11-20T15:00:00.000Z'), planOfPerson(team, null, true)), false);
   // People of one team who get a different number of contacts are searched apart, the most first.
   const sizes: Record<string, number> = { ana: 1, leo: 6, sol: 1, tom: 6, eva: 3 };
   assert.deepEqual(groupByDropSize(['ana', 'leo', 'sol', 'tom', 'eva'], userId => sizes[userId]), [{ size: 6, people: ['leo', 'tom'] }, { size: 3, people: ['eva'] }, { size: 1, people: ['ana', 'sol'] }]);

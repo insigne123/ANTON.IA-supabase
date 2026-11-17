@@ -50,8 +50,18 @@ export function personDropPlanOf(row: { lead_drop_size?: unknown; lead_drop_week
   const startsOn = /^\d{4}-\d{2}-\d{2}/.test(String(row?.starts_on || '')) ? String(row!.starts_on).slice(0, 10) : null;
   return { size, weekdays: weekdays.length ? weekdays : null, startsOn };
 }
-/** What a person gets: their own plan when they have one, on their own days or the team's; the team's otherwise. */
-export const planOfPerson = (team: DropPlan, own?: PersonDropPlan | null): DropPlan => own ? { size: own.size, weekdays: own.weekdays ?? team.weekdays } : team;
+/** Nothing: no contacts on any day. */
+export const NO_DROP_PLAN: DropPlan = { size: 0, weekdays: [] };
+/**
+ * What a person gets: their own plan when they have one, on their own days or the team's; the team's otherwise.
+ *
+ * `byPerson`: someone of the team has a plan of their own. Then the team's plan is retired and whoever has none gets nothing
+ * (18 Nov 2026, the owner, of the one contact on Tuesdays, Wednesdays and Fridays everybody else of GrupoExpro still got:
+ * «quitemos ese recomendado, ese es antiguo»; of 27 sent to its active people that month, one was opened). A team where nobody
+ * has a plan of their own keeps its own as before.
+ */
+export const planOfPerson = (team: DropPlan, own?: PersonDropPlan | null, byPerson = false): DropPlan =>
+  own ? { size: own.size, weekdays: own.weekdays ?? team.weekdays } : byPerson ? NO_DROP_PLAN : team;
 /**
  * People of one workspace by what they get today: one group per number of contacts, the largest first, so whoever gets several is
  * chosen with the finder and the rest as a team of one contact is.

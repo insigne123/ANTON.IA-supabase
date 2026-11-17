@@ -482,7 +482,7 @@ test('whoever left the last six unopened rests two weeks from the last one, then
   assert.equal(restingFromDrops([...sent(six), { drop_date: '2026-10-30', opened_at: null, saved_at: '2026-10-30T13:00:00Z' }], '2026-11-03'), false, 'saving counts as opening');
 });
 
-test('a person with a plan of their own in a team of one contact: «Hoy» offers them theirs, their rest starts over, and the others keep the team\'s (15 nov)', async () => {
+test('a person with a plan of their own in a team of one contact: «Hoy» offers them theirs, their rest starts over, and the others get none (15 and 18 nov)', async () => {
   const { apolloDropDepth, dropPlanFor, personDropPlans, personPlanKey, restingPeople } = await import('./lead-drops');
   const six = ['2026-10-07', '2026-10-09', '2026-10-13', '2026-10-14', '2026-10-16', '2026-10-20'];
   const unopened = (userId: string) => six.map((drop_date, index) => ({ id: `${userId}-${index}`, organization_id: ORG, user_id: userId, drop_date, status: 'sent', criteria: {}, items: [], opened_at: null, saved_at: null }));
@@ -493,11 +493,15 @@ test('a person with a plan of their own in a team of one contact: «Hoy» offers
       { organization_id: 'org-otra', user_id: 'u-ana', lead_drop_size: 4, lead_drop_weekdays: null, starts_on: '2026-10-22' },
       { organization_id: ORG, user_id: 'u-leo', lead_drop_size: 40, lead_drop_weekdays: null, starts_on: '2026-10-22' },
     ] }, unique);
-  // Ana gets six on the team's days; whoever has none (or one that cannot be) gets what the team does.
+  // Ana gets six on the team's days. Whoever has none (or one that cannot be) gets nothing: where people have plans of their own
+  // the team's one contact is retired (18 Nov 2026, the owner: «quitemos ese recomendado, ese es antiguo»).
   assert.deepEqual(await dropPlanFor(client, ORG, 'u-ana'), { size: 6, weekdays: [2, 3, 5] });
   assert.deepEqual(await dropPlanFor(client, ORG, 'u-sin'), { size: 3, weekdays: [1, 2, 3, 4, 5] });
-  assert.deepEqual(await dropPlanFor(client, ORG, 'u-leo'), { size: 1, weekdays: [2, 3, 5] });
+  assert.deepEqual(await dropPlanFor(client, ORG, 'u-leo'), { size: 0, weekdays: [] });
   assert.deepEqual(await dropPlanFor(client, ORG), { size: 1, weekdays: [2, 3, 5] });
+  // «Hoy» offers Leo nothing on a day of the team's, and a team where nobody has a plan of their own keeps the team's.
+  assert.equal(await pullStatus(client, { organizationId: ORG, userId: 'u-nuevo' }, FRIDAY), null);
+  assert.deepEqual(await dropPlanFor(memory(seed(), unique).client, ORG, 'u-leo'), { size: 1, weekdays: [2, 3, 5] });
   const plans = await personDropPlans(client, [ORG]);
   assert.deepEqual([...plans.keys()].sort(), [personPlanKey(ORG, 'u-ana'), personPlanKey(ORG, 'u-sin')]);
   // Thursday is no day of the team's: nothing new for Ana (her own days are the team's), but it is one of u-sin's.
