@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DropCallScript } from '@/lib/lead-drop-call';
 import { dropCallsEmail, dropReadyEmail } from '@/lib/lead-drop-ready-email';
 import { dropThread } from '@/lib/lead-drop-thread';
-import { dropSubject, type DropItem } from '@/lib/lead-drops';
+import { dropThreadSubject, type DropItem } from '@/lib/lead-drops';
 import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { appLinkBase } from '@/lib/server/app-origins';
 import { hashApolloCallbackToken } from '@/lib/server/apollo-enrichment-callbacks';
@@ -84,8 +84,8 @@ async function reach(client: Client, scope: DropScope, dropId: string, deps: Rea
 }
 
 const send = (client: Client, deps: ReadyDeps) => deps.send ?? ((input: SelfEmail) => sendReportEmail(client, input));
-const threadOf = (drop: { id: string; drop_date: string; items: DropItem[] }, now: Date) =>
-  dropThread({ dropId: drop.id, date: drop.drop_date, subject: dropSubject(drop.items), reply: true, now });
+const threadOf = (drop: { id: string; drop_date: string; items: DropItem[]; criteria?: { subject?: string | null } | null }, now: Date) =>
+  dropThread({ dropId: drop.id, date: drop.drop_date, subject: dropThreadSubject(drop), reply: true, now });
 
 /**
  * «Listos»: every contact of the drop that has its email and its campaign written and was not sent to the person's inbox yet, in

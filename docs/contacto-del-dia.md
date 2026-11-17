@@ -579,6 +579,23 @@ En un equipo donde alguien tiene un plan propio (`lead_drop_person_plans`), quie
 de la mañana ni oferta en «Hoy» (`planOfPerson(..., byPerson)`, `NO_DROP_PLAN`). Un equipo donde nadie tiene plan propio sigue con
 el plan del equipo, como antes. Para darle contactos a alguien de un equipo así se le crea su fila en `lead_drop_person_plans`.
 
+### Desde el 18 de noviembre: a quien no ha entrado, el correo lo invita a volver
+
+El dueño, de quienes no han abierto la app: «mandémosle 3 leads para ver si logramos hacerlos entrar, pero a esos claramente debemos
+ponerles un mensaje distinto, para incentivarlos a meterse».
+
+- **A quién:** a quien recibe varios contactos y no ha abierto ninguna pantalla de la app en 14 días (`AWAY_DAYS`), o nunca
+  (`readAway` en `src/lib/server/daily-alerts.ts`, sobre `app_usage_views`). Si esa lectura falla, recibe el correo de siempre.
+  Cuando vuelve a entrar, el correo vuelve a ser el de siempre sin que nadie cambie nada.
+- **Asunto:** el primer contacto por su cargo y empresa, y que el trabajo está hecho: «Gerente HSE en Minera Andina y 2 contactos
+  más, con su correo ya escrito» (`dropSubject(items, { away: true })`). Si los correos aún no están escritos dice «elegidos para ti».
+- **Cuerpo:** «Te dejamos 3 contactos con el correo ya escrito», que se buscaron según lo que vende su equipo y que no hay que
+  buscar nada; al pie, cómo entrar si olvidó la contraseña. Los contactos y sus botones son los mismos.
+- **Conversación:** el asunto con que salió se guarda en `lead_drops.criteria.subject`, y «Listos», «Para llamar» y «Campaña lista»
+  responden con ese mismo (`dropThreadSubject`), para seguir en la misma conversación.
+
+Cuántos contactos recibe cada quien sigue saliendo de su plan (`lead_drop_person_plans`): el mensaje depende de si entra, no del plan.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

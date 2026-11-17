@@ -90,6 +90,8 @@ export type DropCriteria = { titles: string[]; industries: string[]; locations: 
    * team sells, how many were opened to bring their people, and the industries next to the customer's it widened to, if any.
    */
   accounts?: { fit: number; opened: number; expanded?: string[] };
+  /** The subject the morning email left with, when it was not the usual one (someone away): its answers keep it (dropThreadSubject). */
+  subject?: string;
   /**
    * How the finder's run went for this customer (17 Nov 2026), in counts: the first real run of the search by company left the
    * companies' table empty and most contacts chosen by the words of their title, and nothing said why. Read by whoever reviews a
@@ -876,8 +878,23 @@ export function withoutSourceTalk(line: string | null | undefined): string | nul
 }
 
 /** «Tu contacto de hoy: Gerente de Personas en Ripley»; with more than one, how many. */
-export function dropSubject(items: Array<Pick<DropItem, 'title' | 'company'>>) {
-  if (items.length !== 1) return `${items.length} contactos nuevos para ti`;
+export function dropSubject(items: Array<Pick<DropItem, 'title' | 'company'> & { draft?: unknown }>, options: { /** For someone who has not opened the app in a while (AWAY_DAYS). */ away?: boolean } = {}) {
+  if (items.length !== 1) {
+    if (!options.away) return `${items.length} contactos nuevos para ti`;
+    // Who has not come in for a while reads what is waiting, by the first of them, and that the work is done (18 Nov 2026).
+    const who = [items[0]?.title, items[0]?.company].filter(Boolean).join(' en ');
+    const rest = items.length - 1;
+    const done = items.some(item => item.draft) ? 'con su correo ya escrito' : 'elegidos para ti';
+    const named = who ? `${who} y ${rest} ${rest === 1 ? 'contacto' : 'contactos'} más, ${done}` : '';
+    return named && named.length <= 110 ? named : `${items.length} contactos ${done}`;
+  }
   const who = [items[0].title, items[0].company].filter(Boolean).join(' en ');
   return who ? `Tu contacto de hoy: ${who}`.slice(0, 120) : 'Tu contacto de hoy';
 }
+
+/**
+ * The subject of a drop's conversation: the one its morning email left with when it was not the usual one (kept in the drop's
+ * criteria by server/daily-alerts.ts), so every answer in that conversation carries the same and stays in it.
+ */
+export const dropThreadSubject = (drop: { criteria?: { subject?: string | null } | null; items: Array<Pick<DropItem, 'title' | 'company'>> }) =>
+  String(drop.criteria?.subject || '').trim() || dropSubject(drop.items);

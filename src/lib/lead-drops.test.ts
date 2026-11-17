@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, accountsLine, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, accountsLine, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, dropThreadSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -452,3 +452,20 @@ test('the search by company, said to the person: how many companies fit, how man
     /^Su cargo es de los que buscas\. Su empresa es de un rubro vecino a los tuyos \(construcción\)/);
 });
 
+
+test('the subject for someone who has not opened the app names the first contact and that the work is done (18 nov)', () => {
+  const one = { title: 'Gerente HSE', company: 'Minera Andina', draft: { subject: 'Brigadas', body: 'Hola' } };
+  assert.equal(dropSubject([one, one, one], { away: true }), 'Gerente HSE en Minera Andina y 2 contactos más, con su correo ya escrito');
+  assert.equal(dropSubject([one, one], { away: true }), 'Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito');
+  assert.equal(dropSubject([{ title: 'Gerente HSE', company: 'Minera Andina' }, { title: 'Jefe', company: 'Otra' }], { away: true }), 'Gerente HSE en Minera Andina y 1 contacto más, elegidos para ti');
+  // Without a title or a company, or too long for a subject: the count.
+  assert.equal(dropSubject([{ title: null, company: null, draft: {} }, one, one] as any, { away: true }), '3 contactos con su correo ya escrito');
+  assert.equal(dropSubject([{ ...one, title: 'Gerente Corporativo de Seguridad, Salud Ocupacional y Medio Ambiente para Latinoamérica', company: 'Compañía Minera del Pacífico' }, one], { away: true }), '2 contactos con su correo ya escrito');
+  // One contact, and the usual email, read as before.
+  assert.equal(dropSubject([one], { away: true }), 'Tu contacto de hoy: Gerente HSE en Minera Andina');
+  assert.equal(dropSubject([one, one]), '2 contactos nuevos para ti');
+  // What answers in the conversation carries the subject the drop kept, or the usual one.
+  assert.equal(dropThreadSubject({ criteria: { subject: 'Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito' }, items: [one, one] }), 'Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito');
+  assert.equal(dropThreadSubject({ criteria: {}, items: [one, one] }), '2 contactos nuevos para ti');
+  assert.equal(dropThreadSubject({ items: [one, one] }), '2 contactos nuevos para ti');
+});

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
-import { BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson, dropAlertEmail } from '@/lib/daily-alerts';
+import { AWAY_DAYS, BEST_PER_ALERT, alertEmail, composeAlert, documentDue, type AlertFacts, type AlertOpportunity, type AlertPerson, dropAlertEmail } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
 import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
 import { dropThread } from '@/lib/lead-drop-thread';
@@ -275,11 +275,25 @@ async function readClosing(client: Client, scope: AlertScope, now: Date, manager
 }
 
 /** Today's «Contacto del día» of the person, once ready; nothing before the migration or while it is being written. */
-async function readTodayDrop(client: Client, scope: AlertScope, today: string): Promise<{ id: string; items: DropItem[] } | null> {
-  const result: any = await client.from('lead_drops').select('id,items').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+async function readTodayDrop(client: Client, scope: AlertScope, today: string): Promise<{ id: string; items: DropItem[]; criteria: Record<string, unknown> } | null> {
+  const result: any = await client.from('lead_drops').select('id,items,criteria').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
     .eq('drop_date', today).eq('status', 'ready').maybeSingle();
   const items = (result.error ? [] : result.data?.items || []) as DropItem[];
-  return result.data && items.length ? { id: String(result.data.id), items } : null;
+  return result.data && items.length ? { id: String(result.data.id), items, criteria: (result.data.criteria && typeof result.data.criteria === 'object' ? result.data.criteria : {}) as Record<string, unknown> } : null;
+}
+
+/**
+ * Whether the person has not opened the app for AWAY_DAYS, in any workspace: no screen of theirs in the usage ledger since then,
+ * or none ever. Their contacts' email is then written to bring them back (alertEmail). Best effort: a failed read is «not away»,
+ * and they get the usual email.
+ */
+async function readAway(client: Client, userId: string, now: Date) {
+  try {
+    const latest: any = await client.from('app_usage_views').select('occurred_at').eq('user_id', userId).order('occurred_at', { ascending: false }).limit(1);
+    if (latest.error) return false;
+    const seen = Date.parse(String(latest.data?.[0]?.occurred_at || ''));
+    return !Number.isFinite(seen) || now.getTime() - seen >= AWAY_DAYS * 86_400_000;
+  } catch { return false; }
 }
 
 /**
@@ -341,13 +355,16 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
     content: await dropPdf(drop.items, { name: facts.name, date: today, link: open || `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
   const mailed = drop && open ? { ...drop, link: open } : drop;
   // The email of several contacts opens a conversation of its own: what the person does from it is answered there (lead-drop-thread.ts).
-  const ownEmail = own && mailed ? dropAlertEmail(facts.name, open ? dropLinkBase(deps.appUrl) : deps.appUrl, mailed) : null;
+  // Whoever has not opened the app in a while gets that email written to bring them back, with a subject of its own: the drop keeps
+  // it, so what answers in that conversation carries the same (dropThreadSubject).
+  const away = own ? await readAway(client, scope.userId, now) : false;
+  const ownEmail = own && mailed ? dropAlertEmail(facts.name, open ? dropLinkBase(deps.appUrl) : deps.appUrl, mailed, { away }) : null;
   const sent = await deps.send({ userId: scope.userId, to, ...(ownEmail && drop ? { ...ownEmail, headers: dropThread({ dropId: drop.id, date: today, subject: ownEmail.subject }).headers } : alertEmail(alert, facts.name, deps.appUrl, mailed)),
     ...(attachments ? { attachments } : {}) });
   const other = sent.ok && rest ? await deps.send({ userId: scope.userId, to, ...alertEmail(rest, facts.name, deps.appUrl) }) : null;
   const failure = !sent.ok ? sent : other && !other.ok ? other : null;
   const at = new Date().toISOString();
   await client.from('daily_alerts').update(failure ? { status: 'failed', email_error: failure.error.slice(0, 300) } : { status: 'sent', emailed_at: at, email_error: null }).eq('id', stored.data.id);
-  if (sent.ok && drop) await client.from('lead_drops').update({ status: 'sent', emailed_at: at, updated_at: at }).eq('id', drop.id).eq('status', 'ready');
+  if (sent.ok && drop) await client.from('lead_drops').update({ status: 'sent', emailed_at: at, updated_at: at, ...(away && ownEmail ? { criteria: { ...drop.criteria, subject: ownEmail.subject } } : {}) }).eq('id', drop.id).eq('status', 'ready');
   return { status: failure ? 'failed' as const : 'sent' as const };
 }

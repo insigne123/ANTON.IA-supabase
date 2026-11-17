@@ -145,3 +145,12 @@ test('with their mobiles asked, the script of each saved contact is written at o
   assert.deepEqual(await prepareDropCalls(client, scope, DROP, async leadId => { asked.push(leadId); if (leadId === C) throw new Error('model down'); }), { ready: 1, asked: 2 });
   assert.deepEqual(asked.sort(), [B, C]);
 });
+
+test('the answer keeps the subject the morning email left with, when it was written to bring the person back (18 nov)', async () => {
+  const { client, tables } = seed([item(A, 'Pedro Araya', { savedLeadId: 'e-1' }), item(B, 'Luisa Soto', { savedLeadId: 'e-2' })], [lead('e-1'), lead('e-2')]);
+  tables.lead_drops[0].criteria = { subject: 'Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito' };
+  const { sent, send } = outbox();
+  assert.deepEqual(await mailDropReady(client, scope, DROP, {}, deps(send)), { sent: true, count: 2 });
+  assert.equal(sent[0].subject, 'Re: Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito');
+  assert.equal(sent[0].headers['Thread-Topic'], 'Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito');
+});
