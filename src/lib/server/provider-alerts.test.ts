@@ -108,7 +108,7 @@ test('the email says what is left, what stops, when it renews and where to add m
   assert.match(low.text, /La cuenta de Apollo de ANTON\.IA usó 3\.220 de 3\.520 créditos: quedan 300\./);
   assert.match(low.text, /Cuando se acabe, se detiene: pedir el correo y el teléfono de los contactos, en la app y en Cowork\. Se renueva el 1 de noviembre\./);
   assert.match(low.html, /href="https:\/\/app\.apollo\.io\/"/);
-  assert.match(low.html, /^<div style="background:#ffffff;color:#111827;color-scheme:light/, 'a white card of its own: readable in a dark mail client');
+  assert.match(low.html, /^<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f5f5f7" style="[^"]*color:#111827;color-scheme:light[^"]*">[\s\S]*<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff"/, 'a page and a white card of its own, their colours as attributes too: readable in a dark mail client');
   const empty = providerAlertEmail('openai', 'empty', { detail: 'insufficient_quota' });
   assert.equal(empty.subject, 'OpenAI se quedó sin saldo');
   assert.match(empty.text, /OpenAI respondió que la cuenta de ANTON\.IA no tiene saldo \(insufficient_quota\)\./);

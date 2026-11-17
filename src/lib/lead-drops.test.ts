@@ -160,7 +160,7 @@ test('the email table escapes what came from outside and links to the drop', () 
   // One contact is a block, not a three-column table that breaks on a phone: name, role · company, why.
   assert.doesNotMatch(section.html, /<th |<table(?! role="presentation")/);
   assert.match(section.html, /font-weight:600[^>]*>Ana &lt;b&gt;<\/p><p[^>]*>Gerente · R&amp;R<\/p><p[^>]*>Calza\.<\/p>/);
-  assert.match(section.html, /Contacto del día<\/h2>/);
+  assert.match(section.html, />Contacto del día<\/p><p[^>]*>Tu contacto de hoy, con su correo listo\.<\/p>/);
   // When the drop is all the email has, the title and its lead are left out.
   const bare = dropEmailSection([item], 'drop-1', 'https://app.antonia.ai/', { heading: false });
   assert.doesNotMatch(bare.html, /Contacto del día|Tu contacto de hoy, con su correo listo/);
@@ -177,7 +177,7 @@ test('the email table escapes what came from outside and links to the drop', () 
   assert.equal(dropSubject([item, item]), '2 contactos nuevos para ti');
   // The first reason it is worth it for what the person sells goes under the why; the rest are in the PDF.
   const advised = dropEmailSection([{ ...item, reasons: ['Revisa a cada persona que entra.', 'Otra.'] }], 'drop-1', 'https://app.antonia.ai/');
-  assert.match(advised.html, /Calza\.<\/p><p[^>]*>Revisa a cada persona que entra\.<\/p><\/div>/);
+  assert.match(advised.html, /Calza\.<\/p><p[^>]*>Revisa a cada persona que entra\.<\/p><\/div><div[^>]*><table/);
   assert.doesNotMatch(advised.html, /Otra\./);
   assert.match(advised.text, /Calza\. Revisa a cada persona que entra\./);
 });
@@ -346,7 +346,7 @@ test('the email of several contacts: a card each with who it is, what is happeni
   assert.ok(preview.length <= 151 && preview.endsWith('…'));
   assert.match(section.html, /Brigadas en &lt;faena&gt;/);
   assert.doesNotMatch(section.html, /<faena>/);
-  assert.equal((section.html.match(/Campaña lista<\/strong> · «Brigadas en &lt;faena&gt;» · primer correo y 2 seguimientos<\/p>/g) || []).length, 2, 'the one without emails has no campaign line');
+  assert.equal((section.html.match(/>Campaña lista<\/span> &nbsp;«Brigadas en &lt;faena&gt;» · primer correo y 2 seguimientos<\/p>/g) || []).length, 2, 'the one without emails has no campaign line');
   // The card is scanned, not read (16 Nov 2026): the initials of each on a tint, the news apart with its source, one line of why.
   // How to open and the email itself stay in the text version, on the page and in the PDF.
   assert.deepEqual([...section.html.matchAll(/line-height:40px;text-align:center">([^<]+)<\/td>/g)].map(match => match[1]), ['PA', 'LS', 'AR']);
@@ -354,8 +354,12 @@ test('the email of several contacts: a card each with who it is, what is happeni
   assert.match(section.html, />Una planta nueva suma áreas que proteger\.<\/p>/);
   assert.doesNotMatch(section.html, /Cómo abrir|Pregúntale por la planta nueva|¿Cómo cubren los turnos de noche/);
   assert.match(section.html, /href="https:\/\/app\.test\/dashboard\/contactos\/drop-1\?c=lf_000000000000000000000001&amp;enriquecer=1"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
-  assert.match(section.html, /· para explorar/);
-  assert.match(section.html, /Ver los 3 juntos/);
+  // What a contact is goes next to its name as a pill, and each card is a table: its air and its edge hold in Outlook.
+  assert.match(section.html, />Luisa Soto <span style="[^"]*border-radius:999px[^"]*">Para explorar<\/span><\/p>/);
+  assert.equal((section.html.match(/bgcolor="#ffffff" style="[^"]*border:1px solid #e5e7eb;border-radius:16px"/g) || []).length, 3);
+  assert.doesNotMatch(section.html, /<div style="[^"]*padding:1[0-9]px/, 'no card or block drawn with a padded div');
+  assert.match(section.html, /<td bgcolor="#ffffff"[^>]*><a href="https:\/\/app\.test\/dashboard\/contactos\/drop-1"[^>]*>Ver los 3 juntos<\/a>/);
+  assert.equal(section.summary, '3 contactos nuevos, cada uno con su campaña lista para aprobar.');
   // Inside another alert the heading is the alert's.
   assert.match(section.html, />Contacto del día<\/p><p[^>]*>3 contactos nuevos para ti, cada uno con su campaña lista<\/p>/);
   assert.doesNotMatch(dropEmailSection(items as any, 'drop-1', 'https://app.test', { heading: false }).html, /Contacto del día|3 contactos nuevos para ti/);
@@ -383,10 +387,11 @@ test('from the inbox the person chooses how to go on: all of them looked up at o
   assert.equal((all.html.match(/<td bgcolor="#2563eb"/g) || []).length, 1);
   assert.match(all.html, new RegExp(`<td bgcolor="#2563eb"[^>]*><a href="${link.replace(/\./g, '\\.')}\\?todos=correo"[^>]*>Enriquecer los 3 · 3 créditos</a>`));
   assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="${link.replace(/\./g, '\\.')}\\?todos=telefono"[^>]*>Con sus teléfonos · 24 créditos</a>`));
-  assert.match(all.html, new RegExp(`<td bgcolor="#ffffff"[^>]*><a href="https://app\\.test/contactos/${token}"[^>]*>Abrir en ANTON\\.IA</a>`));
+  assert.match(all.html, new RegExp(`¿Prefieres la app\\? <a href="https://app\\.test/contactos/${token}"[^>]*>Abrir en ANTON\\.IA &rsaquo;</a>`), 'the app is a quiet link under the two ways to look them up');
+  assert.match(all.html, /^<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eff6ff"/, 'the choice for all of them is the blue card, first');
   assert.equal((all.html.match(/<td bgcolor="#ffffff"[^>]*><a href="[^"]+\?c=lf_[0-9]+"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/g) || []).length, 3);
   assert.match(all.text, /Enriquécelos de una vez\. Te respondemos en esta misma conversación con el correo de cada uno y su campaña lista para aprobar\. Con teléfonos, también el guion de cada llamada\./);
-  assert.match(all.html, /font-weight:600;color:#111827">Enriquécelos de una vez<\/p>/);
+  assert.match(all.html, /font-weight:700;color:#111827">Enriquécelos de una vez<\/p>/);
   assert.match(all.text, /con su teléfono, 8 por ambos\. Nada se cobra al abrir: confirmas en la página\./);
   // Some already looked up: the button counts the ones that are left. With one left, its own button is the main one.
   const some = dropEmailSection([{ ...three[0], savedLeadId: 'e-1' }, three[1], three[2]] as any, 'drop-1', 'https://app.test', { link });
@@ -395,7 +400,7 @@ test('from the inbox the person chooses how to go on: all of them looked up at o
   const last = dropEmailSection([{ ...three[0], savedLeadId: 'e-1' }, { ...three[1], savedLeadId: 'e-2' }, three[2]] as any, 'drop-1', 'https://app.test', { link });
   assert.doesNotMatch(last.html, /todos=/);
   assert.match(last.html, /<td bgcolor="#2563eb"[^>]*><a href="[^"]+\?c=lf_000000000000000000000003"[^>]*>Enriquecer y revisar · 1 crédito<\/a>/);
-  assert.match(last.html, />Abrir en ANTON\.IA</);
+  assert.match(last.html, /<td bgcolor="#ffffff"[^>]*><a href="[^"]+"[^>]*>Abrir en ANTON\.IA<\/a>/, 'with nothing to look up at once, the app is the outlined button');
   assert.match(last.text, /Sigue como prefieras\. Desde este correo, con el botón de cada contacto, o desde la app\./);
   // Without a page that needs no session, the email is as before: every button opens the app.
   const inApp = dropEmailSection(three as any, 'drop-1', 'https://app.test');

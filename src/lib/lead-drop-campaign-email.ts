@@ -1,8 +1,8 @@
 // The email a person gets once a contact's email is found (12 Nov 2026, docs/contacto-del-dia.md): the campaign as it would go, to
 // read wherever they are. The first email and each follow-up in full, with the day each would leave if approved today, and the way
 // to the contact's card, where it is approved or changed. Pure: the server reads the facts (server/lead-drop-campaign.ts).
-import { emailButton, emailShell } from '@/lib/email-shell';
-import { dropCampaignMessages, dropEmailPreview, dropHref, dropName, dropSchedule, shortDay, type DropItem } from '@/lib/lead-drops';
+import { EMAIL_AVATAR_TINTS, emailButton, emailCard, emailHeadline, emailLabel, emailNote, emailPerson, emailPill, emailRow, emailShell } from '@/lib/email-shell';
+import { dropCampaignMessages, dropEmailPreview, dropHref, dropInitials, dropName, dropSchedule, dropTint, shortDay, type DropItem } from '@/lib/lead-drops';
 
 export type DropCampaignEmailInput = {
   dropId: string;
@@ -56,19 +56,18 @@ export function dropCampaignEmail(item: DropItem, input: DropCampaignEmailInput)
     '', `Revisar y aprobar: ${link}`, note, `${off} «Tu semana»: ${settings}`,
   ].join('\n');
 
-  const block = (email: typeof emails[number]) => `<div style="margin:0 0 12px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#ffffff">`
-    + `<p style="margin:0;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">${escape(email.label)}</p>`
+  // On the email's page (src/lib/email-shell.ts): who it is and the address found, each email of the campaign in its own card, and
+  // the one button under the last.
+  const block = (email: typeof emails[number]) => emailCard(emailLabel(escape(email.label))
     + `<p style="margin:6px 0 0;font-size:15px;line-height:22px;font-weight:600;color:#111827">${escape(email.subject)}</p>`
-    + email.body.split(/\n{2,}/).map(paragraph => `<p style="margin:8px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(paragraph).replace(/\n/g, '<br>')}</p>`).join('')
-    + '</div>';
-  const html = emailShell(`<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
-    + `<p style="margin:0 0 4px;font-size:15px;line-height:22px;color:#111827">${escape(found)}</p>`
-    + `<p style="margin:0 0 16px;font-size:15px;line-height:22px;color:#6b7280">${escape(next)}</p>`
-    + `<p style="margin:0;font-size:16px;line-height:24px;font-weight:600;color:#111827">${escape(contact)}</p>`
-    + (role ? `<p style="margin:2px 0 14px;font-size:14px;line-height:20px;color:#374151">${escape(role)}</p>` : '<div style="height:14px"></div>')
+    + email.body.split(/\n{2,}/).map(paragraph => `<p style="margin:8px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(paragraph).replace(/\n/g, '<br>')}</p>`).join(''));
+  const html = emailShell(emailHeadline({ kicker: escape(greeting), title: escape(`Encontramos el correo de ${contact}`), lines: [escape(next)] })
+    + emailCard(emailPerson({ initials: escape(dropInitials(item)), tint: dropTint(item.leadId, EMAIL_AVATAR_TINTS), name: escape(contact), role: role ? escape(role) : null })
+      + `<p style="margin:12px 0 0;font-size:14px;line-height:20px;color:#065f46">${emailPill('Correo encontrado', 'green')} &nbsp;${escape(input.contactEmail)}</p>`)
     + emails.map(block).join('')
-    + `<div style="margin:20px 0 0">${emailButton(link, 'Revisar y aprobar')}</div>`
-    + `<p style="margin:10px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(note)}</p>`
-    + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">${escape(off)} <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p>`);
+    + emailRow(emailButton(link, 'Revisar y aprobar'), { padding: '4px 4px 4px' })
+    + emailNote(escape(note))
+    + emailNote(`${escape(off)} <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.`),
+    { bare: true, label: 'Campaña lista', preheader: escape(next) });
   return { subject, text, html, link };
 }

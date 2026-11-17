@@ -36,7 +36,8 @@ test('the HTML says the same, escapes what the email brings and leads to the car
   const email = dropCampaignEmail(contact(), input)!;
   assert.ok(email.html.includes('Lo pregunto por &lt;algo&gt; &amp; más.'), 'text of the email is never markup');
   assert.ok(email.html.includes('¿Cómo cubren los turnos de noche en Minera Andina?<br>Lo pregunto'), 'a line break inside a paragraph stays');
-  assert.equal((email.html.match(/text-transform:uppercase/g) || []).length, 4, 'one block per email');
+  assert.equal((email.html.match(/text-transform:uppercase/g) || []).length, 5, 'the greeting, and one block per email');
+  assert.match(email.html, />Campaña lista<\/td>/, 'what this email is, next to the name of the app');
   const links = [...email.html.matchAll(/href="([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(links, [email.link, 'https://app.ejemplo.cl/dashboard?vista=semana']);
   assert.ok(!links.some(link => /aprobar|approve/.test(link)), 'approving is done on the page');

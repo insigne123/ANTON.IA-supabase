@@ -533,6 +533,27 @@ vuelve a ella del todo. Los modelos más caros siguen bloqueados en toda la app 
 Pruebas: `lead-drop-writer.test.ts` y, en `lead-drops-apollo.test.ts`, «the emails of a recommended contact come from the drops'
 own writer…» (con su respaldo).
 
+### Desde el 17 de noviembre: los correos, como una página propia
+
+El dueño: «sigamos mejorando el cómo se ven los mails que le llegan a los usuarios». Hasta ahora cada correo era una columna blanca
+con tarjetas dibujadas con `div`: sin marca, sin texto de vista previa en la bandeja y, en el Outlook de escritorio (que ignora
+`max-width`, el relleno y los márgenes de un `div`), con las tarjetas pegadas al borde y a todo el ancho de la ventana.
+
+- **Marco común** (`src/lib/email-shell.ts`, `emailShell`): fondo gris suave, «ANTON.IA» arriba con una etiqueta de qué es el correo
+  («Contactos de hoy», «Listos para aprobar», «Para llamar», «Campaña lista», «Tu día») y tarjetas blancas encima. Todo con tablas y
+  con el color también como atributo, para que se vea igual en Gmail, Outlook y el teléfono, y legible en modo oscuro.
+- **Vista previa en la bandeja** (`preheader`): después del asunto se lee a quiénes trae el correo («Marcela F. de Tiendas Aurora,
+  Rodrigo P. de… y 3 más») o el siguiente paso, y no otra vez el saludo.
+- **Titular** (`emailHeadline`): el saludo chico, qué pasó como título y qué hacer debajo.
+- **Tarjetas** (`emailCard`): una por contacto. Lo que es cada contacto va como píldora junto a su nombre («Puede derivarte», «Para
+  explorar», «Rubro vecino»), y «Campaña lista» y «Correo encontrado» también (`emailPill`).
+- **Un botón principal por correo.** En el de la mañana, «Enriquecer los N»; «Con sus teléfonos» queda delineado y la app pasa a ser
+  un enlace discreto («¿Prefieres la app? Abrir en ANTON.IA»). «Ver los N juntos» deja de ser un enlace suelto al final.
+- **Los demás correos de la app** (informe del lunes, avisos de saldo, asignaciones de Oportunidades) reciben el mismo marco con su
+  contenido en una sola tarjeta, sin cambiar su texto.
+
+Nada cambia en qué dice cada correo, en sus enlaces ni en la versión de texto.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

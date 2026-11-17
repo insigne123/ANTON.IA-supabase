@@ -73,7 +73,7 @@ test('the email: the same report in a few lines, escaped, without tracking or un
   assert.match(email.html, /href="https:\/\/app\.example\/contacted\/replied"/);
   assert.match(email.text, /Ver el informe completo: https:\/\/app\.example\/dashboard\?vista=semana/);
   assert.doesNotMatch(email.html, /<b>|unsubscribe|tracking|pixel/i);
-  assert.match(email.html, /^<div style="background:#ffffff;color:#111827;color-scheme:light/, 'a white card of its own: readable in a dark mail client');
+  assert.match(email.html, /^<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f5f5f7" style="[^"]*color:#111827;color-scheme:light[^"]*">[\s\S]*<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff"/, 'a page and a white card of its own, their colours as attributes too: readable in a dark mail client');
 });
 
 const member = (name: string, patch: Partial<TeamSection['members'][number]> = {}) => ({ userId: name, name, role: 'member', sent: 0, replies: 0, meetings: 0, pending: 0, ...patch });

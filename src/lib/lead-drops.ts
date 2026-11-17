@@ -1,5 +1,5 @@
 import { DROP_EMAIL_AND_PHONE_CREDITS, type DropCallScript, type DropPhone } from '@/lib/lead-drop-call';
-import { EMAIL_AVATAR_TINTS, emailButton, emailCallout, emailLabel, emailPerson } from '@/lib/email-shell';
+import { EMAIL_AVATAR_TINTS, emailButton, emailCallout, emailCard, emailLabel, emailNote, emailPerson, emailPill, emailRow, type EmailPillTone } from '@/lib/email-shell';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { displayLeadName } from '@/lib/lead-name';
 
@@ -696,13 +696,20 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
     + `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:#6b7280">${escape(item.why)}</p>`
     // The first reason it is worth it for what the person sells (writeDrop): the rest, with the fit criterion by criterion, in the PDF.
     + (item.reasons?.[0] ? `<p style="margin:4px 0 0;font-size:14px;line-height:20px;color:#374151">${escape(item.reasons[0])}</p>` : '') + '</div>';
-  const html = (heading ? `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
-      + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
-    + `<div style="margin:0 0 16px;padding:4px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb">${items.map(block).join('')}</div>`
-    + emailButton(link, one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`)
-    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${escape(dropCostNote(items))} ${research}</p>`;
-  return { text, html, link };
+  // Laid on the email's page (src/lib/email-shell.ts): the title of the part, one white card with the contacts and their button, and
+  // the small print under it.
+  const html = (heading ? sectionTitle(`${lead}.`) : '')
+    + emailCard(items.map(block).join('') + `<div style="margin:6px 0 0">${emailButton(link, one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`)}</div>`, { padding: '8px 18px 10px' })
+    + emailNote(`${escape(dropCostNote(items))} ${research}`);
+  return { text, html, link, summary: lookup ? (one ? 'Elegido para lo que vendes.' : 'Elegidos para lo que vendes.') : `Con su correo listo: ${one ? 'guárdalo' : 'guárdalos'} sin costo.` };
 }
+
+/** The title of the contacts inside an email that also brings the rest of the day: on the page, over their cards. Already escaped. */
+const sectionTitle = (lead: string) => emailRow(emailLabel('Contacto del día')
+  + `<p style="margin:4px 0 0;font-size:19px;line-height:26px;font-weight:700;color:#111827">${lead}</p>`, { padding: '14px 4px 12px' });
+/** What a contact is, said next to its name: someone who can pass the message on, a profile to try, a neighbouring industry. */
+const dropTag = (item: Pick<DropItem, 'role' | 'track' | 'expanded'>): { text: string; tone: EmailPillTone } | null =>
+  item.role === 'refer' ? { text: 'Puede derivarte', tone: 'violet' } : item.track === 'explore' ? { text: 'Para explorar', tone: 'teal' } : item.expanded ? { text: 'Rubro vecino', tone: 'gray' } : null;
 
 /** «el lun 16, el vie 20 y el mar 24 nov» would repeat the month: «lun 16 nov, vie 20 nov y mar 24 nov», joined as a sentence. */
 const listed = (values: string[]) => values.length <= 1 ? values.join('') : `${values.slice(0, -1).join(', ')} y ${values[values.length - 1]}`;
@@ -802,25 +809,31 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   // The card of a contact (16 Nov 2026, the redesign the owner asked for: «se siente como mucho texto y poco organizado»): who it is,
   // the one thing happening at its company, one line of why and its campaign in one line. How to open and the email itself are a
   // click away, on its page and in the PDF; the text version keeps them for the clients that show no HTML.
-  const card = ({ item, why, newsNow, campaign, steps, href, action }: typeof cards[number]) => `<div style="margin:0 0 12px;padding:16px;border:1px solid #e5e7eb;border-radius:14px;background-color:#ffffff">`
-    + emailPerson({ initials: escape(dropInitials(item)), tint: dropTint(item.leadId, EMAIL_AVATAR_TINTS), name: escape(dropName(item)),
-      role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: item.role === 'refer' ? 'puede derivarte' : item.track === 'explore' ? 'para explorar' : item.expanded ? 'rubro vecino' : null })
-    + (newsNow ? emailCallout({ label: 'Ahora', body: escape(newsNow.text), foot: newsNow.source ? escape(newsNow.source) : null }) : '')
-    + `<p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(why)}</p>`
-    + (campaign ? `<p style="margin:10px 0 0;padding:10px 0 0;border-top:1px solid #f3f4f6;font-size:13px;line-height:19px;color:#6b7280">`
-      + `<strong style="color:#111827">Campaña lista</strong> · «${escape(campaign.subject)}» · ${steps}</p>` : '')
-    + `<div style="margin:14px 0 0">${emailButton(href, action, { quiet: Boolean(bulk?.all) })}</div></div>`;
-  const html = (heading ? `<div style="margin:28px 0 14px">${emailLabel('Contacto del día')}`
-      + `<p style="margin:4px 0 0;font-size:20px;line-height:27px;font-weight:600;color:#111827">${lead}</p></div>` : '')
-    + (bulk ? `<div style="margin:0 0 16px;padding:16px 16px 8px;border:1px solid #bfdbfe;border-radius:14px;background-color:#eff6ff">`
-      + `<p style="margin:0;font-size:15px;line-height:21px;font-weight:600;color:#111827">${escape(bulk.title)}</p>`
-      + `<p style="margin:3px 0 12px;font-size:14px;line-height:20px;color:#374151">${escape(bulk.lead)}</p>`
-      + (bulk.all ? emailButton(bulk.all.href, bulk.all.label) : '') + (bulk.phones ? emailButton(bulk.phones.href, bulk.phones.label, { quiet: true }) : '')
-      + emailButton(bulk.app.href, bulk.app.label, { quiet: true }) + '</div>' : '')
+  //
+  // Laid on the email's page (17 Nov 2026, src/lib/email-shell.ts): the blue card with the choice for all of them, a white card per
+  // contact, and a way to see them together under the last one.
+  const card = ({ item, why, newsNow, campaign, steps, href, action }: typeof cards[number]) => {
+    const tag = dropTag(item);
+    return emailCard(emailPerson({ initials: escape(dropInitials(item)), tint: dropTint(item.leadId, EMAIL_AVATAR_TINTS), name: escape(dropName(item)),
+      role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: tag?.text, tagTone: tag?.tone })
+      + (newsNow ? emailCallout({ label: 'Ahora', body: escape(newsNow.text), foot: newsNow.source ? escape(newsNow.source) : null }) : '')
+      + `<p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(why)}</p>`
+      + (campaign ? `<p style="margin:12px 0 0;padding:12px 0 0;border-top:1px solid #f3f4f6;font-size:13px;line-height:20px;color:#4b5563">`
+        + `${emailPill('Campaña lista', 'green')} &nbsp;«${escape(campaign.subject)}» · ${steps}</p>` : '')
+      + `<div style="margin:14px 0 0">${emailButton(href, action, { quiet: Boolean(bulk?.all) })}</div>`, { padding: '18px 18px 10px' });
+  };
+  // One main button in the email. With all of them still to look up, the app is a quiet link under the two ways to do it.
+  const choice = bulk ? emailCard(`<p style="margin:0;font-size:16px;line-height:22px;font-weight:700;color:#111827">${escape(bulk.title)}</p>`
+    + `<p style="margin:4px 0 14px;font-size:14px;line-height:21px;color:#374151">${escape(bulk.lead)}</p>`
+    + (bulk.all ? emailButton(bulk.all.href, bulk.all.label) : '') + (bulk.phones ? emailButton(bulk.phones.href, bulk.phones.label, { quiet: true }) : '')
+    + (bulk.all ? `<p style="margin:4px 0 8px;font-size:13px;line-height:19px;color:#4b5563">¿Prefieres la app? <a href="${escape(bulk.app.href)}" style="color:#1d4ed8;font-weight:600;text-decoration:none">${escape(bulk.app.label)} &rsaquo;</a></p>`
+      : emailButton(bulk.app.href, bulk.app.label, { quiet: true })), { tone: 'blue', padding: '18px 18px 10px' }) : '';
+  const html = (heading ? sectionTitle(lead) : '')
+    + choice
     + cards.map(card).join('')
-    + `<p style="margin:4px 0 0;font-size:14px;line-height:20px"><a href="${escape(link)}" style="color:#2563eb">Ver los ${items.length} juntos</a></p>`
-    + `<p style="margin:10px 0 0;font-size:12px;line-height:18px;color:#6b7280">${escape(note)}</p>`;
-  return { text, html, link };
+    + emailRow(emailButton(link, `Ver los ${items.length} juntos`, { quiet: true }), { align: 'center', padding: '4px 4px 6px' })
+    + emailNote(escape(note));
+  return { text, html, link, summary: `${items.length} contactos nuevos${written ? ', cada uno con su campaña lista para aprobar' : ', elegidos para lo que vendes'}.` };
 }
 
 /**
