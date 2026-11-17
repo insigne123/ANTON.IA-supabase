@@ -596,9 +596,16 @@ ponerles un mensaje distinto, para incentivarlos a meterse».
 
 Cuántos contactos recibe cada quien sigue saliendo de su plan (`lead_drop_person_plans`): el mensaje depende de si entra, no del plan.
 
+### Desde el 18 de noviembre: la preparación parte a las 02:00
+
+Con todo GrupoExpro en planes por persona (13 personas con 6 contactos y 15 con 3: 123 al día) las nueve corridas de 05:00 a 07:40
+no alcanzaban: una corrida escribe unos 16 contactos (dos rondas de hasta 8), y un contacto que no está escrito cuando sale el aviso
+de las 08:00 no se envía ese día. `leadDropsTick` corre ahora de 02:00 a 07:40 de Chile, dieciocho corridas, sin cambiar cuántos se
+escriben a la vez.
+
 ## Cómo funciona
 
-1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
+1. **Preparación** (`leadDropsTick`, de lunes a viernes de 02:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
    - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos y una dirección que no es de prueba, y a quien le llega el correo: con Resend, a todos; sin Resend, a quien tiene su Gmail u Outlook conectado (o con el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
    - **A quién buscar: el cliente ideal de cada persona** (desde el 29 de octubre):
      - el de su «Perfil», si lo declaró;
