@@ -74,8 +74,33 @@ el asunto, pero comparten la forma de abrir («Te escribo porque…»). Con inve
 - `src/lib/bulk-campaign-personal.test.ts`, `src/lib/server/campaign-personal.test.ts`, `src/lib/server/lead-drop-writer.test.ts`.
 - Recorridos visuales `campanas-nueva-personal` y `campanas-nueva-personal-telefono` (`scripts/visual-audit/journeys/campanas.mjs`).
 
+## En Cowork
+
+Las campañas que Cowork arma en el chat siguen la misma regla, antes de aprobar:
+
+- **La tarjeta escribe sola.** Al abrirse una propuesta para varias personas, la tarjeta pide los correos de cada una al mismo servicio
+  (`/api/campaigns/bulk/personalize`): «Escribiendo un correo para cada persona… 3 de 8», con «Detener». «Crear campaña sin enviar»
+  espera a que termine.
+- **La campaña que propuso Cowork es la guía.** Quien ya tenía un primer correo propio (Cowork lo escribió con su investigación, o la
+  persona lo editó) lo conserva: sus seguimientos se escriben a partir de ese correo.
+- **Cada persona muestra lo que recibe**: su primer correo y, debajo, «Sus N seguimientos, escritos para esta persona».
+- **La secuencia pasa a ser la base** cuando todos tienen sus correos: se lee, no se edita y no se envía a nadie. Mientras alguien quede
+  con los correos comunes, la secuencia sigue editable y la tarjeta ofrece «Escribir sus correos».
+- **Para una sola persona no cambia nada**: Cowork ya le escribe a ella (la campaña se guarda con `personalize: false`).
+- Se guardan con las mismas garantías de cualquier edición de la propuesta (`cowork_edit_campaign_definition`: solo mientras está
+  pendiente y sobre la versión vista) y dejan su propio evento (`proposal.personalized`), así «editada por ti» cuenta solo lo que
+  editó la persona.
+
+No se escriben dentro del turno del asistente: ese turno tiene 105 segundos para todo y la escritura de 25 personas puede tomar uno.
+
+Código: `src/components/cowork/CampaignPeople.tsx`, `CampaignReview.tsx`, `src/lib/cowork/campaign-edit.ts`
+(`coworkPersonalCampaignDefinition`), `src/lib/cowork/campaign-people.ts` (`written`, `rest`),
+`src/lib/server/cowork/campaign-ops.ts` (`saveCoworkCampaignPersonal`), `src/app/api/cowork/runs/[id]/campaign-preview/route.ts`.
+Pruebas: `campaign-edit.test.ts`, `campaign-people.test.ts`, `campaign-ops.test.ts`, `scripts/test-cowork-campaign-personal-ui.mjs`.
+
 ## Pendiente
 
-- Las campañas que arma Cowork en el chat todavía llegan con un texto para todos (y el primer correo propio cuando son hasta tres
-  personas); al abrirlas en Campañas se ofrece escribirlos. Que Cowork los escriba al armarla va en un cambio aparte.
 - No se investiga a cada destinatario al escribir: se usa lo guardado. Investigar a cien personas es otro costo y otro tiempo.
+- Una propuesta de Cowork que se aprueba desde fuera de la tarjeta (modo Autónomo) se crea con los correos comunes. Al abrirla en
+  Campañas se ofrece escribirlos, y la tarjeta de «Aprobar y activar» de Cowork avisa cuántas personas recibirían el mismo texto, con
+  el enlace a la campaña. Avisa y no bloquea.

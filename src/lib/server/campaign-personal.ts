@@ -40,8 +40,11 @@ export type PersonalDeps = {
 
 const text = (...values: unknown[]) => { for (const value of values) { const clean = String(value ?? '').replace(/\s+/g, ' ').trim(); if (clean) return clean; } return ''; };
 const strings = (value: unknown) => (Array.isArray(value) ? value.map(entry => text(entry)).filter(Boolean) : []);
-/** ILIKE finds the address whatever its case. Its `_` also matches any character, so what comes back is compared again, exactly. */
-const likeExact = (email: string) => `email.ilike."${email}"`;
+/**
+ * ILIKE finds the address whatever its case, written as the app already filters by email elsewhere (contacted-leads-service.ts): an
+ * address checked as one has no comma nor parenthesis. Its `_` also matches any character, so what comes back is compared again.
+ */
+const likeExact = (email: string) => `email.ilike.${email}`;
 
 export function personalRecipientOf(row: any): PersonalRecipient {
   return {

@@ -6,7 +6,8 @@ import { getCoworkRun } from '@/lib/server/cowork/runs';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { loadAudience } from '@/lib/server/bulk-campaign-audience';
-import { editCoworkCampaignMessages, editCoworkCampaignPerson, parseCoworkCampaignTarget } from '@/lib/server/cowork/campaign-ops';
+import { editCoworkCampaignMessages, editCoworkCampaignPerson, parseCoworkCampaignTarget, saveCoworkCampaignPersonal } from '@/lib/server/cowork/campaign-ops';
+import { personalMissing } from '@/lib/bulk-campaign-personal';
 import { coworkCampaignPeople } from '@/lib/cowork/campaign-people';
 import { CoworkCampaignEditRefused, coworkCampaignEditSchema } from '@/lib/cowork/campaign-edit';
 import { CampaignInputSchema } from '@/lib/bulk-campaigns';
@@ -43,11 +44,16 @@ export async function GET(_req: NextRequest, context: Context) {
       const audience = await loadAudience(auth, definition.criteria);
       const matched = new Set(audience.filter(person => !person.blockedReason).map(person => person.email.toLowerCase()));
       // Edits the person made before approving (proposal.edited), newest last.
-      const edits = state.events.filter((event: { kind: string }) => event.kind === 'proposal.edited').length;
+      // The emails the app wrote for each person are saved as an edit too, with their own event next to it: they are not the person's.
+      const count = (kind: string) => state.events.filter((event: { kind: string }) => event.kind === kind).length;
+      const edits = Math.max(0, count('proposal.edited') - count('proposal.personalized'));
+      const personalize = definition.personalize !== false && definition.emails.length > 1;
       return NextResponse.json({
         kind: 'campaign_create', label: String(proposal.label || ''), edits,
         definitionHash: canonicalSha256(row.data.definition),
-        name: definition.name, objective: definition.objective, provider: definition.provider, relationship: definition.criteria.relationship,
+        name: definition.name, objective: definition.objective, description: definition.description, provider: definition.provider, relationship: definition.criteria.relationship,
+        // Whether each person gets emails written for them, and who still reads the common ones.
+        personalize, onGuide: personalize ? personalMissing(definition) : [],
         messages: definition.messages.map(message => ({ subject: message.subject, body: message.body, delayDays: message.delayDays })),
         emails: definition.emails,
         matched: definition.emails.filter(email => matched.has(email.toLowerCase())).length,
@@ -67,6 +73,10 @@ export async function GET(_req: NextRequest, context: Context) {
       revision: campaign.revision, recipients: campaign.recipients.length,
       emails: campaign.recipients.map(recipient => recipient.email),
       matches: campaign.revision === target.revision && campaign.review_hash === target.reviewHash,
+      // Activating sends: how many people would still get the common text (a campaign created without the card, or from before).
+      campaignId: campaign.id,
+      onGuideCount: proposal.kind === 'campaign_activate' && campaign.definition?.personalize !== false && campaign.recipients.length > 1
+        ? personalMissing(campaign.definition).length : 0,
     }, { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
@@ -81,9 +91,11 @@ export async function PATCH(req: NextRequest, context: Context) {
     const auth = await requireCoworkAccess();
     const id = z.string().uuid().parse((await context.params).id);
     const body = coworkCampaignEditSchema.parse(await req.json());
-    return NextResponse.json(body.person
-      ? await editCoworkCampaignPerson(auth, id, body.person, body.expectedHash)
-      : await editCoworkCampaignMessages(auth, id, body.messages ?? [], body.expectedHash), { headers });
+    return NextResponse.json(body.personal
+      ? await saveCoworkCampaignPersonal(auth, id, body.personal, body.expectedHash)
+      : body.person
+        ? await editCoworkCampaignPerson(auth, id, body.person, body.expectedHash)
+        : await editCoworkCampaignMessages(auth, id, body.messages ?? [], body.expectedHash), { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     if (error instanceof CoworkCampaignEditRefused) return NextResponse.json({ error: error.message }, { status: error.status, headers });

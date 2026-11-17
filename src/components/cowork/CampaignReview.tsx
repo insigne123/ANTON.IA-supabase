@@ -17,6 +17,10 @@ type Preview = {
   /** Each recipient with the first email they will receive (servers before Plan 5 PR-6 send only `emails`). */
   people?: CampaignPerson[];
   relationship?: 'never_contacted' | 'previously_contacted';
+  // Since 17 Nov 2026 (docs/campanas-un-correo-por-persona.md): each person gets emails written for them when the card opens.
+  description?: string; personalize?: boolean; onGuide?: string[];
+  /** On activation: the campaign, and how many of its people would still get the common text. */
+  campaignId?: string; onGuideCount?: number;
 };
 
 const STATUS: Record<string, string> = {
@@ -37,6 +41,8 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
   const [saved, setSaved] = useState(false);
   // One person's first email open for editing (CampaignPeople): approving waits for it.
   const [editingPerson, setEditingPerson] = useState(false);
+  // Each person's emails are being written (CampaignPeople): approving waits for them too.
+  const [writingPeople, setWritingPeople] = useState(false);
   const load = useCallback(async () => {
     const response = await fetch(`/api/cowork/runs/${runId}/campaign-preview`, { cache: 'no-store' });
     const data = await response.json();
@@ -83,7 +89,9 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
   const days = messages.reduce<number[]>((all, message, index) => [...all, index === 0 ? 1 : all[index - 1] + message.delayDays], []);
   // One person: the preview above already shows the first email exactly as it goes out (round 3: the same email twice on the card).
   const allOwn = Boolean(people?.length) && (own === people!.length || people!.length === 1);
-  const listed = messages.map((message, index) => ({ message, index })).filter(item => !(allOwn && item.index === 0));
+  // Everyone has every email written for them: the common sequence goes to nobody. It stays as what they were written from.
+  const allWritten = Boolean(people && people.length > 1 && people.every(person => person.written));
+  const listed = messages.map((message, index) => ({ message, index })).filter(item => allWritten || !(allOwn && item.index === 0));
   const merged = messages.some(message => /\{\{\s*(?:nombre|empresa|cargo)\s*\}\}/.test(`${message.subject}\n${message.body}`));
   return <div className="space-y-4">
     <div>
@@ -99,7 +107,8 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
       </ReviewFields>
       {people && people.length > 0 && <CampaignPeople runId={runId} people={people} objective={preview.objective || ''}
         relationship={preview.relationship || 'never_contacted'} definitionHash={preview.definitionHash} locked={Boolean(draft)}
-        onSaved={async () => { setPreview(await load()); }} onEditingChange={setEditingPerson} />}
+        onSaved={async () => { setPreview(await load()); }} onEditingChange={setEditingPerson} onWritingChange={setWritingPeople}
+        guide={preview.personalize ? { description: preview.description || '', messages, onGuide: preview.onGuide || [] } : undefined} />}
       {draft
         ? <div className="space-y-4">
           {draft.map((item, index) => <div key={index} className="rounded-xl border border-cw-border bg-cw-panel p-3.5">
@@ -115,21 +124,25 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
         </div>
         : listed.length > 0 && <>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[12.5px] font-medium text-cw-muted">{allOwn
+          <h3 className="text-[12.5px] font-medium text-cw-muted">{allWritten
+            ? `Base de la campaña · ${messages.length === 1 ? '1 correo' : `${messages.length} correos`}`
+            : allOwn
             ? `${people!.length === 1 ? 'Seguimientos' : 'Seguimientos para todos'} · ${listed.length === 1 ? '1 correo' : `${listed.length} correos`}`
             : people ? `Secuencia para todos · ${messages.length === 1 ? '1 correo' : `${messages.length} correos`}`
               : messages.length === 1 ? 'Correo' : `${messages.length} correos`}{preview.edits ? ' · editada por ti' : ''}</h3>
-          <CwButton variant="secondary" size="xs" disabled={editingPerson} onClick={() => { setSaved(false); setDraft(messages.map(message => ({ subject: message.subject, body: message.body }))); }}>
+          {/* The base goes to nobody once everyone has their own emails: there is nothing of it left to edit. */}
+          {!allWritten && <CwButton variant="secondary" size="xs" disabled={editingPerson || writingPeople} onClick={() => { setSaved(false); setDraft(messages.map(message => ({ subject: message.subject, body: message.body }))); }}>
             <Pencil aria-hidden="true" />{people ? (allOwn ? 'Editar seguimientos' : 'Editar secuencia') : 'Editar correos'}
-          </CwButton>
+          </CwButton>}
         </div>
-        {people && (merged || (own > 0 && !allOwn)) && <p className="text-[12.5px] leading-5 text-cw-muted">
+        {allWritten && <p className="text-[12.5px] leading-5 text-cw-muted">Cada persona tiene sus propios correos, escritos a partir de esta base. La base no se envía a nadie; para cambiar el correo de alguien, edítalo en su tarjeta.</p>}
+        {people && !allWritten && (merged || (own > 0 && !allOwn)) && <p className="text-[12.5px] leading-5 text-cw-muted">
           {merged ? 'El nombre, la empresa y el cargo se completan con los datos de cada persona.' : ''}
           {own > 0 && !allOwn ? `${merged ? ' ' : ''}El primer correo de la secuencia va solo a quienes no tienen uno propio.` : ''}
         </p>}
       <ol className="space-y-2">
         {listed.map(({ message, index }) => <li key={index}>
-            <details className="group rounded-xl border border-cw-border bg-cw-panel" open={index === listed[0].index}>
+            <details className="group rounded-xl border border-cw-border bg-cw-panel" open={!allWritten && index === listed[0].index}>
               <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-3.5 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cw-elevated text-[12px] font-semibold text-cw-muted ring-1 ring-cw-border">{index + 1}</span>
                 <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium"><CoworkMergedText text={message.subject} /></span>
@@ -153,8 +166,13 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
         : preview.kind === 'campaign_activate'
           ? 'Al aprobar empiezan los envíos según su calendario. Antes se verifican de nuevo audiencia, bajas y cada mensaje.'
           : 'Al aprobar se detienen los envíos que faltan. Lo que ya se envió no se revierte.'}</ReviewNote>
+      {!blocked && preview.kind === 'campaign_activate' && (preview.onGuideCount ?? 0) > 0 && preview.campaignId && <ReviewNote ok={false}>
+        {preview.onGuideCount === 1 ? '1 persona recibiría' : `${preview.onGuideCount} personas recibirían`} el mismo texto que las demás.
+        Para que cada una reciba un correo escrito para ella, <a className="font-medium underline underline-offset-2" href={`/campaigns?campaign=${encodeURIComponent(preview.campaignId)}`}>abre la campaña</a> y elige «Escribir un correo para cada persona» antes de activarla.
+      </ReviewNote>}
     </>}
     {(draft || editingPerson) && <p className="text-right text-[12px] text-cw-muted">Guarda o cancela tus cambios antes de aprobar.</p>}
-    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel={approveLabel} disabled={blocked || Boolean(draft) || editingPerson} resolving={resolving} resolvingLabel="Guardando…" />
+    {writingPeople && !draft && !editingPerson && <p className="text-right text-[12px] text-cw-muted">Se están escribiendo los correos de cada persona: espera a que terminen o detén la escritura para aprobar.</p>}
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel={approveLabel} disabled={blocked || Boolean(draft) || editingPerson || writingPeople} resolving={resolving} resolvingLabel="Guardando…" />
   </div>;
 }

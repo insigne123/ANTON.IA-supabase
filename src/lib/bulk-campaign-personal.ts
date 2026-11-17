@@ -70,10 +70,15 @@ export function keptOverrides(previous: Definition, next: Pick<CampaignInput, 'e
   return (previous.overrides || []).filter(override => chosen.has(override.email) && same(override.messageIndex));
 }
 
-/** The emails in groups of a request, each with where it starts. */
-export function personalBatches(emails: string[]): Array<{ emails: string[]; offset: number }> {
+/**
+ * The emails in groups of a request, each with where it starts. Whoever already has a first email of their own (`alone`: Cowork wrote
+ * it from their research, or the person did by hand) goes in a request of one, since that email is their guide and no one else's.
+ */
+export function personalBatches(emails: string[], alone: string[] = []): Array<{ emails: string[]; offset: number }> {
   const batches: Array<{ emails: string[]; offset: number }> = [];
-  for (let offset = 0; offset < emails.length; offset += PERSONALIZE_BATCH) batches.push({ emails: emails.slice(offset, offset + PERSONALIZE_BATCH), offset });
+  const shared = emails.filter(email => !alone.includes(email));
+  for (let offset = 0; offset < shared.length; offset += PERSONALIZE_BATCH) batches.push({ emails: shared.slice(offset, offset + PERSONALIZE_BATCH), offset });
+  emails.filter(email => alone.includes(email)).forEach((email, index) => batches.push({ emails: [email], offset: shared.length + index }));
   return batches;
 }
 
@@ -83,7 +88,7 @@ export function personalEstimate(people: number): string {
   return seconds < 90 ? 'menos de un minuto' : `unos ${Math.round(seconds / 60)} minutos`;
 }
 
-type Writable = Definition & Pick<CampaignInput, 'objective' | 'description' | 'criteria'>;
+type Writable = Pick<CampaignInput, 'objective' | 'description' | 'messages'> & { criteria: Pick<CampaignInput['criteria'], 'relationship'> };
 export type PersonalRun = PersonalizeResult & {
   /** The person stopped it: whoever was not reached keeps the guide. */
   stopped: boolean;
@@ -100,20 +105,24 @@ export async function writePersonalEmails(input: {
   send: (body: z.input<typeof PersonalizeInputSchema>) => Promise<PersonalizeResult>;
   onProgress?: (done: number, total: number) => void;
   stopped?: () => boolean;
+  /** The first email some of them already have of their own: their follow-ups are written from it, not from the campaign's. */
+  own?: Record<string, { subject: string; body: string }>;
 }): Promise<PersonalRun> {
   const { definition } = input;
   const run: PersonalRun = { written: [], failed: [], stopped: false, limit: null };
   let done = 0;
   const pass = async (emails: string[], total: number) => {
-    const queue = personalBatches(emails);
+    const queue = personalBatches(emails, Object.keys(input.own || {}));
     const failed: PersonalizeResult['failed'] = [];
     const worker = async () => {
       for (let batch = queue.shift(); batch; batch = queue.shift()) {
         if (run.limit) { failed.push(...batch.emails.map(email => ({ email, reason: run.limit! }))); continue; }
         if (input.stopped?.()) { run.stopped = true; return; }
         try {
+          const first = batch.emails.length === 1 ? input.own?.[batch.emails[0]] : undefined;
           const result = await input.send({ emails: batch.emails, offset: batch.offset, objective: definition.objective, description: definition.description,
-            relationship: definition.criteria.relationship, messages: definition.messages });
+            relationship: definition.criteria.relationship,
+            messages: first ? definition.messages.map((message, index) => (index === 0 ? { ...message, subject: first.subject, body: first.body } : message)) : definition.messages });
           const got = new Set([...result.written.map(person => person.email), ...result.failed.map(person => person.email)]);
           run.written.push(...result.written.filter(person => person.messages.length === definition.messages.length));
           failed.push(...result.failed, ...batch.emails.filter(email => !got.has(email)).map(email => ({ email, reason: 'No se pudieron escribir sus correos.' })));

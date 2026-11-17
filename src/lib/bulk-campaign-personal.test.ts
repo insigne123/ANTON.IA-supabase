@@ -86,6 +86,19 @@ test('writing a campaign: every group is asked, progress is told, and whoever fa
   assert.deepEqual([twice.written.length >= 1, twice.failed.map(person => person.email)], [true, [people(2)[0]]]);
 });
 
+test('whoever already has a first email of their own goes alone, and their emails are written from it', async () => {
+  const emails = people(7);
+  const mine = { subject: 'Vi la planta nueva', body: 'Hola Ana,\nvi que abrieron una planta.' };
+  assert.deepEqual(personalBatches(emails, [emails[1]]).map(batch => [batch.offset, batch.emails]), [[0, [emails[0], ...emails.slice(2, 6)]], [5, [emails[6]]], [6, [emails[1]]]]);
+  const asked: any[] = [];
+  const run = await writePersonalEmails({ definition: definition(7), emails, own: { [emails[1]]: mine },
+    send: async body => { asked.push(body); return { written: body.emails.map(written), failed: [] }; } });
+  assert.equal(run.written.length, 7);
+  const alone = asked.find(body => body.emails.length === 1 && body.emails[0] === emails[1]);
+  assert.deepEqual([alone.messages[0].subject, alone.messages[0].body, alone.messages[0].delayDays, alone.messages[1].subject], ['Vi la planta nueva', mine.body, 0, 'Base 2']);
+  assert.ok(asked.filter(body => body !== alone).every(body => body.messages[0].subject === 'Base 1'));
+});
+
 test('the day\'s limit stops the writing with the server\'s words, and the person can stop it too', async () => {
   let calls = 0;
   const limited = await writePersonalEmails({ definition: definition(12), emails: people(12), send: async body => {
