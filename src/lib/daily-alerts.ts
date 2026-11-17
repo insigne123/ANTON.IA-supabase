@@ -1,8 +1,8 @@
 import { dayInZone, shiftDay } from '@/lib/admin/chile-time';
 import { isOpportunityAdmin } from '@/lib/commercial-opportunities/workspace';
 import { opportunityAssignHref } from '@/lib/commercial-opportunities/workspace-url';
-import { emailButton, emailShell } from '@/lib/email-shell';
-import { dropEmailSection, dropHref, dropSubject, type DropItem } from '@/lib/lead-drops';
+import { emailButton, emailCard, emailHeadline, emailNote, emailRow, emailShell } from '@/lib/email-shell';
+import { dropEmailSection, dropHref, dropName, dropSubject, type DropItem } from '@/lib/lead-drops';
 import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } from '@/lib/weekly-goals';
 
 /**
@@ -338,19 +338,24 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
     `Te avisamos solo cuando hay algo que hacer. Los apagas en «Tu semana»: ${settings}`,
   ].join('\n');
   // A line's own step («Asignar») is a small outlined button under it: the dark «Abrir ANTON.IA» stays the one main button.
-  const rows = lines.map(line => `<p style="margin:0;padding:12px 0;border-top:1px solid #e5e7eb;font-size:15px;line-height:22px">`
+  const rows = lines.map((line, index) => `<p style="margin:0;padding:12px 0;${index ? 'border-top:1px solid #e5e7eb;' : ''}font-size:15px;line-height:22px">`
     + `<a href="${escape(link(line.href))}" style="color:#111827;text-decoration:none">${escape(line.text)}<span style="color:#2563eb"> &rsaquo;</span></a>`
     + (line.action ? `<br><a href="${escape(link(line.action.href))}" style="display:inline-block;margin-top:8px;padding:4px 12px;border:1px solid #d1d5db;border-radius:8px;color:#111827;text-decoration:none;font-size:13px;line-height:20px">${escape(line.action.label)}</a>` : '')
     + '</p>').join('');
   const open = inbox ? '' : section
-    ? `<p style="margin:24px 0 0;font-size:14px"><a href="${escape(link('/dashboard'))}" style="color:#2563eb;text-decoration:none">Abrir ANTON.IA &rsaquo;</a></p>`
-    : `<div style="margin:24px 0 0">${emailButton(link('/dashboard'), 'Abrir ANTON.IA', { color: '#111827' })}</div>`;
-  const html = emailShell(`<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
-    + `<p style="margin:0 0 16px;font-size:15px;line-height:22px;color:#6b7280">${escape(intro)}.</p>`
-    + (lines.length ? `<div style="border-bottom:1px solid #e5e7eb">${rows}</div>` : '')
+    ? emailRow(`<a href="${escape(link('/dashboard'))}" style="font-size:14px;line-height:20px;font-weight:600;color:#1d4ed8;text-decoration:none">Abrir ANTON.IA &rsaquo;</a>`, { padding: '10px 4px 4px' })
+    : emailRow(emailButton(link('/dashboard'), 'Abrir ANTON.IA', { color: '#111827' }), { padding: '6px 0 0' });
+  // What the inbox shows after the subject: who the contacts are, or what waits today.
+  const people = (drop?.items ?? []).map(item => [dropName(item), item.company].filter(Boolean).join(' de '));
+  const alone = Boolean(section && !lines.length);
+  const preheader = alone ? `${people.slice(0, 3).join(', ')}${people.length > 3 ? ` y ${people.length - 3} más` : ''}.` : lines.map(line => line.text).join(' · ');
+  // On the email's page (src/lib/email-shell.ts): the greeting and what this is, the day's lines in one card, the contacts in theirs.
+  const html = emailShell(emailHeadline({ kicker: escape(greeting), title: escape(intro), lines: [alone ? escape(section!.summary) : null] })
+    + (lines.length ? emailCard(rows, { padding: '4px 18px' }) : '')
     + (section ? section.html : '')
     + open
-    + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p>`);
+    + emailNote(`Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.`),
+    { bare: true, label: alone ? (drop!.items.length === 1 ? 'Contacto de hoy' : 'Contactos de hoy') : 'Tu día', preheader: escape(preheader) });
   return { subject: alert.subject, text, html };
 }
 

@@ -118,19 +118,25 @@ test('with today\'s contact the email has one block and one main button; without
   assert.match(email.html, />Ver y guardar</);
   assert.doesNotMatch(email.html, /background-color:#111827[^>]*>Abrir ANTON\.IA</, 'no second button');
   assert.match(email.html, />Abrir ANTON\.IA &rsaquo;</);
-  assert.match(email.html, /^<div style="background:#ffffff;color:#111827;color-scheme:light/, 'on a white card of its own, readable in a dark mail client');
+  // The email is a page of its own (src/lib/email-shell.ts): its colours are attributes too, so a dark mail client cannot leave dark text on dark.
+  assert.match(email.html, /<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f5f5f7" style="[^"]*color:#111827;color-scheme:light/);
+  assert.match(email.html, />ANTON\.IA<\/td><td align="right"[^>]*>Tu día<\/td>/, 'the name of the app over it, and what this email is');
+  assert.match(email.html, /^<div style="display:none;[^"]*">Ana te respondió/, 'the inbox shows what waits, not the greeting again');
+  assert.match(email.html, />Hola, Ana<\/p><p[^>]*>Esto te espera hoy en ANTON\.IA<\/p>/);
+  assert.match(email.html, />Contacto del día<\/p><p[^>]*>Tu contacto de hoy, con su correo listo\.<\/p>/, 'the contact has its own title under the day\'s lines');
   assert.doesNotMatch(email.text, /guárdalo sin gastar créditos \(/);
   // The contact alone: the greeting says it, and there is no list or heading.
   const alone = composeAlert(facts({ drop, goal: null }), TUESDAY)!;
   const only = alertEmail(alone, 'Ana', 'https://app.antonia.ai/', drop);
-  assert.match(only.html, /Tu contacto del día ya está listo\./);
-  assert.doesNotMatch(only.html, /border-top:1px solid #e5e7eb;font-size:15px|Contacto del día<\/h2>/);
+  assert.match(only.html, />Hola, Ana<\/p><p[^>]*>Tu contacto del día ya está listo<\/p><p[^>]*>Con su correo listo: guárdalo sin costo\.<\/p>/);
+  assert.match(only.html, />ANTON\.IA<\/td><td align="right"[^>]*>Contacto de hoy<\/td>/);
+  assert.doesNotMatch(only.html, /font-size:15px;line-height:22px"><a|>Contacto del día</);
   assert.match(only.text, /^Hola, Ana\. Tu contacto del día ya está listo\./);
   // No contact: the usual dark button, and still the white card.
   const plain = alertEmail(composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana', company: null }] }), TUESDAY)!, 'Ana', 'https://app.antonia.ai/');
   // Its colour is the cell's own attribute too: a mail client that drops a style must not leave white text on white (emailButton).
   assert.match(plain.html, /<td bgcolor="#111827"[^>]*><a href="https:\/\/app\.antonia\.ai\/dashboard" style="[^"]*background-color:#111827;color:#ffffff[^"]*">Abrir ANTON\.IA<\/a>/);
-  assert.match(plain.html, /^<div style="background:#ffffff/);
+  assert.match(plain.html, /bgcolor="#f5f5f7"[\s\S]*bgcolor="#ffffff"/);
 });
 
 test('what waits for an administrator on Oportunidades leads, with who asked, and says how long it has waited or when it is needed', () => {

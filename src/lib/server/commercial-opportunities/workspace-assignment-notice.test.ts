@@ -46,7 +46,7 @@ test('the email says who assigned it, what it is, when it closes and what is exp
   assert.match(email.text, /Qué se espera: Revisar las bases/);
   assert.match(email.text, /https:\/\/app\.antonia\.ai\/opportunities\?op=00000000-0000-4000-8000-0000000000aa/);
   assert.match(email.html, /Abrir la oportunidad/);
-  assert.match(email.html, /background:#ffffff/, 'on the white card of the app\'s other emails');
+  assert.match(email.html, /bgcolor="#f5f5f7"[\s\S]*bgcolor="#ffffff"/, 'on the page and the white card of the app\'s other emails');
   const plain = assignmentEmail({ name: '', assignedBy: null, opportunityId: OPP, title: '<b>Aseo</b> & más', buyer: null, deadlineAt: null, nextActionAt: null, objective: '', responsible: false, appUrl: 'https://app.antonia.ai' });
   assert.equal(plain.subject, 'Te asignaron: <b>Aseo</b> & más');
   assert.match(plain.text, /^Hola\. Un administrador te asignó esta oportunidad\./);

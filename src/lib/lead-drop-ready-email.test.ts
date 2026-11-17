@@ -39,7 +39,10 @@ test('«Listos»: each contact with its address, how its first email starts and 
   // Several contacts: each card is its person, its address and how its first email starts, in one paragraph; the whole email is
   // in the text version and on its page (16 Nov 2026: six emails in full were a wall of text).
   assert.deepEqual([...email.html.matchAll(/line-height:40px;text-align:center">([^<]+)<\/td>/g)].map(match => match[1]), ['PA', 'LS']);
-  assert.match(email.html, />Primer correo · sale al aprobar<\/p><p[^>]*>Brigadas en Minera &lt;Andina&gt;<\/p><p[^>]*>Hola Pedro, ¿Cómo cubren los turnos de noche\? Saludos<\/p><\/div>/);
+  assert.match(email.html, />Primer correo · sale al aprobar<\/p><p[^>]*>Brigadas en Minera &lt;Andina&gt;<\/p><p[^>]*>Hola Pedro, ¿Cómo cubren los turnos de noche\? Saludos<\/p><\/td><\/tr><\/table>/);
+  assert.match(email.html, /^<div style="display:none;[^"]*">La campaña de cada uno está lista/, 'the inbox shows what to do next');
+  assert.match(email.html, />ANTON\.IA<\/td><td align="right"[^>]*>Listos para aprobar<\/td>/);
+  assert.match(email.html, />Correo encontrado<\/span> &nbsp;<a href="mailto:luisa@puertosur\.cl"/);
   assert.match(email.html, />Hola, Ana<\/p><p[^>]*>Encontramos el correo de 2 de tus 3 contactos\.<\/p>/);
   assert.match(email.html, /href="https:\/\/app\.test\/dashboard\?vista=semana"/);
 });
@@ -78,7 +81,8 @@ test('«Para llamar»: the number to tap, WhatsApp with its first line written, 
   assert.match(email.html, /<strong[^>]*>Turnos de noche:<\/strong> quién responde ante una emergencia\.<\/p>/);
   assert.match(email.html, />1<\/td><td[^>]*>¿Cómo cubren hoy la noche\?<\/td>/);
   assert.doesNotMatch(email.html, /Ya tenemos proveedor|soy Ana de Brigadas/);
-  assert.match(email.html, /En su ficha: cómo responder si objeta y qué dejar en el buzón\. <a href="https:\/\/app\.test\/contactos\/TOKEN\?c=6accdbfcd5f5d80001cf6901&amp;llamar=1"[^>]*>Abrir el guion completo<\/a>/);
+  assert.match(email.html, /En su ficha: cómo responder si objeta y qué dejar en el buzón\. <a href="https:\/\/app\.test\/contactos\/TOKEN\?c=6accdbfcd5f5d80001cf6901&amp;llamar=1"[^>]*>Abrir el guion completo &rsaquo;<\/a>/);
+  assert.match(email.html, />ANTON\.IA<\/td><td align="right"[^>]*>Para llamar<\/td>/);
   // The one without a script still has its number and its buttons.
   assert.match(email.html, /<a href="https:\/\/app\.test\/contactos\/TOKEN\?c=6accdbfcd5f5d80001cf6902&amp;llamar=1"[^>]*>Llamar<\/a>/);
 });
