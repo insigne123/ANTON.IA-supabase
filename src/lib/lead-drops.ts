@@ -79,7 +79,16 @@ export type DropCriteria = { titles: string[]; industries: string[]; locations: 
    * The search by company of that day (16 Nov 2026, server/lead-drop-accounts.ts): how many companies of the customer fit what the
    * team sells, how many were opened to bring their people, and the industries next to the customer's it widened to, if any.
    */
-  accounts?: { fit: number; opened: number; expanded?: string[] } };
+  accounts?: { fit: number; opened: number; expanded?: string[] };
+  /**
+   * How the finder's run went for this customer (17 Nov 2026), in counts: the first real run of the search by company left the
+   * companies' table empty and most contacts chosen by the words of their title, and nothing said why. Read by whoever reviews a
+   * run; no screen shows it. `narrow`: people the searches by industry brought; `broad`: the search fell back to titles and places;
+   * `hurried`: too little of the run left for the companies; `known`, `learnt`, `scored`, `fit`, `opened`: the companies read, new,
+   * with a score, that fit, and opened; `saved`: whether they were kept; `candidates`, `worth`: people found and people the score
+   * found worth offering; `plain`: members who got theirs by title because the score left them with nobody; `ms`: how long it took.
+   */
+  trace?: Record<string, number | boolean> };
 export type IcpDeclared = { roles?: string | null; industries?: string | null; locations?: string | null; size?: string | null };
 
 /** One contact of a drop, as the person sees it before saving it: never the email or the phone, which stay in the vault. */
