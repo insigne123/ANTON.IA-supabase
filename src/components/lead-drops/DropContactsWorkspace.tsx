@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { dropName, type DropItem } from '@/lib/lead-drops';
+import { dropName, dropRecommendation, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
 import { DropAvatar, DropStageChip, dropStage, stageDotClass } from './drop-contact-parts';
 
@@ -28,6 +28,7 @@ export function DropContactsWorkspace({ items, selectedId, onSelect, children }:
       <ul className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-3 [scrollbar-width:none] lg:mx-0 lg:flex-col lg:gap-1.5 lg:overflow-visible lg:p-0 [&::-webkit-scrollbar]:hidden">
         {items.map(item => {
           const stage = dropStage(item);
+          const recommended = dropRecommendation(item);
           const on = item.leadId === selected.leadId;
           return <li key={item.leadId} className="shrink-0 lg:shrink">
             <button type="button" aria-current={on ? 'true' : undefined} onClick={() => onSelect(item.leadId)}
@@ -41,7 +42,8 @@ export function DropContactsWorkspace({ items, selectedId, onSelect, children }:
               <span className="w-full min-w-0 lg:flex-1">
                 <span className={cn('block truncate text-xs lg:text-sm', on ? 'font-semibold' : 'font-medium')}>{dropName(item)}</span>
                 <span className="hidden truncate text-xs text-muted-foreground lg:block">{[item.title, item.company].filter(Boolean).join(' · ')}</span>
-                <span className="mt-1.5 hidden lg:block"><DropStageChip stage={stage} /></span>
+                <span className="mt-1.5 hidden items-center gap-2 lg:flex"><DropStageChip stage={stage} />
+                  {recommended ? <span className="text-xs tabular-nums text-muted-foreground">{recommended.pct} %<span className="sr-only"> de recomendación</span></span> : null}</span>
               </span>
             </button>
           </li>;

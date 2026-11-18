@@ -98,6 +98,16 @@ export type DropCriteria = { titles: string[]; industries: string[]; locations: 
    */
   accountsKey?: string;
   /**
+   * The next people the finder would have offered this person, kept while the drop is pending: whoever the judge of the drop
+   * (lead-drop-gate.ts) finds under the minimum is replaced with them. Removed when the drop is written.
+   */
+  spares?: unknown[];
+  /**
+   * How the judge of the drop went: the minimum asked, how many it judged, how many reserves came in, how many were left out, and
+   * who fell short (their ids, so the team's next searches do not bring them back).
+   */
+  gate?: { min: number; judged: number; replaced: number; dropped: number; rejected?: string[] };
+  /**
    * How the finder's run went for this customer (17 Nov 2026), in counts: the first real run of the search by company left the
    * companies' table empty and most contacts chosen by the words of their title, and nothing said why. Read by whoever reviews a
    * run; no screen shows it. `narrow`: people the searches by industry brought; `broad`: the search fell back to titles and places;
@@ -111,6 +121,11 @@ export type IcpDeclared = { roles?: string | null; industries?: string | null; l
 /** One contact of a drop, as the person sees it before saving it: never the email or the phone, which stay in the vault. */
 export type DropItem = {
   leadId: string;
+  /**
+   * How much the contact is worth recommending, 0 to 100, and why in one sentence (server/lead-drop-gate.ts, 18 Nov 2026): said after its
+   * research, and whoever stays under the minimum is replaced before the drop is written. Absent when nobody judged it.
+   */
+  recommendation?: { pct: number; reason: string | null };
   name: string;
   title: string | null;
   company: string | null;
@@ -398,7 +413,28 @@ export function groupDropPeople(people: Array<{ id: string; criteria: DropCriter
 /** A contact found, with what the server needs to choose (the email and LinkedIn only as keys to skip known people). */
 export type DropCandidate = Omit<DropItem, 'why' | 'research' | 'draft' | 'savedLeadId' | 'summary' | 'fit' | 'reasons' | 'approach'>
   & { emailKey: string | null; linkedinKey: string | null; about: string | null };
-export type KnownPeople = { emails: Set<string>; linkedins: Set<string>; leadIds: Set<string> };
+export type KnownPeople = { emails: Set<string>; linkedins: Set<string>; leadIds: Set<string>;
+  /** The companies (companyKey) already offered to someone of the team today: another person does not get the same one while others are left. */
+  companies?: Set<string> };
+
+/**
+ * A company by its name, for telling two people's contacts at the same one (18 Nov 2026: four sellers got someone of the same
+ * retailer the same morning, as «Walmart» and «Walmart Chile»): folded, without its legal form, its country or its marks.
+ */
+export function companyKey(name: string | null | undefined): string {
+  let value = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[®™©]/g, '').replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
+  for (let before = ''; before !== value;) {
+    before = value;
+    // «Banco de Chile» keeps its country: it is its name, not where a branch is.
+    value = value.replace(/\s+(s\s?a|spa|ltda|limitada|e\s?i\s?r\s?l|inc|corp|llc|ltd)$/, '').replace(/(?<!(^|\s)(de|del|of))\s+(chile|peru|colombia|latam)$/, '').trim();
+  }
+  return value;
+}
+/** The keys a candidate's company goes by: its site and its name (Apollo's free search names no site, so the name tells them apart too). */
+export function companyKeys(item: { domain?: string | null; company?: string | null; leadId: string }): string[] {
+  const keys = [item.domain ? fold(item.domain) : '', companyKey(item.company)].filter(Boolean);
+  return keys.length ? keys : [fold(item.leadId)];
+}
 
 // The country domains of the places a team may search in (and of its neighbours): the search filters by where the PERSON is,
 // so a Mexican company with someone in Santiago («gou.mx») came out as a contact «en Santiago».
@@ -456,8 +492,7 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
     return [person, usable.filter(item => !foreignDomain(item.domain, own.locations))
       .sort((a, b) => Number(b.hasPhone) - Number(a.hasPhone) || closeness(b.title) - closeness(a.title) || a.leadId.localeCompare(b.leadId))];
   }));
-  const companyOf = (item: DropCandidate) => fold(item.domain || item.company || item.leadId);
-  const taken = new Set<string>(), usedCompanies = new Set<string>();
+  const taken = new Set<string>(), usedCompanies = new Set<string>(known.companies || []);
   const out = new Map<string, DropCandidate[]>(people.map(person => [person, []]));
   // Round robin: each person takes one at a time, so the best contacts are shared out instead of going to the first person.
   for (const strict of [true, false]) {
@@ -465,10 +500,11 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
       for (const person of people) {
         const mine = out.get(person)!;
         if (mine.length > round) continue;
-        const companies = new Set(mine.map(companyOf));
-        const pick = ranked.get(person)!.find(item => !taken.has(item.leadId) && !companies.has(companyOf(item)) && (!strict || !usedCompanies.has(companyOf(item))));
+        const companies = new Set(mine.flatMap(companyKeys));
+        const pick = ranked.get(person)!.find(item => !taken.has(item.leadId) && !companyKeys(item).some(key => companies.has(key))
+          && (!strict || !companyKeys(item).some(key => usedCompanies.has(key))));
         if (!pick) continue;
-        taken.add(pick.leadId); usedCompanies.add(companyOf(pick)); mine.push(pick);
+        taken.add(pick.leadId); for (const key of companyKeys(pick)) usedCompanies.add(key); mine.push(pick);
       }
     }
   }
@@ -504,8 +540,7 @@ export function pickRankedDrops(candidates: DropCandidate[], people: string[], k
     return [person, { core: deciding.filter(entry => entry.score.titleClass !== 'related'), explore: deciding.filter(entry => entry.score.titleClass === 'related'),
       refer: scored.filter(entry => entry.score.role === 'refer') }];
   }));
-  const companyOf = (item: DropCandidate) => fold(item.domain || item.company || item.leadId);
-  const taken = new Set<string>(), usedCompanies = new Set<string>();
+  const taken = new Set<string>(), usedCompanies = new Set<string>(known.companies || []);
   const out = new Map<string, Array<DropCandidate & { track?: 'explore'; role?: 'refer' }>>(people.map(person => [person, []]));
   const exploring = exploreSlots(size);
   for (const strict of [true, false]) {
@@ -513,16 +548,16 @@ export function pickRankedDrops(candidates: DropCandidate[], people: string[], k
       for (const person of people) {
         const mine = out.get(person)!;
         if (mine.length > round) continue;
-        const companies = new Set(mine.map(companyOf));
-        const free = (entry: { item: DropCandidate }) => !taken.has(entry.item.leadId) && !companies.has(companyOf(entry.item))
-          && (!strict || !usedCompanies.has(companyOf(entry.item)));
+        const companies = new Set(mine.flatMap(companyKeys));
+        const free = (entry: { item: DropCandidate }) => !taken.has(entry.item.leadId) && !companyKeys(entry.item).some(key => companies.has(key))
+          && (!strict || !companyKeys(entry.item).some(key => usedCompanies.has(key)));
         const { core, explore, refer } = lists.get(person)!;
         // The last slots are for who can refer the person to whoever decides and, without any, for roles next to the customer's; a
         // list that ran out is filled from the next one.
         const wanted = round >= size - exploring ? [refer, explore, core] : [core, explore, refer];
         const pick = wanted[0].find(free) ?? wanted[1].find(free) ?? wanted[2].find(free);
         if (!pick) continue;
-        taken.add(pick.item.leadId); usedCompanies.add(companyOf(pick.item));
+        taken.add(pick.item.leadId); for (const key of companyKeys(pick.item)) usedCompanies.add(key);
         mine.push(pick.score.role === 'refer' ? { ...pick.item, role: 'refer' } : pick.score.titleClass === 'related' ? { ...pick.item, track: 'explore' } : pick.item);
       }
     }
@@ -733,6 +768,15 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
 /** The title of the contacts inside an email that also brings the rest of the day: on the page, over their cards. Already escaped. */
 const sectionTitle = (lead: string) => emailRow(emailLabel('Contacto del día')
   + `<p style="margin:4px 0 0;font-size:19px;line-height:26px;font-weight:700;color:#111827">${lead}</p>`, { padding: '14px 4px 12px' });
+/**
+ * How much a contact is recommended, as it is said next to it («92 % recomendado»): the judge's percentage (lead-drop-gate.ts).
+ * `level` is how strongly it is shown: only the clear ones (85 and over) get colour, so a page of contacts is not a page of badges.
+ */
+export function dropRecommendation(item: Pick<DropItem, 'recommendation'>): { pct: number; label: string; reason: string | null; level: 'high' | 'good' | 'fair' } | null {
+  const pct = item.recommendation?.pct;
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) return null;
+  return { pct, label: `${pct} % recomendado`, reason: item.recommendation?.reason || null, level: pct >= 85 ? 'high' : pct >= 70 ? 'good' : 'fair' };
+}
 /** What a contact is, said next to its name: someone who can pass the message on, a profile to try, a neighbouring industry. */
 const dropTag = (item: Pick<DropItem, 'role' | 'track' | 'expanded'>): { text: string; tone: EmailPillTone } | null =>
   item.role === 'refer' ? { text: 'Puede derivarte', tone: 'violet' } : item.track === 'explore' ? { text: 'Para explorar', tone: 'teal' } : item.expanded ? { text: 'Rubro vecino', tone: 'gray' } : null;
@@ -799,7 +843,7 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
       followUps: days.length ? `${days.length === 1 ? 'Seguimiento' : `${days.length} seguimientos`} si no responde: ${listed(days)}.` : null } : null;
     // The step each contact is at: its email still to look up, its campaign to approve, already going, or (the email came with the search) to save.
     const action = needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
-    return { item, why, news, newsNow, opener, campaign, steps, href: dropContactHref(link, item, options.open), action };
+    return { item, why, news, newsNow, opener, campaign, steps, href: dropContactHref(link, item, options.open), action, recommended: dropRecommendation(item) };
   });
   // From the inbox the person chooses how to go on (15 Nov 2026, the owner: «la idea es que tenga la opción de continuar desde el mail
   // o desde la app»): all of them looked up at once, with their mobiles or without, or the same contacts inside the app. The answer to
@@ -819,9 +863,10 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   const text = [
     ...(heading ? [`${lead}:`] : []),
     ...(bulk ? ['', `${bulk.title}. ${bulk.lead}`, ...[bulk.all, bulk.phones, bulk.app].filter((entry): entry is { label: string; href: string } => Boolean(entry)).map(entry => `${entry.label}: ${entry.href}`)] : []),
-    ...cards.flatMap(({ item, why, news, opener, campaign, href, action }) => [
+    ...cards.flatMap(({ item, why, news, opener, campaign, href, action, recommended }) => [
       '',
       `${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}${item.role === 'refer' ? ' (puede derivarte)' : item.track === 'explore' ? ' (para explorar)' : item.expanded ? ' (rubro vecino)' : ''}`,
+      ...(recommended ? [`Recomendación: ${recommended.pct} %${recommended.reason ? `. ${recommended.reason}` : ''}`] : []),
       `Por qué: ${why}`,
       ...(news ? [`Ahora: ${news}`] : []),
       ...(opener ? [`Cómo abrir: ${opener}`] : []),
@@ -838,12 +883,14 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   //
   // Laid on the email's page (17 Nov 2026, src/lib/email-shell.ts): the blue card with the choice for all of them, a white card per
   // contact, and a way to see them together under the last one.
-  const card = ({ item, why, newsNow, campaign, steps, href, action }: typeof cards[number]) => {
+  const card = ({ item, why, newsNow, campaign, steps, href, action, recommended }: typeof cards[number]) => {
     const tag = dropTag(item);
+    // The percentage opens the line of why: one more thing to read there, not one more badge by the name.
+    const pct = recommended ? `${emailPill(escape(recommended.label), recommended.level === 'high' ? 'green' : recommended.level === 'good' ? 'teal' : 'gray')} &nbsp;` : '';
     return emailCard(emailPerson({ initials: escape(dropInitials(item)), tint: dropTint(item.leadId, EMAIL_AVATAR_TINTS), name: escape(dropName(item)),
       role: escape([item.title, item.company].filter(Boolean).join(' · ')), tag: tag?.text, tagTone: tag?.tone })
       + (newsNow ? emailCallout({ label: 'Ahora', body: escape(newsNow.text), foot: newsNow.source ? escape(newsNow.source) : null }) : '')
-      + `<p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#374151">${escape(why)}</p>`
+      + `<p style="margin:12px 0 0;font-size:14px;line-height:21px;color:#374151">${pct}${escape(why)}</p>`
       + (campaign ? `<p style="margin:12px 0 0;padding:12px 0 0;border-top:1px solid #f3f4f6;font-size:13px;line-height:20px;color:#4b5563">`
         + `${emailPill('Campaña lista', 'green')} &nbsp;«${escape(campaign.subject)}» · ${steps}</p>` : '')
       + `<div style="margin:14px 0 0">${emailButton(href, action, { quiet: Boolean(bulk?.all) })}</div>`, { padding: '18px 18px 10px' });

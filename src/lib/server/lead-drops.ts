@@ -8,7 +8,7 @@ import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/li
 import { renderPdf } from '@/lib/documents/render-pdf';
 import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
-  DEFAULT_DROP_PLAN, NO_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, groupDropPeople, needsLookup, nextDropDay,
+  DEFAULT_DROP_PLAN, NO_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, companyKey, companyKeys, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, dropRecommendation, groupDropPeople, needsLookup, nextDropDay,
   personDropCriteria, personDropPlanOf, planOfPerson, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria,
   type DropFollowUp, type DropItem, type DropPlan, type DropScore, type IcpDeclared, type KnownPeople,
 type PersonDropPlan,
@@ -26,6 +26,7 @@ import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { ACCOUNTS_OPENED, ACCOUNT_FIT, accountDomain, accountsOf, accountsToOpen, expansionIndustries, learnResearchedAccounts, readAccounts, saveAccounts, scoreAccounts, type DropAccount } from '@/lib/server/lead-drop-accounts';
 import { dropSellerOf } from '@/lib/server/lead-drop-seller';
 import { dropWriterEnabled, writeDropEmails, type DropSeller } from '@/lib/server/lead-drop-writer';
+import { GATE_REJECTED_MAX, GATE_REPLACE_BEFORE_MS, GATE_SPARES_PER_LOW, dropMinRecommendation, judgeDropContacts, type GateVerdict } from '@/lib/server/lead-drop-gate';
 import { dropLessons, dropWishes, finderSearchTerms, scoreDropCandidates, type FinderLessons, type FinderPreferences, type FinderSeller } from '@/lib/server/lead-drop-finder';
 import { profileTargetNotes } from '@/lib/profile/profile-mappings';
 import { briefNewsLine, type DropResearch, type DropResearchInput } from '@/lib/server/lead-drop-research';
@@ -152,17 +153,26 @@ async function knownPeople(client: Client, organizationId: string, now: Date): P
   const [enriched, contacted, drops, saved]: any[] = await Promise.all([
     allRows(() => client.from('enriched_leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId)),
     allRows(() => client.from('contacted_leads').select('email').eq('organization_id', organizationId)),
-    allRows(() => client.from('lead_drops').select('items').eq('organization_id', organizationId).gte('drop_date', since)),
+    allRows(() => client.from('lead_drops').select('items,drop_date,criteria').eq('organization_id', organizationId).gte('drop_date', since)),
     allRows(() => client.from('leads').select('email,linkedin_url,source_provider_id').eq('organization_id', organizationId)),
   ]);
   if (enriched.error || contacted.error || drops.error || saved.error) throw new LeadDropsError('No pudimos leer los contactos del equipo.', 503);
   const lower = (value: unknown) => String(value || '').trim().toLowerCase();
+  // Today's drops of the team: their companies are not offered to another person the same day, and the reserves a pending drop
+  // keeps for its own replacements (criteria.spares) are nobody else's meanwhile.
+  const today = dayInZone(now);
+  const todays = ((drops.data || []) as any[]).filter(row => row.drop_date === today);
+  const reserved = todays.flatMap(row => (Array.isArray(row.criteria?.spares) ? row.criteria.spares : []).map((item: any) => String(item?.leadId || '')));
+  // Whoever the judge left out of a drop (criteria.gate.rejected) is not searched for again while the drop is remembered.
+  const rejected = ((drops.data || []) as any[]).flatMap(row => (Array.isArray(row.criteria?.gate?.rejected) ? row.criteria.gate.rejected : []).map((id: unknown) => String(id || '')));
   return {
+    companies: new Set(todays.flatMap(row => (Array.isArray(row.items) ? row.items : []).map((item: any) => companyKey(item?.company))).filter(Boolean)),
     emails: new Set([...(enriched.data || []), ...(contacted.data || []), ...(saved.data || [])].map((row: any) => lower(row.email)).filter(Boolean)),
     linkedins: new Set([...(enriched.data || []), ...(saved.data || [])].map((row: any) => lower(row.linkedin_url).replace(/\/$/, '')).filter(Boolean)),
     leadIds: new Set([
       ...[...(enriched.data || []), ...(saved.data || [])].map((row: any) => String(row.source_provider_id || '')),
       ...(drops.data || []).flatMap((row: any) => (Array.isArray(row.items) ? row.items : []).map((item: any) => String(item?.leadId || ''))),
+      ...reserved, ...rejected,
     ].filter(Boolean)),
   };
 }
@@ -370,6 +380,8 @@ const FINDER_BASE = 300;
 const FINDER_EXTRA = 100;
 /** What one group's search, classification and score may take at worst (ten pages twice, its companies opened, and the model's timeouts). */
 export const FINDER_GROUP_MS = 120_000;
+/** How many reserves a pending drop keeps for the judge's replacements at most (lead-drop-gate.ts). */
+const DROP_SPARES_MAX = 12;
 const GROUP_MS = FINDER_GROUP_MS;
 const criteriaKey = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort().join(',')).join('|');
 
@@ -467,7 +479,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   for (const userId of people) if (!own.get(userId)) results.push({ userId, status: 'empty', error: NO_CUSTOMER });
   const groups = groupDropPeople(people.filter(userId => own.get(userId)).map(userId => ({ id: userId, criteria: own.get(userId)! })), dropsMaxGroups());
 
-  const known = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
+  const known: KnownPeople = groups.length ? await knownPeople(client, organizationId, deps.now) : { emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() };
   const lessons = finder && groups.length ? await readDropLessons(client, organizationId, deps.now) : { liked: [], disliked: [], wishesOf: () => [] as string[] };
   const preferences = (userId: string): FinderPreferences => ({ notes: ownNotes(team.byId.get(userId)) || null, teamNotes: team.company?.targetNotes || null, wishes: lessons.wishesOf(userId) });
   let spent = deps.spentUsd;
@@ -672,21 +684,37 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         // The wider search failed: those people keep the empty drop and its reason, as before.
       }
     }
+    // The reserves of each person (lead-drop-gate.ts): the next ones they would have been offered, of companies nobody of the team
+    // got today, and nobody else's while their drop is pending. By the finder's score where it answered; by the words of the title,
+    // as their contacts came, for a team of one contact or with the model down. Twice the drop's size, two at least.
+    const picked = [...assigned.values()].flat();
+    const reserveSize = Math.min(DROP_SPARES_MAX, Math.max(2, plan.size * 2));
+    const reserveKnown = (extra: DropCandidate[] = []): KnownPeople => ({ ...known, leadIds: new Set([...known.leadIds, ...[...picked, ...extra].map(pick => pick.leadId)]),
+      companies: new Set([...(known.companies || []), ...picked.flatMap(companyKeys)]) });
+    const sparesOf = new Map<string, Array<DropCandidate & { track?: 'explore'; role?: 'refer' }>>(finder && picked.length ? pickRankedDrops(found.results.map(candidateOf), members,
+      reserveKnown(), reserveSize, { criteriaOf: userId => own.get(userId)!, scoreOf: (userId, item) => scoreOf(userId, item.leadId) }) : []);
+    const unranked = members.filter(userId => (assigned.get(userId) || []).length && !(sparesOf.get(userId) || []).length);
+    if (unranked.length) for (const [userId, spares] of assignDrops(found.results.map(candidateOf), unranked, reserveKnown([...sparesOf.values()].flat()), criteria, reserveSize,
+      person => own.get(person)!)) sparesOf.set(userId, spares);
     const share = members.length ? Math.round((found.costUsd / members.length) * 10_000) / 10_000 : 0;
     for (const userId of members) {
       // What the person sees and keeps is their own customer, not the group's search.
       const mine = own.get(userId)!;
       const picks = assigned.get(userId) || [];
       if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria: mine }); continue; }
-      for (const pick of picks) { known.leadIds.add(pick.leadId); if (pick.emailKey) known.emails.add(pick.emailKey); }
+      for (const pick of picks) {
+        known.leadIds.add(pick.leadId); if (pick.emailKey) known.emails.add(pick.emailKey);
+        // The next group of this run does not offer the same company to someone else.
+        for (const key of companyKeys(pick)) (known.companies ??= new Set<string>()).add(key);
+      }
+      const spares = sparesOf.get(userId) || [];
+      for (const spare of spares) known.leadIds.add(spare.leadId);
       // Leads Finder's people wait in the vault with their email; Apollo's have none to keep yet.
       const vaulted = picks.map(pick => entries.get(pick.leadId)).filter((entry): entry is VaultEntry => Boolean(entry) && isLeadsFinderId(entry!.lead.id));
       if (vaulted.length) await storeInVault(client, { organizationId, userId, entries: vaulted, now: deps.now.getTime() });
       // The industries next to theirs this person's contacts came from, if any: said with how the search went.
       const widened = [...new Set(picks.map(pick => expandedIds.get(pick.leadId)).filter((industry): industry is string => Boolean(industry)))];
-      const searched = { ...mine, ...(accountsNote ? { accounts: { ...accountsNote, ...(widened.length ? { expanded: widened } : {}) } } : {}),
-        ...(Object.keys(trace).length ? { trace } : {}), ...(accountsKey ? { accountsKey } : {}) };
-      results.push({ userId, status: 'pending', cost: share, criteria: searched, items: picks.map(pick => {
+      const toItem = (pick: typeof picks[number]) => {
         // The industry as the actor names it: «servicios transitorios» searched as «staffing & recruiting» fits «Reclutamiento y personal».
         const actorIndustry = text(entries.get(pick.leadId)?.lead.organization_industry, 160).toLowerCase();
         const { emailKey: _email, linkedinKey: _linkedin, about, ...shown } = pick;
@@ -702,7 +730,10 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
         const neighbour = expandedIds.get(pick.leadId);
         const extras = { ...(companyReason ? { companyWhy: companyReason } : {}), ...(neighbour ? { expanded: neighbour } : {}) };
         return { ...person, ...extras, why: whyText({ ...person, ...extras }, mine, fit), research: researchFacts({ ...person, about: null }), draft: null, fit, description: about };
-      }) });
+      };
+      const searched = { ...mine, ...(accountsNote ? { accounts: { ...accountsNote, ...(widened.length ? { expanded: widened } : {}) } } : {}),
+        ...(Object.keys(trace).length ? { trace } : {}), ...(accountsKey ? { accountsKey } : {}), ...(spares.length ? { spares: spares.map(toItem) } : {}) };
+      results.push({ userId, status: 'pending', cost: share, criteria: searched, items: picks.map(toItem) });
     }
   }
   for (const result of results) {
@@ -865,6 +896,8 @@ export async function writeDrop(client: Client, drop: { id: string; organization
   generate: Generate; now: Date; parallel?: number;
   /** The research of one contact (researchDropContact with the web); without it, the contacts are written as the search brought them. */
   research?: (input: DropResearchInput) => Promise<DropResearch | null>;
+  /** Under this percentage a contact is replaced or left out (dropMinRecommendation when not given); 0 only shows the percentage. */
+  minRecommendation?: number;
 }) {
   const scope = { organizationId: drop.organization_id, userId: drop.user_id };
   const [userContext, about, ownSamples] = await Promise.all([
@@ -876,27 +909,85 @@ export async function writeDrop(client: Client, drop: { id: string; organization
   const seller = await dropSellerOf(client, scope, userContext).catch(() => null);
   // Every contact is researched at once: two searches, a page and a small model each, before anything is written about them.
   const found = new Map<string, DropResearch>();
-  if (deps.research) {
-    const seller = userContext ? { company: userContext.companyName, offer: userContext.offer, services: userContext.services, proofPoints: userContext.proofPoints, sector: userContext.sector } : null;
-    await Promise.all(drop.items.map(async item => {
-      const result = await deps.research!({ organizationId: scope.organizationId, seller,
+  const startedAt = Date.now();
+  const researchSeller = userContext ? { company: userContext.companyName, offer: userContext.offer, services: userContext.services, proofPoints: userContext.proofPoints, sector: userContext.sector } : null;
+  const researchAll = async (list: PendingItem[]) => {
+    if (!deps.research) return;
+    await Promise.all(list.map(async item => {
+      const result = await deps.research!({ organizationId: scope.organizationId, seller: researchSeller,
         contact: { title: item.title, company: item.company, domain: item.domain, country: item.country, industry: item.industry } }).catch(() => null);
       if (result) found.set(item.leadId, result);
     }));
+  };
+  await researchAll(drop.items);
+  const searched = (drop.criteria && typeof drop.criteria === 'object' ? drop.criteria : null) as DropCriteria | null;
+  // ── How much each one is worth recommending (lead-drop-gate.ts, 18 Nov 2026): said with what the research read. Whoever stays
+  // under the minimum gives their place to the next one the finder kept in reserve, researched and judged too, and only who reaches
+  // it is written and delivered, the best first. Without the model nobody is judged and the drop goes on as it came.
+  const min = deps.minRecommendation ?? dropMinRecommendation();
+  const verdicts = new Map<string, GateVerdict>();
+  const judge = async (list: PendingItem[]) => {
+    const answer = await judgeDropContacts({ generate: deps.generate,
+      seller: seller ? { company: seller.companyName, offer: seller.offer, services: seller.services, sector: seller.sector, problems: seller.painPoints,
+        wants: seller.inOwnWords, teamWants: seller.teamInOwnWords } : researchSeller,
+      criteria: searched && Array.isArray(searched.titles) ? searched : null,
+      contacts: list.map(item => { const brief = found.get(item.leadId)?.brief; return { leadId: item.leadId, title: item.title, company: item.company, industry: item.industry,
+        size: item.size ?? null, place: [item.city, item.country].filter(Boolean).join(', ') || null, role: item.role === 'refer' ? 'refer' as const : null,
+        about: brief?.company ?? item.description ?? null, news: brief?.news ? briefNewsLine(brief.news) : null }; }) }).catch(() => null);
+    for (const [leadId, verdict] of answer || []) verdicts.set(leadId, verdict);
+    return Boolean(answer);
+  };
+  const pctOf = (item: PendingItem) => verdicts.get(item.leadId)?.pct;
+  const isPending = (value: unknown): value is PendingItem => Boolean(value && typeof value === 'object' && typeof (value as { leadId?: unknown }).leadId === 'string');
+  const spares = (Array.isArray(searched?.spares) ? searched!.spares : []).filter(isPending);
+  let chosen: PendingItem[] = drop.items;
+  let gate: DropCriteria['gate'];
+  if (await judge(chosen)) {
+    gate = { min, judged: verdicts.size, replaced: 0, dropped: 0 };
+    const short = (item: PendingItem) => (pctOf(item) ?? 100) < min;
+    // The lowest first: they are the first to give their place.
+    const low = min > 0 ? chosen.filter(short).sort((a, b) => (pctOf(a) ?? 0) - (pctOf(b) ?? 0)) : [];
+    const next = low.length && Date.now() - startedAt < GATE_REPLACE_BEFORE_MS ? spares.slice(0, low.length * GATE_SPARES_PER_LOW) : [];
+    if (next.length) {
+      await researchAll(next);
+      // The model gone halfway: what was judged stands, and nobody comes in unjudged.
+      if (await judge(next)) {
+        gate.judged = verdicts.size;
+        const good = next.filter(item => (pctOf(item) ?? -1) >= min).sort((a, b) => (pctOf(b) ?? 0) - (pctOf(a) ?? 0)).slice(0, low.length);
+        const out = new Set(low.slice(0, good.length).map(item => item.leadId));
+        chosen = [...chosen.filter(item => !out.has(item.leadId)), ...good];
+        gate.replaced = good.length;
+      }
+    }
+    if (min > 0) { const kept = chosen.filter(item => !short(item)); gate.dropped = chosen.length - kept.length; chosen = kept; }
+    // The best first; who was not judged keeps the place the finder gave them, after the judged ones.
+    chosen = chosen.map((item, index) => ({ item, index })).sort((a, b) => (pctOf(b.item) ?? -1) - (pctOf(a.item) ?? -1) || a.index - b.index).map(entry => entry.item);
+    // Who fell short, of the drop and of its reserves: the next searches of the team do not bring them back (knownPeople).
+    const rejected = min > 0 ? [...verdicts].filter(([, verdict]) => verdict.pct < min).map(([leadId]) => leadId).slice(0, GATE_REJECTED_MAX) : [];
+    if (rejected.length) gate.rejected = rejected;
+  }
+  // What the drop keeps of its search once written: without the reserves, with how the judge went.
+  const { spares: _spares, ...keptCriteria } = (searched || {}) as DropCriteria;
+  const criteriaNow = searched ? { ...keptCriteria, ...(gate ? { gate } : {}) } : null;
+  if (!chosen.length) {
+    const none = await client.from('lead_drops').update({ status: 'empty', items: [], error: `Ningún contacto alcanzó el ${min} % de recomendación hoy.`,
+      ...(criteriaNow ? { criteria: criteriaNow } : {}), updated_at: new Date().toISOString() }).eq('id', drop.id).eq('status', 'pending');
+    if (none.error) throw new LeadDropsError('No pudimos guardar tu contacto del día.', 503);
+    return { written: 0, items: [] as DropItem[] };
   }
   // The companies the research found, kept for the next search by company (learnResearchedAccounts): Apollo's search brings none
   // to keep them by. Not awaited before the emails: it is one small call, and nothing of this drop depends on it.
-  const searched = (drop.criteria && typeof drop.criteria === 'object' ? drop.criteria : null) as DropCriteria | null;
   const learning = searched?.accountsKey && found.size ? learnResearchedAccounts(client, {
     organizationId: scope.organizationId, customerKey: searched.accountsKey, generate: deps.generate, now: deps.now,
     criteria: { titles: searched.titles || [], industries: searched.industries || [], locations: searched.locations || [], sizes: searched.sizes || [], source: searched.source },
     seller: userContext ? { company: userContext.companyName, offer: userContext.offer, services: userContext.services, sector: userContext.sector } as FinderSeller : null,
-    companies: drop.items.map(item => { const research = found.get(item.leadId); return { domain: item.domain || research?.domain, name: item.company, industry: item.industry,
+    companies: chosen.map(item => { const research = found.get(item.leadId); return { domain: item.domain || research?.domain, name: item.company, industry: item.industry,
       size: typeof item.size === 'number' ? item.size : null, about: research?.brief.company }; }).filter(company => company.domain && company.about),
   }).catch(() => 0) : Promise.resolve(0);
   // The description stays out of the saved drop: what reaches the person is its summary.
-  const items: DropItem[] = drop.items.map(({ description: _description, ...item }) => {
+  const items: DropItem[] = chosen.map(({ description: _description, ...item }) => {
     const research = found.get(item.leadId);
+    const verdict = verdicts.get(item.leadId);
     const summary = research?.brief.company ?? about.get(item.leadId) ?? null;
     const facts = [summary, research?.brief.news ? briefNewsLine(research.brief.news) : null, ...item.research].filter((fact): fact is string => Boolean(fact));
     return {
@@ -904,10 +995,13 @@ export async function writeDrop(client: Client, drop: { id: string; organization
       ...(research ? { brief: research.brief } : {}),
       // The site the research told from the company's name, when the search brought none.
       ...(research?.domain && !item.domain ? { domain: research.domain, website: item.website ?? `https://${research.domain}` } : {}),
+      // What the judge said of it, and what the company does when the search did not say.
+      ...(verdict ? { recommendation: { pct: verdict.pct, reason: verdict.reason } } : {}),
+      ...(verdict?.industry && !item.industry ? { industry: verdict.industry } : {}),
     };
   });
   // The advice reads what the research found of each company, as it read the search's description.
-  const advised = drop.items.map(item => {
+  const advised = chosen.map(item => {
     const brief = found.get(item.leadId)?.brief;
     const known = [brief?.company, brief?.news ? briefNewsLine(brief.news) : null].filter(Boolean).join(' ');
     return known && !item.description ? { ...item, description: known } : item;
@@ -928,7 +1022,7 @@ export async function writeDrop(client: Client, drop: { id: string; organization
     if (found) Object.assign(item, found);
   }
   await learning;
-  const saved = await client.from('lead_drops').update({ status: 'ready', items, updated_at: new Date().toISOString() }).eq('id', drop.id).eq('status', 'pending');
+  const saved = await client.from('lead_drops').update({ status: 'ready', items, ...(criteriaNow ? { criteria: criteriaNow } : {}), updated_at: new Date().toISOString() }).eq('id', drop.id).eq('status', 'pending');
   if (saved.error) throw new LeadDropsError('No pudimos guardar tu contacto del día.', 503);
   return { written: items.filter(item => item.draft).length, items };
 }
@@ -1252,7 +1346,10 @@ const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^w
 function dropItemBlocks(item: DropItem): DocBlock[] {
   const blocks: DocBlock[] = [];
   const reasons = item.reasons?.length ? `\n\n${item.reasons.map(reason => `- ${reason}`).join('\n')}` : '';
-  blocks.push({ type: 'callout', tone: 'info', title: 'Por qué te lo recomendamos', runs: [{ text: item.why, bold: Boolean(reasons) }, ...(reasons ? [{ text: reasons }] : [])] });
+  // The judge's percentage and what it said of the contact (lead-drop-gate.ts), over what matched.
+  const recommended = dropRecommendation(item);
+  blocks.push({ type: 'callout', tone: 'info', title: recommended ? `Por qué te lo recomendamos · ${recommended.pct} %` : 'Por qué te lo recomendamos',
+    runs: [...(recommended?.reason ? [{ text: `${recommended.reason}\n\n` }] : []), { text: item.why, bold: Boolean(reasons) }, ...(reasons ? [{ text: reasons }] : [])] });
   if (item.fit?.length) {
     blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Cómo calza con tu cliente ideal' }] });
     blocks.push({ type: 'table', columns: [{ header: [{ text: 'Criterio' }] }, { header: [{ text: 'Este contacto' }] }, { header: [{ text: 'Lo que buscas' }] }, { header: [{ text: '¿Calza?' }] }],

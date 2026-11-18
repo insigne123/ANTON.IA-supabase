@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, accountsLine, assignDrops, companyDropCriteria, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, dropThreadSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, accountsLine, assignDrops, companyDropCriteria, companyKey, companyKeys, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, dropThreadSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -235,6 +235,30 @@ test('a person\'s own plan: how many contacts they get whatever the team\'s, on 
   const sizes: Record<string, number> = { ana: 1, leo: 6, sol: 1, tom: 6, eva: 3 };
   assert.deepEqual(groupByDropSize(['ana', 'leo', 'sol', 'tom', 'eva'], userId => sizes[userId]), [{ size: 6, people: ['leo', 'tom'] }, { size: 3, people: ['eva'] }, { size: 1, people: ['ana', 'sol'] }]);
   assert.deepEqual(groupByDropSize([], () => 1), []);
+});
+
+test('a company is one whatever its legal form or its country, and what the team got today is not offered to someone else', () => {
+  assert.deepEqual(['Walmart Chile', 'WALMART', 'Walmart Chile S.A.', 'Wálmart®', 'Walmart SpA'].map(companyKey), ['walmart', 'walmart', 'walmart', 'walmart', 'walmart']);
+  assert.deepEqual(['Banco de Chile', 'Clínica Las Condes Ltda.', 'Sodimac Perú', '', null].map(companyKey), ['banco de chile', 'clinica las condes', 'sodimac', '', '']);
+  assert.deepEqual(companyKeys({ leadId: 'L1', domain: 'Walmart.cl', company: 'Walmart Chile' }), ['walmart.cl', 'walmart']);
+  assert.deepEqual(companyKeys({ leadId: 'L1', domain: null, company: null }), ['l1'], 'nothing to tell the company by: the person alone');
+
+  // Apollo's free search names no site: «Walmart» and «Walmart Chile» are told apart by name.
+  const bare = (id: string, company: string) => candidate(id, company, { domain: null });
+  const scores = new Map<string, DropScore>();
+  const pool = [bare('1', 'Walmart'), bare('2', 'Walmart Chile'), bare('3', 'Ripley'), bare('4', 'Falabella S.A.'), bare('5', 'Paris')];
+  pool.forEach((item, index) => scores.set(item.leadId, { titleClass: 'exact', score: 90 - index }));
+  const deps = { criteriaOf: () => criteria, scoreOf: (_person: string, item: DropCandidate) => scores.get(item.leadId) ?? null };
+  const shared = pickRankedDrops(pool, ['ana', 'leo'], none(), 2, deps);
+  assert.deepEqual([...shared.values()].flat().map(item => item.company).sort(), ['Falabella S.A.', 'Paris', 'Ripley', 'Walmart'], 'one person of the retailer, not two');
+  // What another group of the team got earlier today counts too.
+  const later = pickRankedDrops(pool, ['eva'], { ...none(), companies: new Set(['walmart', 'falabella']) }, 2, deps);
+  assert.deepEqual(later.get('eva')!.map(item => item.company), ['Ripley', 'Paris']);
+  const byTitle = assignDrops(pool, ['eva'], { ...none(), companies: new Set(['walmart', 'ripley']) }, criteria, 2);
+  assert.deepEqual(byTitle.get('eva')!.map(item => item.company), ['Falabella S.A.', 'Paris']);
+  // With nobody else left, the company is offered again rather than leaving the person without contacts.
+  const few = pickRankedDrops(pool.slice(0, 2), ['eva'], { ...none(), companies: new Set(['walmart']) }, 1, deps);
+  assert.deepEqual(few.get('eva')!.map(item => item.company), ['Walmart']);
 });
 
 test('the finder\'s pick: the customer\'s own roles by score, and the last slots for roles next to them', () => {
