@@ -23,7 +23,7 @@ import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { insertCoworkContact } from '@/lib/server/cowork/save-contact';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
-import { ACCOUNTS_OPENED, ACCOUNT_FIT, accountDomain, accountsOf, accountsToOpen, expansionIndustries, readAccounts, saveAccounts, scoreAccounts, type DropAccount } from '@/lib/server/lead-drop-accounts';
+import { ACCOUNTS_OPENED, ACCOUNT_FIT, accountDomain, accountsOf, accountsToOpen, expansionIndustries, learnResearchedAccounts, readAccounts, saveAccounts, scoreAccounts, type DropAccount } from '@/lib/server/lead-drop-accounts';
 import { dropSellerOf } from '@/lib/server/lead-drop-seller';
 import { dropWriterEnabled, writeDropEmails, type DropSeller } from '@/lib/server/lead-drop-writer';
 import { dropLessons, dropWishes, finderSearchTerms, scoreDropCandidates, type FinderLessons, type FinderPreferences, type FinderSeller } from '@/lib/server/lead-drop-finder';
@@ -519,6 +519,8 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     const groupStarted = Date.now();
     const companyWhy = new Map<string, string>();
     const expandedIds = new Map<string, string>();
+    // The key this group's companies are kept under: each drop carries it, so the research of its contacts can add to them (writeDrop).
+    let accountsKey: string | null = null;
     if (finder) {
       // The same customer asked two more ways (free): its roles as people write them, and the words of their area as a title.
       const terms = await finderSearchTerms(criteria, deps.generate).catch(() => ({ titles: [] as string[], keywords: [] as string[] }));
@@ -533,6 +535,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       // ── By company: the customer's companies found, scored once, and the best ones opened to bring their people ──
       const quiet = (inputs: LeadSearchInput[], wanted: number) => searchAll(inputs, wanted).then(answer => answer.results).catch(() => null);
       const customerKey = createHash('sha1').update(criteriaKey(criteria)).digest('hex').slice(0, 16);
+      accountsKey = customerKey;
       const sellers = new Map<string, Promise<FinderSeller | null>>();
       const seller = (userId: string) => sellers.get(userId) ?? sellers.set(userId, sellerFor(client, organizationId, userId)).get(userId)!;
       const teamWords: FinderPreferences = { notes: preferences(members[0]).notes, teamNotes: preferences(members[0]).teamNotes };
@@ -681,7 +684,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       // The industries next to theirs this person's contacts came from, if any: said with how the search went.
       const widened = [...new Set(picks.map(pick => expandedIds.get(pick.leadId)).filter((industry): industry is string => Boolean(industry)))];
       const searched = { ...mine, ...(accountsNote ? { accounts: { ...accountsNote, ...(widened.length ? { expanded: widened } : {}) } } : {}),
-        ...(Object.keys(trace).length ? { trace } : {}) };
+        ...(Object.keys(trace).length ? { trace } : {}), ...(accountsKey ? { accountsKey } : {}) };
       results.push({ userId, status: 'pending', cost: share, criteria: searched, items: picks.map(pick => {
         // The industry as the actor names it: «servicios transitorios» searched as «staffing & recruiting» fits «Reclutamiento y personal».
         const actorIndustry = text(entries.get(pick.leadId)?.lead.organization_industry, 160).toLowerCase();
@@ -857,7 +860,7 @@ async function draftFor(item: DropItem, userContext: Record<string, unknown> | n
  * from the web), why each contact is worth it for what the person sells (adviseOn) and a first email with three follow-ups for each,
  * written with what the research found. A research, a draft or advice that fails leaves the contact without it.
  */
-export async function writeDrop(client: Client, drop: { id: string; organization_id: string; user_id: string; items: PendingItem[] }, deps: {
+export async function writeDrop(client: Client, drop: { id: string; organization_id: string; user_id: string; items: PendingItem[]; criteria?: unknown }, deps: {
   generate: Generate; now: Date; parallel?: number;
   /** The research of one contact (researchDropContact with the web); without it, the contacts are written as the search brought them. */
   research?: (input: DropResearchInput) => Promise<DropResearch | null>;
@@ -880,6 +883,16 @@ export async function writeDrop(client: Client, drop: { id: string; organization
       if (result) found.set(item.leadId, result);
     }));
   }
+  // The companies the research found, kept for the next search by company (learnResearchedAccounts): Apollo's search brings none
+  // to keep them by. Not awaited before the emails: it is one small call, and nothing of this drop depends on it.
+  const searched = (drop.criteria && typeof drop.criteria === 'object' ? drop.criteria : null) as DropCriteria | null;
+  const learning = searched?.accountsKey && found.size ? learnResearchedAccounts(client, {
+    organizationId: scope.organizationId, customerKey: searched.accountsKey, generate: deps.generate, now: deps.now,
+    criteria: { titles: searched.titles || [], industries: searched.industries || [], locations: searched.locations || [], sizes: searched.sizes || [], source: searched.source },
+    seller: userContext ? { company: userContext.companyName, offer: userContext.offer, services: userContext.services, sector: userContext.sector } as FinderSeller : null,
+    companies: drop.items.map(item => { const research = found.get(item.leadId); return { domain: item.domain || research?.domain, name: item.company, industry: item.industry,
+      size: typeof item.size === 'number' ? item.size : null, about: research?.brief.company }; }).filter(company => company.domain && company.about),
+  }).catch(() => 0) : Promise.resolve(0);
   // The description stays out of the saved drop: what reaches the person is its summary.
   const items: DropItem[] = drop.items.map(({ description: _description, ...item }) => {
     const research = found.get(item.leadId);
@@ -913,6 +926,7 @@ export async function writeDrop(client: Client, drop: { id: string; organization
     const found = advice.get(item.leadId);
     if (found) Object.assign(item, found);
   }
+  await learning;
   const saved = await client.from('lead_drops').update({ status: 'ready', items, updated_at: new Date().toISOString() }).eq('id', drop.id).eq('status', 'pending');
   if (saved.error) throw new LeadDropsError('No pudimos guardar tu contacto del día.', 503);
   return { written: items.filter(item => item.draft).length, items };

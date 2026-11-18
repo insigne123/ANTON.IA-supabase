@@ -68,7 +68,7 @@ export async function POST(request: Request) {
   const result = { written: 0, planned: 0, empty: 0, failed: 0, resting: 0, spentUsd: 0 };
 
   const writePending = async () => {
-    const pending: any = await admin.from('lead_drops').select('id,organization_id,user_id,items').eq('drop_date', today).eq('status', 'pending').limit(60);
+    const pending: any = await admin.from('lead_drops').select('id,organization_id,user_id,items,criteria').eq('drop_date', today).eq('status', 'pending').limit(60);
     if (pending.error) throw new Error('pending');
     // A row without contacts is being searched from «Hoy» (pullDrop): that request completes it.
     const rows = ((pending.data || []) as any[]).filter(row => Array.isArray(row.items) && row.items.length);

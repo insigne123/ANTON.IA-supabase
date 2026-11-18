@@ -93,6 +93,11 @@ export type DropCriteria = { titles: string[]; industries: string[]; locations: 
   /** The subject the morning email left with, when it was not the usual one (someone away): its answers keep it (dropThreadSubject). */
   subject?: string;
   /**
+   * The key the companies of this drop's search are kept under (lead_drop_accounts.customer_key): the group's customer, which is not
+   * always this person's own. With it, the companies the research finds for these contacts are kept for the next search (18 Nov 2026).
+   */
+  accountsKey?: string;
+  /**
    * How the finder's run went for this customer (17 Nov 2026), in counts: the first real run of the search by company left the
    * companies' table empty and most contacts chosen by the words of their title, and nothing said why. Read by whoever reviews a
    * run; no screen shows it. `narrow`: people the searches by industry brought; `broad`: the search fell back to titles and places;

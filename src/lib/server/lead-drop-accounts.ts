@@ -214,6 +214,45 @@ export async function readAccounts(client: Client, organizationId: string, custo
   return accounts;
 }
 
+/**
+ * The companies the research of a drop found (18 Nov 2026). Apollo's free search names a person's company and nothing else: no site,
+ * no industry, no size, so the search by company had nothing to keep a company by and never started (the first two real runs left
+ * this table empty). The research of each contact does find the company's site and what it does (lead-drop-research.ts), so the
+ * companies are learnt there: scored for what the team sells with what the research read, and kept for the next morning, when the
+ * finder opens the best ones to bring the rest of their people.
+ *
+ * Only new companies are kept: one the table already has keeps its score and what was learnt on opening it. Best effort, as the rest.
+ */
+export async function learnResearchedAccounts(client: Client, input: {
+  organizationId: string; customerKey: string; criteria: DropCriteria; seller: FinderSeller | null; generate?: Generate; now: Date;
+  companies: Array<{ domain: string | null | undefined; name: string | null | undefined; industry?: string | null; size?: number | null; about?: string | null }>;
+}): Promise<number> {
+  const found = new Map<string, DropAccount>();
+  for (const company of input.companies) {
+    const domain = accountDomain(company.domain);
+    const name = clip(company.name, 200);
+    if (!domain || !name || found.has(domain)) continue;
+    found.set(domain, { domain, name, industry: clip(company.industry, 120) || null, size: typeof company.size === 'number' ? company.size : null,
+      about: clip(company.about, 400) || null, score: null, reason: null, origin: 'customer', segment: null, peopleLeft: null, openedAt: null, scoredAt: null });
+  }
+  if (!found.size || !/^[0-9a-f]{16}$/.test(input.customerKey)) return 0;
+  const known: any = await Promise.resolve(client.from(TABLE).select('domain').eq('organization_id', input.organizationId).eq('customer_key', input.customerKey)
+    .in('domain', [...found.keys()])).catch(() => ({ error: true }));
+  if (known?.error) return 0;
+  for (const row of known.data || []) found.delete(String(row.domain));
+  const fresh = [...found.values()];
+  if (!fresh.length) return 0;
+  // With what the research read of each: a company the model does not answer for is kept without a score, and the finder asks again.
+  await scoreAccounts({ accounts: fresh, criteria: input.criteria, seller: input.seller, generate: input.generate, now: input.now }).catch(() => 0);
+  const rows = fresh.map(account => ({
+    organization_id: input.organizationId, customer_key: input.customerKey, domain: account.domain, name: account.name, industry: account.industry, size: account.size,
+    score: account.score, reason: account.reason, origin: account.origin, segment: account.segment, people_left: null, opened_at: null, scored_at: account.scoredAt,
+    updated_at: input.now.toISOString(),
+  }));
+  const saved: any = await Promise.resolve(client.from(TABLE).upsert(rows, { onConflict: 'organization_id,customer_key,domain', ignoreDuplicates: true })).catch(() => ({ error: true }));
+  return saved?.error ? 0 : rows.length;
+}
+
 /** Keeps the companies given (new ones, their score, and what was learnt on opening them). A failure is not told: the drop is made anyway. */
 export async function saveAccounts(client: Client, organizationId: string, customerKey: string, accounts: DropAccount[], now: Date) {
   const rows = accounts.map(account => ({
