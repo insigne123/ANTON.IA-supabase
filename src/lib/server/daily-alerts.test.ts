@@ -287,7 +287,9 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
   const DROP = '11111111-1111-4111-8111-111111111111';
   const contact = (leadId: string, name: string) => ({ leadId, name, title: 'Gerente HSE', company: 'Minera Andina', domain: null, industry: 'Minería', size: null, city: null,
     hasEmail: true, hasPhone: false, why: 'Calza con tu cliente ideal.', research: [], provider: 'apollo', draft: { subject: 'Brigadas', body: 'Hola {{nombre}}' }, followUps: [] });
-  const drop = (items: unknown[]) => ({ ...seed(), lead_drops: [{ id: DROP, organization_id: ORG, user_id: 'u-ana', drop_date: '2026-10-20', status: 'ready', criteria: {}, items }] });
+  // Ana opened the app last week: she gets the usual email (who has not for AWAY_DAYS gets another, in the test below).
+  const drop = (items: unknown[]) => ({ ...seed(), app_usage_views: [{ event_id: 'v-1', user_id: 'u-ana', organization_id: ORG, occurred_at: '2026-10-15T14:00:00Z' }],
+    lead_drops: [{ id: DROP, organization_id: ORG, user_id: 'u-ana', drop_date: '2026-10-20', status: 'ready', criteria: {}, items }] });
   const previous = process.env.INTERNAL_API_SECRET;
   process.env.INTERNAL_API_SECRET = 'a-secret-for-tests';
   try {
@@ -363,5 +365,54 @@ test('a drop of several contacts is used from the inbox: its email and its PDF o
     assert.equal(oneBusy.sent.length, 1);
     assert.ok(oneBusy.sent[0].text.includes('Persona r-new') && oneBusy.sent[0].text.includes('Pedro Araya') && oneBusy.sent[0].text.includes('Abrir ANTON.IA'));
     assert.ok(!String(one.sent[0].html).includes('/contactos/AAAA') && !/\/contactos\/[A-Za-z0-9_-]{48}/.test(String(one.sent[0].html)));
+  } finally { if (previous === undefined) delete process.env.INTERNAL_API_SECRET; else process.env.INTERNAL_API_SECRET = previous; }
+});
+
+test('who has not opened the app in two weeks gets their contacts written to bring them back, and the drop keeps that subject (18 nov)', async () => {
+  const DROP = '22222222-2222-4222-8222-222222222222';
+  const contact = (leadId: string, name: string, draft = true) => ({ leadId, name, title: 'Gerente HSE', company: 'Minera Andina', domain: null, industry: 'Minería', size: null, city: null,
+    hasEmail: true, hasPhone: false, why: 'Calza con tu cliente ideal.', research: [], provider: 'apollo', ...(draft ? { draft: { subject: 'Brigadas', body: 'Hola {{nombre}}' } } : {}), followUps: [] });
+  const data = (views: unknown[], items: unknown[]) => ({ ...seed(), app_usage_views: views,
+    lead_drops: [{ id: DROP, organization_id: ORG, user_id: 'u-ana', drop_date: '2026-10-20', status: 'ready', criteria: { source: 'equipo' }, items }] });
+  const three = [contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya'), contact('6accdbfcd5f5d80001cf6902', 'Luisa Soto'), contact('6accdbfcd5f5d80001cf6903', 'Marta Pino')];
+  const view = (at: string, userId = 'u-ana') => ({ event_id: `v-${at}-${userId}`, user_id: userId, organization_id: ORG, occurred_at: at });
+  const previous = process.env.INTERNAL_API_SECRET;
+  process.env.INTERNAL_API_SECRET = 'a-secret-for-tests';
+  try {
+    // Never in the app, or last there fifteen days ago (someone else's visits do not count): the email that brings them back.
+    for (const views of [[], [view('2026-10-05T10:00:00Z'), view('2026-10-19T10:00:00Z', 'u-other')]]) {
+      const away = memory(data(views, three), { unique: UNIQUE });
+      const { sent, send } = sender();
+      assert.deepEqual(await deliverDailyAlert(away.client, SCOPE, { ...deps(send), now: TUESDAY }), { status: 'sent' });
+      assert.equal(sent[0].subject, 'Gerente HSE en Minera Andina y 2 contactos más, con su correo ya escrito');
+      assert.match(sent[0].text, /^Hola, Ana\. Te dejamos 3 contactos con el correo ya escrito\.\n\nLos buscamos según lo que vende tu equipo\. No tienes que buscar nada: revisa el correo de cada uno y aprueba su campaña en un par de minutos\.\n/);
+      assert.match(sent[0].text, /¿No recuerdas tu contraseña\? Entra en https:\/\/app\.antonia\.ai\/login y elige «¿Olvidaste tu contraseña\?»\./);
+      assert.match(sent[0].html, />Te dejamos 3 contactos con el correo ya escrito<\/p><p[^>]*>Los buscamos según lo que vende tu equipo\./);
+      assert.match(sent[0].html, /No tienes que buscar nada: Pedro Araya de Minera Andina, Luisa Soto de Minera Andina y 1 más\./, 'what the inbox shows after the subject');
+      assert.match(sent[0].html, /<a href="https:\/\/app\.antonia\.ai\/login"[^>]*>Entra aquí<\/a>/);
+      assert.match(sent[0].html, />Enriquecer los 3 · 3 créditos<\/a>/, 'the same contacts and the same buttons');
+      // Its conversation: the same subject in the thread, and kept in the drop for what answers it.
+      assert.equal(sent[0].headers['Thread-Topic'], sent[0].subject);
+      assert.deepEqual(away.tables.lead_drops[0].criteria, { source: 'equipo', subject: sent[0].subject });
+      assert.equal(away.tables.lead_drops[0].status, 'sent');
+    }
+    // In the app thirteen days ago: the usual email, and nothing kept in the drop.
+    const recent = memory(data([view('2026-10-07T12:00:00Z')], three), { unique: UNIQUE });
+    const usual = sender();
+    assert.deepEqual(await deliverDailyAlert(recent.client, SCOPE, { ...deps(usual.send), now: TUESDAY }), { status: 'sent' });
+    assert.equal(usual.sent[0].subject, '3 contactos nuevos para ti');
+    assert.ok(!usual.sent[0].text.includes('contraseña') && !usual.sent[0].html.includes('Te dejamos'));
+    assert.deepEqual(recent.tables.lead_drops[0].criteria, { source: 'equipo' });
+    // The ledger cannot be read: the usual email.
+    const blind = memory(data([], three), { unique: UNIQUE, missing: ['app_usage_views'] });
+    const safe = sender();
+    assert.deepEqual(await deliverDailyAlert(blind.client, SCOPE, { ...deps(safe.send), now: TUESDAY }), { status: 'sent' });
+    assert.equal(safe.sent[0].subject, '3 contactos nuevos para ti');
+    // Without their emails written yet, it does not promise them.
+    const bare = memory(data([], [contact('6accdbfcd5f5d80001cf6901', 'Pedro Araya', false), contact('6accdbfcd5f5d80001cf6902', 'Luisa Soto', false)]), { unique: UNIQUE });
+    const plain = sender();
+    assert.deepEqual(await deliverDailyAlert(bare.client, SCOPE, { ...deps(plain.send), now: TUESDAY }), { status: 'sent' });
+    assert.equal(plain.sent[0].subject, 'Gerente HSE en Minera Andina y 1 contacto más, elegidos para ti');
+    assert.match(plain.sent[0].text, /^Hola, Ana\. Te dejamos 2 contactos elegidos para ti\.\n\nLos buscamos según lo que vende tu equipo\. No tienes que buscar nada: ábrelos y guarda los que te sirvan\.\n/);
   } finally { if (previous === undefined) delete process.env.INTERNAL_API_SECRET; else process.env.INTERNAL_API_SECRET = previous; }
 });

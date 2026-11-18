@@ -80,6 +80,11 @@ export function managesOpportunityAlert(userId: string, role: string, named: rea
 
 /** A week without coming in: from then on, on Tuesdays, the contacts already waiting are reason enough for the alert (U5). */
 export const IDLE_DAYS = 7;
+/**
+ * Days without opening the app after which the email of the day's contacts is written to bring the person back (18 Nov 2026, the
+ * owner: «a esos claramente debemos ponerles un mensaje distinto, para incentivarlos a meterse»).
+ */
+export const AWAY_DAYS = 14;
 
 /**
  * The days a document of the company is told on before it lapses: two weeks ahead (time to ask for a new F30), a week, the day before
@@ -320,21 +325,31 @@ const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;
  * and button after the lines, so its line in the list is left out (it would say it twice) and «Abrir ANTON.IA» becomes a
  * quiet link: one main button per email.
  */
-export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop?: AlertFacts['drop']) {
+export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop?: AlertFacts['drop'], options: { /** The person has not opened the app in a while: the contacts' email says the work is done and how to come back. */ away?: boolean } = {}) {
   const base = appUrl.replace(/\/$/, '');
   const link = (href: string) => `${base}${href}`;
   const settings = link('/dashboard?vista=semana');
   const greeting = name ? `Hola, ${name}` : 'Hola';
   const lines = drop?.items.length ? alert.lines.filter(line => line.kind !== 'drop') : alert.lines;
   const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base, { heading: lines.length > 0, link: drop.link }) : null;
-  const intro = lines.length || !section ? 'Esto te espera hoy en ANTON.IA' : drop!.items.length === 1 ? 'Tu contacto del día ya está listo' : 'Tus contactos del día ya están listos';
+  const alone = Boolean(section && !lines.length);
+  // Someone who has not come in for a while (AWAY_DAYS), with several contacts alone in their email: what was done for them, how
+  // little is left, and the way back in for whoever lost their password. The contacts and their buttons are the same.
+  const away = Boolean(options.away && alone && drop!.items.length > 1);
+  const written = Boolean(drop?.items.some(item => item.draft));
+  const intro = away ? (written ? `Te dejamos ${drop!.items.length} contactos con el correo ya escrito` : `Te dejamos ${drop!.items.length} contactos elegidos para ti`)
+    : lines.length || !section ? 'Esto te espera hoy en ANTON.IA' : drop!.items.length === 1 ? 'Tu contacto del día ya está listo' : 'Tus contactos del día ya están listos';
+  const pitch = away ? `Los buscamos según lo que vende tu equipo. No tienes que buscar nada: ${written ? 'revisa el correo de cada uno y aprueba su campaña en un par de minutos' : 'ábrelos y guarda los que te sirvan'}.` : null;
+  const recover = away ? link('/login') : null;
   // Contacts used from the inbox, alone in their email (dropAlertEmail): nothing sends the person into the app.
   const inbox = Boolean(section && drop?.link && !lines.length);
   const text = [
     `${greeting}. ${intro}${lines.length ? ':' : '.'}`, '',
+    ...(pitch ? [pitch, ''] : []),
     ...lines.map(line => `- ${line.text} (${link(line.href)})${line.action ? `. ${line.action.label}: ${link(line.action.href)}` : ''}`), ...(lines.length ? [''] : []),
     ...(section ? [section.text, ''] : []),
     ...(inbox ? [] : [`Abrir ANTON.IA: ${link('/dashboard')}`]),
+    ...(recover ? [`¿No recuerdas tu contraseña? Entra en ${recover} y elige «¿Olvidaste tu contraseña?».`] : []),
     `Te avisamos solo cuando hay algo que hacer. Los apagas en «Tu semana»: ${settings}`,
   ].join('\n');
   // A line's own step («Asignar») is a small outlined button under it: the dark «Abrir ANTON.IA» stays the one main button.
@@ -347,14 +362,14 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
     : emailRow(emailButton(link('/dashboard'), 'Abrir ANTON.IA', { color: '#111827' }), { padding: '6px 0 0' });
   // What the inbox shows after the subject: who the contacts are, or what waits today.
   const people = (drop?.items ?? []).map(item => [dropName(item), item.company].filter(Boolean).join(' de '));
-  const alone = Boolean(section && !lines.length);
-  const preheader = alone ? `${people.slice(0, 3).join(', ')}${people.length > 3 ? ` y ${people.length - 3} más` : ''}.` : lines.map(line => line.text).join(' · ');
+  const preheader = away ? `No tienes que buscar nada: ${people.slice(0, 2).join(', ')}${people.length > 2 ? ` y ${people.length - 2} más` : ''}.`
+    : alone ? `${people.slice(0, 3).join(', ')}${people.length > 3 ? ` y ${people.length - 3} más` : ''}.` : lines.map(line => line.text).join(' · ');
   // On the email's page (src/lib/email-shell.ts): the greeting and what this is, the day's lines in one card, the contacts in theirs.
-  const html = emailShell(emailHeadline({ kicker: escape(greeting), title: escape(intro), lines: [alone ? escape(section!.summary) : null] })
+  const html = emailShell(emailHeadline({ kicker: escape(greeting), title: escape(intro), lines: [pitch ? escape(pitch) : alone ? escape(section!.summary) : null] })
     + (lines.length ? emailCard(rows, { padding: '4px 18px' }) : '')
     + (section ? section.html : '')
     + open
-    + emailNote(`Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.`),
+    + emailNote(`${recover ? `¿No recuerdas tu contraseña? <a href="${escape(recover)}" style="color:#6b7280">Entra aquí</a> y elige «¿Olvidaste tu contraseña?». ` : ''}Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.`),
     { bare: true, label: alone ? (drop!.items.length === 1 ? 'Contacto de hoy' : 'Contactos de hoy') : 'Tu día', preheader: escape(preheader) });
   return { subject: alert.subject, text, html };
 }
@@ -363,6 +378,6 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
  * The email of a drop of several contacts, only about them (13 Nov 2026): its subject, each contact with its button, and nothing of
  * the rest of the day, which goes in its own email (server/daily-alerts.ts, deliverDailyAlert).
  */
-export function dropAlertEmail(name: string, appUrl: string, drop: NonNullable<AlertFacts['drop']>) {
-  return alertEmail({ subject: dropSubject(drop.items), lines: [] }, name, appUrl, drop);
+export function dropAlertEmail(name: string, appUrl: string, drop: NonNullable<AlertFacts['drop']>, options: { away?: boolean } = {}) {
+  return alertEmail({ subject: dropSubject(drop.items, options), lines: [] }, name, appUrl, drop, options);
 }

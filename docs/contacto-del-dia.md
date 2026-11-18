@@ -579,9 +579,33 @@ En un equipo donde alguien tiene un plan propio (`lead_drop_person_plans`), quie
 de la mañana ni oferta en «Hoy» (`planOfPerson(..., byPerson)`, `NO_DROP_PLAN`). Un equipo donde nadie tiene plan propio sigue con
 el plan del equipo, como antes. Para darle contactos a alguien de un equipo así se le crea su fila en `lead_drop_person_plans`.
 
+### Desde el 18 de noviembre: a quien no ha entrado, el correo lo invita a volver
+
+El dueño, de quienes no han abierto la app: «mandémosle 3 leads para ver si logramos hacerlos entrar, pero a esos claramente debemos
+ponerles un mensaje distinto, para incentivarlos a meterse».
+
+- **A quién:** a quien recibe varios contactos y no ha abierto ninguna pantalla de la app en 14 días (`AWAY_DAYS`), o nunca
+  (`readAway` en `src/lib/server/daily-alerts.ts`, sobre `app_usage_views`). Si esa lectura falla, recibe el correo de siempre.
+  Cuando vuelve a entrar, el correo vuelve a ser el de siempre sin que nadie cambie nada.
+- **Asunto:** el primer contacto por su cargo y empresa, y que el trabajo está hecho: «Gerente HSE en Minera Andina y 2 contactos
+  más, con su correo ya escrito» (`dropSubject(items, { away: true })`). Si los correos aún no están escritos dice «elegidos para ti».
+- **Cuerpo:** «Te dejamos 3 contactos con el correo ya escrito», que se buscaron según lo que vende su equipo y que no hay que
+  buscar nada; al pie, cómo entrar si olvidó la contraseña. Los contactos y sus botones son los mismos.
+- **Conversación:** el asunto con que salió se guarda en `lead_drops.criteria.subject`, y «Listos», «Para llamar» y «Campaña lista»
+  responden con ese mismo (`dropThreadSubject`), para seguir en la misma conversación.
+
+Cuántos contactos recibe cada quien sigue saliendo de su plan (`lead_drop_person_plans`): el mensaje depende de si entra, no del plan.
+
+### Desde el 18 de noviembre: la preparación parte a las 02:00
+
+Con todo GrupoExpro en planes por persona (13 personas con 6 contactos y 15 con 3: 123 al día) las nueve corridas de 05:00 a 07:40
+no alcanzaban: una corrida escribe unos 16 contactos (dos rondas de hasta 8), y un contacto que no está escrito cuando sale el aviso
+de las 08:00 no se envía ese día. `leadDropsTick` corre ahora de 02:00 a 07:40 de Chile, dieciocho corridas, sin cambiar cuántos se
+escriben a la vez.
+
 ## Cómo funciona
 
-1. **Preparación** (`leadDropsTick`, de lunes a viernes de 05:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
+1. **Preparación** (`leadDropsTick`, de lunes a viernes de 02:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
    - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos y una dirección que no es de prueba, y a quien le llega el correo: con Resend, a todos; sin Resend, a quien tiene su Gmail u Outlook conectado (o con el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
    - **A quién buscar: el cliente ideal de cada persona** (desde el 29 de octubre):
      - el de su «Perfil», si lo declaró;

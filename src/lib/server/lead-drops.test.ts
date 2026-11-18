@@ -569,7 +569,8 @@ test('when the search brings only people the team has, it looks once more, wider
 test('a team with contacts on Mondays: that day\'s alert goes only once they are ready, and waiting keeps nothing (12 nov)', async () => {
   const MONDAY = new Date('2026-10-19T10:00:00.000Z'); // 07:00 in Chile
   const plan = { size: 2, weekdays: [1, 2, 3, 4, 5] };
-  const { client, tables } = memory({ ...seed(), organizations: [{ id: ORG, lead_drop_size: 2, lead_drop_weekdays: [1, 2, 3, 4, 5] }] },
+  const { client, tables } = memory({ ...seed(), organizations: [{ id: ORG, lead_drop_size: 2, lead_drop_weekdays: [1, 2, 3, 4, 5] }],
+    app_usage_views: [{ event_id: 'v-1', user_id: 'u-ana', organization_id: ORG, occurred_at: '2026-10-16T14:00:00Z' }] },
     { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'], daily_alerts: ['organization_id', 'user_id', 'alert_date'] } });
   const sent: any[] = [];
   const deliver = (requireDrop: boolean) => deliverDailyAlert(client, { organizationId: ORG, userId: 'u-ana' }, {
