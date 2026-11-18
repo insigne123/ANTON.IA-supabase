@@ -276,9 +276,10 @@ test('by company: the customer\'s companies found through their heads, each scor
     return { results: input.titles.join('|') === 'Gerente de Personas' && input.industryKeywords.length
       ? apolloDropEntries([at(1, 'Gerente de Personas', 'Ripley', 'ripley.example'), at(2, 'Gerente de Personas', 'Falabella', 'falabella.example')]) : [], costUsd: 0 };
   };
-  const classes: Record<string, string> = { 'Jefe de Personas': 'similar', 'Analista de Personas': 'related', 'Coordinadora de Personas': 'related' };
+  // A general manager would read as someone to explore, were they a candidate: they are not (see below).
+  const classes: Record<string, string> = { 'Jefe de Personas': 'similar', 'Analista de Personas': 'related', 'Coordinadora de Personas': 'related', 'Gerente General': 'related' };
   const companyNotes: Record<string, [number, string | null]> = { Ripley: [9, 'Opera tiendas con mucha dotación.'], Falabella: [9, 'Contrata por temporada en todo Chile.'], Paris: [8, 'Multitienda con alta rotación.'], 'Insumos del Retail': [2, null] };
-  const personNotes: Record<string, [number, number]> = { 'Gerente de Personas': [10, 0], 'Jefe de Personas': [8, 0], 'Analista de Personas': [3, 9], 'Coordinadora de Personas': [4, 7] };
+  const personNotes: Record<string, [number, number]> = { 'Gerente de Personas': [10, 0], 'Jefe de Personas': [8, 0], 'Analista de Personas': [3, 9], 'Coordinadora de Personas': [4, 7], 'Gerente General': [7, 0] };
   const scoring: any[] = [], companyScoring: any[] = [];
   const generate = async (options: any) => {
     const prompt = JSON.parse(options.prompt);
@@ -309,6 +310,10 @@ test('by company: the customer\'s companies found through their heads, each scor
   ], 'one a company for the person: who decides in each, and Paris came only by opening it');
   assert.equal(drop.items.find((item: any) => item.company === 'Paris').companyWhy, 'Multitienda con alta rotación.', 'why that company, as it was scored');
   assert.deepEqual(drop.criteria.accounts, { fit: 3, opened: 3 }, 'the drop says how it searched by company');
+  // The heads of the companies name the companies and are not candidates themselves (18 Nov 2026: as candidates, owners and founders
+  // of very small firms took the «para explorar» place). «Insumos del Retail» was scored, and its general manager never offered nor read.
+  assert.ok(!scoring.some(call => call.personas.some((entry: any) => entry.cargo === 'Gerente General')), 'no head is scored as a person');
+  assert.ok(!drop.items.some((item: any) => item.title === 'Gerente General'));
   // And how the run went, in counts, for whoever reviews it (17 Nov 2026: the first real run left no trace of why it kept no company).
   const { ms, ...trace } = drop.criteria.trace;
   assert.ok(typeof ms === 'number' && ms >= 0);

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { decideIdentityReview, IdentityReviewError, judgeIdentityReview } from '@/lib/server/identity-reviews';
-import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
+import { AuthError } from '@/lib/server/auth-utils';
+import { requireHomeAuth } from '@/lib/server/home-auth';
+import { requestAuthErrorResponse } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 /**
@@ -13,13 +15,19 @@ export const runtime = 'nodejs';
 
 type Context = { params: Promise<{ id: string }> };
 
+/**
+ * The person and the workspace they have open (requireHomeAuth). The session alone names no workspace: read with it, every review
+ * was asked for under the organization «null» and the screen answered «no disponible» to everyone (18 Nov 2026, four reviews of two
+ * people in production, none ever read).
+ */
 async function owner(req: NextRequest) {
   try {
-    const ctx = await requireSessionRequestAuth(req);
-    return { ok: true as const, organizationId: ctx.organizationId as string, userId: ctx.user.id as string };
+    const auth = await requireHomeAuth(req);
+    return { ok: true as const, organizationId: auth.organizationId, userId: auth.user.id as string };
   } catch (error) {
     const response = requestAuthErrorResponse(error);
     if (response) return { ok: false as const, response };
+    if (error instanceof AuthError) return { ok: false as const, response: NextResponse.json({ error: 'IDENTITY_REVIEW_FORBIDDEN' }, { status: error.status }) };
     throw error;
   }
 }
