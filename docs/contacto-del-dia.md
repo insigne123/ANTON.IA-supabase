@@ -596,6 +596,26 @@ ponerles un mensaje distinto, para incentivarlos a meterse».
 
 Cuántos contactos recibe cada quien sigue saliendo de su plan (`lead_drop_person_plans`): el mensaje depende de si entra, no del plan.
 
+### Desde el 18 de noviembre: las empresas se aprenden de la investigación de cada contacto
+
+La traza de las dos primeras corridas reales (17 y 18 de noviembre) dijo por qué la búsqueda por empresa no arrancaba: `known 0`,
+`learnt 0`, `opened 0`, con miles de candidatos. La búsqueda gratuita de personas de Apollo nombra la empresa de cada persona y nada
+más: sin sitio, sin rubro, sin tamaño. La tabla `lead_drop_accounts` guarda cada empresa por su sitio, así que no había con qué
+guardarla (las pruebas pasaban porque sus búsquedas de ejemplo sí traían el sitio).
+
+Lo que sí encuentra el sitio de la empresa y qué hace es la investigación corta de cada contacto (`lead-drop-research.ts`). Ahí se
+aprenden ahora las empresas (`learnResearchedAccounts` en `src/lib/server/lead-drop-accounts.ts`, llamada desde `writeDrop`):
+
+- **Qué se guarda:** la empresa de cada contacto investigado con sitio, con su nota de 0 a 10 para lo que vende el equipo y su
+  razón, puestas con lo que la investigación leyó de ella. Solo las nuevas: una que ya está conserva su nota y lo aprendido al abrirla.
+- **Bajo qué clave:** la del cliente del grupo que buscó, que cada envío lleva en `criteria.accountsKey` (no siempre es el cliente
+  propio de la persona).
+- **Para qué:** a la mañana siguiente el buscador las lee (`known` deja de ser 0), abre las que calzan y trae al resto de su gente,
+  como estaba previsto.
+
+Depende de que la investigación corra: sin saldo en el buscador web (Serper) no hay sitio que aprender, como pasó el 18 de noviembre
+desde las 02:41 de Chile (29 de 123 contactos con investigación).
+
 ### Desde el 18 de noviembre: la preparación parte a las 02:00
 
 Con todo GrupoExpro en planes por persona (13 personas con 6 contactos y 15 con 3: 123 al día) las nueve corridas de 05:00 a 07:40

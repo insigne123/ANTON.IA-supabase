@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { DropCriteria } from '@/lib/lead-drops';
 import { memory } from './goals-alerts-test-fixtures';
-import { ACCOUNT_FIT, accountDomain, accountsOf, accountsToOpen, expansionIndustries, readAccounts, saveAccounts, scoreAccounts, type DropAccount } from './lead-drop-accounts';
+import { ACCOUNT_FIT, accountDomain, accountsOf, accountsToOpen, expansionIndustries, learnResearchedAccounts, readAccounts, saveAccounts, scoreAccounts, type DropAccount } from './lead-drop-accounts';
 import { industrySets } from './lead-drops';
 
 const NOW = new Date('2026-11-17T11:00:00.000Z');
@@ -94,4 +94,45 @@ test('a customer\'s industries as the search can ask for them: the ones with a t
     '«forestal», «celulosa» and «puertos» were left out of the search until 16 Nov 2026');
   assert.deepEqual(industrySets({ ...criteria, industries: ['Retail', 'Forestal'] }), [['retail'], ['forestal']], 'a tag and a word in the same search leave almost nobody: one search each');
   assert.deepEqual(industrySets({ ...criteria, industries: [] }), []);
+});
+
+test('the companies the research found are learnt: scored with what it read and kept once; a known one keeps what it had (18 nov)', async () => {
+  const KEY = '0123456789abcdef';
+  const { client, tables } = memory({ lead_drop_accounts: [] as any[] }, { unique: { lead_drop_accounts: ['organization_id', 'customer_key', 'domain'] } });
+  await saveAccounts(client as any, 'org-1', KEY, [account('aurora.example', { name: 'Minera Aurora', score: 9, reason: 'Opera faenas.', openedAt: NOW.toISOString(), peopleLeft: 4, scoredAt: NOW.toISOString() })], NOW);
+  const asked: any[] = [];
+  const generate = async (options: any) => {
+    const prompt = JSON.parse(options.prompt); asked.push(prompt);
+    return { companies: prompt.empresas.map((entry: any) => ({ i: entry.i, nota: entry.empresa === 'Forestal Sur' ? 8 : 3, razon: `Por ${entry.descripcion}` })) };
+  };
+  const later = new Date('2026-11-18T08:00:00.000Z');
+  const learnt = await learnResearchedAccounts(client as any, { organizationId: 'org-1', customerKey: KEY, criteria, seller: { company: 'Brigadas SpA', offer: 'Brigadas de emergencia' }, generate: generate as any, now: later,
+    companies: [
+      { domain: 'https://www.Forestal-Sur.example/nosotros', name: 'Forestal Sur', industry: 'Forestal', size: 800, about: 'Opera aserraderos en el Biobío.' },
+      { domain: 'forestal-sur.example', name: 'Forestal Sur S.A.', about: 'La misma, dos veces.' },
+      { domain: 'aurora.example', name: 'Minera Aurora', about: 'Ya conocida.' },
+      { domain: 'ropa.example', name: 'Ropa Ltda', about: 'Vende ropa.' },
+      { domain: null, name: 'Sin Sitio', about: 'No se sabe su sitio.' },
+      { domain: 'sin-nombre.example', name: '', about: 'Sin nombre.' },
+    ] });
+  assert.equal(learnt, 2, 'the two new ones');
+  assert.deepEqual(asked[0].empresas.map((entry: any) => [entry.empresa, entry.sitio, entry.rubro, entry.empleados, entry.descripcion]),
+    [['Forestal Sur', 'forestal-sur.example', 'Forestal', 800, 'Opera aserraderos en el Biobío.'], ['Ropa Ltda', 'ropa.example', null, null, 'Vende ropa.']], 'only the new ones are scored, with what the research read');
+  const rows = new Map<string, any>(tables.lead_drop_accounts.map((row: any) => [row.domain, row]));
+  assert.equal(rows.size, 3);
+  assert.deepEqual([rows.get('forestal-sur.example').score, rows.get('forestal-sur.example').reason, rows.get('forestal-sur.example').scored_at, rows.get('forestal-sur.example').opened_at, rows.get('forestal-sur.example').origin],
+    [8, 'Por Opera aserraderos en el Biobío.', later.toISOString(), null, 'customer']);
+  assert.equal(rows.get('ropa.example').score, 3);
+  assert.deepEqual([rows.get('aurora.example').score, rows.get('aurora.example').people_left, rows.get('aurora.example').opened_at], [9, 4, NOW.toISOString()], 'the known one keeps its score and what was learnt on opening it');
+  // The next morning the finder reads them: the one that fits is opened.
+  assert.deepEqual(accountsToOpen([...(await readAccounts(client as any, 'org-1', KEY)).values()], later).map(item => item.domain), ['aurora.example', 'forestal-sur.example']);
+  // With the model down they are kept without a score, and the finder asks again; nothing to learn, a key that is not one, or no table: nothing is kept.
+  const down = memory({ lead_drop_accounts: [] as any[] }, { unique: { lead_drop_accounts: ['organization_id', 'customer_key', 'domain'] } });
+  assert.equal(await learnResearchedAccounts(down.client as any, { organizationId: 'org-1', customerKey: KEY, criteria, seller: null, generate: (async () => { throw new Error('down'); }) as any, now: later,
+    companies: [{ domain: 'forestal-sur.example', name: 'Forestal Sur', about: 'Opera aserraderos.' }] }), 1);
+  assert.deepEqual(down.tables.lead_drop_accounts.map((row: any) => [row.domain, row.score, row.scored_at]), [['forestal-sur.example', null, null]]);
+  assert.equal(await learnResearchedAccounts(down.client as any, { organizationId: 'org-1', customerKey: KEY, criteria, seller: null, now: later, companies: [] }), 0);
+  assert.equal(await learnResearchedAccounts(down.client as any, { organizationId: 'org-1', customerKey: 'no-es-una-clave', criteria, seller: null, now: later, companies: [{ domain: 'otra.example', name: 'Otra', about: 'x' }] }), 0);
+  const missing = memory({}, { missing: ['lead_drop_accounts'] });
+  assert.equal(await learnResearchedAccounts(missing.client as any, { organizationId: 'org-1', customerKey: KEY, criteria, seller: null, now: later, companies: [{ domain: 'otra.example', name: 'Otra', about: 'x' }] }), 0);
 });

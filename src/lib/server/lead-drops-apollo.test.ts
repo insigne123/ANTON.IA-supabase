@@ -409,7 +409,7 @@ test('six a day with the model down: the customer\'s roles by their words, as a 
 test('each contact is researched before it is written: the brief is kept, its facts reach the Writer, and a research that fails leaves the contact as it came', async () => {
   clearTitleAiCache();
   const generate = fakeGenerate;
-  const { client, tables } = memory(seed(), unique);
+  const { client, tables } = memory({ ...seed(), lead_drop_accounts: [] as any[] }, { unique: { ...unique.unique, lead_drop_accounts: ['organization_id', 'customer_key', 'domain'] } });
   // Two contacts, chosen by the words of their title (the finder's model is not what this test is about).
   await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0, generate: (async () => { throw new Error('down'); }) as any,
     plan: { size: 2, weekdays: [1, 2, 3, 4, 5] } });
@@ -438,6 +438,12 @@ test('each contact is researched before it is written: the brief is kept, its fa
   assert.equal(other.brief, undefined);
   assert.equal(other.domain, null);
   assert.ok(other.draft && falabella.draft, 'both are written');
+  // The search named no site for any company, so it kept none; the research found Falabella's, and it is kept for the next search by
+  // company under the key the drop carries (18 Nov 2026: the first real runs left the companies' table empty).
+  assert.match(tables.lead_drops[0].criteria.accountsKey, /^[0-9a-f]{16}$/);
+  assert.equal(tables.lead_drops[0].criteria.trace.learnt, 0);
+  assert.deepEqual(tables.lead_drop_accounts.map((row: any) => [row.organization_id, row.customer_key, row.domain, row.name, row.industry, row.origin, row.opened_at]),
+    [[ORG, tables.lead_drops[0].criteria.accountsKey, 'falabella.com', 'Falabella', 'Retail', 'customer', null]]);
   // The Writer opens with what the research found, and reads the company's facts.
   const forFalabella = writerPrompts.find(prompt => JSON.stringify(prompt.observations).includes('Falabella'));
   assert.equal(forFalabella.brief.angle, 'Para abrir: Pregúntale cómo van a revisar los antecedentes de quienes entren al centro nuevo. Por qué le sirve: Un centro nuevo suma cientos de ingresos que revisar antes de la temporada alta.');
