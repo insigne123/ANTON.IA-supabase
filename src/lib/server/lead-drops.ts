@@ -586,11 +586,12 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
       const hurried = Boolean(deps.timeLeft && deps.timeLeft() < GROUP_MS - 20_000);
       trace.hurried = hurried;
       if (!deps.quick && !hurried) {
-        if (sets.length) {
-          const heads = await quiet(perSet({ ...searchInput(criteria, FINDER_BASE), titles: [], seniorities: COMPANY_HEADS, includeSimilarTitles: false }), FINDER_BASE);
-          for (const entry of heads || []) if (!entries.has(entry.lead.id)) { entries.set(entry.lead.id, entry); narrowIds.add(entry.lead.id); }
-        }
-        learn(accountsOf([...entries.values()].filter(entry => narrowIds.has(entry.lead.id))));
+        // The heads of the customer's companies name those companies, and nothing else: they are not offered as contacts. As
+        // candidates they filled the «para explorar» place with the owners and founders of very small firms (18 Nov 2026: 15 of the
+        // 24 of that day), whom nobody asked for. Whoever wants owners names them among the roles, and the search by role brings them.
+        const heads = sets.length
+          ? await quiet(perSet({ ...searchInput(criteria, FINDER_BASE), titles: [], seniorities: COMPANY_HEADS, includeSimilarTitles: false }), FINDER_BASE) : null;
+        learn(accountsOf([...[...entries.values()].filter(entry => narrowIds.has(entry.lead.id)), ...(heads || [])]));
         trace.learnt = touched.size;
         await scoreNew();
       }

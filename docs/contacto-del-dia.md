@@ -616,6 +616,14 @@ aprenden ahora las empresas (`learnResearchedAccounts` en `src/lib/server/lead-d
 Depende de que la investigación corra: sin saldo en el buscador web (Serper) no hay sitio que aprender, como pasó el 18 de noviembre
 desde las 02:41 de Chile (29 de 123 contactos con investigación).
 
+### Desde el 18 de noviembre: quienes encabezan una empresa no se ofrecen como contactos
+
+En la corrida del 18 de noviembre, 15 de los 24 contactos «para explorar» eran dueños, fundadores o gerentes generales de empresas
+muy chicas («Main Owner», «Co-founder», «Entrepreneur»), que nadie había pedido. Venían de la búsqueda que encuentra las empresas del
+cliente a través de quienes las encabezan (`COMPANY_HEADS`): esas personas entraban además como candidatas, y la nota las dejaba en
+el lugar de explorar. Ahora solo nombran a sus empresas (`learn(accountsOf(...))`); quien quiera dueños los pone entre sus cargos y
+la búsqueda por cargo los trae.
+
 ### Desde el 18 de noviembre: la preparación parte a las 02:00
 
 Con todo GrupoExpro en planes por persona (13 personas con 6 contactos y 15 con 3: 123 al día) las nueve corridas de 05:00 a 07:40
