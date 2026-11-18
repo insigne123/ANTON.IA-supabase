@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { SegmentedTabs, tabPanelProps } from '@/components/ui/segmented-tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
-import { dropEmailPreview, dropName, dropSchedule, needsLookup, placeLabel, shortDay, type DropFit, type DropItem } from '@/lib/lead-drops';
+import { dropEmailPreview, dropName, dropRecommendation, dropSchedule, needsLookup, placeLabel, shortDay, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
 import { DropCallPanel } from './DropCallPanel';
 import { DropAvatar, DropStageChip, dropStage } from './drop-contact-parts';
@@ -141,6 +141,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
       after: item.phone?.state === 'found' ? <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"><span className="sr-only"> (con teléfono)</span></span> : null },
   ];
   const shown = tabs.some(entry => entry.value === tab) ? tab : 'why';
+  // How much the judge recommends it (lead-drop-gate.ts): a chip by the name, and its reason over what matched.
+  const recommended = dropRecommendation(item);
   const current = Math.min(step, Math.max(0, emails.length - 1));
   const stepLabel = (index: number) => index === 0 ? 'Primer correo' : `Seguimiento ${index}`;
   const box = 'rounded-xl border bg-background p-4';
@@ -153,6 +155,8 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Heading id={`${uid}-name`} className="text-lg font-semibold tracking-tight">{dropName(item)}</Heading>
             <DropStageChip stage={stage} />
+            {recommended ? <span title={recommended.reason || undefined} className={cn('rounded-full px-2 py-0.5 text-xs font-medium tabular-nums',
+              recommended.level === 'high' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-foreground/75')}>{recommended.label}</span> : null}
             {item.role === 'refer' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Trabaja en el área que buscas: no decide la compra, pero puede decirte quién la ve o presentarte">Puede derivarte</span> : null}
             {item.track === 'explore' && item.role !== 'refer' ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title="Un cargo vecino a los que buscas, para probar si también te sirve">Para explorar</span> : null}
             {item.expanded ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/75" title={`${item.expanded}: un rubro vecino a los tuyos. Ampliamos la búsqueda porque de tus rubros ya te mostramos a casi todos`}>Rubro vecino</span> : null}
@@ -190,6 +194,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
           <div className="grid gap-3 lg:grid-cols-2">
             <section className={box} aria-labelledby={`${uid}-why`}>
               <p id={`${uid}-why`} className={labelClass}>Por qué te lo recomendamos</p>
+              {recommended?.reason ? <p className="mt-2 text-sm leading-6"><span className="font-medium tabular-nums">{recommended.pct} %. </span>{recommended.reason}</p> : null}
               {reasons.length ? <ul className="mt-2 space-y-2">{reasons.map(reason => <li key={reason} className="flex gap-2.5 text-sm leading-6">
                 <CircleCheck className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><span>{reason}</span></li>)}</ul> : null}
               <p className={cn('text-sm leading-6', reasons.length ? 'mt-2 text-muted-foreground' : 'mt-2')}>{item.why}</p>

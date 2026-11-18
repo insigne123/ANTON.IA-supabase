@@ -23,8 +23,10 @@ const ROUND_MS = 120_000;
 /**
  * A team with several contacts a day (organizations.lead_drop_size, 12 Nov 2026) has drops of six or more: a round takes at most
  * this many contacts (and PARALLEL drops), and a large drop writes all of its own at once, so it ends in one round too.
+ * Twelve since 18 Nov 2026 (two drops of six, or four of three): each drop now judges its contacts and may research replacements
+ * before writing (lead-drop-gate.ts), so a round is longer and a run often has time for one only.
  */
-const ROUND_CONTACTS = 8;
+const ROUND_CONTACTS = 12;
 const DROP_PARALLEL = 6;
 
 /**

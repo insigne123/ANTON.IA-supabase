@@ -129,6 +129,34 @@ const SCRIPT = { points: ['Turnos de noche: quién responde ante una emergencia 
   voicemail: 'Hola Pedro, soy Ana de Brigadas del Sur. Te llamaba por las brigadas de emergencia en faena. Te escribo un correo con el detalle.',
   whatsapp: 'Hola Pedro, soy Ana de Brigadas del Sur. Apoyamos a faenas con brigadas de emergencia. ¿Te sirve conversar cinco minutos esta semana?' };
 
+test('how much a contact is recommended: a chip by its name with the judge\'s reason, and that reason over what matched', async () => {
+  const actions = { enrich: () => {}, save: () => {}, approve: async () => {}, feedback: async () => {}, phone: async () => {}, script: async () => {}, refresh: async () => {}, edit: async () => true };
+  const render = async (extra: Record<string, unknown>) => {
+    const host = dom.window.document.createElement('div');
+    dom.window.document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => root.render(React.createElement(card.DropContactCard, { item: { ...item, ...extra }, actions, busy: false, enriching: false, defaultOpen: true })));
+    await press([...host.querySelectorAll('[role="tab"]')].find(entry => (entry.textContent || '').startsWith('Por qué'))!);
+    const read = { text: host.textContent || '', chip: [...host.querySelectorAll('span')].find(entry => / % recomendado$/.test(entry.textContent || '')) };
+    await act(async () => root.unmount());
+    host.remove();
+    return read;
+  };
+  const high = await render({ recommendation: { pct: 91, reason: 'Minera con brigadas propias; decide la compra.' } });
+  assert.match(high.text, /^PAPedro ArayaCampaña por aprobar91 % recomendadoGerente HSE · Minera Andina/);
+  assert.equal(high.chip!.getAttribute('title'), 'Minera con brigadas propias; decide la compra.');
+  assert.match(high.chip!.className, /emerald/, 'only the clear ones get colour');
+  assert.match(high.text, /Por qué te lo recomendamos91 %\. Minera con brigadas propias; decide la compra\.Calza con tu cliente ideal por su cargo\./);
+  const fair = await render({ recommendation: { pct: 64, reason: null } });
+  assert.match(fair.chip!.className, /bg-muted/);
+  assert.equal(fair.chip!.getAttribute('title'), null);
+  assert.match(fair.text, /Por qué te lo recomendamosCalza con tu cliente ideal/, 'without a reason, only the chip');
+  // A contact from before the judge existed shows nothing of it.
+  const before = await render({});
+  assert.equal(before.chip, undefined);
+  assert.doesNotMatch(before.text, /recomendado/);
+});
+
 test('«Para llamar»: the mobile with the email or after it, the number with its two ways once it lands, and the script of the call, prepared when asked', async () => {
   const asked: string[] = [];
   const actions = { save: () => {}, approve: async () => {}, feedback: async () => {}, edit: async () => true,

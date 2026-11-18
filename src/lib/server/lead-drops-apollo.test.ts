@@ -76,7 +76,10 @@ const sequence = (name: string) => ({ reply: `Le escribí a ${name}.`, question:
   { day: 11, subject: 'Cierro aquí', body: `Hola ${name},\n\nEs mi último correo: ¿te sirve verlo con un caso tuyo?\n\nPersona u-ana` },
 ] }] });
 const writerPrompts: any[] = [];
+// The judge of a drop (lead-drop-gate.ts) answers for nobody in these tests unless one says otherwise: everyone is kept, unjudged.
+const isJudge = (options: any) => String(options.systemPrompt).startsWith('Eres quien decide si un contacto vale');
 const fakeGenerate = async (options: any) => {
+  if (isJudge(options)) return { contactos: [] };
   if (options.prompt.includes('"companies"')) return { companies: [] };
   if (String(options.systemPrompt).startsWith('Le explicas a un vendedor')) return { contacts: [] };
   if (String(options.systemPrompt).startsWith('Eres la Revisora')) return { verdict: 'ok', issues: [] };
@@ -124,6 +127,7 @@ test('the emails of a recommended contact come from the drops\' own writer, with
   ];
   const read: any[] = [];
   const own = async (options: any) => {
+    if (isJudge(options)) return { contactos: [] };
     if (options.prompt.includes('"companies"')) return { companies: [] };
     if (String(options.systemPrompt).startsWith('Le explicas a un vendedor')) return { contacts: [] };
     const prompt = JSON.parse(options.prompt);
@@ -454,4 +458,142 @@ test('each contact is researched before it is written: the brief is kept, its fa
   assert.equal(forFalabella.brief.angle, 'Para abrir: Pregúntale cómo van a revisar los antecedentes de quienes entren al centro nuevo. Por qué le sirve: Un centro nuevo suma cientos de ingresos que revisar antes de la temporada alta.');
   assert.match(JSON.stringify(forFalabella.observations), /Abrirá un centro de distribución en Santiago \(Diario Financiero, 3 nov 2026\)/);
   assert.equal(writerPrompts.find(prompt => !JSON.stringify(prompt.observations).includes('Falabella')).brief.angle, null);
+});
+
+// ─── The judge of a drop (lead-drop-gate.ts, 18 Nov 2026) ──────────────────────────────────────────────────────────
+
+/** A finder's run over eight people of eight companies, scored in that order, for whoever is asked. */
+const gateCompanies = ['Ripley', 'Falabella', 'Paris', 'Easy', 'Corona', 'Sodimac', 'Jumbo', 'Unimarc'];
+const gateSearch = (from = 21, companies = gateCompanies) => async (input: any) => (!input.titles.length ? { results: [], costUsd: 0 }
+  : { results: apolloDropEntries(companies.map((company, index) => person(from + index, company))), costUsd: 0 });
+const finderGenerate = (companies = gateCompanies) => async (options: any) => {
+  const prompt = JSON.parse(options.prompt);
+  if (prompt.cargoBuscado) return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, match: 'exact' })) };
+  if (prompt.personas) return { people: prompt.personas.map((entry: any) => ({ i: entry.i, cargo: 10, empresa: Math.max(1, 10 - companies.indexOf(entry.empresa)) })) };
+  return { titles: prompt.cargos.map((entry: any) => ({ i: entry.i, variants: [], keywords: [] })) };
+};
+/** The writer's model with a judge that answers by company: `pct` for those named, nothing for the rest. */
+const judging = (pct: Record<string, number>, seen: any[] = []) => async (options: any) => {
+  if (!isJudge(options)) return fakeGenerate(options);
+  const prompt = JSON.parse(options.prompt);
+  seen.push(prompt);
+  return { contactos: prompt.contactos.flatMap((entry: any) => entry.empresa in pct ? [{ i: entry.i, pct: pct[entry.empresa], razon: `Sobre ${entry.empresa}.`, rubro: 'Tiendas por departamento' }] : []) };
+};
+const gateSeed = () => {
+  const base = seed();
+  return { ...base, enriched_leads: [] as any[], organization_members: [...base.organization_members, { organization_id: ORG, user_id: 'u-ben', role: 'member' }],
+    profiles: [...base.profiles, profile('u-ben', { targetRoles: 'Gerente de Personas', targetIndustries: 'retail', targetLocations: 'Chile', targetCompanySize: '51-200' })] };
+};
+const two = { size: 2, weekdays: [1, 2, 3, 4, 5] };
+
+test('each contact gets a percentage of recommendation: whoever falls short gives their place to the best reserve, and is not searched for again', async () => {
+  clearTitleAiCache();
+  const { client, tables } = memory(gateSeed(), unique);
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: gateSearch() as any, budgetUsd: 3, spentUsd: 0, generate: finderGenerate() as any, plan: two });
+  const drop = tables.lead_drops[0];
+  assert.deepEqual(drop.items.map((item: any) => item.company), ['Ripley', 'Falabella']);
+  assert.deepEqual(drop.criteria.spares.map((item: any) => item.company), ['Paris', 'Easy', 'Corona', 'Sodimac'], 'the next ones by the finder\'s score, twice the drop\'s size, kept as contacts ready to write');
+  assert.ok(drop.criteria.spares.every((item: any) => item.leadId && item.fit && item.why && item.draft === null));
+
+  // Someone else of the team, later the same morning: neither the companies offered today nor the people kept in reserve.
+  await planOrganizationDrops(client, ORG, ['u-ben'], { now: TUESDAY, search: gateSearch(41, ['Ripley Chile', 'Falabella S.A.', ...gateCompanies.slice(2)]) as any, budgetUsd: 3, spentUsd: 0,
+    generate: finderGenerate(['Ripley Chile', 'Falabella S.A.', ...gateCompanies.slice(2)]) as any, plan: two });
+  const other = tables.lead_drops.find((row: any) => row.user_id === 'u-ben');
+  assert.deepEqual(other.items.map((item: any) => item.company), ['Paris', 'Easy'], 'other people of the companies Ana did not get; not Ripley nor Falabella under another name');
+  await planOrganizationDrops(client, ORG, ['u-ben'], { now: TUESDAY, search: gateSearch() as any, budgetUsd: 3, spentUsd: 0, generate: finderGenerate() as any, plan: two, claimed: true });
+  assert.ok(!tables.lead_drops.find((row: any) => row.user_id === 'u-ben').items.some((item: any) => drop.criteria.spares.some((spare: any) => spare.leadId === item.leadId)),
+    'Ana\'s reserves are hers while her drop is pending');
+
+  const seen: any[] = [];
+  const researched: string[] = [];
+  const research = async (input: any) => { researched.push(input.contact.company); return { domain: null, brief: { company: `${input.contact.company} vende en tiendas.`, news: null, fit: null, role: null, opener: null } }; };
+  drop.items[0].industry = null;
+  const written = await writeDrop(client, drop, { generate: judging({ Ripley: 91, Falabella: 30, Paris: 55, Easy: 78 }, seen) as any, now: TUESDAY, research: research as any });
+  assert.deepEqual(researched, ['Ripley', 'Falabella', 'Paris', 'Easy'], 'the drop\'s two, then two reserves for the one that fell short');
+  assert.deepEqual(seen.map(prompt => prompt.contactos.map((entry: any) => [entry.empresa, entry.que_hace])), [
+    [['Ripley', 'Ripley vende en tiendas.'], ['Falabella', 'Falabella vende en tiendas.']], [['Paris', 'Paris vende en tiendas.'], ['Easy', 'Easy vende en tiendas.']]]);
+  assert.deepEqual(seen[0].cliente_ideal, { cargos: ['Gerente de Personas'], rubros: ['retail'], lugares: ['Chile'], empleados: ['51 a 200'] });
+  assert.deepEqual(written.items.map(item => [item.company, item.recommendation, Boolean(item.draft)]), [
+    ['Ripley', { pct: 91, reason: 'Sobre Ripley.' }, true], ['Easy', { pct: 78, reason: 'Sobre Easy.' }, true]], 'Easy takes Falabella\'s place; Paris, under the minimum too, takes nobody\'s');
+  assert.equal(written.items[0].industry, 'Tiendas por departamento', 'what the company does, when the search did not say');
+  assert.equal(written.items[1].industry, 'Retail');
+  const saved = tables.lead_drops.find((row: any) => row.id === drop.id);
+  assert.equal(saved.status, 'ready');
+  assert.equal(saved.criteria.spares, undefined, 'the reserves it did not use are free again');
+  assert.deepEqual(saved.criteria.gate, { min: 60, judged: 4, replaced: 1, dropped: 0, rejected: [id(22), id(23)] });
+  assert.deepEqual(saved.criteria.titles, ['Gerente de Personas'], 'the rest of what the search kept stays');
+  // The percentage reaches the morning email (opening the line of why), its text and the PDF.
+  const email = dropEmailSection(saved.items, saved.id, 'https://app.test');
+  assert.match(email.html, />91 % recomendado<\/span> &nbsp;/);
+  assert.match(email.html, />78 % recomendado<\/span>/);
+  assert.match(email.text, /Recomendación: 91 %\. Sobre Ripley\.\nPor qué: /);
+  const doc = JSON.stringify(dropDocument(saved.items, { name: 'Ana', date: '2026-10-20', link: 'https://app.test/x' }));
+  assert.match(doc, /Por qué te lo recomendamos · 91 %/);
+  assert.match(doc, /Sobre Easy\./);
+
+  // The next day: neither the two she got, nor the two the judge left out.
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: new Date('2026-10-21T10:00:00.000Z'), search: gateSearch() as any, budgetUsd: 3, spentUsd: 0, generate: finderGenerate() as any, plan: two });
+  assert.deepEqual(tables.lead_drops.find((row: any) => row.user_id === 'u-ana' && row.drop_date === '2026-10-21').items.map((item: any) => item.company), ['Corona', 'Sodimac']);
+});
+
+test('only who reaches the minimum is delivered: fewer contacts, or none, rather than weak ones; and without the judge the drop goes as it came', async () => {
+  clearTitleAiCache();
+  const plan = async () => {
+    const { client, tables } = memory(gateSeed(), unique);
+    await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: gateSearch() as any, budgetUsd: 3, spentUsd: 0, generate: finderGenerate() as any, plan: two });
+    return { client, drop: tables.lead_drops[0], tables };
+  };
+  // One falls short and no reserve reaches the minimum: the drop goes with one.
+  let run = await plan();
+  let written = await writeDrop(run.client, run.drop, { generate: judging({ Ripley: 40, Falabella: 82, Paris: 20, Easy: 59 }) as any, now: TUESDAY });
+  assert.deepEqual(written.items.map(item => [item.company, item.recommendation?.pct]), [['Falabella', 82]]);
+  assert.deepEqual(run.tables.lead_drops[0].criteria.gate, { min: 60, judged: 4, replaced: 0, dropped: 1, rejected: [id(21), id(23), id(24)] });
+
+  // Nobody reaches it: the drop is empty and says why, and nothing is written.
+  run = await plan();
+  writerPrompts.length = 0;
+  written = await writeDrop(run.client, run.drop, { generate: judging({ Ripley: 10, Falabella: 20, Paris: 30, Easy: 40, Corona: 50, Sodimac: 55 }) as any, now: TUESDAY });
+  assert.deepEqual(written, { written: 0, items: [] });
+  assert.equal(writerPrompts.length, 0);
+  assert.deepEqual([run.tables.lead_drops[0].status, run.tables.lead_drops[0].items, run.tables.lead_drops[0].error], ['empty', [], 'Ningún contacto alcanzó el 60 % de recomendación hoy.']);
+  assert.deepEqual(run.tables.lead_drops[0].criteria.gate, { min: 60, judged: 6, replaced: 0, dropped: 2, rejected: [id(21), id(22), id(23), id(24), id(25), id(26)] });
+  assert.equal(run.tables.lead_drops[0].criteria.spares, undefined);
+
+  // A minimum of 0 only shows the percentage: nobody is replaced nor left out, and the best goes first.
+  run = await plan();
+  written = await writeDrop(run.client, run.drop, { generate: judging({ Ripley: 10, Falabella: 95 }) as any, now: TUESDAY, minRecommendation: 0 });
+  assert.deepEqual(written.items.map(item => [item.company, item.recommendation?.pct]), [['Falabella', 95], ['Ripley', 10]]);
+  assert.deepEqual(run.tables.lead_drops[0].criteria.gate, { min: 0, judged: 2, replaced: 0, dropped: 0 });
+
+  // Whoever the judge skipped is kept, after the judged ones; the reserves are not touched for them.
+  run = await plan();
+  written = await writeDrop(run.client, run.drop, { generate: judging({ Falabella: 70 }) as any, now: TUESDAY });
+  assert.deepEqual(written.items.map(item => [item.company, item.recommendation?.pct]), [['Falabella', 70], ['Ripley', undefined]]);
+
+  // The judge down: the drop is written as the finder left it, without a percentage, and says nothing of a judge.
+  run = await plan();
+  written = await writeDrop(run.client, run.drop, { generate: (async (options: any) => { if (isJudge(options)) throw new Error('down'); return fakeGenerate(options); }) as any, now: TUESDAY });
+  assert.deepEqual(written.items.map(item => [item.company, item.recommendation, Boolean(item.draft)]), [['Ripley', undefined, true], ['Falabella', undefined, true]]);
+  assert.equal(run.tables.lead_drops[0].criteria.gate, undefined);
+  assert.equal(run.tables.lead_drops[0].criteria.spares, undefined, 'and still lets its reserves go');
+
+  // A team of one contact a day has reserves too, by the words of the title as its contact came: a weak one is replaced, not lost.
+  const single = memory(seed(), unique);
+  await planOrganizationDrops(single.client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0 });
+  const [first] = single.tables.lead_drops[0].items;
+  const reserves = single.tables.lead_drops[0].criteria.spares.map((item: any) => item.company);
+  assert.equal(reserves.length, 2, 'two reserves for a drop of one');
+  assert.ok(!reserves.includes(first.company) && !reserves.includes('Lider') && !reserves.includes('Ripley'), 'other companies, nobody the team has, nobody without an email');
+  written = await writeDrop(single.client, single.tables.lead_drops[0], { generate: judging({ [first.company]: 20, [reserves[0]]: 45, [reserves[1]]: 77 }) as any, now: TUESDAY });
+  assert.deepEqual(written.items.map(item => [item.company, item.recommendation?.pct]), [[reserves[1], 77]]);
+
+  // The judge down for the reserves only: what it said of the drop stands, and nobody comes in unjudged.
+  run = await plan();
+  let calls = 0;
+  written = await writeDrop(run.client, run.drop, { now: TUESDAY, generate: (async (options: any) => {
+    if (isJudge(options) && ++calls > 1) throw new Error('down');
+    return judging({ Ripley: 88, Falabella: 15 })(options);
+  }) as any });
+  assert.deepEqual(written.items.map(item => [item.company, item.recommendation?.pct]), [['Ripley', 88]]);
+  assert.deepEqual(run.tables.lead_drops[0].criteria.gate, { min: 60, judged: 2, replaced: 0, dropped: 1, rejected: [id(22)] });
 });

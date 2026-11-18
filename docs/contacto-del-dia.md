@@ -117,7 +117,7 @@ Con un contacto al día alcanzaba con tomar al primero cuyo cargo tuviera las pa
 
 - **Un cargo vecino se dice como lo que es:** «Su cargo es vecino a los que buscas: te lo proponemos para probar si también te sirve». En la tabla de calce, su cargo dice «En parte».
 - **Si el modelo falla**, quedan los cargos que se reconocen por sus palabras, y quien se queda sin nadie recibe los contactos como un equipo de un contacto.
-- **Escribir tarda más:** un envío de 6 contactos son 24 correos. La corrida escribe los 6 a la vez y junta en una ronda hasta 8 contactos.
+- **Escribir tarda más:** un envío de 6 contactos son 24 correos. La corrida escribe los 6 a la vez y junta en una ronda hasta 12 contactos (8 hasta el 18 de noviembre).
 - **Modelo:** `LEAD_DROPS_FINDER_MODEL` (por defecto, el de `LEAD_DROPS_RESEARCH_MODEL` o Haiku 5.5).
 
 ### La investigación corta de cada contacto (`src/lib/server/lead-drop-research.ts`)
@@ -630,6 +630,43 @@ Con todo GrupoExpro en planes por persona (13 personas con 6 contactos y 15 con 
 no alcanzaban: una corrida escribe unos 16 contactos (dos rondas de hasta 8), y un contacto que no está escrito cuando sale el aviso
 de las 08:00 no se envía ese día. `leadDropsTick` corre ahora de 02:00 a 07:40 de Chile, dieciocho corridas, sin cambiar cuántos se
 escriben a la vez.
+
+### Desde el 18 de noviembre: cada contacto con su porcentaje de recomendación, y solo se entregan los que alcanzan el mínimo
+
+Pedido del dueño tras revisar la corrida del 18 de noviembre: «un módulo de IA que les asigne un porcentaje de recomendación y que haga volver a buscar si ese porcentaje es bajo para un lead, de esa manera solo le entregamos leads buenos».
+
+**Qué fallaba.** El buscador ordena a cientos de personas solo por su cargo y el nombre de su empresa, que es todo lo que entrega la búsqueda gratuita de Apollo. Nunca supo a qué se dedica la empresa. Por eso llegaban dueños de firmas de una persona, consultores y empresas de otro rubro.
+
+**Qué hace ahora** (`src/lib/server/lead-drop-gate.ts`, dentro de `writeDrop`):
+
+1. **Investiga y después juzga.** Con la investigación corta de cada contacto ya hecha, un modelo lee qué vende quien recibe, a quién le vende (cargos, rubros, lugares, tamaños y lo que escribió «en sus palabras») y, de cada contacto, su cargo, su empresa, qué hace la empresa y qué está pasando ahí. Responde un porcentaje de 0 a 100, una frase con el motivo y el rubro de la empresa.
+2. **Cómo se arma el porcentaje.** La mitad es la empresa (¿necesita lo que se vende?, ¿tiene dotación?, ¿es competencia?) y la mitad es la persona (¿es uno de los cargos declarados?, ¿tiene mando?). De 85 a 100 calza de lleno; de 70 a 84, con una reserva menor; de 60 a 69, vale el intento; bajo 60, no se entrega.
+3. **Reemplaza a los que no alcanzan.** El planificador guarda, por persona, reservas: los siguientes mejores de la misma búsqueda, el doble del tamaño del envío (`criteria.spares`, mínimo 2 y máximo 12). Se ordenan por el puntaje del buscador con IA o, en los equipos de un contacto al día, por las palabras del cargo. Por cada contacto bajo el mínimo se investigan y juzgan dos reservas, y las mejores toman los lugares.
+4. **Entrega solo los buenos, el mejor primero.** Quien sigue bajo el mínimo no se escribe ni se entrega. Si ninguno alcanza, el envío queda vacío con el motivo «Ningún contacto alcanzó el 60 % de recomendación hoy.» y ese día no sale correo.
+5. **No los vuelve a traer.** Los rechazados quedan en `criteria.gate.rejected` y las búsquedas del equipo los excluyen mientras dure la memoria de envíos (180 días).
+
+**Qué ve la persona.** Una etiqueta «92 % recomendado» en la tarjeta del contacto (con color solo desde 85 %), el porcentaje en la lista lateral, el motivo del juez sobre «Por qué te lo recomendamos», la etiqueta al inicio de la línea de por qué en el correo de la mañana y el porcentaje en el título del recuadro del PDF. Además, cuando Apollo no dijo el rubro, se muestra el que leyó el juez en vez de «Sin dato».
+
+**Empresas sin repetir entre personas.** Cuatro vendedores recibieron el mismo día a alguien de la misma cadena, como «Walmart» y «Walmart Chile». Ahora la empresa se compara por nombre sin forma legal ni país (`companyKey`), y lo que una persona del equipo recibió hoy no se ofrece a otra, tampoco entre corridas distintas de la misma mañana (`knownPeople` devuelve `companies`).
+
+**Medición con los 123 contactos reales del 18 de noviembre** (28 envíos de un equipo, modelo Haiku, US$ 0,04 en total, 2 a 10 segundos por envío):
+
+| Grupo | Contactos | Promedio | Bajo 60 % |
+| --- | --- | --- | --- |
+| Cargos del cliente ideal | 82 | 74 % | 4 |
+| «Puede derivarte» | 17 | 62 % | 7 |
+| «Para explorar» | 24 | 38 % | 23 |
+
+Los más bajos (12 a 30 %) fueron un consultor independiente, dueños de emprendimientos sin dotación y el gerente general de una empresa de software. Los más altos (85 a 88 %), gerentes de personas de mineras, de logística y de alimentos. Solo 28 de los 123 tenían investigación ese día (Serper sin saldo): sin ella el juez decide por el cargo y el nombre de la empresa.
+
+**Límites conocidos.**
+
+- **El mismo contacto puede variar unos 10 puntos entre dos corridas.** Cerca del mínimo, eso decide si entra.
+- **Si las reservas tampoco alcanzan, la persona recibe menos contactos ese día, o ninguno.** No hay una segunda búsqueda en la misma mañana.
+- **El reemplazo solo se intenta en el primer minuto del envío,** para que una noche lenta no deje un envío a medio escribir (`GATE_REPLACE_BEFORE_MS`). Pasado ese minuto, igual se dejan fuera los que no alcanzan.
+- **Si el modelo no responde, nadie se juzga** y el envío sale como antes, sin porcentaje.
+
+**Ajustes.** `LEAD_DROPS_MIN_RECOMMENDATION` (0 a 100, por defecto 60; con 0 el porcentaje solo se muestra y nadie se reemplaza ni se deja fuera) y `LEAD_DROPS_GATE_MODEL` (por defecto, el de `LEAD_DROPS_RESEARCH_MODEL` o Haiku 5.5). La traza del envío guarda cómo le fue: `criteria.gate = { min, judged, replaced, dropped, rejected }`.
 
 ## Cómo funciona
 
