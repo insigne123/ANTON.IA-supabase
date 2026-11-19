@@ -597,3 +597,42 @@ test('only who reaches the minimum is delivered: fewer contacts, or none, rather
   assert.deepEqual(written.items.map(item => [item.company, item.recommendation?.pct]), [['Ripley', 88]]);
   assert.deepEqual(run.tables.lead_drops[0].criteria.gate, { min: 60, judged: 2, replaced: 0, dropped: 1, rejected: [id(22)] });
 });
+
+test('a team of one contact whose first hundred are all known looks further down Apollo\'s list: the same customer first, the titles and places alone after', async () => {
+  const known = () => {
+    const data = seed();
+    // The team has everyone the first page brings.
+    data.enriched_leads = people().map((entry, index) => ({ id: `e-${index}`, organization_id: ORG, user_id: 'u-ana', email: `x${index}@empresa.cl`, linkedin_url: null,
+      source_provider_id: entry.id, title: 'Gerente', organization_industry: 'Retail', created_at: '2026-10-01T00:00:00Z' }));
+    return data;
+  };
+  const asked: any[] = [];
+  const deeperSearch = (where: 'narrow' | 'broad' | 'nowhere') => async (input: any) => {
+    asked.push(input);
+    const first = people();
+    const more = input.maxResults > 100 && ((where === 'narrow' && input.industryKeywords.length) || (where === 'broad' && !input.industryKeywords.length))
+      ? [person(31, 'Cencosud'), person(32, 'Mallplaza')] : [];
+    return { results: apolloDropEntries([...first, ...more]), costUsd: 0 };
+  };
+  const run = async (where: 'narrow' | 'broad' | 'nowhere') => {
+    asked.length = 0;
+    const { client, tables } = memory(known(), unique);
+    await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: deeperSearch(where) as any, budgetUsd: 3, spentUsd: 0 });
+    return tables.lead_drops[0];
+  };
+  // Further down, within the customer's industry: found there, and nothing wider is asked.
+  let drop = await run('narrow');
+  assert.deepEqual(asked.map(call => [call.maxResults, call.industryKeywords.length > 0]), [[100, true], [300, true]]);
+  assert.equal(drop.status, 'pending');
+  assert.equal(drop.items[0].company, 'Cencosud');
+  assert.equal(drop.items[0].fit.find((entry: any) => entry.criterion === 'Rubro').match, 'yes', 'still within the industry asked');
+  // Nobody new there either: the titles and places alone, and the fit says the industry was not asked.
+  drop = await run('broad');
+  assert.deepEqual(asked.map(call => [call.maxResults, call.industryKeywords.length > 0]), [[100, true], [300, true], [300, false]]);
+  assert.equal(drop.items[0].company, 'Cencosud');
+  assert.notEqual(drop.items[0].fit.find((entry: any) => entry.criterion === 'Rubro').match, 'yes');
+  // Nobody new anywhere: empty, with its reason, after both tries.
+  drop = await run('nowhere');
+  assert.equal(asked.length, 3);
+  assert.deepEqual([drop.status, drop.error], ['empty', 'La búsqueda no trajo contactos nuevos con correo.']);
+});

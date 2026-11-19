@@ -668,6 +668,12 @@ Los más bajos (12 a 30 %) fueron un consultor independiente, dueños de emprend
 
 **Ajustes.** `LEAD_DROPS_MIN_RECOMMENDATION` (0 a 100, por defecto 60; con 0 el porcentaje solo se muestra y nadie se reemplaza ni se deja fuera) y `LEAD_DROPS_GATE_MODEL` (por defecto, el de `LEAD_DROPS_RESEARCH_MODEL` o Haiku 5.5). La traza del envío guarda cómo le fue: `criteria.gate = { min, judged, replaced, dropped, rejected }`.
 
+### Desde el 19 de noviembre: con Apollo, la búsqueda sí baja más en la lista cuando todos son conocidos
+
+**Qué fallaba.** Cuando la búsqueda solo trae personas que el equipo ya tiene, se busca una vez más, «tres veces más abajo». Esa segunda búsqueda tenía el tope de una corrida de Leads Finder (100). Con Apollo la primera búsqueda ya pide 100, así que la segunda nunca se ejecutaba. Un equipo de un contacto al día con un cliente ideal angosto se quedaba sin nadie en un par de semanas: el 18 de noviembre dos personas de un equipo quedaron con «La búsqueda no trajo contactos nuevos con correo».
+
+**Qué hace ahora.** Con Apollo (gratis, hasta 1.000 por búsqueda) se pide hasta 300: primero el mismo cliente ideal, con sus rubros y tamaños, y solo si tampoco hay nadie nuevo, los cargos y lugares solos. Con Leads Finder sigue como antes. No aplica a los equipos con buscador con IA, que ya bajan en la lista según cuántas personas conoce el equipo.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 02:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
