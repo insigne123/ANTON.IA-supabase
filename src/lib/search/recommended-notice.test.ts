@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { recommendedNoticeKey, recommendedNoticeOf, recommendedNoticeText } from './recommended-notice';
+import { recommendedNoticeKey, recommendedNoticeOf, recommendedNoticeText, recommendedNoticeTitle } from './recommended-notice';
 
 const TODAY = '2026-11-19';
 const item = (extra: Record<string, unknown> = {}) => ({ leadId: 'x', draft: { subject: 'Hola', body: 'Hola' }, ...extra });
@@ -24,6 +24,14 @@ test('the search page says which recommended contacts still wait for the person,
   assert.deepEqual(one, { id: 'drop-1', total: 1, left: 1, today: true });
   assert.equal(recommendedNoticeText(one!), 'Hoy elegimos un contacto para ti con tu cliente ideal, con su campaña ya escrita.');
   assert.equal(recommendedNoticeText({ id: 'd', total: 1, left: 1, today: false }), 'Tienes un contacto elegido para ti por revisar, con su campaña ya escrita.');
+});
+
+test('the headline says how many wait: today\'s whole, or what is left', () => {
+  assert.equal(recommendedNoticeTitle({ id: 'd', total: 6, left: 6, today: true }), 'Tienes 6 contactos recomendados para hoy');
+  assert.equal(recommendedNoticeTitle({ id: 'd', total: 1, left: 1, today: true }), 'Tienes un contacto recomendado para hoy');
+  assert.equal(recommendedNoticeTitle({ id: 'd', total: 6, left: 2, today: true }), 'Te esperan 2 contactos recomendados');
+  assert.equal(recommendedNoticeTitle({ id: 'd', total: 6, left: 6, today: false }), 'Te esperan 6 contactos recomendados');
+  assert.equal(recommendedNoticeTitle({ id: 'd', total: 3, left: 1, today: false }), 'Te espera un contacto recomendado');
 });
 
 test('nothing left, nothing said; and an answer that cannot be read says nothing either', () => {

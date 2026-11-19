@@ -2685,7 +2685,7 @@ export default function SearchPage() {
           </Button>
         )}
       />
-      {/* The contacts already chosen for the person, where they spend their time (src/lib/search/recommended-notice.ts). */}
+      {/* The contacts already chosen for the person, said on arriving where they spend their time (src/lib/search/recommended-notice.ts). */}
       <RecommendedNotice />
       {marksUnavailable ? (
         <Alert variant="warning" role="status">

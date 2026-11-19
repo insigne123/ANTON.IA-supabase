@@ -19,8 +19,21 @@ const TODAY = '2026-11-19';
 let answer: { ok: boolean; body: unknown } | 'down' = { ok: true, body: null };
 let organizationId: string | null = 'org-1';
 const asked: Array<{ path: string; org: string | undefined }> = [];
+const pushed: string[] = [];
+let escape: () => void = () => {};
 const stubs: Record<string, unknown> = {
-  '@/components/ui/button': { Button: ({ asChild, variant: _variant, size: _size, ...props }: any) => asChild ? props.children : React.createElement('button', props) },
+  // The app's dialog, as plain elements: what is said, its two buttons, and the answer Escape gives (onOpenChange).
+  '@/components/ui/alert-dialog': {
+    AlertDialog: ({ open, onOpenChange, children }: any) => { escape = () => onOpenChange(false); return open ? React.createElement('div', { role: 'alertdialog' }, children) : null; },
+    AlertDialogContent: ({ children }: any) => React.createElement('div', null, children),
+    AlertDialogHeader: ({ children }: any) => React.createElement('header', null, children),
+    AlertDialogFooter: ({ children }: any) => React.createElement('footer', null, children),
+    AlertDialogTitle: ({ children }: any) => React.createElement('h2', null, children),
+    AlertDialogDescription: ({ children }: any) => React.createElement('p', { 'data-description': '' }, children),
+    AlertDialogCancel: ({ children }: any) => React.createElement('button', { type: 'button', onClick: () => escape() }, children),
+    AlertDialogAction: ({ children, onClick }: any) => React.createElement('button', { type: 'button', onClick }, children),
+  },
+  'next/navigation': { useRouter: () => ({ push: (href: string) => { pushed.push(href); } }) },
   '@/context/AuthContext': { useAuth: () => ({ organizationId }) },
   '@/lib/admin/chile-time': { dayInZone: () => TODAY },
   '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init: any) => {
@@ -31,7 +44,6 @@ const stubs: Record<string, unknown> = {
   '@/lib/lead-drops': leadDrops,
   '@/lib/search/recommended-notice': rules,
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
-  'next/link': { __esModule: true, default: ({ href, children, ...props }: any) => React.createElement('a', { href, ...props }, children) },
 };
 const source = await readFile(new URL('./RecommendedNotice.tsx', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
@@ -50,30 +62,44 @@ const board = (id: string) => ({ ok: true, body: { drop: null, board: { id, date
 
 test.after(() => { Object.assign(globalThis, { ...previous, IS_REACT_ACT_ENVIRONMENT: false }); dom.window.close(); });
 
-test('«Buscar prospectos» says the recommended contacts that wait for the person, with one way in; closed, it stays closed until the next ones', async () => {
+const click = async (target: Element) => { await act(async () => { target.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); }); };
+const buttonOf = (host: Element, label: string) => [...host.querySelectorAll('button')].find(entry => entry.textContent === label)!;
+
+test('arriving at «Buscar prospectos», a large notice says the recommended contacts that wait, with two answers: go to them or close it', async () => {
   answer = board('drop-6');
   let page = await open();
   assert.deepEqual(asked.at(-1), { path: '/api/lead-drops/latest', org: 'org-1' });
-  const section = page.host.querySelector('section')!;
-  assert.equal(section.getAttribute('aria-labelledby'), 'recomendados-aviso');
-  assert.equal(section.querySelector('h2')!.textContent, 'Contactos recomendadosNuevo');
-  assert.equal(section.querySelector('p')!.textContent, 'Te quedan 2 de tus 3 contactos recomendados por revisar.');
-  const link = section.querySelector('a')!;
-  assert.deepEqual([link.textContent, link.getAttribute('href')], ['Ver mis recomendados', '/dashboard/contactos/drop-6']);
-  const closer = section.querySelector('button')!;
-  assert.equal(closer.getAttribute('aria-label'), 'Cerrar el aviso de contactos recomendados');
-  await act(async () => { closer.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });
-  assert.equal(page.host.querySelector('section'), null);
+  const dialog = page.host.querySelector('[role="alertdialog"]')!;
+  assert.equal(dialog.querySelector('h2')!.textContent, 'Te esperan 2 contactos recomendados');
+  assert.equal(dialog.querySelector('[data-description]')!.textContent, 'Te quedan 2 de tus 3 contactos recomendados por revisar. Los encuentras en «Tus contactos de hoy», listos para revisar y enviar.');
+  assert.match(dialog.textContent || '', /^Sección nueva · Contactos recomendados/);
+  assert.deepEqual([...dialog.querySelectorAll('button')].map(entry => entry.textContent), ['Cerrar', 'Ver mis recomendados'], 'two answers, no more');
+  // «Cerrar»: gone, remembered, and the person stays on the search.
+  await click(buttonOf(page.host, 'Cerrar'));
+  assert.equal(page.host.querySelector('[role="alertdialog"]'), null);
   assert.equal(dom.window.localStorage.getItem('anton:search-recommended:drop-6'), '1');
+  assert.deepEqual(pushed, []);
   await page.close();
 
-  // The same contacts on the next visit: still closed. The next day's: said again.
+  // The same contacts on the next visit: not said again. The next day's: said, and «Ver mis recomendados» goes to them.
   page = await open();
-  assert.equal(page.host.querySelector('section'), null);
+  assert.equal(page.host.querySelector('[role="alertdialog"]'), null);
   await page.close();
   answer = board('drop-7');
   page = await open();
-  assert.match(page.host.textContent || '', /Contactos recomendados/);
+  await click(buttonOf(page.host, 'Ver mis recomendados'));
+  assert.deepEqual(pushed, ['/dashboard/contactos/drop-7']);
+  assert.equal(page.host.querySelector('[role="alertdialog"]'), null);
+  assert.equal(dom.window.localStorage.getItem('anton:search-recommended:drop-7'), '1', 'coming back to the search does not say it again');
+  await page.close();
+
+  // Escape is «Cerrar».
+  answer = board('drop-8');
+  page = await open();
+  assert.ok(page.host.querySelector('[role="alertdialog"]'));
+  await act(async () => { escape(); });
+  assert.equal(page.host.querySelector('[role="alertdialog"]'), null);
+  assert.equal(dom.window.localStorage.getItem('anton:search-recommended:drop-8'), '1');
   await page.close();
 });
 
@@ -86,7 +112,7 @@ test('it says nothing when nothing waits, when the answer fails, or before the w
   }
   organizationId = null;
   asked.length = 0;
-  answer = board('drop-8');
+  answer = board('drop-9');
   const page = await open();
   assert.equal(page.host.innerHTML, '');
   assert.equal(asked.length, 0, 'nothing is asked without a workspace');

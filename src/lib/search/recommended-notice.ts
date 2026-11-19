@@ -4,6 +4,9 @@
  * del día»). That week nine people of a team searched by hand and spent credits there while four opened the contacts already chosen
  * for them: the search is where they are, so it says what waits for them and takes them to it.
  *
+ * Large and in the middle of the screen since the same day (the owner: «necesito que el aviso sea grande, que tenga dos opciones: o lo
+ * cierran o van a la sección»): the quiet line at the top of the page was one more thing to scroll past.
+ *
  * `recommendedNoticeOf` reads what «Hoy» reads (GET /api/lead-drops/latest): the person's last contacts of the week with something
  * left to do. Nothing left, nothing said.
  */
@@ -32,6 +35,12 @@ export function recommendedNoticeOf(latest: Latest, today: string): RecommendedN
     return left ? { id: drop.id, total, left, today: drop.dropDate === today } : null;
   }
   return null;
+}
+
+/** The notice's headline: how many wait, said large. */
+export function recommendedNoticeTitle(notice: RecommendedNotice): string {
+  if (notice.today && notice.left === notice.total) return notice.total === 1 ? 'Tienes un contacto recomendado para hoy' : `Tienes ${notice.total} contactos recomendados para hoy`;
+  return notice.left === 1 ? 'Te espera un contacto recomendado' : `Te esperan ${notice.left} contactos recomendados`;
 }
 
 /** What the notice says, in one sentence. */
