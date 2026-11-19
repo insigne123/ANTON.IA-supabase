@@ -690,6 +690,19 @@ Pedido del dueño: «haz que los mails que mandamos sí tengan investigación en
 
 **Límites.** Solo ocurre al abrir en la app: el correo de la mañana ya enviado y su PDF no cambian. Cuesta dos búsquedas por contacto, solo para quien abre.
 
+### Desde el 19 de noviembre: el buscador avisa de los contactos recomendados
+
+Pedido del dueño: «si el módulo de buscador es el más usado podríamos poner una alerta cuando entren a esa página para decirles que tenemos una nueva sección de leads recomendados del día».
+
+**Por qué.** Esa semana nueve personas de un equipo usaron el buscador y gastaron ahí sus créditos, mientras solo cuatro abrieron los contactos ya elegidos para ellas. El buscador es donde están.
+
+**Qué hace** (`src/components/search/RecommendedNotice.tsx`, reglas en `src/lib/search/recommended-notice.ts`). Arriba de «Buscar prospectos» aparece una franja «Contactos recomendados · Nuevo» con una frase y un botón «Ver mis recomendados», que abre los contactos de la persona.
+
+- **Cuándo aparece:** cuando la persona tiene contactos recomendados de la semana con algo pendiente (un correo por buscar o una campaña por aprobar). Lee lo mismo que «Hoy» (`GET /api/lead-drops/latest`).
+- **Qué dice:** «Hoy elegimos 6 contactos para ti con tu cliente ideal, cada uno con su campaña ya escrita.» o «Te quedan 2 de tus 6 contactos recomendados por revisar.»
+- **Se puede cerrar:** queda cerrada para esos contactos (en el navegador) y vuelve cuando llegan los del día siguiente.
+- **Si no hay nada pendiente o la lectura falla,** no se muestra nada: la acción de la página sigue siendo buscar.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 02:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):
