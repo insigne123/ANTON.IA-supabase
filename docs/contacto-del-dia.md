@@ -674,6 +674,22 @@ Los más bajos (12 a 30 %) fueron un consultor independiente, dueños de emprend
 
 **Qué hace ahora.** Con Apollo (gratis, hasta 1.000 por búsqueda) se pide hasta 300: primero el mismo cliente ideal, con sus rubros y tamaños, y solo si tampoco hay nadie nuevo, los cargos y lugares solos. Con Leads Finder sigue como antes. No aplica a los equipos con buscador con IA, que ya bajan en la lista según cuántas personas conoce el equipo.
 
+### Desde el 19 de noviembre: la investigación que faltó se hace al abrir los contactos
+
+Pedido del dueño: «haz que los mails que mandamos sí tengan investigación en la app».
+
+**Qué fallaba.** La búsqueda web (Serper) se quedó sin saldo dos mañanas (18 y 19 de noviembre). Los contactos salieron con sus correos escritos, pero sin nada de su empresa: sin resumen, sin «Ahora» y sin «Cómo abrir». Nada lo reintentaba, así que quedaban así para siempre.
+
+**Qué hace ahora** (`src/lib/server/lead-drop-late-research.ts`). Cuando la persona abre sus contactos en la app (su página o la sección de «Hoy»), la pantalla pide la investigación de los que llegaron sin ella (`POST /api/lead-drops/[id]` con `action: 'research'`):
+
+- **Cuáles:** los que tienen empresa, no tienen investigación y no se intentaron en las últimas 20 horas (`lacksResearch`), de envíos de hasta 14 días. Hasta 10 por visita, todos a la vez.
+- **Qué guarda:** lo mismo que habría guardado la corrida: la investigación, el resumen de la empresa, sus hechos y su sitio web si la búsqueda no lo traía.
+- **Qué no toca:** los correos. La persona pudo haberlos cambiado o aprobado; quedan como estaban.
+- **Si no encuentra nada:** el contacto queda marcado como intentado (`researchedAt`) y se reintenta al día siguiente, por si la búsqueda estaba caída.
+- **Mientras tanto:** la pantalla muestra «Investigando las empresas de tus contactos…» y los contactos se pueden usar igual. Si falla, no se dice nada y la próxima visita lo intenta de nuevo.
+
+**Límites.** Solo ocurre al abrir en la app: el correo de la mañana ya enviado y su PDF no cambian. Cuesta dos búsquedas por contacto, solo para quien abre.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 02:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

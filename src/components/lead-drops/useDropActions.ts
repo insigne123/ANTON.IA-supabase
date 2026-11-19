@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { dropName, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
+import { useEffect, useRef, useState } from 'react';
+import { dropName, lacksResearch, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
 import { DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
 import { completeSavedContacts, completionSummary } from '@/lib/leads-workspace/complete-contacts';
 import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
@@ -19,8 +19,10 @@ export type DropBulkRun = { done: number; total: number; mailing: boolean };
  * answer with the drop's contacts as they are now. «Para llamar» (src/lib/lead-drop-call.ts): the mobile with the email or after it,
  * and the script of the call, both asked to the server. `single`: the drop has one contact, and what is said speaks of one.
  */
-export function useDropActions({ dropId, call, setItems, single }: {
+export function useDropActions({ dropId, call, setItems, single, items }: {
   dropId: string | null; call: (path: string, init?: RequestInit) => Promise<Response>; setItems: (items: DropItem[]) => void; single: boolean;
+  /** The contacts on screen: those that reached the person without their research get it on opening (server/lead-drop-late-research.ts). */
+  items?: DropItem[];
 }) {
   const [saving, setSaving] = useState(false);
   /** The contact whose email is being looked up. */
@@ -35,6 +37,22 @@ export function useDropActions({ dropId, call, setItems, single }: {
     if (!response.ok) throw Object.assign(new Error(payload?.error || 'No pudimos guardarlo.'), { status: response.status });
     return payload;
   };
+  // The research some contacts came without (19 Nov 2026): asked once per drop when the screen opens, while the person reads the
+  // rest. Nothing is said if it fails: the contacts stay as they came, and the next visit tries again.
+  const [researching, setResearching] = useState(false);
+  const researched = useRef<string | null>(null);
+  const shown = useRef(true);
+  useEffect(() => { shown.current = true; return () => { shown.current = false; }; }, []);
+  const lacking = Boolean(items?.some(item => lacksResearch(item)));
+  useEffect(() => {
+    if (!dropId || !lacking || researched.current === dropId) return;
+    researched.current = dropId;
+    setResearching(true);
+    post({ action: 'research' }).then(body => { if (shown.current && Array.isArray(body?.items)) setItems(body.items); }).catch(() => null)
+      .finally(() => { if (shown.current) setResearching(false); });
+    // Once per drop: `post` and `setItems` are the caller's own each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dropId, lacking]);
   // «Enriquecer y guardar»: kept as a saved contact, its email looked up as any saved contact's (1 credit), then tied to this drop.
   // `withPhone`: its mobile in the same lookup; the provider answers it minutes later, and the card shows it when it lands.
   const enrich = async (item: DropItem, withPhone = false) => {
@@ -163,5 +181,5 @@ export function useDropActions({ dropId, call, setItems, single }: {
     },
     feedback: async (item, useful, reason, wish) => { await act({ action: 'feedback', leadId: item.leadId, feedback: { useful, reason: reason ?? null, ...(wish !== undefined ? { wish } : {}) } }, 'No pudimos guardar tu opinión. Inténtalo de nuevo.'); },
   };
-  return { saving, enriching, notice, setNotice, enrich, enrichAll, bulk, save, actions };
+  return { saving, enriching, notice, setNotice, enrich, enrichAll, bulk, save, actions, researching };
 }

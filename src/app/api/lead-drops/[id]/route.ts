@@ -5,6 +5,7 @@ import { requireHomeAuth } from '@/lib/server/home-auth';
 import { LeadDropsError, dropOwner, keepDropLead, linkDropLead, readDrop, saveDropLeads } from '@/lib/server/lead-drops';
 import { approveDropCampaign, dropEmailsSchema, dropFeedbackSchema, editDropEmails, mailDropCampaign, saveDropFeedback } from '@/lib/server/lead-drop-campaign';
 import { findDropPhone, prepareDropCall, withDropPhones } from '@/lib/server/lead-drop-call';
+import { researchDropLate } from '@/lib/server/lead-drop-late-research';
 import { enrichDropLead } from '@/lib/server/lead-drop-mail';
 import { mailDropCalls, mailDropReady, prepareDropCalls } from '@/lib/server/lead-drop-ready';
 import { requestAuthErrorResponse } from '@/lib/server/request-auth';
@@ -56,6 +57,8 @@ const BodySchema = z.discriminatedUnion('action', [
   // «Para llamar» (src/lib/server/lead-drop-call.ts): the mobile of a contact already in «Por escribir», and the script of its call.
   z.object({ action: z.literal('phone'), leadId: LeadId }).strict(),
   z.object({ action: z.literal('script'), leadId: LeadId, fresh: z.boolean().optional() }).strict(),
+  // The research of the contacts that reached the person without it, asked by the page when it opens (lead-drop-late-research.ts).
+  z.object({ action: z.literal('research') }).strict(),
   // «Enriquecer los N» (16 Nov 2026): each contact looked up by the server, one after another, as from the email's page; `ready`
   // sends the one answer for all of them to the person's inbox, in the conversation of the morning email.
   z.object({ action: z.literal('enrich'), leadId: LeadId, phone: z.boolean().optional() }).strict(),
@@ -88,6 +91,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (body.data.action === 'script') {
       return NextResponse.json(await shown(await prepareDropCall(admin, scope, id.data, body.data.leadId, { fresh: body.data.fresh })), { headers: noStore });
+    }
+    if (body.data.action === 'research') {
+      return NextResponse.json(await shown(await researchDropLate(admin, scope, id.data)), { headers: noStore });
     }
     if (body.data.action === 'enrich') {
       const lookup = await enrichDropLead(admin, scope, id.data, body.data.leadId, { phone: body.data.phone });

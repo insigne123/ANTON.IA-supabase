@@ -196,8 +196,11 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   /** How many still need their email looked up: two or more can be asked at once. */
   const toLook = drop?.items.filter(item => needsLookup(item)).length ?? 0;
   // What the person does with the contacts is the same wherever the app shows them (useDropActions): here and in «Hoy».
-  const { saving, enriching, notice, setNotice, enrich, enrichAll, bulk, save, actions } = useDropActions({
-    dropId: id, call, single: Boolean(one), setItems: items => setDrop(current => current && { ...current, items }) });
+  const { saving, enriching, notice, setNotice, enrich, enrichAll, bulk, save, actions, researching } = useDropActions({
+    dropId: id, call, single: Boolean(one), items: drop?.items, setItems: items => setDrop(current => current && { ...current, items }) });
+  // Contacts that came without their research get it now (server/lead-drop-late-research.ts): said quietly while it is read.
+  const researchingLine = researching ? <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+    <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />{one ? 'Investigando su empresa…' : 'Investigando las empresas de tus contactos…'}</p> : null;
   const copy = async (key: string, email: { subject: string; body: string } | null | undefined) => {
     if (!email) return;
     const textValue = `Asunto: ${email.subject}\n\n${email.body}`;
@@ -412,6 +415,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}
         </div>
         {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
+        {researchingLine}
         <div className="space-y-4 rounded-2xl border p-4 sm:p-5">
           <div className="space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Por qué te lo recomendamos</p>
@@ -441,6 +445,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
             : left.length ? null : <Button asChild size="lg"><Link href="/saved/leads/enriched">Ir a «Por escribir»<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>}
         </div>
         {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
+        {researchingLine}
 
         {/* All of them looked up at once, with their mobiles or without: the answer also goes to the person's inbox. */}
         {toLook >= 2 || bulk ? <DropBulkEnrich count={toLook} phone={bulkPhone} onPhone={setBulkPhone} onStart={() => void enrichAll(drop.items, bulkPhone)} running={bulk} disabled={saving || (enriching !== null && !bulk)} /> : null}
