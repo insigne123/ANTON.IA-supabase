@@ -1,23 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { ArrowRight, Sparkles, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
+import { Sparkles } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/context/AuthContext';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { dropHref } from '@/lib/lead-drops';
-import { recommendedNoticeKey, recommendedNoticeOf, recommendedNoticeText, type RecommendedNotice as Notice } from '@/lib/search/recommended-notice';
+import { recommendedNoticeKey, recommendedNoticeOf, recommendedNoticeText, recommendedNoticeTitle, type RecommendedNotice as Notice } from '@/lib/search/recommended-notice';
 
 /**
- * «Contactos recomendados» at the top of «Buscar prospectos» (src/lib/search/recommended-notice.ts): the contacts chosen for the
- * person that still wait for them, with one way in. Quiet on purpose: the page's own action is the search, so this is a line with
- * an outlined button, it can be closed, and a closed one stays closed until the next contacts arrive. Says nothing while it reads,
- * when there is nothing left, or when the request fails.
+ * «Contactos recomendados» on arriving at «Buscar prospectos» (src/lib/search/recommended-notice.ts): a large notice in the middle
+ * of the screen with the contacts chosen for the person that still wait for them, and two ways on: go to them, or close it and
+ * search. Either answer is remembered for those contacts, so it is said once and again only when the next ones arrive. Says nothing
+ * while it reads, when nothing is left, or when the request fails.
  */
 export function RecommendedNotice() {
   const { organizationId } = useAuth();
+  const router = useRouter();
   const [notice, setNotice] = useState<Notice | null>(null);
   useEffect(() => {
     if (!organizationId) return;
@@ -27,34 +28,34 @@ export function RecommendedNotice() {
       .then(body => {
         const found = recommendedNoticeOf(body, dayInZone(new Date()));
         if (!shown || !found) return;
-        let closed = false;
-        try { closed = window.localStorage.getItem(recommendedNoticeKey(found.id)) === '1'; } catch { /* private mode: shown each visit */ }
-        if (!closed) setNotice(found);
+        let answered = false;
+        try { answered = window.localStorage.getItem(recommendedNoticeKey(found.id)) === '1'; } catch { /* private mode: said each visit */ }
+        if (!answered) setNotice(found);
       })
       .catch(() => null);
     return () => { shown = false; };
   }, [organizationId]);
   if (!notice) return null;
-  const close = () => {
-    try { window.localStorage.setItem(recommendedNoticeKey(notice.id), '1'); } catch { /* closed for this visit only */ }
+  const answer = () => {
+    try { window.localStorage.setItem(recommendedNoticeKey(notice.id), '1'); } catch { /* answered for this visit only */ }
     setNotice(null);
   };
-  return <section aria-labelledby="recomendados-aviso" className="flex flex-col gap-3 rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:flex-row sm:items-center sm:gap-4">
-    <div className="min-w-0 flex-1 space-y-1">
-      <h2 id="recomendados-aviso" className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-        <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Contactos recomendados
-        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Nuevo</span>
-      </h2>
-      {/* On the tinted band the muted grey falls under 4.5:1: the grey «Hoy» uses for secondary text on it. */}
-      <p className="text-sm text-foreground/75">{recommendedNoticeText(notice)}</p>
-    </div>
-    <div className="flex shrink-0 items-center gap-1">
-      <Button asChild size="sm" variant="outline" className="flex-1 justify-between gap-2 sm:flex-none">
-        <Link href={dropHref(notice.id)}>Ver mis recomendados<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
-      </Button>
-      <Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-foreground/70" onClick={close} aria-label="Cerrar el aviso de contactos recomendados">
-        <X className="h-4 w-4" aria-hidden="true" />
-      </Button>
-    </div>
-  </section>;
+  const go = () => { const href = dropHref(notice.id); answer(); router.push(href); };
+  // Escape and «Cerrar» are the same answer. The focus starts on «Cerrar» (the dialog's own rule): going is the person's choice.
+  return <AlertDialog open onOpenChange={open => { if (!open) answer(); }}>
+    <AlertDialogContent className="w-[calc(100%-2rem)] max-w-xl gap-6 rounded-3xl p-7 text-center sm:rounded-3xl sm:p-10">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10" aria-hidden="true"><Sparkles className="h-7 w-7 text-primary" /></div>
+      <AlertDialogHeader className="space-y-3 text-center sm:text-center">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Sección nueva · Contactos recomendados</p>
+        <AlertDialogTitle className="text-2xl font-semibold tracking-tight sm:text-3xl">{recommendedNoticeTitle(notice)}</AlertDialogTitle>
+        <AlertDialogDescription className="text-base leading-7 text-foreground/75">
+          {recommendedNoticeText(notice)} Los encuentras en «Tus contactos de hoy», listos para revisar y enviar.
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter className="gap-2 sm:justify-center sm:space-x-0">
+        <AlertDialogCancel className="h-11 px-6 text-base sm:min-w-32">Cerrar</AlertDialogCancel>
+        <AlertDialogAction className="h-11 px-6 text-base sm:min-w-56" onClick={go}>Ver mis recomendados</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>;
 }

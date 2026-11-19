@@ -696,12 +696,14 @@ Pedido del dueño: «si el módulo de buscador es el más usado podríamos poner
 
 **Por qué.** Esa semana nueve personas de un equipo usaron el buscador y gastaron ahí sus créditos, mientras solo cuatro abrieron los contactos ya elegidos para ellas. El buscador es donde están.
 
-**Qué hace** (`src/components/search/RecommendedNotice.tsx`, reglas en `src/lib/search/recommended-notice.ts`). Arriba de «Buscar prospectos» aparece una franja «Contactos recomendados · Nuevo» con una frase y un botón «Ver mis recomendados», que abre los contactos de la persona.
+**Qué hace** (`src/components/search/RecommendedNotice.tsx`, reglas en `src/lib/search/recommended-notice.ts`). Al entrar a «Buscar prospectos» aparece un aviso grande al centro de la pantalla, con dos respuestas: «Ver mis recomendados», que abre los contactos de la persona, o «Cerrar», que la deja en el buscador.
 
 - **Cuándo aparece:** cuando la persona tiene contactos recomendados de la semana con algo pendiente (un correo por buscar o una campaña por aprobar). Lee lo mismo que «Hoy» (`GET /api/lead-drops/latest`).
-- **Qué dice:** «Hoy elegimos 6 contactos para ti con tu cliente ideal, cada uno con su campaña ya escrita.» o «Te quedan 2 de tus 6 contactos recomendados por revisar.»
-- **Se puede cerrar:** queda cerrada para esos contactos (en el navegador) y vuelve cuando llegan los del día siguiente.
-- **Si no hay nada pendiente o la lectura falla,** no se muestra nada: la acción de la página sigue siendo buscar.
+- **Qué dice:** el título «Tienes 6 contactos recomendados para hoy» (o «Te esperan 2 contactos recomendados») y una frase: cuántos son, que traen su campaña escrita y que están en «Tus contactos de hoy».
+- **Una vez por envío:** cualquiera de las dos respuestas (y la tecla Escape) se recuerda en el navegador para esos contactos. Vuelve a aparecer cuando llegan los del día siguiente.
+- **Si no hay nada pendiente o la lectura falla,** no se muestra nada.
+
+El mismo día se cambió de una franja arriba de la página a este aviso grande, a pedido del dueño: «necesito que el aviso sea grande, que tenga dos opciones: o lo cierran o van a la sección».
 
 ## Cómo funciona
 
