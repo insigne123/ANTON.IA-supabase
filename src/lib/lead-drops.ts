@@ -186,6 +186,8 @@ export type DropItem = {
   feedback?: { useful: boolean; reason?: string | null; wish?: string | null; at: string };
   /** The short research of the contact, read from the web before writing to it (server/lead-drop-research.ts). */
   brief?: DropBrief;
+  /** When the research was tried again on opening the contact in the app (server/lead-drop-late-research.ts), found or not. */
+  researchedAt?: string;
   /** The person changed the emails by hand: what goes out is theirs. */
   edited?: boolean;
   /** The campaign the person approved for this contact («Aprobar y programar», server/lead-drop-campaign.ts): its emails go out from their mailbox. */
@@ -768,6 +770,19 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
 /** The title of the contacts inside an email that also brings the rest of the day: on the page, over their cards. Already escaped. */
 const sectionTitle = (lead: string) => emailRow(emailLabel('Contacto del día')
   + `<p style="margin:4px 0 0;font-size:19px;line-height:26px;font-weight:700;color:#111827">${lead}</p>`, { padding: '14px 4px 12px' });
+/** How long a contact whose research found nothing waits before it is tried again on opening. */
+export const LATE_RESEARCH_RETRY_MS = 20 * 60 * 60 * 1000;
+/**
+ * A contact that reached the person without its research (19 Nov 2026: the search provider ran out of credits for two mornings and
+ * 216 contacts went out with nothing about their companies): it has a company to look for, no brief, and was not tried in the last
+ * hours. The app asks for it when the person opens their contacts.
+ */
+export function lacksResearch(item: Pick<DropItem, 'brief' | 'company' | 'researchedAt'>, now: Date = new Date()) {
+  if (item.brief || !String(item.company || '').trim()) return false;
+  const tried = item.researchedAt ? Date.parse(item.researchedAt) : NaN;
+  return !Number.isFinite(tried) || now.getTime() - tried > LATE_RESEARCH_RETRY_MS;
+}
+
 /**
  * How much a contact is recommended, as it is said next to it («92 % recomendado»): the judge's percentage (lead-drop-gate.ts).
  * `level` is how strongly it is shown: only the clear ones (85 and over) get colour, so a page of contacts is not a page of badges.

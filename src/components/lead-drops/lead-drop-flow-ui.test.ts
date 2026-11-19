@@ -127,9 +127,12 @@ test('«Hoy» for a team with several contacts a day: no email is promised befor
 
 /** The workspaces the page moved to (organizationService.setCurrentOrganization). */
 const switched: string[] = [];
+// The contacts of these tests were researched a moment ago (found or not): the page asks for nothing on opening. The research a
+// contact came without is the last test's.
+const TRIED = new Date().toISOString();
 const drop = { id: 'drop-1', date: '2026-10-21', criteria: { titles: ['Gerente de Personas'], industries: ['Retail'], locations: ['Chile'], sizes: [], source: 'perfil' },
   items: [{ leadId: 'lf_1', name: 'Ana Pérez', title: 'Gerente de Personas', company: 'Ripley', domain: null, industry: 'Retail', size: null, city: 'Santiago',
-    hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana' } }] };
+    hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana' }, researchedAt: TRIED }] };
 
 async function open(dropId: string, options: { motion?: boolean; played?: boolean; url?: string } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: options.url || 'https://app.test/dashboard/contactos/nuevo' });
@@ -834,4 +837,48 @@ test('a button of the morning email opens its contact inside «Hoy», and other 
   assert.deepEqual(linkedArrival('?contactos=no-es-un-enlace', BOARD), { focus: null, away: '/dashboard' });
   assert.equal(leadDrops.dropIdInLink(token), BOARD);
   assert.equal(leadDrops.dropIdInLink('corto'), null);
+});
+
+test('contacts that reached the person without their research get it when the page opens: asked once, said quietly, and shown when it lands', async () => {
+  calls.length = 0; bodies.length = 0;
+  const bare = (n: number, extra: Record<string, unknown> = {}) => apolloItem(n, { researchedAt: undefined, ...extra });
+  let arrive!: () => void, release!: () => void;
+  // The contacts arrive, then the research is held so the page is seen while it waits.
+  gate = new Promise<void>(resolve => { arrive = resolve; });
+  answers = [{ status: 200, body: { ...drop, items: [bare(1), bare(2, { name: 'Luisa Soto' })] } }];
+  const page = await open('drop-1');
+  try {
+    arrive();
+    gate = new Promise<void>(resolve => { release = resolve; });
+    await page.settle();
+    assert.deepEqual(calls, ['GET /api/lead-drops/drop-1', 'POST /api/lead-drops/drop-1']);
+    assert.deepEqual(bodies, [{ action: 'research' }]);
+    const status = [...page.dom.window.document.querySelectorAll('[role="status"]')].find(entry => /Investigando/.test(entry.textContent || ''));
+    assert.equal(status?.textContent, 'Investigando las empresas de tus contactos…');
+    assert.doesNotMatch(cardOf(page, 0).textContent || '', /Ahora:/);
+    assert.ok(within(cardOf(page, 0), 'Enriquecer · 1 crédito'), 'the contacts are usable meanwhile');
+    answers = [{ status: 200, body: { researched: 1, items: [bare(1, { brief, summary: brief.company, researchedAt: TRIED }), bare(2, { name: 'Luisa Soto', researchedAt: TRIED })] } }];
+    release(); gate = null;
+    await page.settle();
+    assert.match(cardOf(page, 0).textContent || '', /Cómo abrirPregúntale cómo cubrirán la planta nueva\.[\s\S]*Sobre Minera 1Produce cobre en dos faenas del norte\.Ahora: Anunció una planta concentradora nueva\./);
+    assert.doesNotMatch(page.text(), /Investigando/);
+    assert.equal(calls.length, 2, 'once: the one with nothing to find is not asked for again');
+  } finally { gate = null; await close(page); }
+
+  // A refusal says nothing and leaves the contacts as they came.
+  calls.length = 0;
+  answers = [{ status: 200, body: { ...drop, items: [bare(1)] } }, { status: 503, body: { error: 'No pudimos leer tu contacto del día.' } }];
+  const failed = await open('drop-1');
+  try {
+    await failed.settle();
+    assert.equal(calls.length, 2);
+    assert.doesNotMatch(failed.text(), /Investigando|No pudimos leer/);
+    assert.match(failed.text(), /Persona1 A\./);
+  } finally { await close(failed); }
+
+  // With its research, or tried a moment ago, nothing is asked.
+  calls.length = 0;
+  answers = [{ status: 200, body: { ...drop, items: [bare(1, { brief }), apolloItem(2)] } }];
+  const done = await open('drop-1');
+  try { await done.settle(); assert.deepEqual(calls, ['GET /api/lead-drops/drop-1']); } finally { await close(done); }
 });

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight, Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { DropContactCard, type DropContactActions } from '@/components/lead-drops/DropContactCard';
 import { useDropActions } from '@/components/lead-drops/useDropActions';
@@ -66,7 +66,7 @@ function Board({ board, focus }: { board: DropBoard; focus: string | null }) {
   const call = useCallback((path: string, init?: RequestInit) => authenticatedApiFetch(path, {
     cache: 'no-store', ...init, headers: { 'Content-Type': 'application/json', ...(organizationId ? { 'x-organization-id': organizationId } : {}) },
   }), [organizationId]);
-  const { saving, enriching, notice, actions } = useDropActions({ dropId: board.id, call, setItems, single: false });
+  const { saving, enriching, notice, actions, researching } = useDropActions({ dropId: board.id, call, setItems, single: false, items });
   // What happened is said in the row it happened to: with six rows, a line at the top of the section would be out of sight.
   const [acted, setActed] = useState<string | null>(null);
   const inRow: DropContactActions = {
@@ -107,6 +107,9 @@ function Board({ board, focus }: { board: DropBoard; focus: string | null }) {
           <dd className={cn('text-lg font-semibold tabular-nums', !step.value && 'text-foreground/60')}>{step.value}</dd>
         </div>)}
       </dl>
+      {/* Contacts that came without their research get it now (server/lead-drop-late-research.ts). */}
+      {researching ? <p role="status" className="flex items-center gap-2 text-sm text-foreground/75">
+        <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />Investigando las empresas de tus contactos…</p> : null}
     </div>
     <ul className="divide-y border-t">
       {items.map(item => <li key={item.leadId} id={`contacto-${item.leadId}`} className="scroll-mt-20">
