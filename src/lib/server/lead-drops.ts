@@ -669,19 +669,29 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     // Plan de uso A5 (audit B3): the same search every day ends up bringing only people already known; 29 drops came empty that
     // way at the end of October. Then once more, wider: the titles and places only, and further down the list (three times as
     // many). Each contact's fit (dropFit) shows what no longer matches, the industry or the size. A failure leaves it as before.
-    const waiting = members.filter(userId => !(assigned.get(userId) || []).length);
-    const deeper = Math.min(LEADS_FINDER_MAX_PER_RUN, count * 3);
-    if (!finder && waiting.length && found.results.length && deeper > count && !overBudget(spent, deeper, usdPerLead, deps.budgetUsd)) {
+    // With Apollo (19 Nov 2026) this never ran: its first search already asks for a hundred, the cap of a Leads Finder run, so
+    // «three times as many» was no more than it had, and a team of one contact with a narrow customer ran out in two weeks (two
+    // people of a team left without a contact, «La búsqueda no trajo contactos nuevos con correo»). Apollo's search is free and
+    // goes down to a thousand: first the same customer further down the list, and only then the titles and places alone.
+    const deeper = Math.min(apollo ? APOLLO_DROP_SEARCH_MAX : LEADS_FINDER_MAX_PER_RUN, count * 3);
+    for (const broad of apollo ? [false, true] : [true]) {
+      const waiting = members.filter(userId => !(assigned.get(userId) || []).length);
+      if (finder || !waiting.length || !found.results.length || deeper <= count || overBudget(spent, deeper, usdPerLead, deps.budgetUsd)) break;
       try {
-        const wider = await search(searchInput(criteria, deeper, true), searchDeps(deeper));
+        const wider = await search(searchInput(criteria, deeper, broad), searchDeps(deeper));
         spent += wider.costUsd;
         found = { ...found, costUsd: found.costUsd + wider.costUsd };
         const taken = new Set([...assigned.values()].flat().map(pick => pick.leadId));
-        for (const entry of wider.results) if (!entries.has(entry.lead.id)) entries.set(entry.lead.id, entry);
+        for (const entry of wider.results) {
+          if (!entries.has(entry.lead.id)) entries.set(entry.lead.id, entry);
+          // Still within the customer's industries and sizes, though further down.
+          if (!broad) narrowIds.add(entry.lead.id);
+        }
         const more = assignDrops(wider.results.map(candidateOf).filter(item => !taken.has(item.leadId)), waiting, known, criteria, plan.size, userId => own.get(userId)!);
         for (const [userId, picks] of more) if (picks.length) assigned.set(userId, picks);
       } catch {
         // The wider search failed: those people keep the empty drop and its reason, as before.
+        break;
       }
     }
     // The reserves of each person (lead-drop-gate.ts): the next ones they would have been offered, of companies nobody of the team
