@@ -16,7 +16,11 @@ const require = createRequire(import.meta.url);
 
 const source = await readFile(new URL('./PhoneRefundsCard.tsx', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-const tag = (name: string) => ({ asChild: _asChild, variant: _variant, size: _size, ...props }: any) => React.createElement(name, props);
+const tag = (name: string) => {
+  const Tag = ({ asChild: _asChild, variant: _variant, size: _size, ...props }: any) => React.createElement(name, props);
+  Tag.displayName = name;
+  return Tag;
+};
 const stubs: Record<string, unknown> = {
   '@/components/ui/badge': { Badge: tag('span') }, '@/components/ui/button': { Button: tag('button') },
   '@/components/ui/card': { Card: tag('section'), CardContent: tag('div'), CardHeader: tag('div'), CardTitle: tag('div') },
