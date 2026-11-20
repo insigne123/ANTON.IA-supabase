@@ -8,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SegmentedTabs, tabPanelProps } from '@/components/ui/segmented-tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { dropCredits } from '@/lib/lead-drop-call';
 import { dropEmailPreview, dropName, dropRecommendation, dropSchedule, needsLookup, placeLabel, shortDay, type DropFit, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
 import { DropCallPanel } from './DropCallPanel';
 import { DropAvatar, DropStageChip, dropStage } from './drop-contact-parts';
+import { useCreditPrices } from '@/context/CreditPricesContext';
+import { creditsLabel } from '@/lib/credit-prices';
 
 /** What the card asks its page to do with the contact: each answers when done, and the page shows what happened. */
 export type DropContactActions = {
@@ -70,6 +72,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
   /** «Para llamar» open on arrival (the email's «Llamar»). */
   callOpen?: boolean;
 }) {
+  const cost = dropCredits(useCreditPrices());
   const uid = useId();
   const [expanded, setExpanded] = useState(!collapsible || defaultOpen);
   // Its sections, one at a time: why it is worth it, its campaign and its call. A button of an email opens the one it was about.
@@ -120,12 +123,12 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
         : needsLookup(item)
           ? <Button size="sm" disabled={busy} onClick={() => actions.enrich(item)}>
             {enriching ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
-            {enriching ? 'Buscando su correo…' : 'Enriquecer · 1 crédito'}</Button>
+            {enriching ? 'Buscando su correo…' : `Enriquecer · ${creditsLabel(cost.email)}`}</Button>
           : <Button size="sm" disabled={busy} onClick={() => actions.save(item)}>{mail ? 'Guardar este contacto' : 'Guardar en «Por escribir»'}</Button>;
   // The same lookup with its mobile too, for whoever means to call: the quieter way, under the button.
   const withPhone = !item.campaign && !item.savedLeadId && needsLookup(item) && !enriching
     ? <Button variant="link" size="sm" className="h-auto min-h-9 justify-start p-0 text-xs font-normal text-muted-foreground sm:justify-end" disabled={busy} onClick={() => actions.enrich(item, true)}>
-      O con su teléfono · {DROP_EMAIL_AND_PHONE_CREDITS} créditos</Button> : null;
+      O con su teléfono · {cost.both} créditos</Button> : null;
   // Under the button, what it does or where things stand: from the inbox it names the person's own mailbox and never a part of the app.
   const actionNote = !mail ? (!item.campaign && item.savedLeadId && emails.length ? 'Sale desde tu Gmail u Outlook. Se detiene si responde.' : null)
     : item.campaign ? (paused ? 'Detenida: no sale ningún correo más.' : `Sale desde tu ${item.campaign.provider === 'google' ? 'Gmail' : 'Outlook'}. Se detiene sola si responde.`)

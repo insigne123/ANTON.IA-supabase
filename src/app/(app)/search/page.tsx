@@ -98,6 +98,7 @@ import { telHref } from '@/lib/contact-calls';
 import { LeadFitBadge, LeadFitNotice } from '@/components/leads/LeadFitBadge';
 import { useLeadFit } from '@/hooks/use-lead-fit';
 import type { LeadFitLead } from '@/lib/lead-fit/core';
+import { useCreditPrices } from '@/context/CreditPricesContext';
 
 const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
 
@@ -123,6 +124,8 @@ function resultCountInput(value: string, fallback: number) {
 }
 
 export default function SearchPage() {
+  // What a lookup costs this organization (credit-prices.ts).
+  const creditPrices = useCreditPrices();
   const router = useRouter();
   const opportunityOrigin = useRef<string | undefined>();
   const reauthScope = useRef(readCachedAuthScope());
@@ -1996,7 +1999,7 @@ export default function SearchPage() {
             <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
               <div>
                 <Label htmlFor="revealPhone">Teléfono</Label>
-                <p className="text-xs text-foreground/70">Correo y móvil cuestan 8 créditos por persona y llegan en 1 a 3 minutos, si el proveedor lo tiene.</p>
+                <p className="text-xs text-foreground/70">Correo y móvil cuestan {creditPrices.both} créditos por persona y llegan en 1 a 3 minutos, si el proveedor lo tiene.</p>
               </div>
               <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
             </div>

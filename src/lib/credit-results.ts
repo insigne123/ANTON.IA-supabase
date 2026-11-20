@@ -1,6 +1,6 @@
 /**
  * «Qué se obtuvo con los créditos» (2 Nov 2026, plan de uso M1). The people paid for with Apollo credits in a period
- * (1 credit an email, 8 email and mobile) and what happened with them afterwards, however long it took: contacted by
+ * (as its share counts them: at the organization's own prices, or 1 an email and 8 more a mobile) and what happened with them afterwards, however long it took: contacted by
  * email, call or WhatsApp, a real conversation (a human reply, or a call answered), a meeting (asked for in a reply,
  * or booked on a call). Each person counts for whoever paid for them. «Esperan contacto»: paid more than seven days ago
  * and still nobody wrote or called. Administración shows it by person and team; «Hoy», each person's own month.
@@ -8,7 +8,7 @@
  */
 
 export type CreditOutcomes = {
-  /** Apollo credits used: 1 an email, 8 email and mobile; paying twice for someone counts twice. */
+  /** Apollo credits used, at the organization's prices; paying twice for someone counts twice. */
   credits: number;
   /** People paid for, once each. */
   paid: number;

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { apolloAllocationCost } from '@/lib/apollo-credit-allocation';
+import { DEFAULT_CREDIT_PRICES, type CreditPrices } from '@/lib/credit-prices';
 import { dialable } from '@/lib/contact-calls';
 import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
 
@@ -12,11 +13,15 @@ import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
  */
 
 /**
- * What looking a contact up costs, as the buttons say it: the app's own rule (apolloAllocationCost). A mobile's lookup brings the
- * email with it, so both at once cost what the mobile does; the mobile asked later, after the email, is paid on top of it.
+ * What looking a contact up costs, as the buttons say it: the organization's prices (src/lib/credit-prices.ts). The mobile
+ * after the email, and both in one lookup. These two are the default prices; a screen that knows the organization's uses
+ * dropCredits(prices).
  */
 export const DROP_PHONE_CREDITS = apolloAllocationCost({ revealEmail: false, revealPhone: true });
 export const DROP_EMAIL_AND_PHONE_CREDITS = apolloAllocationCost({ revealEmail: true, revealPhone: true });
+export const dropCredits = (prices: CreditPrices = DEFAULT_CREDIT_PRICES) => ({
+  email: prices.email, phone: prices.phone, both: prices.both,
+});
 
 /**
  * The mobile of a saved contact, as its card shows it: the number, a lookup still running (the provider answers in minutes), or

@@ -46,6 +46,8 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { leadClaimRefusal } from '@/lib/lead-claim';
 import { APOLLO_ALLOCATION_ERROR, apolloAllocationCost } from '@/lib/apollo-credit-allocation';
 import { ApolloAllocationRefusal, assertApolloAllocationAllows } from '@/lib/server/apollo-credit-allocation';
+import { DEFAULT_CREDIT_PRICES } from '@/lib/credit-prices';
+import { loadCreditPrices } from '@/lib/server/credit-prices';
 import { hybridEnabled } from '@/lib/server/microworlds/contracts';
 import { observeConfirmedApolloIdentity } from '@/lib/server/microworlds/search';
 import { findHybridHint, frozenHybridItems, registerHybridItem, applyHybridCache, hybridFieldPlan, cancelHybridItems, settleHybrid,
@@ -984,10 +986,12 @@ export async function POST(request: NextRequest) {
 
     // The organization's Apollo share (when it has one) before any credit is claimed: what the cache already holds costs nothing.
     if (!matchOnly && !setupFailure) {
+      // At the organization's own prices (credit-prices.ts); if they cannot be read, the default ones, which are not lower.
+      const prices = await loadCreditPrices(organizationId).catch(() => DEFAULT_CREDIT_PRICES);
       const needed = leads.reduce((sum, _lead, index) => sum + apolloAllocationCost({
         revealEmail: revealEmail.value && !hints[index]?.contact.email,
         revealPhone: revealPhone.value && !hints[index]?.contact.mobile,
-      }), 0);
+      }, prices), 0);
       try {
         await assertApolloAllocationAllows(organizationId, needed);
       } catch (error) {

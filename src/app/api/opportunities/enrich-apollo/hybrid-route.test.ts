@@ -8,10 +8,11 @@ import {profileTargetId} from '@/lib/server/profile-target';
 import {hybridFieldPlan} from '@/lib/server/microworlds/fulfillment';
 import type {CachedContact} from '@/lib/server/microworlds/contracts';
 import * as allocation from '@/lib/apollo-credit-allocation';
+import * as creditPrices from '@/lib/credit-prices';
 class ProviderError extends Error {constructor(readonly status:number,readonly code:string,readonly providerOutcomeUnknown:boolean){super(code);}}
 class AllocationRefusal extends Error {}
 const contact:CachedContact={firstName:'Ana',lastName:'Pérez',fullName:'Ana Pérez',domain:'demo.test',title:'CEO',linkedinUrl:'https://linkedin.com/in/ana-demo',email:'ana@demo.test',emailStatus:'unknown',mobile:'+56912345678'};
-function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boolean;providerEmail?:string;shareUsed?:string}={}){
+function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boolean;providerEmail?:string;shareUsed?:string;prices?:creditPrices.CreditPrices}={}){
   const rows=new Map<string,any>(),callbacks:any[]=[],calls={claims:0,provider:[] as any[],registered:[] as any[],applied:[] as any[],share:[] as number[]};
   let claim:any=null,stored:any=null;
   const db:any={from(table:string){let value:any,selected:any,ids:any={};const chain:any={
@@ -42,6 +43,7 @@ function fixture(options:{cache?:CachedContact|null;pending?:boolean;fail?:boole
     '@/lib/server/supabase-admin':{getSupabaseAdminClient:()=>db},
     '@/lib/lead-claim':{leadClaimRefusal:()=>null},
     '@/lib/apollo-credit-allocation':allocation,
+    '@/lib/credit-prices':creditPrices,'@/lib/server/credit-prices':{loadCreditPrices:async()=>options.prices??creditPrices.DEFAULT_CREDIT_PRICES},
     '@/lib/server/apollo-credit-allocation':{ApolloAllocationRefusal:AllocationRefusal,assertApolloAllocationAllows:async(_org:string,needed:number)=>{
       calls.share.push(needed);if(options.shareUsed&&needed>0)throw new AllocationRefusal(options.shareUsed);return null;}},
     '@/lib/server/enrichment-search-access':{hasEnrichmentSearchCreditAccess:()=>true,hasUserEnrichmentSearchCreditAccess:async()=>true},
@@ -102,6 +104,9 @@ test('the organization Apollo share counts only what Apollo is asked: a full cac
   const cached=fixture();assert.equal((await cached.run()).status,200);assert.deepEqual(cached.calls.share,[0]);
   const phone=fixture({cache:{...contact,mobile:null},pending:true});assert.equal((await phone.run()).status,202);assert.deepEqual(phone.calls.share,[8]);
   const none=fixture({cache:null,pending:true});await none.run();assert.deepEqual(none.calls.share,[8],'email and mobile together cost 8 (audit T5)');
+  // An organization with its own prices is checked at them (20 Nov 2026).
+  const own=fixture({cache:null,pending:true,prices:{email:1,phone:5,both:6}});await own.run();assert.deepEqual(own.calls.share,[6]);
+  const ownPhone=fixture({cache:{...contact,mobile:null},pending:true,prices:{email:1,phone:5,both:6}});await ownPhone.run();assert.deepEqual(ownPhone.calls.share,[5]);
 });
 test('a used organization share is said as it is, before any credit is claimed or Apollo is asked',async()=>{
   const message='Tu organización ya usó los 300 créditos de Apollo que tiene hasta el 1 de noviembre.';

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS, dropCallPrompt, dropCallScriptSchema, dropCallText, dropPhoneOf, splitTopic } from './lead-drop-call';
+import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS, dropCredits, dropCallPrompt, dropCallScriptSchema, dropCallText, dropPhoneOf, splitTopic } from './lead-drop-call';
 
 const NOW = Date.parse('2026-11-15T15:00:00.000Z');
 
@@ -17,6 +17,7 @@ test('where a contact\'s mobile stands: the number, a lookup still running, or n
   assert.deepEqual(dropPhoneOf({ enrichment_status: 'completed', updated_at: '2026-11-15T14:50:00.000Z' }, true, NOW), { state: 'none', missed: true });
   // What the buttons say: the mobile after the email, and both in one lookup (the app's own rule: the mobile brings the email).
   assert.deepEqual([DROP_PHONE_CREDITS, DROP_EMAIL_AND_PHONE_CREDITS], [8, 8], 'a mobile\'s lookup brings the email with it');
+  assert.deepEqual(dropCredits({ email: 1, phone: 5, both: 6 }), { email: 1, phone: 5, both: 6 }, 'an organization with its own prices');
 });
 
 const SCRIPT = {

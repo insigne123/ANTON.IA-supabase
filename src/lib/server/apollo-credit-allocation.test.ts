@@ -11,13 +11,25 @@ const client = (result: { data?: unknown; error?: unknown }, calls: unknown[] = 
 test('the share is read for the organization only, with what is left', async () => {
   const calls: unknown[] = [];
   const share = await loadApolloCreditAllocation('org-1', client({ data: [row] }, calls));
-  assert.deepEqual(calls, [['apollo_credit_allocation_status_v2', { p_organization_id: 'org-1' }]]);
-  assert.deepEqual(share, { credits: 300, used: 18, remaining: 282, startsAt: row.starts_at, endsAt: row.ends_at, note: 'Ya se usaron los 2.500 créditos del plan.', usedBefore: 2300, showLimit: true });
+  assert.deepEqual(calls, [['apollo_credit_allocation_status_v3', { p_organization_id: 'org-1' }]]);
+  assert.deepEqual(share, { credits: 300, used: 18, remaining: 282, startsAt: row.starts_at, endsAt: row.ends_at, note: 'Ya se usaron los 2.500 créditos del plan.', usedBefore: 2300, showLimit: true,
+    prices: { email: 1, phone: 8, both: 8 }, refunded: 0 });
+  // An organization with its own prices and credits given back for phones that did not exist (20 Nov 2026); one without
+  // its own answers nulls and keeps the default.
+  const own = await loadApolloCreditAllocation('org-1', client({ data: [{ ...row, email_credits: 1, phone_credits: 5, both_credits: 6, refunded: 10 }] }));
+  assert.deepEqual([own?.prices, own?.refunded], [{ email: 1, phone: 5, both: 6 }, 10]);
+  const none = await loadApolloCreditAllocation('org-1', client({ data: [{ ...row, email_credits: null, phone_credits: null, both_credits: null, refunded: 0 }] }));
+  assert.deepEqual(none?.prices, { email: 1, phone: 8, both: 8 });
   assert.equal((await loadApolloCreditAllocation('org-1', client({ data: [{ ...row, show_limit: false }] })))?.showLimit, false);
   assert.equal(await loadApolloCreditAllocation('org-1', client({ data: [] })), null, 'no open share');
 });
 
-test('before the migration no organization has a share; any other failure is not taken as one', async () => {
+test('before the migration the earlier reading answers, and without it no organization has a share; any other failure is not taken as one', async () => {
+  const names: string[] = [];
+  const older = { rpc: async (name: string) => { names.push(name); return name.endsWith('_v3') ? { data: null, error: { code: 'PGRST202', message: 'missing' } } : { data: [row], error: null }; } };
+  const share = await loadApolloCreditAllocation('org-1', older);
+  assert.deepEqual(names, ['apollo_credit_allocation_status_v3', 'apollo_credit_allocation_status_v2']);
+  assert.deepEqual([share?.remaining, share?.prices, share?.refunded], [282, { email: 1, phone: 8, both: 8 }, 0]);
   assert.equal(await loadApolloCreditAllocation('org-1', client({ error: { code: 'PGRST202', message: 'missing' } })), null);
   await assert.rejects(loadApolloCreditAllocation('org-1', client({ error: { code: '57014', message: 'timeout' } })));
 });

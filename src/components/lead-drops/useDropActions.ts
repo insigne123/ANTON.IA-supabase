@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { dropName, lacksResearch, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
-import { DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { dropCredits } from '@/lib/lead-drop-call';
 import { completeSavedContacts, completionSummary } from '@/lib/leads-workspace/complete-contacts';
 import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
 import { supabaseService } from '@/lib/supabase-service';
 import type { DropContactActions } from './DropContactCard';
+import { useCreditPrices } from '@/context/CreditPricesContext';
+import { creditsLabel } from '@/lib/credit-prices';
 
 export type DropNotice = { ok: boolean; text: string } | null;
 export type DropBulkRun = { done: number; total: number; mailing: boolean };
@@ -24,6 +26,7 @@ export function useDropActions({ dropId, call, setItems, single, items }: {
   /** The contacts on screen: those that reached the person without their research get it on opening (server/lead-drop-late-research.ts). */
   items?: DropItem[];
 }) {
+  const cost = dropCredits(useCreditPrices());
   const [saving, setSaving] = useState(false);
   /** The contact whose email is being looked up. */
   const [enriching, setEnriching] = useState<string | null>(null);
@@ -156,7 +159,7 @@ export function useDropActions({ dropId, call, setItems, single, items }: {
       if (!outcome) return;
       const receipt = enrichmentCreditReceipt(Number(done.phone.consumed) || 0);
       setNotice(outcome === 'found' ? { ok: true, text: `Listo: ya tienes el teléfono de ${dropName(item)}. ${receipt}`.trim() }
-        : outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Llamada». Usa ${DROP_PHONE_CREDITS} créditos.` }
+        : outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Llamada». Usa ${creditsLabel(cost.phone)}.` }
         : { ok: false, text: `No encontramos un teléfono para ${dropName(item)}. ${receipt}`.trim() });
     },
     script: async (item, fresh) => { await act({ action: 'script', leadId: item.leadId, ...(fresh ? { fresh: true } : {}) }, 'No pudimos preparar el guion. Inténtalo de nuevo.'); },

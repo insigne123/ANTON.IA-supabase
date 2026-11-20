@@ -234,7 +234,8 @@ test('a phone reveal is described only when it is on, says the cost, one person 
   const on = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, phoneReveal: true }), base);
   const text = String(on.phoneRevealCapability);
   assert.match(text, /lead\.enrich_phone con leadId \(un contacto que ya consultaste en esta conversación/);
-  assert.match(text, /Cuesta 8 créditos por persona \(trae también el correo\) y se aprueba de a una/);
+  assert.match(text, /Usa los créditos de un teléfono por persona \(cuántos son en esta organización lo dicen credits\.read, en costs, y la tarjeta\) y se aprueba de a una/);
+  assert.doesNotMatch(text, /8 créditos/, 'the cost is the organization\'s, never a fixed number');
   assert.match(text, /nunca propongas teléfonos en lote/);
   assert.match(text, /nunca inventes un número, ni digas que ya lo tienes, ni prometas que habrá uno/);
   assert.match(text, /ANTON\.IA no verifica que tenga una base legal para llamar a esa persona/);

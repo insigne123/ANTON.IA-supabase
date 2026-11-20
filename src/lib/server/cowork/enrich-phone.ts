@@ -12,7 +12,8 @@ import {
   bindApolloEnrichmentCallback, createApolloEnrichmentCallback, markApolloEnrichmentCallbackSubmitted, settleApolloEnrichmentCallback,
 } from '@/lib/server/apollo-enrichment-callbacks';
 import { submitApolloEnrichment } from '@/lib/server/apollo-enrichment';
-import { APOLLO_ALLOCATION_PHONE_CREDITS } from '@/lib/apollo-credit-allocation';
+import { DEFAULT_CREDIT_PRICES } from '@/lib/credit-prices';
+import { loadCreditPrices } from '@/lib/server/credit-prices';
 import { assertApolloAllocationAllows } from '@/lib/server/apollo-credit-allocation';
 import { isApolloCreditBalanceStale, loadLatestApolloCreditBalance } from '@/lib/server/apollo-credit-balance';
 import { leadClaimRefusal } from '@/lib/lead-claim';
@@ -60,15 +61,19 @@ async function loadLead(client: ReturnType<typeof getSupabaseAdminClient>, scope
   return data as Record<string, unknown>;
 }
 
+/** What a phone costs the organization (credit-prices.ts): what the card says and what the approval is pinned to. */
+const phoneCost = (organizationId: string, client?: unknown) =>
+  loadCreditPrices(organizationId, client ?? undefined).then(prices => prices.phone).catch(() => DEFAULT_CREDIT_PRICES.phone);
+
 /** Who the card names, and whether the contact has enough identity for the provider to find them. */
-function whoOf(saved: Record<string, unknown>) {
+function whoOf(saved: Record<string, unknown>, cost: number = COWORK_PHONE_REVEAL_CREDITS) {
   const name = splitName(String(saved.name || ''));
   const linkedin = linkedinOf(saved.linkedin_url);
   const domain = cleanDomain(saved.company_website);
   const apolloId = typeof saved.source_provider_id === 'string' && saved.source_provider === 'apollo' ? text(saved.source_provider_id, 255) : undefined;
   const company = text(saved.company, 200);
   const identified = Boolean(apolloId || linkedin || (name.firstName && (domain || company)));
-  const who: CoworkPhoneWho = { name: name.fullName, company: company || '', linkedin: linkedin || '', apolloId: apolloId || '', cost: COWORK_PHONE_REVEAL_CREDITS };
+  const who: CoworkPhoneWho = { name: name.fullName, company: company || '', linkedin: linkedin || '', apolloId: apolloId || '', cost };
   return { who, name, linkedin, domain, apolloId, company, identified, title: text(saved.title, 160) };
 }
 
@@ -83,7 +88,7 @@ export async function stageCoworkPhoneReveal(scope: Scope, runId: string, leadId
   }
   const saved = await loadLead(client, scope, leadId);
   if (!saved) throw new Error('El contacto no está disponible en tu organización.');
-  const info = whoOf(saved);
+  const info = whoOf(saved, await phoneCost(scope.organizationId, client));
   if (!info.identified) throw new Error('El contacto no tiene identidad suficiente para pedir su teléfono (nombre y empresa o LinkedIn).');
   const hash = hashCoworkPhoneReveal(runId, leadId, info.who);
   const label = `Revelar el teléfono de ${info.who.name}${info.who.company ? ` (${info.who.company})` : ''} · ${info.who.cost} créditos`.slice(0, 280);
@@ -97,7 +102,7 @@ export async function readCoworkPhoneRevealPreview(auth: AuthContext, runId: str
   try { target = parseCoworkPhoneRevealTarget(targetId); } catch { return null; }
   const saved = await loadLead(getSupabaseAdminClient(), scope, target.leadId);
   if (!saved) return null;
-  const info = whoOf(saved);
+  const info = whoOf(saved, await phoneCost(scope.organizationId));
   const matches = info.identified && hashCoworkPhoneReveal(runId, target.leadId, info.who) === target.hash;
   let balance: { remaining: number; stale: boolean; capturedAt: string } | null = null;
   try {
@@ -134,13 +139,13 @@ export async function executeCoworkPhoneReveal(auth: AuthContext, runId: string,
   }
   const saved = await loadLead(client, scope, target.leadId);
   if (!saved) throw new Error('El contacto ya no está disponible. No se pidió el teléfono.');
-  const info = whoOf(saved);
+  const info = whoOf(saved, await phoneCost(organizationId));
   if (!info.identified || hashCoworkPhoneReveal(runId, target.leadId, info.who) !== target.hash) {
     throw new Error('El contacto cambió desde tu revisión. No se pidió el teléfono: pide una nueva revisión.');
   }
   if (!await hasUserEnrichmentSearchCreditAccess(userId)) throw new Error('Tu cuenta no tiene acceso a créditos de enriquecimiento. No se pidió el teléfono.');
   // The organization's Apollo share (when it has one): the phone alone, the email is not asked here.
-  await assertApolloAllocationAllows(organizationId, APOLLO_ALLOCATION_PHONE_CREDITS);
+  await assertApolloAllocationAllows(organizationId, info.who.cost);
   // The balance is the shared account's last reading: when it says there is not enough, nothing is asked; when it cannot be read, the provider decides.
   try {
     const latest = await loadLatestApolloCreditBalance();

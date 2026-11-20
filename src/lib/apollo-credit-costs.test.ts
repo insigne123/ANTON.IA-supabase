@@ -15,4 +15,5 @@ test('Apollo enrichment costs use the shared account contract', () => {
   assert.equal(apolloEnrichmentCreditCost({ revealEmail: true, revealPhone: false }), 1);
   assert.equal(apolloEnrichmentCreditCost({ revealEmail: false, revealPhone: true }), 8);
   assert.equal(apolloEnrichmentCreditCost({ revealEmail: true, revealPhone: true }), 8);
+  assert.equal(apolloEnrichmentCreditCost({ revealEmail: true, revealPhone: true }, { email: 1, phone: 5, both: 6 }), 6, 'at the organization\'s own prices');
 });

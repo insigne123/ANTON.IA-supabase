@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { APOLLO_EMAIL_ENRICHMENT_CREDITS, APOLLO_PHONE_ENRICHMENT_CREDITS } from '@/lib/apollo-credit-costs';
+import { DEFAULT_CREDIT_PRICES } from '@/lib/credit-prices';
+import { loadCreditPrices } from '@/lib/server/credit-prices';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import {
   isApolloCreditBalanceStale,
@@ -12,7 +13,9 @@ export const runtime = 'nodejs';
 
 export async function GET() {
   try {
-    await requireAuth();
+    const auth = await requireAuth();
+    // What each lookup costs is the organization's (credit-prices.ts); if it cannot be read, the default.
+    const prices = await loadCreditPrices(auth.organizationId).catch(() => DEFAULT_CREDIT_PRICES);
     const balance = await loadLatestApolloCreditBalance();
     if (!balance) {
       return NextResponse.json({ error: 'APOLLO_CREDIT_BALANCE_UNAVAILABLE' }, { status: 503 });
@@ -25,8 +28,8 @@ export async function GET() {
         stale: isApolloCreditBalanceStale(balance),
       },
       costs: {
-        emailEnrichment: APOLLO_EMAIL_ENRICHMENT_CREDITS,
-        phoneEnrichment: APOLLO_PHONE_ENRICHMENT_CREDITS,
+        emailEnrichment: prices.email,
+        phoneEnrichment: prices.phone,
       },
     }, {
       headers: {

@@ -1,3 +1,5 @@
+import { DEFAULT_CREDIT_PRICES, creditCost, creditsLabel, type CreditPrices } from '@/lib/credit-prices';
+
 /**
  * Apollo credits shared out per organization for a window (28 Oct 2026: the cycle's 2,500 were spent and 1,000 more were
  * bought, 700 for one company and 300 for another). The database counts each organization's lookups in the window
@@ -5,9 +7,12 @@
  * direct-dial reading: 1,848 credits for 231 phones). While an organization has an open allocation, the email and phone
  * lookups that do not fit are refused before anything is claimed or asked; searches are never stopped by it. Pure: the
  * screens, the server and the tests share it.
+ *
+ * Since 20 Nov 2026 the 1 and the 8 are the default: an organization can have its own prices (src/lib/credit-prices.ts), which
+ * its allocation carries, and credits given back for phones that did not exist (`refunded`) add to what is left.
  */
-export const APOLLO_ALLOCATION_EMAIL_CREDITS = 1;
-export const APOLLO_ALLOCATION_PHONE_CREDITS = 8;
+export const APOLLO_ALLOCATION_EMAIL_CREDITS = DEFAULT_CREDIT_PRICES.email;
+export const APOLLO_ALLOCATION_PHONE_CREDITS = DEFAULT_CREDIT_PRICES.phone;
 
 /** The error code the enrichment route answers with, whose message the screens show as it is. */
 export const APOLLO_ALLOCATION_ERROR = 'APOLLO_CREDITS_ALLOCATION_USED';
@@ -25,12 +30,18 @@ export type ApolloCreditAllocation = {
   usedBefore: number;
   /** False: the organization sees only what it used, not its share nor what is left. */
   showLimit: boolean;
+  /** What an email and a phone cost this organization; absent, the default. */
+  prices?: CreditPrices;
+  /** Credits given back for phones that did not exist, usable in this window (already in `remaining`). */
+  refunded?: number;
 };
 
-/** Email alone is 1; a phone lookup brings the email with it and is 8 for both (audit T5, 1 Nov 2026). */
-export function apolloAllocationCost(fields: { revealEmail: boolean; revealPhone: boolean }) {
-  if (fields.revealPhone) return APOLLO_ALLOCATION_PHONE_CREDITS;
-  return fields.revealEmail ? APOLLO_ALLOCATION_EMAIL_CREDITS : 0;
+export const allocationPrices = (allocation: Pick<ApolloCreditAllocation, 'prices'> | null | undefined): CreditPrices =>
+  allocation?.prices ?? DEFAULT_CREDIT_PRICES;
+
+/** What the lookup uses of the organization's share: the email, the phone, or both together, at the organization's prices. */
+export function apolloAllocationCost(fields: { revealEmail: boolean; revealPhone: boolean }, prices: CreditPrices = DEFAULT_CREDIT_PRICES) {
+  return creditCost(fields, prices);
 }
 
 const count = (value: number) => value.toLocaleString('es-CL');
@@ -54,16 +65,19 @@ export function apolloAllocationRefusal(allocation: ApolloCreditAllocation | nul
   const left = allocation.showLimit
     ? `A tu organización le quedan ${count(allocation.remaining)} créditos de Apollo hasta el ${until} y esto usa hasta ${count(needed)}.`
     : `Esto usa hasta ${count(needed)} créditos de Apollo y a tu organización no le alcanzan hasta el ${until}.`;
-  return `${left} Pide menos contactos o solo correos (${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito cada uno).`;
+  return `${left} Pide menos contactos o solo correos (${creditsLabel(allocationPrices(allocation).email)} cada uno).`;
 }
 
 /** What the admin panel's card says and shows: the cycle's use, and what is left only when the organization sees its share. */
 export function apolloAllocationCopy(allocation: ApolloCreditAllocation) {
   const until = apolloAllocationEndLabel(allocation.endsAt);
-  const used = allocation.usedBefore + Math.min(allocation.used, allocation.credits);
-  const total = allocation.usedBefore + allocation.credits;
-  const costs = `El correo usa ${APOLLO_ALLOCATION_EMAIL_CREDITS} crédito; correo y móvil, ${APOLLO_ALLOCATION_PHONE_CREDITS}. `
-    + 'Lo que está en curso ya se cuenta. Las búsquedas no usan estos créditos.';
+  const refunded = Math.max(0, allocation.refunded ?? 0);
+  const used = allocation.usedBefore + Math.min(allocation.used, allocation.credits + refunded);
+  const total = allocation.usedBefore + allocation.credits + refunded;
+  const prices = allocationPrices(allocation);
+  const costs = `El correo usa ${creditsLabel(prices.email)}; el móvil, ${prices.phone}; correo y móvil, ${prices.both}. `
+    + 'Lo que está en curso ya se cuenta. Las búsquedas no usan estos créditos.'
+    + (refunded > 0 ? ` Incluye ${creditsLabel(refunded)} ${refunded === 1 ? 'devuelto' : 'devueltos'} por teléfonos que no existían.` : '');
   if (!allocation.showLimit) {
     return {
       until, used, total: null, remaining: null, spent: false,

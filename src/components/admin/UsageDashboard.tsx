@@ -19,6 +19,7 @@ import {dayInZone,lastDaysInZone,shiftDay} from '@/lib/admin/chile-time';
 import {cn} from '@/lib/utils';
 import {SEGMENT_TRACK,chipClass,segmentClass} from '@/components/ui/chip';
 import {ApolloAllocationCard} from '@/components/admin/ApolloAllocationCard';
+import { PhoneRefundsCard } from '@/components/admin/PhoneRefundsCard';
 import {CreditResultsCard} from '@/components/admin/CreditResultsCard';
 import {TeamFunnelCard} from '@/components/admin/TeamFunnelCard';
 
@@ -104,6 +105,8 @@ export function UsageDashboard(){
     </section>
     {/* Only while the organization has Apollo credits assigned for a window (apollo-credit-allocation.ts). */}
     {!person&&<ApolloAllocationCard/>}
+    {/* Phones the customer says do not exist and what came back (phone-refunds.ts); only where the agreement includes it. */}
+    {!person&&<PhoneRefundsCard/>}
     {/* What the period's Apollo credits got, by person and team (credit-results.ts); a platform view needs one company. */}
     {(!data?.platform||Boolean(org))&&<CreditResultsCard from={from} to={to} organizationId={org||undefined} groupId={group||undefined} userId={person||undefined}/>}
     {/* Where the period's work stops, for the team and each person (team-funnel.ts, plan de uso A4); same scope as above. */}
