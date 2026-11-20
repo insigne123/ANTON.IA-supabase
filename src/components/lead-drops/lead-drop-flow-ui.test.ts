@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
 import * as chileTime from '@/lib/admin/chile-time';
 import * as contactCalls from '@/lib/contact-calls';
+import * as creditPrices from '@/lib/credit-prices';
 import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
 
@@ -28,6 +29,7 @@ async function component(file: string, dependencies: Record<string, unknown>) {
   return exports;
 }
 
+let orgPrices: creditPrices.CreditPrices = creditPrices.DEFAULT_CREDIT_PRICES;
 const shared = {
   '@/components/ui/button': { Button: ({ asChild, variant: _variant, size: _size, ...props }: any) => asChild ? props.children : React.createElement('button', props) },
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
@@ -36,6 +38,9 @@ const shared = {
   // «Para llamar»: the real rules of the number and of the script; the app's «Llamar» and «WhatsApp» as a line that says what it got.
   '@/lib/contact-calls': contactCalls,
   '@/lib/lead-drop-call': leadDropCall,
+  '@/lib/credit-prices': creditPrices,
+  // The organization's prices come from the app's frame; here the default ones, or the ones a test sets.
+  '@/context/CreditPricesContext': { useCreditPrices: () => orgPrices },
   '@/components/contact/ContactActions': { ContactActions: ({ phone, whatsappText, contact }: any) => React.createElement('p', { 'data-contact-actions': contact?.leadId || '', 'data-whatsapp': whatsappText || '' }, `Llamar · WhatsApp · ${phone}`) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
   // The fields of the card as the browser has them, so a test can type in them.

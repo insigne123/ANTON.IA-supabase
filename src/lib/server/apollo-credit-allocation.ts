@@ -1,4 +1,5 @@
 import { apolloAllocationRefusal, type ApolloCreditAllocation } from '@/lib/apollo-credit-allocation';
+import { creditPricesOf } from '@/lib/credit-prices';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 /** A lookup refused because it does not fit in the organization's Apollo share (or the share could not be read). */
@@ -22,7 +23,12 @@ export async function loadApolloCreditAllocation(
   organizationId: string,
   admin: any = getSupabaseAdminClient(),
 ): Promise<ApolloCreditAllocation | null> {
-  const { data, error } = await admin.rpc('apollo_credit_allocation_status_v2', { p_organization_id: organizationId });
+  // v3 (20 Nov 2026) counts at the organization's own prices and adds what was given back for phones that did not exist;
+  // until its migration is applied, v2 answers as before.
+  let { data, error } = await admin.rpc('apollo_credit_allocation_status_v3', { p_organization_id: organizationId });
+  if (error && MISSING_FUNCTION.has(String(error.code || ''))) {
+    ({ data, error } = await admin.rpc('apollo_credit_allocation_status_v2', { p_organization_id: organizationId }));
+  }
   if (error) {
     if (MISSING_FUNCTION.has(String(error.code || ''))) return null;
     throw error;
@@ -38,6 +44,8 @@ export async function loadApolloCreditAllocation(
     note: typeof row.note === 'string' && row.note.trim() ? row.note.trim() : null,
     usedBefore: number(row.used_before),
     showLimit: row.show_limit !== false,
+    prices: creditPricesOf(row),
+    refunded: number(row.refunded),
   };
 }
 

@@ -19,6 +19,10 @@ test('a share counts what Apollo charges: 1 for the email and 8 for the phone', 
   assert.equal(apolloAllocationCost({ revealEmail: true, revealPhone: false }), 1);
   assert.equal(apolloAllocationCost({ revealEmail: false, revealPhone: true }), 8);
   assert.equal(apolloAllocationCost({ revealEmail: true, revealPhone: true }), 8);
+  // An organization with its own prices (20 Nov 2026).
+  const own = { email: 1, phone: 5, both: 6 };
+  assert.deepEqual([apolloAllocationCost({ revealEmail: true, revealPhone: true }, own), apolloAllocationCost({ revealEmail: false, revealPhone: true }, own),
+    apolloAllocationCost({ revealEmail: true, revealPhone: false }, own)], [6, 5, 1]);
   assert.equal(apolloAllocationCost({ revealEmail: false, revealPhone: false }), 0);
 });
 
@@ -58,7 +62,12 @@ test('the card says what is left and what was used in the cycle, the earlier use
   assert.deepEqual([copy.used, copy.total, copy.remaining, copy.spent], [2_300, 2_600, 300, false]);
   const later = apolloAllocationCopy(share(282, 300, { usedBefore: 2_300 }));
   assert.equal(later.summary, 'Quedan solo 282 créditos disponibles hasta el 1 de noviembre: ya se usaron 2.318.');
-  assert.match(copy.footnote, /El correo usa 1 crédito; correo y móvil, 8\./);
+  assert.match(copy.footnote, /El correo usa 1 crédito; el móvil, 8; correo y móvil, 8\./);
+  // Its own prices, and what came back for phones that did not exist, which adds to what there is.
+  const own = apolloAllocationCopy(share(2_490, 2_500, { used: 20, prices: { email: 1, phone: 5, both: 6 }, refunded: 10 }));
+  assert.deepEqual([own.used, own.total, own.remaining], [20, 2_510, 2_490]);
+  assert.match(own.footnote, /El correo usa 1 crédito; el móvil, 5; correo y móvil, 6\..*Incluye 10 créditos devueltos por teléfonos que no existían\.$/);
+  assert.doesNotMatch(copy.footnote, /devuelt/);
   assert.match(copy.footnote, /Las búsquedas no usan estos créditos/);
 });
 

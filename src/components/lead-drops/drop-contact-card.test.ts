@@ -5,6 +5,7 @@ import test from 'node:test';
 import ts from 'typescript';
 import { JSDOM } from 'jsdom';
 import * as contactCalls from '@/lib/contact-calls';
+import * as creditPrices from '@/lib/credit-prices';
 import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
 
@@ -19,6 +20,7 @@ const require = createRequire(import.meta.url);
 
 const source = await readFile(new URL('./DropContactCard.tsx', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+let orgPrices: creditPrices.CreditPrices = creditPrices.DEFAULT_CREDIT_PRICES;
 const stubs: Record<string, unknown> = {
   '@/components/ui/button': { Button: ({ asChild, variant: _variant, size: _size, ...props }: any) => asChild ? props.children : React.createElement('button', props) },
   '@/components/ui/input': { Input: (props: any) => React.createElement('input', props) },
@@ -30,6 +32,9 @@ const stubs: Record<string, unknown> = {
   // «Para llamar»: the real rules of the number and of the script; the app's «Llamar» and «WhatsApp» as a line that says what it got.
   '@/lib/contact-calls': contactCalls,
   '@/lib/lead-drop-call': leadDropCall,
+  '@/lib/credit-prices': creditPrices,
+  // The organization's prices come from the app's frame; here the default ones, or the ones a test sets.
+  '@/context/CreditPricesContext': { useCreditPrices: () => orgPrices },
   '@/components/contact/ContactActions': { ContactActions: ({ phone, whatsappText, contact }: any) => React.createElement('p', { 'data-contact-actions': contact?.leadId || '', 'data-whatsapp': whatsappText || '' }, `Llamar · WhatsApp · ${phone}`) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
 };

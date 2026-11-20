@@ -5,9 +5,11 @@ import { Check, ChevronDown, CircleHelp, Copy, Loader2, MessageCircle, Phone, Qu
 import { ContactActions } from '@/components/contact/ContactActions';
 import { Button } from '@/components/ui/button';
 import { telHref, whatsappHref } from '@/lib/contact-calls';
-import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS, dropCallText, splitTopic } from '@/lib/lead-drop-call';
+import { dropCallText, dropCredits, splitTopic } from '@/lib/lead-drop-call';
 import { dropName, needsLookup, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
+import { useCreditPrices } from '@/context/CreditPricesContext';
+import { creditsLabel } from '@/lib/credit-prices';
 
 /** What the panel asks its page to do: each answers when done, and the page says what happened. */
 export type DropCallActions = {
@@ -40,6 +42,7 @@ export function DropCallPanel({ item, actions, busy, mail = false, collapsible =
   /** Inside a tab of its own (DropContactCard): the tab is its heading, so it brings none. */
   bare?: boolean;
 }) {
+  const cost = dropCredits(useCreditPrices());
   const uid = useId();
   const [open, setOpen] = useState(!collapsible || defaultOpen);
   const [working, setWorking] = useState<'phone' | 'script' | 'refresh' | null>(null);
@@ -70,7 +73,7 @@ export function DropCallPanel({ item, actions, busy, mail = false, collapsible =
   const phoneLine = phone?.state === 'found' ? <span className="select-all text-lg font-semibold tabular-nums tracking-tight">{phone.number}{phone.more ? <span className="ml-1.5 text-sm font-normal text-muted-foreground">+{phone.more}</span> : null}</span>
     : phone?.state === 'pending' ? <span role="status" className="flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />Buscando su teléfono: suele tardar unos minutos y aparece aquí solo.</span>
     : item.savedLeadId ? <span className="text-sm text-muted-foreground">{phone?.state === 'none' && phone.missed ? 'La última búsqueda no encontró un teléfono para este contacto.' : 'Su móvil, para llamarlo o escribirle por WhatsApp.'}</span>
-    : <span className="text-sm text-muted-foreground">{needsLookup(item) ? `Su teléfono se busca al enriquecerlo: junto con el correo (${DROP_EMAIL_AND_PHONE_CREDITS} créditos por ambos) o después (${DROP_PHONE_CREDITS} más).` : 'Guárdalo primero: su teléfono se busca después.'}</span>;
+    : <span className="text-sm text-muted-foreground">{needsLookup(item) ? `Su teléfono se busca al enriquecerlo: junto con el correo (${cost.both} créditos por ambos) o después (${cost.phone} más).` : 'Guárdalo primero: su teléfono se busca después.'}</span>;
   // From the inbox the number's two ways are plain links. The card's own step stays its one filled button: «Llamar» is outlined.
   const phoneActions = phone?.state === 'found' ? (mail
     ? <div className="flex flex-wrap gap-2">
@@ -85,7 +88,7 @@ export function DropCallPanel({ item, actions, busy, mail = false, collapsible =
       <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', working === 'refresh' && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Actualizar</Button>
     : item.savedLeadId ? <Button variant="outline" size="sm" disabled={stopped} onClick={() => void run('phone', () => actions.phone(item))}>
       {working === 'phone' ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Phone className="mr-2 h-4 w-4" aria-hidden="true" />}
-      {working === 'phone' ? 'Buscando su teléfono…' : `Buscar su teléfono · ${DROP_PHONE_CREDITS} créditos`}</Button>
+      {working === 'phone' ? 'Buscando su teléfono…' : `Buscar su teléfono · ${creditsLabel(cost.phone)}`}</Button>
     : null;
   // In the app the number's own row («Llamar», «WhatsApp», what happened) already shows the number: it is not said twice.
   const inApp = phone?.state === 'found' && !mail;

@@ -3,8 +3,10 @@
 import { useId } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { dropCredits } from '@/lib/lead-drop-call';
 import { cn } from '@/lib/utils';
+import { useCreditPrices } from '@/context/CreditPricesContext';
+import { creditsLabel } from '@/lib/credit-prices';
 
 /**
  * «Enriquecer los N» on the page the morning email opens (15 Nov 2026, the owner: «el botón que te deje darle a enriquecer todos con
@@ -20,9 +22,10 @@ export function DropBulkEnrich({ count, phone, onPhone, onStart, running, disabl
   running: { done: number; total: number; mailing: boolean } | null;
   disabled: boolean;
 }) {
+  const cost = dropCredits(useCreditPrices());
   const name = useId();
   const total = running?.total ?? count;
-  const credits = (withPhone: boolean) => total * (withPhone ? DROP_EMAIL_AND_PHONE_CREDITS : 1);
+  const credits = (withPhone: boolean) => total * (withPhone ? cost.both : cost.email);
   const choice = (withPhone: boolean, label: string, hint: string) => <label className={cn('flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 text-sm transition-colors',
     'bg-card focus-within:ring-2 focus-within:ring-ring', phone === withPhone ? 'border-primary shadow-sm' : 'hover:bg-muted/50', (running || disabled) && 'cursor-not-allowed opacity-60')}>
     <input type="radio" name={name} className="mt-1 h-4 w-4 accent-primary" checked={phone === withPhone} disabled={Boolean(running) || disabled} onChange={() => onPhone(withPhone)} />
@@ -39,8 +42,8 @@ export function DropBulkEnrich({ count, phone, onPhone, onStart, running, disabl
       </div>
       <fieldset className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
         <legend className="sr-only">Qué buscar de cada contacto</legend>
-        {choice(false, 'Solo correo', '1 crédito por contacto.')}
-        {choice(true, 'Correo y teléfono', `${DROP_EMAIL_AND_PHONE_CREDITS} por contacto. El teléfono llega en minutos, con el guion de la llamada.`)}
+        {choice(false, 'Solo correo', `${creditsLabel(cost.email)} por contacto.`)}
+        {choice(true, 'Correo y teléfono', `${cost.both} por contacto. El teléfono llega en minutos, con el guion de la llamada.`)}
       </fieldset>
       <div className="flex flex-col gap-1.5 lg:w-56 lg:shrink-0">
         <Button type="button" onClick={onStart} disabled={Boolean(running) || disabled}>

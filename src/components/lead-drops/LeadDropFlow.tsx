@@ -11,7 +11,7 @@ import { dayInZone } from '@/lib/admin/chile-time';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { organizationService } from '@/lib/services/organization-service';
 import { accountsLine, dropCostNote, dropHref, dropName, needsLookup, placeLabel, type DropCriteria, type DropFit, type DropItem } from '@/lib/lead-drops';
-import { DROP_EMAIL_AND_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { dropCredits } from '@/lib/lead-drop-call';
 import { telHref } from '@/lib/contact-calls';
 import { DropBulkEnrich } from './DropBulkEnrich';
 import { DropCallPanel } from './DropCallPanel';
@@ -19,6 +19,8 @@ import { DropContactCard } from './DropContactCard';
 import { DropContactsWorkspace } from './DropContactsWorkspace';
 import { useDropActions } from './useDropActions';
 import { cn } from '@/lib/utils';
+import { useCreditPrices } from '@/context/CreditPricesContext';
+import { creditsLabel } from '@/lib/credit-prices';
 
 type Drop = { id: string; date: string; criteria: DropCriteria; items: DropItem[] };
 /** Why there are no contacts this time (src/lib/server/lead-drops.ts, emptyReason), with the button to «Perfil» when it helps. */
@@ -85,6 +87,8 @@ function Steps({ step }: { step: number }) {
  * one contact (`?c=`) and may ask to look its email up on arrival (`&enriquecer=1`): the click in the email was the person's.
  */
 export function LeadDropFlow({ dropId }: { dropId: string }) {
+  const prices = useCreditPrices();
+  const cost = dropCredits(prices);
   const { organizationId, loading: authLoading, refreshOrganization } = useAuth();
   const [id, setId] = useState<string | null>(dropId === 'nuevo' ? null : dropId);
   const [making, setMaking] = useState(dropId === 'nuevo');
@@ -295,9 +299,9 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   };
 
   const enrichButton = (item: DropItem, size: 'lg' | 'sm') => <Button size={size} variant={size === 'sm' ? 'outline' : 'default'} disabled={saving || enriching !== null}
-    onClick={() => void enrich(item)} aria-label={size === 'sm' && enriching !== item.leadId ? `Enriquecer y guardar · 1 crédito: ${dropName(item)}` : undefined}>
+    onClick={() => void enrich(item)} aria-label={size === 'sm' && enriching !== item.leadId ? `Enriquecer y guardar · ${creditsLabel(cost.email)}: ${dropName(item)}` : undefined}>
     {enriching === item.leadId ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
-    {enriching === item.leadId ? 'Buscando su correo…' : 'Enriquecer y guardar · 1 crédito'}</Button>;
+    {enriching === item.leadId ? 'Buscando su correo…' : `Enriquecer y guardar · ${creditsLabel(cost.email)}`}</Button>;
   const playing = Boolean(drop) && step < STEPS.length;
   // Opened from the morning email on one contact: it comes into view and, when the link asked for it, its email is looked up at once
   // (the click in the email was the person's; the lookup is the one the button makes, for a contact of theirs).
@@ -359,7 +363,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   return <div className={cn('mx-auto w-full', drop && !one && !playing ? 'max-w-6xl' : 'max-w-3xl')}>
     {/* A screen of «Hoy» (16 Nov 2026): the way back is «Hoy», and the menu lists it under it. */}
     <PageHeader title={drop && !one ? (today ? 'Tus contactos de hoy' : 'Tus contactos del día') : (today ? 'Tu contacto de hoy' : 'Tu contacto del día')} back={{ href: '/dashboard', label: 'Hoy' }}
-      description={drop ? (lookup ? `${one ? 'Encontrado' : 'Encontrados'} el ${dayLabel(drop.date)} para ti. ${left.length ? dropCostNote(left)
+      description={drop ? (lookup ? `${one ? 'Encontrado' : 'Encontrados'} el ${dayLabel(drop.date)} para ti. ${left.length ? dropCostNote(left, prices)
         : one ? 'Ya está en «Por escribir», con su correo.' : 'Ya están en «Por escribir», con su correo.'}`
         : one ? `Encontrado el ${dayLabel(drop.date)} para ti. Ya tiene su correo verificado: guardarlo no gasta créditos.`
         : `Encontrados el ${dayLabel(drop.date)} para ti. Ya tienen su correo verificado: guardarlos no gasta créditos.`)
@@ -409,7 +413,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
               {enrichButton(one, 'lg')}
               {/* The same lookup with its mobile too, for whoever means to call («Para llamar», below). */}
               {enriching ? null : <Button variant="link" size="sm" className="h-auto min-h-9 justify-start p-0 text-xs font-normal text-muted-foreground sm:justify-end" disabled={saving}
-                onClick={() => actions.enrich(one, true)}>O con su teléfono · {DROP_EMAIL_AND_PHONE_CREDITS} créditos</Button>}
+                onClick={() => actions.enrich(one, true)}>O con su teléfono · {cost.both} créditos</Button>}
             </div>
             : <Button size="lg" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}

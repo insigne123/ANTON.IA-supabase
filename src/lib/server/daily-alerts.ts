@@ -16,6 +16,8 @@ import { matchesSearch, readAdminSettings, searchHref, type NewOpportunity } fro
 import { readPersonGoal } from '@/lib/server/weekly-goals';
 import { readPeopleToCall } from '@/lib/server/contact-calls';
 import type { SendSelf } from '@/lib/server/weekly-report';
+import { DEFAULT_CREDIT_PRICES } from '@/lib/credit-prices';
+import { loadCreditPrices } from '@/lib/server/credit-prices';
 
 /** The reads and the delivery of «Avisos» (src/lib/daily-alerts.ts), with the service client and an explicit organization. */
 type Client = SupabaseClient;
@@ -326,7 +328,9 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
     readAlertFacts(client, scope, { now, since, opportunities: deps.opportunities, lastSignInAt: deps.lastSignInAt }),
     todayDrop,
   ]);
-  facts.drop = drop;
+  // What the email and the PDF say a lookup costs is the organization's (credit-prices.ts); if it cannot be read, the default.
+  const prices = drop ? await loadCreditPrices(scope.organizationId, client).catch(() => DEFAULT_CREDIT_PRICES) : DEFAULT_CREDIT_PRICES;
+  facts.drop = drop ? { ...drop, prices } : drop;
   // A goal that is behind alone is worth an email in one workspace only: whoever belongs to several gets it from one.
   const alert = composeAlert(facts, now, { goalReminders: deps.goalReminders });
   const row = { organization_id: scope.organizationId, user_id: scope.userId, alert_date: today };
@@ -352,8 +356,8 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   // That email is all at the address its link opens (LEAD_DROPS_PUBLIC_URL), its other links too; the rest of the day keeps the app's.
   const open = drop && own ? dropLinkUrl(deps.appUrl, drop.id, { now }) : null;
   const attachments = drop ? [{ filename: `contacto-del-dia-${today}.pdf`, contentType: 'application/pdf',
-    content: await dropPdf(drop.items, { name: facts.name, date: today, link: open || `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
-  const mailed = drop && open ? { ...drop, link: open } : drop;
+    content: await dropPdf(drop.items, { name: facts.name, date: today, link: open || `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}`, prices }) }] : undefined;
+  const mailed = drop && open ? { ...drop, link: open, prices } : drop ? { ...drop, prices } : drop;
   // The email of several contacts opens a conversation of its own: what the person does from it is answered there (lead-drop-thread.ts).
   // Whoever has not opened the app in a while gets that email written to bring them back, with a subject of its own: the drop keeps
   // it, so what answers in that conversation carries the same (dropThreadSubject).

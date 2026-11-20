@@ -3,6 +3,7 @@ import { isOpportunityAdmin } from '@/lib/commercial-opportunities/workspace';
 import { opportunityAssignHref } from '@/lib/commercial-opportunities/workspace-url';
 import { emailButton, emailCard, emailHeadline, emailNote, emailRow, emailShell } from '@/lib/email-shell';
 import { dropEmailSection, dropHref, dropName, dropSubject, type DropItem } from '@/lib/lead-drops';
+import type { CreditPrices } from '@/lib/credit-prices';
 import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } from '@/lib/weekly-goals';
 
 /**
@@ -55,7 +56,7 @@ export type AlertFacts = {
   /** Days since the person last signed in or did something recorded (plan de uso U5); null or absent when unknown. */
   idleDays?: number | null;
   /** Today's «Contacto del día», when it is ready. */
-  drop?: { id: string; items: DropItem[]; /** The page of the drop that needs no session, when it has one (server/lead-drop-link.ts). */ link?: string | null } | null;
+  drop?: { id: string; items: DropItem[]; /** The page of the drop that needs no session, when it has one (server/lead-drop-link.ts). */ link?: string | null; /** What an email and a phone cost the organization (credit-prices.ts). */ prices?: CreditPrices } | null;
   /** Conversations of Cowork whose proposal waits for the person (COW-04): every day while they wait, as the decisions above. */
   coworkApprovals?: number;
   /**
@@ -331,7 +332,7 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop
   const settings = link('/dashboard?vista=semana');
   const greeting = name ? `Hola, ${name}` : 'Hola';
   const lines = drop?.items.length ? alert.lines.filter(line => line.kind !== 'drop') : alert.lines;
-  const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base, { heading: lines.length > 0, link: drop.link }) : null;
+  const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base, { heading: lines.length > 0, link: drop.link, prices: drop.prices }) : null;
   const alone = Boolean(section && !lines.length);
   // Someone who has not come in for a while (AWAY_DAYS), with several contacts alone in their email: what was done for them, how
   // little is left, and the way back in for whoever lost their password. The contacts and their buttons are the same.

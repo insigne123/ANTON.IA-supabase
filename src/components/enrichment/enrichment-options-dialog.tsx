@@ -6,6 +6,8 @@ import { useState } from 'react';
 import { AlertCircle, Mail, Phone } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { apolloEnrichmentCreditCost } from '@/lib/apollo-credit-costs';
+import { useCreditPrices } from '@/context/CreditPricesContext';
+import { creditsLabel } from '@/lib/credit-prices';
 
 interface EnrichmentOptionsDialogProps {
     open: boolean;
@@ -20,7 +22,8 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
     const [revealPhone, setRevealPhone] = useState(false);
 
     const hasSelection = revealEmail || revealPhone;
-    const creditsPerContact = apolloEnrichmentCreditCost({ revealEmail, revealPhone });
+    const prices = useCreditPrices();
+    const creditsPerContact = apolloEnrichmentCreditCost({ revealEmail, revealPhone }, prices);
     const estimatedCredits = leadCount * creditsPerContact;
 
     const handleConfirm = () => {
@@ -74,7 +77,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                                 </span>
                             </div>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                Correo: 1 crédito por contacto. Correo y móvil: 8 por contacto.
+                                Correo: {creditsLabel(prices.email)} por contacto. Correo y móvil: {prices.both} por contacto.
                             </p>
                         </div>
                     ) : (

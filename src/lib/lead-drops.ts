@@ -1,4 +1,5 @@
-import { DROP_EMAIL_AND_PHONE_CREDITS, type DropCallScript, type DropPhone } from '@/lib/lead-drop-call';
+import { type DropCallScript, type DropPhone } from '@/lib/lead-drop-call';
+import { DEFAULT_CREDIT_PRICES, creditsLabel, type CreditPrices } from '@/lib/credit-prices';
 import { EMAIL_AVATAR_TINTS, emailButton, emailCallout, emailCard, emailLabel, emailNote, emailPerson, emailPill, emailRow, type EmailPillTone } from '@/lib/email-shell';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { displayLeadName } from '@/lib/lead-name';
@@ -256,9 +257,9 @@ export const dropName = (item: Pick<DropItem, 'name'>) => displayLeadName(item.n
 /** A contact whose email is still to look up: «Enriquecer y guardar» (1 credit) instead of «Guardar» (free, the email came with the search). */
 export const needsLookup = (item: Pick<DropItem, 'provider' | 'savedLeadId'>) => item.provider === 'apollo' && !item.savedLeadId;
 /** What saving them costs, said where they are offered: the email, the PDF, «Hoy». */
-export function dropCostNote(items: Array<Pick<DropItem, 'provider'>>) {
+export function dropCostNote(items: Array<Pick<DropItem, 'provider'>>, prices: CreditPrices = DEFAULT_CREDIT_PRICES) {
   const one = items.length === 1;
-  if (items.some(item => item.provider === 'apollo')) return one ? 'Ver su correo y guardarlo usa 1 crédito.' : 'Ver el correo de cada uno y guardarlo usa 1 crédito por contacto.';
+  if (items.some(item => item.provider === 'apollo')) return one ? `Ver su correo y guardarlo usa ${creditsLabel(prices.email)}.` : `Ver el correo de cada uno y guardarlo usa ${creditsLabel(prices.email)} por contacto.`;
   return one ? 'Guardarlo no gasta créditos.' : 'Guardarlos no gasta créditos.';
 }
 
@@ -734,7 +735,7 @@ export function dropIdInLink(token: string): string | null {
  * The drop's part of the email: each contact as a block (name, role and company, why), the button to see them and a note on
  * the PDF. With `heading: false` (the drop is all the email has) the title and its lead are left out.
  */
-export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean; now?: Date; /** The page that needs no session (server/lead-drop-link.ts), in place of the app's. */ link?: string | null } = {}) {
+export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean; now?: Date; /** The page that needs no session (server/lead-drop-link.ts), in place of the app's. */ link?: string | null; /** What an email and a phone cost the organization (credit-prices.ts). */ prices?: CreditPrices } = {}) {
   const link = options.link || `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
   // Several contacts (a team's plan): each with its campaign ready to approve, and its own way in.
   if (items.length > 1) return campaignEmailSection(items, link, { ...options, open: Boolean(options.link) });
@@ -751,7 +752,7 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
     ...(heading ? [`${lead}:`] : []),
     ...items.map(item => `- ${dropName(item)}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${[item.why, item.reasons?.[0]].filter(Boolean).join(' ')}`),
     lookup ? `${one ? 'Míralo' : 'Míralos'}: ${link}` : `${one ? 'Míralo y guárdalo' : 'Míralos y guárdalos'} sin costo: ${link}`,
-    lookup ? `${dropCostNote(items)} ${research}` : research,
+    lookup ? `${dropCostNote(items, options.prices)} ${research}` : research,
   ].join('\n');
   const block = (item: DropItem, index: number) => `<div style="padding:12px 0;${index ? 'border-top:1px solid #e5e7eb;' : ''}">`
     + `<p style="margin:0;font-size:17px;line-height:24px;font-weight:600;color:#111827">${escape(dropName(item))}</p>`
@@ -763,7 +764,7 @@ export function dropEmailSection(items: DropItem[], dropId: string, appUrl: stri
   // the small print under it.
   const html = (heading ? sectionTitle(`${lead}.`) : '')
     + emailCard(items.map(block).join('') + `<div style="margin:6px 0 0">${emailButton(link, one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`)}</div>`, { padding: '8px 18px 10px' })
-    + emailNote(`${escape(dropCostNote(items))} ${research}`);
+    + emailNote(`${escape(dropCostNote(items, options.prices))} ${research}`);
   return { text, html, link, summary: lookup ? (one ? 'Elegido para lo que vendes.' : 'Elegidos para lo que vendes.') : `Con su correo listo: ${one ? 'guárdalo' : 'guárdalos'} sin costo.` };
 }
 
@@ -840,7 +841,8 @@ export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'p
  * and first lines, and when each follow-up would go if it started today. One button per contact, to its card: «Enriquecer y revisar»
  * looks its email up on arrival (1 credit) and shows the campaign to change or approve. The emails in full go in the PDF.
  */
-function campaignEmailSection(items: DropItem[], link: string, options: { heading?: boolean; now?: Date; /** The link opens without a session: every step is a button on that page, never the arrival. */ open?: boolean }) {
+function campaignEmailSection(items: DropItem[], link: string, options: { heading?: boolean; now?: Date; /** The link opens without a session: every step is a button on that page, never the arrival. */ open?: boolean; prices?: CreditPrices }) {
+  const prices = options.prices ?? DEFAULT_CREDIT_PRICES;
   const heading = options.heading !== false;
   const now = options.now ?? new Date();
   const lookup = items.some(item => needsLookup(item));
@@ -857,7 +859,7 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
     const campaign = item.draft ? { subject: dropEmailPreview(item.draft.subject, item), preview: firstLines(dropEmailPreview(item.draft.body, item), 150),
       followUps: days.length ? `${days.length === 1 ? 'Seguimiento' : `${days.length} seguimientos`} si no responde: ${listed(days)}.` : null } : null;
     // The step each contact is at: its email still to look up, its campaign to approve, already going, or (the email came with the search) to save.
-    const action = needsLookup(item) ? 'Enriquecer y revisar · 1 crédito' : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
+    const action = needsLookup(item) ? `Enriquecer y revisar · ${creditsLabel(prices.email)}` : item.campaign ? 'Ver su campaña' : item.savedLeadId ? 'Revisar y aprobar' : 'Ver y guardar';
     return { item, why, news, newsNow, opener, campaign, steps, href: dropContactHref(link, item, options.open), action, recommended: dropRecommendation(item) };
   });
   // From the inbox the person chooses how to go on (15 Nov 2026, the owner: «la idea es que tenga la opción de continuar desde el mail
@@ -865,15 +867,15 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   // «Enriquecer» comes back in this conversation (src/lib/lead-drop-ready-email.ts). One main button: the rest are outlined.
   const pending = items.filter(item => needsLookup(item)).length;
   const bulk = options.open ? {
-    all: pending >= 2 ? { label: `Enriquecer ${pending === items.length ? `los ${pending}` : `los ${pending} que faltan`} · ${pending} créditos`, href: dropBulkHref(link, false) } : null,
-    phones: pending >= 2 ? { label: `Con sus teléfonos · ${pending * DROP_EMAIL_AND_PHONE_CREDITS} créditos`, href: dropBulkHref(link, true) } : null,
+    all: pending >= 2 ? { label: `Enriquecer ${pending === items.length ? `los ${pending}` : `los ${pending} que faltan`} · ${creditsLabel(pending * prices.email)}`, href: dropBulkHref(link, false) } : null,
+    phones: pending >= 2 ? { label: `Con sus teléfonos · ${pending * prices.both} créditos`, href: dropBulkHref(link, true) } : null,
     app: { label: 'Abrir en ANTON.IA', href: dropAppHref(link) },
     title: pending >= 2 ? 'Enriquécelos de una vez' : 'Sigue como prefieras',
     lead: pending >= 2
       ? 'Te respondemos en esta misma conversación con el correo de cada uno y su campaña lista para aprobar. Con teléfonos, también el guion de cada llamada.'
       : 'Desde este correo, con el botón de cada contacto, o desde la app.',
   } : null;
-  const note = [lookup ? `Enriquecer busca su correo y usa 1 crédito por contacto${bulk ? `; con su teléfono, ${DROP_EMAIL_AND_PHONE_CREDITS} por ambos. Nada se cobra al abrir: confirmas en la página` : ''}.` : dropCostNote(items),
+  const note = [lookup ? `Enriquecer busca su correo y usa ${creditsLabel(prices.email)} por contacto${bulk ? `; con su teléfono, ${prices.both} por ambos. Nada se cobra al abrir: confirmas en la página` : ''}.` : dropCostNote(items, prices),
     ...(written ? ['Al aprobar, los correos salen desde tu Gmail u Outlook y se detienen si responde.', 'Los correos completos van en el PDF adjunto.'] : [])].join(' ');
   const text = [
     ...(heading ? [`${lead}:`] : []),

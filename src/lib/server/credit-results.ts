@@ -1,6 +1,8 @@
 import { classifyReplies } from '@/lib/admin/value';
 import { countsAsContacted, isCallOutcome, reachedPerson } from '@/lib/contact-calls';
 import { EMPTY_OUTCOMES, WAITING_AFTER_DAYS, addOutcomes, type CreditOutcomes, type CreditResults, type CreditResultsPerson } from '@/lib/credit-results';
+import { countedCreditCost } from '@/lib/credit-prices';
+import { loadOwnCreditPrices } from '@/lib/server/credit-prices';
 
 /**
  * The reads of «Qué se obtuvo con los créditos» (src/lib/credit-results.ts), with the service client and an explicit
@@ -71,6 +73,8 @@ export async function readCreditResults(client: Client, input: {
   now?: Date;
 }): Promise<CreditResults> {
   const now = input.now ?? new Date();
+  // Each lookup counts as the organization's share counts it (credit-prices.ts): at its own prices when it has them.
+  const own = await loadOwnCreditPrices(input.organizationId, client).catch(() => null);
   const callbacks = await pages(() => {
     let query = client.from('apollo_enrichment_callbacks')
       .select('id,user_id,target_table,target_lead_id,apollo_person_id,reveal_email,reveal_phone,terminal_state,created_at')
@@ -85,7 +89,7 @@ export async function readCreditResults(client: Client, input: {
     const state = text(row.terminal_state);
     if (state && state !== 'succeeded') continue;
     const payer = text(row.user_id);
-    const cost = (row.reveal_email ? 1 : 0) + (row.reveal_phone ? 8 : 0);
+    const cost = countedCreditCost({ revealEmail: Boolean(row.reveal_email), revealPhone: Boolean(row.reveal_phone) }, own);
     credits.set(payer, (credits.get(payer) || 0) + cost);
     const table = text(row.target_table);
     const target = text(row.target_lead_id);

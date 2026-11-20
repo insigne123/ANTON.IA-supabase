@@ -37,6 +37,7 @@ import { leadsFinderMaxRunUsd, leadsFinderUsdPerLead, searchLeadsFinder } from '
 import { LEADS_FINDER_MAX_PER_RUN, leadsFinderIndustry } from '@/lib/server/leads-finder/input';
 import { enrichedLeadRow } from '@/lib/server/leads-finder/reveal';
 import { forgetInVault, isLeadsFinderId, readFromVault, storeInVault, type VaultEntry } from '@/lib/server/leads-finder/vault';
+import type { CreditPrices } from '@/lib/credit-prices';
 
 /** The reads, the preparation and the save of «Contacto del día» (src/lib/lead-drops.ts). Server only. */
 type Client = SupabaseClient;
@@ -1416,12 +1417,12 @@ function dropItemBlocks(item: DropItem): DocBlock[] {
  * «Contacto del día» as a document (src/lib/documents): each contact with why we recommend them, how they fit, who they are,
  * their company, how to open and the first email, and the way to save them as a button-like link instead of a bare address.
  */
-export function dropDocument(items: DropItem[], meta: { name: string; date: string; link: string }): DocumentSpec {
+export function dropDocument(items: DropItem[], meta: { name: string; date: string; link: string; prices?: CreditPrices }): DocumentSpec {
   const one = items.length === 1;
   const role = (item: DropItem) => [item.title, item.company].filter(Boolean).join(' · ');
   const blocks: DocBlock[] = [{ type: 'paragraph', runs: [
     { text: one ? 'Ver y guardar en ANTON.IA' : `Ver y guardar los ${items.length} en ANTON.IA`, href: meta.link, bold: true },
-    { text: items.some(item => item.provider === 'apollo') ? `   ${dropCostNote(items)}`
+    { text: items.some(item => item.provider === 'apollo') ? `   ${dropCostNote(items, meta.prices)}`
       : one ? '   Su correo ya está listo. Guardarlo no gasta créditos.' : '   Sus correos ya están listos. Guardarlos no gasta créditos.' },
   ] }];
   items.forEach((item, index) => {
@@ -1443,7 +1444,7 @@ export function dropDocument(items: DropItem[], meta: { name: string; date: stri
 }
 
 /** «Contacto del día» as a PDF, laid out by the document engine every ANTON.IA document uses. */
-export async function dropPdf(items: DropItem[], meta: { name: string; date: string; link: string }) {
+export async function dropPdf(items: DropItem[], meta: { name: string; date: string; link: string; prices?: CreditPrices }) {
   const { bytes } = await renderPdf(dropDocument(items, meta));
   return Buffer.from(bytes);
 }

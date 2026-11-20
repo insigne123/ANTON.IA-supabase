@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { DROP_EMAIL_AND_PHONE_CREDITS, DROP_PHONE_CREDITS } from '@/lib/lead-drop-call';
+import { dropCredits } from '@/lib/lead-drop-call';
 import { telHref } from '@/lib/contact-calls';
 import { dropName, needsLookup, shortDay, type DropItem } from '@/lib/lead-drops';
 import { enrichmentCreditReceipt } from '@/lib/leads-workspace/enrichment-provider';
@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 import { DropBulkEnrich } from './DropBulkEnrich';
 import { DropContactCard, type DropContactActions, type DropContactMail } from './DropContactCard';
 import { DropContactsWorkspace } from './DropContactsWorkspace';
+import { useCreditPrices } from '@/context/CreditPricesContext';
+import { creditsLabel } from '@/lib/credit-prices';
 
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 /** A name that closes a sentence: «Rodrigo S.» (a surname the search hid) already brings its full stop. */
@@ -36,6 +38,7 @@ const POLL_TIMES = 12;
 export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null, call = false }: { token: string; initial: MailDropView; focus: string | null; mailboxNotice: string | null;
   /** «Enriquecer los N» of the morning email brought the person here with this choice made (DropBulkEnrich): the button confirms it. */ bulk?: 'email' | 'phone' | null;
   /** «Llamar» of the email that brought a mobile (lead-drop-ready-email.ts): mail clients drop `tel:` links, so the call starts here, at the contact. */ call?: boolean }) {
+  const cost = dropCredits(useCreditPrices());
   const [view, setView] = useState(initial);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(mailboxNotice ? MAILBOX_NOTICE[mailboxNotice] ?? null : null);
   const [enriching, setEnriching] = useState<string | null>(null);
@@ -148,7 +151,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null
       if (!found) return;
       const receipt = enrichmentCreditReceipt(found.consumed);
       setNotice(found.outcome === 'found' ? { ok: true, text: `Listo: ya tienes el teléfono de ${closing(item)} ${receipt}`.trim() }
-        : found.outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Llamada». Usa ${DROP_PHONE_CREDITS} créditos.` }
+        : found.outcome === 'pending' ? { ok: true, text: `Buscando el teléfono de ${dropName(item)}: suele tardar unos minutos y aparece solo en «Llamada». Usa ${creditsLabel(cost.phone)}.` }
         : { ok: false, text: `No encontramos un teléfono para ${closing(item)} ${receipt}`.trim() });
     },
     script: async (item, fresh) => { await act({ action: 'script', leadId: item.leadId, ...(fresh ? { fresh: true } : {}) }); },
@@ -217,7 +220,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null
     </div>
 
     <p className="mt-6 max-w-3xl text-xs leading-5 text-muted-foreground">
-      Enriquecer busca el correo de trabajo del contacto y usa 1 crédito; con su teléfono, {DROP_EMAIL_AND_PHONE_CREDITS} por ambos. Al aprobar, los correos salen desde tu propio Gmail u Outlook y las respuestas te llegan ahí.
+      Enriquecer busca el correo de trabajo del contacto y usa {creditsLabel(cost.email)}; con su teléfono, {cost.both} por ambos. Al aprobar, los correos salen desde tu propio Gmail u Outlook y las respuestas te llegan ahí.
       Esta página es personal: se abre con el enlace de tu correo, así que no lo reenvíes.
     </p>
   </main>;
