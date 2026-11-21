@@ -1,14 +1,15 @@
 /**
- * The notice of «Buscar prospectos» about the person's recommended contacts (19 Nov 2026, the owner: «si el módulo de buscador es el
- * más usado podríamos poner una alerta cuando entren a esa página para decirles que tenemos una nueva sección de leads recomendados
- * del día»). That week nine people of a team searched by hand and spent credits there while four opened the contacts already chosen
- * for them: the search is where they are, so it says what waits for them and takes them to it.
+ * The person's recommended contacts inside «Buscar prospectos» (19 Nov 2026, the owner: «si el módulo de buscador es el más usado
+ * podríamos poner una alerta cuando entren a esa página para decirles que tenemos una nueva sección de leads recomendados del día»).
+ * That week nine people of a team searched by hand and spent credits there while four opened the contacts already chosen for them.
  *
- * Large and in the middle of the screen since the same day (the owner: «necesito que el aviso sea grande, que tenga dos opciones: o lo
- * cierran o van a la sección»): the quiet line at the top of the page was one more thing to scroll past.
+ * First a notice, large and in the middle of the screen. In two days it brought nobody to their contacts: of 29 people who got
+ * them, three opened any, and those who came to search closed it and searched. Since 21 Nov 2026 (the owner: «hagamos el 3»,
+ * «mostrar los recomendados dentro del buscador como resultados listos y no como aviso») the contacts themselves are on the page,
+ * above the search, as results that are already there: who each one is, why, and «Enriquecer» in its row (SearchRecommended).
  *
- * `recommendedNoticeOf` reads what «Hoy» reads (GET /api/lead-drops/latest): the person's last contacts of the week with something
- * left to do. Nothing left, nothing said.
+ * `recommendedNoticeOf` and `recommendedResultsOf` read what «Hoy» reads (GET /api/lead-drops/latest): the person's last contacts
+ * of the week with something left to do. Nothing left, nothing shown.
  */
 
 export type RecommendedNotice = { id: string; total: number; left: number; today: boolean };
@@ -25,8 +26,7 @@ export function recommendedNoticeOf(latest: Latest, today: string): RecommendedN
   const board = latest?.board;
   if (board && typeof board.id === 'string' && Array.isArray(board.items)) {
     const items = board.items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
-    // As «Hoy» counts them: an email still to look up, or a campaign still to approve.
-    const left = items.filter(item => !item.savedLeadId || (item.draft && !item.campaign)).length;
+    const left = items.filter(waits).length;
     return left ? { id: board.id, total: items.length, left, today: board.date === today } : null;
   }
   const drop = latest?.drop;
@@ -37,21 +37,39 @@ export function recommendedNoticeOf(latest: Latest, today: string): RecommendedN
   return null;
 }
 
-/** The notice's headline: how many wait, said large. */
+/** How many of the results are on screen before «Ver los N»: three rows leave the search in sight. */
+export const RECOMMENDED_ROWS = 3;
+
+type Row = Record<string, unknown> & { leadId: string };
+/** As «Hoy» counts them: an email still to look up, or a campaign still to approve. */
+const waits = (item: Record<string, unknown>) => !item.savedLeadId || Boolean(item.draft && !item.campaign);
+
+/**
+ * The contacts of several to show as results: the whole drop (the page keeps its rows as they change) and which of them wait, in
+ * the order they came. A drop of one contact has no rows of its own here: `recommendedNoticeOf` says it in a line.
+ */
+export function recommendedResultsOf(latest: Latest, today: string): { id: string; date: string; today: boolean; items: Row[]; waiting: string[] } | null {
+  const board = latest?.board;
+  if (!board || typeof board.id !== 'string' || !Array.isArray(board.items)) return null;
+  const items = board.items.filter((item): item is Row => Boolean(item) && typeof item === 'object' && typeof (item as Row).leadId === 'string');
+  const waiting = items.filter(waits).map(item => item.leadId);
+  return waiting.length ? { id: board.id, date: typeof board.date === 'string' ? board.date : '', today: board.date === today, items, waiting } : null;
+}
+
+/** The section's headline: how many wait, said large. */
 export function recommendedNoticeTitle(notice: RecommendedNotice): string {
   if (notice.today && notice.left === notice.total) return notice.total === 1 ? 'Tienes un contacto recomendado para hoy' : `Tienes ${notice.total} contactos recomendados para hoy`;
   return notice.left === 1 ? 'Te espera un contacto recomendado' : `Te esperan ${notice.left} contactos recomendados`;
 }
 
-/** What the notice says, in one sentence. */
-export function recommendedNoticeText(notice: RecommendedNotice): string {
-  if (notice.today && notice.left === notice.total) return notice.total === 1
-    ? 'Hoy elegimos un contacto para ti con tu cliente ideal, con su campaña ya escrita.'
-    : `Hoy elegimos ${notice.total} contactos para ti con tu cliente ideal, cada uno con su campaña ya escrita.`;
-  return notice.left === 1
-    ? (notice.total === 1 ? 'Tienes un contacto elegido para ti por revisar, con su campaña ya escrita.' : `Te queda 1 de tus ${notice.total} contactos recomendados por revisar.`)
-    : `Te quedan ${notice.left} de tus ${notice.total} contactos recomendados por revisar.`;
+/** The section's headline while the person works through its rows: what is left, or that nothing is. */
+export function recommendedResultsTitle(input: { total: number; left: number; today: boolean }): string {
+  if (!input.left) return 'Listo: ya revisaste tus contactos recomendados';
+  return recommendedNoticeTitle({ id: '', ...input });
 }
 
-/** Where the person's choice to close the notice is kept: by drop, so the next day's contacts are said again. */
+/** «Ver los 6» and back. */
+export const recommendedMoreLabel = (total: number, all: boolean) => (all ? 'Ver menos' : `Ver los ${total}`);
+
+/** Where the person's choice to fold the section away is kept: by drop, so the next day's contacts are shown again. */
 export const recommendedNoticeKey = (dropId: string) => `anton:search-recommended:${dropId}`;

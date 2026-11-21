@@ -63,7 +63,7 @@ const labelClass = 'text-xs font-medium uppercase tracking-wide text-muted-foreg
  * «Para llamar» (15 Nov 2026, DropCallPanel): its mobile, looked up with the email («O con su teléfono») or after it, and the script
  * of its call.
  */
-export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false, callOpen = false }: {
+export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false, callOpen = false, onExpand, dense = false }: {
   item: DropItem; actions: DropContactActions;
   /** Another contact is being saved or enriched: this one waits. */
   busy: boolean; enriching: boolean; defaultOpen?: boolean; heading?: 'h2' | 'h3'; mail?: DropContactMail;
@@ -71,6 +71,10 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
   collapsible?: boolean;
   /** «Para llamar» open on arrival (the email's «Llamar»). */
   callOpen?: boolean;
+  /** Told when the person opens the detail of a collapsed row (the search page counts it as having opened their contacts). */
+  onExpand?: () => void;
+  /** Less air around the row, where it shares the page with something else (the search page). */
+  dense?: boolean;
 }) {
   const cost = dropCredits(useCreditPrices());
   const uid = useId();
@@ -150,7 +154,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
   const stepLabel = (index: number) => index === 0 ? 'Primer correo' : `Seguimiento ${index}`;
   const box = 'rounded-xl border bg-background p-4';
 
-  return <article aria-labelledby={`${uid}-name`} className="p-4 sm:p-6">
+  return <article aria-labelledby={`${uid}-name`} className={dense ? 'p-4 sm:px-5' : 'p-4 sm:p-6'}>
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
       <div className="flex min-w-0 gap-3.5">
         <DropAvatar item={item} size="lg" />
@@ -181,7 +185,7 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
     {collapsible ? <div className="mt-2 space-y-1">
       {expanded ? null : <p className="line-clamp-2 text-sm text-muted-foreground">{reasons[0] || item.why}</p>}
       <Button variant="ghost" size="sm" className="-ml-2 h-auto min-h-9 justify-start whitespace-normal py-1.5 text-left text-muted-foreground" aria-expanded={expanded} aria-controls={`${uid}-detail`}
-        onClick={() => setExpanded(value => !value)}>
+        onClick={() => { if (!expanded) onExpand?.(); setExpanded(value => !value); }}>
         <ChevronDown className={cn('mr-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden="true" />
         <span>{expanded ? 'Ocultar el detalle' : emails.length ? 'Ver por qué y su campaña' : 'Ver por qué te lo recomendamos'}<span className="sr-only">: {dropName(item)}</span></span></Button>
     </div> : null}

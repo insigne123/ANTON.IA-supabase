@@ -13,6 +13,7 @@ import * as contactCalls from '@/lib/contact-calls';
 import * as creditPrices from '@/lib/credit-prices';
 import * as leadDropCall from '@/lib/lead-drop-call';
 import * as leadDrops from '@/lib/lead-drops';
+import * as recommendedRules from '@/lib/search/recommended-notice';
 
 const require = createRequire(import.meta.url);
 async function component(file: string, dependencies: Record<string, unknown>) {
@@ -886,4 +887,113 @@ test('contacts that reached the person without their research get it when the pa
   answers = [{ status: 200, body: { ...drop, items: [bare(1, { brief }), apolloItem(2)] } }];
   const done = await open('drop-1');
   try { await done.settle(); assert.deepEqual(calls, ['GET /api/lead-drops/drop-1']); } finally { await close(done); }
+});
+
+// The same contacts inside «Buscar prospectos», as results that are already there (21 Nov 2026), with the same doubles.
+const searchRecommended = await component('../search/SearchRecommended.tsx', {
+  ...shared,
+  '@/components/lead-drops/DropContactCard': contactCard,
+  '@/components/lead-drops/useDropActions': dropActions,
+  '@/lib/admin/chile-time': chileTime,
+  '@/lib/search/recommended-notice': recommendedRules,
+  '@/context/AuthContext': { useAuth: () => auth },
+  '@/lib/authenticated-api-fetch': { authenticatedApiFetch: async (path: string, init?: RequestInit) => {
+    calls.push(`${init?.method || 'GET'} ${path}`);
+    if (init?.body) bodies.push(JSON.parse(String(init.body)));
+    const answer = answers.shift() || { status: 500, body: { error: 'sin respuesta' } };
+    return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
+  } },
+});
+async function openSearch(kept: Record<string, string> = {}) {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://app.test/search' });
+  (dom.window as any).matchMedia = () => ({ matches: true });
+  for (const [key, value] of Object.entries(kept)) dom.window.localStorage.setItem(key, value);
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  await act(async () => root.render(React.createElement(searchRecommended.SearchRecommended)));
+  const settle = async () => { for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  await settle();
+  return { dom, root, settle, text: () => dom.window.document.body.textContent || '' };
+}
+
+test('the search page shows the recommended contacts as results already there: three rows, the rest on demand, each with its next step', async () => {
+  const today = chileTime.dayInZone(new Date());
+  const campaign = { id: '22222222-2222-4222-8222-222222222222', provider: 'google', approvedAt: `${today}T12:00:00.000Z` };
+  const items = [apolloItem(1, { brief }), apolloItem(2, { savedLeadId: 'e-2', name: 'Luisa Soto' }), apolloItem(3), apolloItem(4), apolloItem(5, { savedLeadId: 'e-5', name: 'Marta Rojas', campaign })];
+  calls.length = 0; bodies.length = 0;
+  answers = [{ status: 200, body: { drop: null, board: { id: BOARD, date: today, items } } }];
+  const page = await openSearch();
+  const key = recommendedRules.recommendedNoticeKey(BOARD);
+  try {
+    assert.deepEqual(calls, ['GET /api/lead-drops/latest'], 'read once, and nothing marked as opened by showing it');
+    const section = page.dom.window.document.querySelector('section[aria-labelledby="buscar-recomendados-titulo"]')!;
+    assert.match(section.textContent || '', /Ya buscamos por ti[\s\S]*Te esperan 4 contactos recomendados[\s\S]*Enriquece aquí los que te sirvan\./);
+    // Three rows of the four that wait; the one whose campaign already runs has nothing to do here.
+    assert.equal(section.querySelectorAll('article').length, 3);
+    assert.doesNotMatch(section.textContent || '', /Marta Rojas/);
+    const first = cardOf(page, 0);
+    assert.match(first.textContent || '', /Persona1 A\.[\s\S]*Una planta nueva suma áreas que proteger\./);
+    assert.ok(within(first, 'Enriquecer · 1 crédito'));
+    assert.ok(within(cardOf(page, 1), 'Aprobar y programar'));
+    assert.equal(section.querySelector(`a[href="/dashboard/contactos/${BOARD}"]`)?.textContent, 'Abrir en «Tus contactos de hoy»');
+
+    // «Ver los 4» brings the rest, names the list it opens, and is the first thing the person does: now the contacts count as opened.
+    const more = within(section as HTMLElement, 'Ver los 4');
+    assert.deepEqual([more.getAttribute('aria-expanded'), more.getAttribute('aria-controls')], ['false', 'buscar-recomendados-filas']);
+    answers = [{ status: 200, body: { id: BOARD, items } }];
+    await press(page, more);
+    assert.equal(section.querySelectorAll('article').length, 4);
+    assert.equal(within(section as HTMLElement, 'Ver menos').getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(calls.slice(1), [`GET /api/lead-drops/${BOARD}`]);
+
+    // «Aprobar y programar» in its row: said there, the row stays with what follows, and the headline counts one less. Opened once.
+    answers = [{ status: 200, body: { items: items.map((item, index) => index === 1 ? { ...item, campaign } : item), campaign, provider: 'Gmail', schedule: ['2026-11-23', '2026-11-26'] } }];
+    await press(page, within(cardOf(page, 1), 'Aprobar y programar'));
+    assert.deepEqual(bodies.at(-1), { action: 'approve', leadId: '6accdbfcd5f5d80001cf6902' });
+    assert.deepEqual(calls.slice(1), [`GET /api/lead-drops/${BOARD}`, `POST /api/lead-drops/${BOARD}`]);
+    assert.match(section.querySelector('[role="status"]')?.textContent || '', /Campaña de Luisa Soto programada desde Gmail/);
+    assert.equal(section.querySelectorAll('article').length, 4, 'the row does not vanish under the person');
+    assert.match(section.querySelector('h2')?.textContent || '', /^Te esperan 3 contactos recomendados$/);
+
+    // «Ocultar» folds it into a line, remembered for these contacts; «Mostrar» brings it back.
+    await press(page, within(section as HTMLElement, 'Ocultar'));
+    assert.equal(page.dom.window.document.querySelector('section'), null);
+    assert.match(page.text(), /^Te esperan 3 contactos recomendados\.Mostrar$/);
+    assert.equal(page.dom.window.localStorage.getItem(key), '1');
+    await press(page, within(page.dom.window.document.body, 'Mostrar'));
+    assert.ok(page.dom.window.document.querySelector('section[aria-labelledby="buscar-recomendados-titulo"]'));
+    assert.equal(page.dom.window.localStorage.getItem(key), null);
+  } finally { await close(page); }
+
+  // Folded on an earlier visit: the line, not the rows. The next contacts have another key and are shown.
+  answers = [{ status: 200, body: { board: { id: BOARD, date: today, items } } }];
+  const folded = await openSearch({ [key]: '1' });
+  try {
+    assert.equal(folded.dom.window.document.querySelector('article'), null);
+    assert.match(folded.text(), /^Te esperan 4 contactos recomendados\.Mostrar$/);
+  } finally { await close(folded); }
+});
+
+test('one contact a day is a line that opens it; nothing left, a failed read or no organization show nothing above the search', async () => {
+  const today = chileTime.dayInZone(new Date());
+  answers = [{ status: 200, body: { drop: { id: 'drop-1', dropDate: today, total: 1, left: 1 }, pull: null } }];
+  const one = await openSearch();
+  try {
+    assert.match(one.text(), /^Tienes un contacto recomendado para hoy\.Ver mi contacto$/);
+    assert.equal(one.dom.window.document.querySelector('a')?.getAttribute('href'), '/dashboard/contactos/drop-1');
+  } finally { await close(one); }
+  const campaign = { id: 'c-1', provider: 'google', approvedAt: `${today}T12:00:00.000Z` };
+  for (const answer of [
+    { status: 200, body: { board: { id: BOARD, date: today, items: [apolloItem(1, { savedLeadId: 'e-1', campaign }), apolloItem(2, { savedLeadId: 'e-2', campaign })] } } },
+    { status: 200, body: { drop: null, pull: 'today' } }, { status: 503, body: { error: 'caída' } },
+  ]) {
+    answers = [answer];
+    const page = await openSearch();
+    try { assert.equal(page.text(), ''); } finally { await close(page); }
+  }
+  calls.length = 0;
+  const before = auth;
+  auth = { ...auth, organizationId: null };
+  const nobody = await openSearch();
+  try { assert.equal(nobody.text(), ''); assert.deepEqual(calls, []); } finally { await close(nobody); auth = before; }
 });
