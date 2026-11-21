@@ -51,7 +51,7 @@ import { companyProfileService } from '@/lib/services/company-profile-service';
 import { FilterRelaxHint } from '@/components/search/SearchGuidance';
 import { ProfileSearchProblemAlert } from '@/components/search/ProfileSearchProblemAlert';
 import { IdentityReviewCard } from '@/components/search/IdentityReviewCard';
-import { RecommendedNotice } from '@/components/search/RecommendedNotice';
+import { SearchRecommended } from '@/components/search/SearchRecommended';
 import type { IdentityReviewView } from '@/lib/search/identity-review';
 import {
   ProfileSearchProblemError, profileProblemFromMessage, profileSearchMessage, profileSearchPersonHint, profileUrlProblem,
@@ -2688,8 +2688,8 @@ export default function SearchPage() {
           </Button>
         )}
       />
-      {/* The contacts already chosen for the person, said on arriving where they spend their time (src/lib/search/recommended-notice.ts). */}
-      <RecommendedNotice />
+      {/* The contacts already chosen for the person, as results that are there before they search (src/lib/search/recommended-notice.ts). */}
+      <SearchRecommended />
       {marksUnavailable ? (
         <Alert variant="warning" role="status">
           <AlertCircle className="h-4 w-4" aria-hidden="true" />

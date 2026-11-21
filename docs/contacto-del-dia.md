@@ -696,14 +696,17 @@ Pedido del dueño: «si el módulo de buscador es el más usado podríamos poner
 
 **Por qué.** Esa semana nueve personas de un equipo usaron el buscador y gastaron ahí sus créditos, mientras solo cuatro abrieron los contactos ya elegidos para ellas. El buscador es donde están.
 
-**Qué hace** (`src/components/search/RecommendedNotice.tsx`, reglas en `src/lib/search/recommended-notice.ts`). Al entrar a «Buscar prospectos» aparece un aviso grande al centro de la pantalla, con dos respuestas: «Ver mis recomendados», que abre los contactos de la persona, o «Cerrar», que la deja en el buscador.
+**Qué hace** (`src/components/search/SearchRecommended.tsx`, reglas en `src/lib/search/recommended-notice.ts`). Arriba de «Buscar prospectos», antes de los filtros, están los contactos recomendados que la persona todavía tiene por revisar, como resultados que ya están ahí: la sección «Ya buscamos por ti».
 
-- **Cuándo aparece:** cuando la persona tiene contactos recomendados de la semana con algo pendiente (un correo por buscar o una campaña por aprobar). Lee lo mismo que «Hoy» (`GET /api/lead-drops/latest`).
-- **Qué dice:** el título «Tienes 6 contactos recomendados para hoy» (o «Te esperan 2 contactos recomendados») y una frase: cuántos son, que traen su campaña escrita y que están en «Tus contactos de hoy».
-- **Una vez por envío:** cualquiera de las dos respuestas (y la tecla Escape) se recuerda en el navegador para esos contactos. Vuelve a aparecer cuando llegan los del día siguiente.
-- **Si no hay nada pendiente o la lectura falla,** no se muestra nada.
+- **Qué muestra:** el título («Tienes 6 contactos recomendados para hoy» o «Te esperan 2 contactos recomendados») y una fila por contacto, la misma de «Hoy»: quién es, su porcentaje de recomendación, una línea de por qué y su paso siguiente («Enriquecer · 1 crédito», luego «Aprobar y programar»). El detalle y la campaña se abren en la misma fila.
+- **Tres filas, y el resto a pedido:** «Ver los 6» trae los demás. En teléfono se muestra una fila, para que los filtros no queden lejos.
+- **Las filas no desaparecen:** un contacto recién enriquecido se queda en su fila con el paso que sigue; el título cuenta lo que falta.
+- **«Ocultar»** pliega la sección a una línea («Tienes 6 contactos recomendados para hoy. Mostrar»). Se recuerda en el navegador para esos contactos; los del día siguiente se muestran de nuevo.
+- **Un contacto al día** (equipos sin plan de varios) es una línea con «Ver mi contacto».
+- **Cuándo cuenta como abierto:** al primer gesto de la persona sobre la sección («Ver los N», abrir el detalle de una fila, enriquecer, aprobar, evaluar) se marca `opened_at`, igual que al abrir la página de sus contactos. Verla de paso hacia una búsqueda no cuenta.
+- **Si no hay nada pendiente o la lectura falla,** no se muestra nada: la página es el buscador.
 
-El mismo día se cambió de una franja arriba de la página a este aviso grande, a pedido del dueño: «necesito que el aviso sea grande, que tenga dos opciones: o lo cierran o van a la sección».
+**Por qué cambió dos veces.** El 19 de noviembre fue una franja y, el mismo día, un aviso grande al centro con dos respuestas, a pedido del dueño («necesito que el aviso sea grande, que tenga dos opciones: o lo cierran o van a la sección»). En dos días el aviso no llevó a nadie a sus contactos: de 29 personas que los recibían, 3 abrieron alguno, y el 19 y el 20 no hubo ninguna apertura; quien entraba a buscar lo cerraba y buscaba. El 21 de noviembre el dueño eligió mostrar los contactos mismos en el buscador («hagamos el 3»), y el aviso emergente se quitó.
 
 ## Cómo funciona
 
