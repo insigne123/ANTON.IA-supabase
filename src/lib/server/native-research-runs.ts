@@ -268,7 +268,8 @@ export async function reprocessCurrentNativeResearch(input: {
   const admin = getSupabaseAdminClient();
   const { data, error } = await admin
     .from('lead_research_jobs')
-    .select('lead_id,lead_ref,email,company_name,company_domain,request_payload,result_payload,updated_at')
+    // Of each stored report only its lead: the whole report is around 90 KB, and this reads up to 500 of them.
+    .select('lead_id,lead_ref,email,company_name,company_domain,request_payload,result_lead:result_payload->lead,updated_at')
     .eq('provider', 'native-research-v1')
     .eq('organization_id', input.access.organizationId)
     .eq('user_id', input.access.userId)
@@ -277,7 +278,10 @@ export async function reprocessCurrentNativeResearch(input: {
     .limit(Math.min(500, limit * 10));
   if (error) throw error;
 
-  const leads = latestReprocessableLeads(data || [], limit);
+  const leads = latestReprocessableLeads(
+    (data || []).map((row: any) => ({ ...row, result_payload: { lead: row.result_lead } })),
+    limit,
+  );
   if (leads.length === 0) return { runId: null, items: [], count: 0 };
 
   const run = await enqueueNativeResearchRun({

@@ -98,6 +98,27 @@ export async function fetchNativeResearchLeadStatuses(
 }
 
 /**
+ * The written reports this tab has read in their final form, by report id. Each time the research was opened the page asked
+ * again for the written report of every researched contact (210 requests for the account of 24 Nov 2026). A report that is
+ * already written does not change, so a page starts from what the tab holds and asks only for the rest.
+ */
+const reportMemory = new Map<string, unknown>();
+
+/** What the tab holds, as the first state of a page. */
+export function heldResearchReports<T>(memory: Map<string, unknown> = reportMemory): Record<string, T> {
+  return Object.fromEntries(memory) as Record<string, T>;
+}
+
+/**
+ * Remembers a report read in its final form (`final`: isResearchReportFinal). One still being written, one that failed or one
+ * whose writing was asked again is forgotten, so the next page asks for it.
+ */
+export function holdResearchReport(reportId: string, report: unknown, final: boolean, memory: Map<string, unknown> = reportMemory): void {
+  if (final && report) memory.set(reportId, report);
+  else memory.delete(reportId);
+}
+
+/**
  * For the poll of a running batch: puts back the reports the page holds where the answer says `result_unchanged`, and
  * remembers the ones that came. `held` goes by job id and belongs to one run; its keys are what the next poll sends as `have`.
  */

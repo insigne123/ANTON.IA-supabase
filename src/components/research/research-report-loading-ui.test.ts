@@ -120,3 +120,15 @@ test('the steps say where the research is: sources, then the written report; the
   assert.match(writing.text, /La mitad de las investigaciones tarda menos de 3 minutos y 9 de cada 10, menos de 9\./);
 });
 
+
+test('a report is final only when its written version is there and nothing is pending on it', () => {
+  const detail = (overrides: Record<string, unknown>) => ({
+    result: { status: 'completed', researchSnapshotId: 'snapshot' }, preferredReportDocument: null, preferredReportSynthesis: null, ...overrides,
+  }) as any;
+  const written = { preferredReportDocument: { sections: [] } };
+  assert.equal(loading.isResearchReportFinal(detail({ ...written, preferredReportSynthesis: { status: 'completed' } })), true);
+  assert.equal(loading.isResearchReportFinal(detail({})), false, 'still being written');
+  assert.equal(loading.isResearchReportFinal(detail({ ...written, preferredReportSynthesis: { status: 'running' } })), false, 'a new version is being written');
+  assert.equal(loading.isResearchReportFinal(detail({ preferredReportSynthesis: { status: 'failed_permanent' } })), false, 'it failed: the next page asks again');
+  assert.equal(loading.isResearchReportFinal(detail({ ...written, preferredReportSynthesis: { status: 'failed_permanent' } })), false);
+});

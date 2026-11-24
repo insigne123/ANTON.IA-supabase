@@ -322,12 +322,15 @@ export function normalizeResearchStatus(value: unknown): ResearchWorkspaceStatus
 /**
  * The research was refused for lack of quota: the queue keeps it and does it when the quota opens again
  * (postponeResearchUntilQuotaReopens). Its batch shows it as failed and the lead as queued; neither says what happens next.
+ * Takes a list item or a status of the list (NativeResearchLeadStatus).
  */
-export function researchWaitsForQuota(item: Pick<ResearchWorkspaceRunItem, 'status' | 'errorCode' | 'result'> | null | undefined): boolean {
+export function researchWaitsForQuota(
+  item: { status: string; errorCode?: string | null; result?: unknown } | null | undefined,
+): boolean {
   return Boolean(item)
     && item!.errorCode === 'daily_research_quota_exceeded'
     && !item!.result
-    && (item!.status === 'failed' || isResearchInFlight(item!.status));
+    && ['queued', 'running', 'failed'].includes(item!.status);
 }
 
 export function isResearchInFlight(status: ResearchWorkspaceStatus): boolean {

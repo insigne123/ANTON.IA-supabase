@@ -4,6 +4,8 @@ import test from 'node:test';
 import type { NativeResearchLeadStatus } from './native-research-contracts';
 import {
   fetchNativeResearchLeadStatuses,
+  heldResearchReports,
+  holdResearchReport,
   knownResearchVersions,
   mergeResearchStatuses,
   restoreHeldRunResults,
@@ -117,4 +119,17 @@ test('the poll of a batch puts back the reports the page holds', () => {
   assert.deepEqual([...held.keys()], ['j2']);
   assert.equal(restoreHeldRunResults(null, held), null);
   assert.deepEqual(restoreHeldRunResults({ error: 'NATIVE_RESEARCH_RUN_NOT_FOUND' }, held), { error: 'NATIVE_RESEARCH_RUN_NOT_FOUND' });
+});
+
+test('a written report read in its final form is kept for the next page; one being written is asked for again', () => {
+  const memory = new Map<string, unknown>();
+  holdResearchReport('report-a', { reportId: 'report-a' }, true, memory);
+  holdResearchReport('report-b', { reportId: 'report-b' }, false, memory);
+  assert.deepEqual(heldResearchReports(memory), { 'report-a': { reportId: 'report-a' } });
+
+  // Its writing was asked again, or a later read found it pending: it is forgotten.
+  holdResearchReport('report-a', null, false, memory);
+  assert.deepEqual(heldResearchReports(memory), {});
+  holdResearchReport('report-c', null, true, memory);
+  assert.deepEqual(heldResearchReports(memory), {}, 'nothing to keep');
 });
