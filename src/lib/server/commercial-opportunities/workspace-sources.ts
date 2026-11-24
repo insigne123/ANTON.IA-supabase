@@ -121,7 +121,16 @@ async function apifyOpportunityItems(client: SupabaseClient, job: OpportunityJob
   if (admission.fresh) {
     opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: null, p_receipt: { stage: 'submitting', actor }, p_data: null }));
     const response = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?${new URLSearchParams({ maxTotalChargeUsd: String(cap), timeout: '180', memory: '1024', restartOnError: 'false' })}`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
-    if (!response.ok) throw new AuthError('La fuente no pudo iniciar la consulta. La reserva queda pendiente de comprobación.', 503);
+    if (!response.ok) {
+      // A refusal (a token that no longer works, no credit left, too many requests) starts no run and bills nothing: its reservation is
+      // released. Kept, each one held its whole cap for good: in November 2026, 39 refused starts held US$11 nobody spent and stopped
+      // GrupoExpro's search at «llegaron al tope». A 5xx may have started the run: that one stays reserved until it is checked.
+      if (response.status >= 400 && response.status < 500) {
+        opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: 0, p_receipt: { stage: 'refused', actor, status: response.status }, p_data: null }));
+        throw new AuthError('La fuente rechazó la consulta. No se cobró nada.', 503);
+      }
+      throw new AuthError('La fuente no pudo iniciar la consulta. La reserva queda pendiente de comprobación.', 503);
+    }
     const payload = await response.json();
     if (!payload.data?.id) throw new AuthError('No se recibió el comprobante de la consulta.', 503);
     receipt = { actor, runId: payload.data.id };

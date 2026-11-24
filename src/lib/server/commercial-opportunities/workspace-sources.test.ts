@@ -162,6 +162,35 @@ test('a LinkedIn post with a NUL character is stored without it, so the paid run
   }
 });
 
+test('a start the source refuses bills nothing and frees its reservation; one that may have started stays reserved', async () => {
+  const { captureOpportunityLinkedIn } = await load(STUBS);
+  const realFetch = globalThis.fetch;
+  process.env.APIFY_TOKEN = 'test';
+  const context = { priority: 'hiring', territories: [], criteria: { roles: ['bodeguero'], postQueries: [] } };
+  const job = { id: 'j4', organization_id: 'org', requested_by: 'u1', kind: 'hiring', lease_token: 'l', payload: {} };
+  const settledBy = async (status: number) => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { type: 'refused' } }), { status })) as typeof fetch;
+    const client = memoryClient({ opportunity_jobs: null });
+    const error = await captureOpportunityLinkedIn(client as any, job as any, context).then(() => null, (thrown: Error) => thrown);
+    return { message: error?.message, settled: client.rpcs.filter(([name]) => name === 'opportunity_budget_settle').map(([, args]) => args) };
+  };
+  try {
+    // No credit left at the source (402), as from 5 to 17 Nov 2026: each start used to hold its whole cap for good.
+    const refused = await settledBy(402);
+    assert.equal(refused.message, 'La fuente rechazó la consulta. No se cobró nada.');
+    assert.deepEqual(refused.settled.at(-1), { p_id: 'res-1', p_cost: 0, p_data: null,
+      p_receipt: { stage: 'refused', actor: 'fantastic-jobs~advanced-linkedin-job-search-api', status: 402 } });
+    for (const status of [401, 403, 429]) assert.equal((await settledBy(status)).settled.at(-1).p_cost, 0, `a ${status} starts no run`);
+    // A failure of the source's own (502) may have started the run: its cost is not known, so the reservation stays.
+    const unknown = await settledBy(502);
+    assert.match(unknown.message || '', /queda pendiente de comprobación/);
+    assert.deepEqual(unknown.settled.map(args => args.p_cost), [null], 'only the «submitting» checkpoint, with no cost');
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.APIFY_TOKEN;
+  }
+});
+
 test('the tenders job runs the listing and Compra Ágil only when each is on in «Qué buscamos»', async () => {
   const { captureOpportunityTenders } = await load({ ...STUBS, './mercado-publico': 'export async function listOpenLicitaciones(){ globalThis.__listed = (globalThis.__listed || 0) + 1; return [] }' });
   const upserts: unknown[] = [];

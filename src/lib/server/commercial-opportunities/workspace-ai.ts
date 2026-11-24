@@ -34,6 +34,11 @@ export const PRICING_VERSION = '2026-10-12';
  * twice (CLAUDE_MAX_TOKENS, «La evaluación no terminó»). On 2 Nov 2026, with a length budget in the prompt, two whole reports took
  * 31k and 36k of the 40k (the JSON about 15k, the rest reasoning): 40k of room leaves a long tender margin, and at the 260 tokens a
  * second measured then the 48k fit in the 230 s of the call.
+ *
+ * That margin was the reasoning's to take: in November 2026, 10 of 19 reports were cut at the 48k again (CLAUDE_MAX_TOKENS, each one
+ * billed whole and lost), whatever their size: the JSON stayed near 15k and the reasoning at «medium» ran from 15k to 32k, even for a
+ * tender of one document. The call cannot be longer (230 s), so the writer reasons at «low» (see opportunityGenerate): the facts and
+ * the specialists' readings it puts together are already made.
  */
 export const OPPORTUNITY_REPORT_OUTPUT_TOKENS = 40_000;
 
@@ -81,8 +86,9 @@ export async function opportunityGenerate<T extends z.ZodTypeAny>(client: Supaba
   if (longContext && input.role !== 'report') throw new AuthError('El bloque de documentos debe dividirse para conservar el costo.', 422);
   const price = longContext ? HAIKU_LONG_CONTEXT_PRICE : prices(model);
   const output = input.output ?? 6000;
-  // The writer and the specialists reason a little more; reading and screening stay quick.
-  const effort = input.role === 'report' || input.role === 'specialist' ? 'medium' : 'low';
+  // The specialists reason a little more; reading and screening stay quick, and so does the writer of the report: at «medium» its
+  // reasoning took what the report needed and half of them were cut (OPPORTUNITY_REPORT_OUTPUT_TOKENS).
+  const effort = input.role === 'specialist' ? 'medium' : 'low';
   const chargedOutput = model.startsWith('claude-') ? claudeRequest({ model, schema: input.schema, prompt: input.prompt, maxOutputTokens: output, reasoningEffort: effort }).max_tokens : output;
   // Only the system block (rules, and the schema when it does not fit the format) carries cache_control (anthropic-json.ts):
   // it may be billed as a cache write, the documents in the prompt at the input price. Charging the whole prompt as a write
