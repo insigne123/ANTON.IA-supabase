@@ -64,7 +64,8 @@ test('one reserved report call uses the envelope and replays without another cal
   assert.equal(f.requests.length, 1); assert.equal(f.settlements.length, 1);
   assert.deepEqual(Object.keys(f.requests[0].schema.shape), ['json']);
   assert.equal(f.requests[0].maxAttempts, 1); assert.equal(f.requests[0].allowDefaultModelFallback, false);
-  assert.equal(f.requests[0].reasoningEffort, 'medium');
+  // «low»: at «medium» the reasoning took the room of the report and half of November's were cut (workspace-ai.ts).
+  assert.equal(f.requests[0].reasoningEffort, 'low');
   assert.equal(f.reservations[0].p_lease, 'lease'); assert.equal(f.reservations[0].p_category, 'research');
   // Haiku: 0.5 USD per million output tokens, 24k with reasoning; a prompt under its 100k line is priced at the short tier.
   assert.ok(f.reservations[0].p_micro >= 24_000 * 0.5, 'reserve includes report and reasoning output');
@@ -77,9 +78,9 @@ test('a seven-document report stays under the 0.75 USD cap of one research, and 
   const prompt = 'á'.repeat(60_000); // 120 kB of UTF-8, the size of the synthesis that was refused in production
   await opportunityGenerateReport(f.client, f.job, { ...f.input, prompt }, f.generate);
   const bytes = Buffer.byteLength(prompt, 'utf8');
-  // Haiku above its 100k line costs 0.5 USD per million input tokens and 2.5 per million output, 48k output with reasoning; bytes bound tokens.
+  // Haiku above its 100k line costs 0.5 USD per million input tokens and 2.5 per million output, 44k output with reasoning; bytes bound tokens.
   // The report cannot be split, so it is reserved at that price instead of being refused (reading and screening are: see below).
-  assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 48_000 * 2.5, 'the documents and the whole output stay reserved');
+  assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 44_000 * 2.5, 'the documents and the whole output stay reserved');
   assert.ok(f.reservations[0].p_micro <= 727_000, `fits next to the reading steps (${f.reservations[0].p_micro})`);
   assert.equal(f.requests[0].maxOutputTokens, 40_000, 'room for the report of a long tender');
 });
