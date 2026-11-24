@@ -200,6 +200,8 @@ export type ResearchWorkspaceRunItem = {
   result: ResearchWorkspaceResult | null;
   researchSnapshotId: string | null;
   errorMessage: string | null;
+  /** Why the job was not done, as the queue recorded it (researchWaitsForQuota reads it). */
+  errorCode?: string | null;
   updatedAt: string | null;
   evidenceCount: number;
   sourceCount: number;
@@ -315,6 +317,17 @@ export function normalizeResearchStatus(value: unknown): ResearchWorkspaceStatus
     return status as NativeResearchStatus;
   }
   return 'idle';
+}
+
+/**
+ * The research was refused for lack of quota: the queue keeps it and does it when the quota opens again
+ * (postponeResearchUntilQuotaReopens). Its batch shows it as failed and the lead as queued; neither says what happens next.
+ */
+export function researchWaitsForQuota(item: Pick<ResearchWorkspaceRunItem, 'status' | 'errorCode' | 'result'> | null | undefined): boolean {
+  return Boolean(item)
+    && item!.errorCode === 'daily_research_quota_exceeded'
+    && !item!.result
+    && (item!.status === 'failed' || isResearchInFlight(item!.status));
 }
 
 export function isResearchInFlight(status: ResearchWorkspaceStatus): boolean {
@@ -1508,6 +1521,7 @@ function normalizeRunItem(rawValue: unknown, fallbackPosition: number, leads: Re
     result,
     researchSnapshotId,
     errorMessage: nullableText(raw.error_message ?? raw.errorMessage ?? job.error_message ?? job.errorMessage),
+    errorCode: nullableText(raw.error_code ?? raw.errorCode ?? job.error_code ?? job.errorCode),
     updatedAt: nullableText(raw.updated_at ?? raw.updatedAt),
     evidenceCount,
     sourceCount,

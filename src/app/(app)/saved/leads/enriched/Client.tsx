@@ -47,6 +47,7 @@ import {
 import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
 import { composeDraftHref, saveDraftQueue } from '@/lib/draft-queue';
 import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
+import { fetchNativeResearchLeadStatuses } from '@/lib/native-research-status-client';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import { researchDetailLoadingState } from '@/lib/research-report-loading';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
@@ -430,18 +431,10 @@ export default function EnrichedLeadsClient() {
     }
 
     try {
-      const chunks = Array.from({ length: Math.ceil(leadIds.length / 200) }, (_, index) => leadIds.slice(index * 200, (index + 1) * 200));
-      const responses = await Promise.all(chunks.map(async (leadIdsChunk) => {
-        const response = await fetch('/api/native-research/status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ leadIds: leadIdsChunk }),
-        });
-        if (!response.ok) throw new Error('NATIVE_RESEARCH_LEAD_STATUS_FAILED');
-        const payload = await response.json();
-        return Array.isArray(payload?.items) ? payload.items as NativeResearchLeadStatus[] : [];
-      }));
-      const next = Object.fromEntries(responses.flat().map((item) => [item.leadId, item]));
+      // This list reloads with every change of a lead: only the research this tab does not hold yet is read
+      // (src/lib/native-research-status-client.ts).
+      const statuses = await fetchNativeResearchLeadStatuses(leadIds);
+      const next = Object.fromEntries(statuses.map((item) => [item.leadId, item]));
       if (nativeResearchStatusRequestIdRef.current !== requestId) return;
       setNativeResearchByLeadId(next);
       setNativeResearchStatusState('ready');

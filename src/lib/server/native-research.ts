@@ -2101,8 +2101,46 @@ export async function findNativeResearchJob(input: { reportId: string; access: N
   return mapJob(data);
 }
 
-export async function listNativeResearchRun(input: { runId: string; access: NativeResearchAccess }) {
-  const admin = getSupabaseAdminClient();
+/**
+ * Stored results read in one request. Each is around 90 KB: 230 of them in one answer, asked again on every reload of the
+ * list, left the database without memory and it stopped answering for everyone (24 Nov 2026).
+ */
+const RESEARCH_RESULTS_PER_READ = 20;
+/** A job waiting or being worked on has no result to read. */
+const RESEARCH_STATUSES_WITHOUT_RESULT = new Set(['queued', 'running']);
+/** The statuses a stored report comes with; once stored, it does not change. */
+const RESEARCH_STATUSES_WITH_REPORT = new Set(['completed', 'partial', 'insufficient_data']);
+
+/** What tells one stored state of a job from another: a caller holding this one is not sent its report again. */
+function researchJobVersion(row: any): string {
+  return [text(row?.provider_report_id), text(row?.status), text(row?.research_snapshot_id), text(row?.updated_at)].join('|');
+}
+
+/** The stored results of these jobs, a few per request; `scope` narrows each read to what the caller may see. */
+async function readResearchResults(jobIds: string[], scope: (query: any) => any, admin: any): Promise<Map<string, unknown>> {
+  const results = new Map<string, unknown>();
+  for (let start = 0; start < jobIds.length; start += RESEARCH_RESULTS_PER_READ) {
+    const { data, error } = await scope(
+      admin
+        .from('lead_research_jobs')
+        .select('id,result_payload')
+        .in('id', jobIds.slice(start, start + RESEARCH_RESULTS_PER_READ)),
+    );
+    if (error) throw error;
+    for (const row of data || []) results.set(text((row as any).id), (row as any).result_payload);
+  }
+  return results;
+}
+
+/**
+ * A run with its items and their jobs. `have` names the jobs whose report the caller already holds: while a batch runs
+ * the page asks every three seconds, and each answer carried again every report finished so far. Those jobs come back
+ * with `result_unchanged` and no `result_payload`.
+ */
+export async function listNativeResearchRun(
+  input: { runId: string; access: NativeResearchAccess; have?: string[] },
+  admin: any = getSupabaseAdminClient(),
+) {
   const runQuery = admin
     .from('research_runs')
     .select('*')
@@ -2124,13 +2162,24 @@ export async function listNativeResearchRun(input: { runId: string; access: Nati
   const { data: jobs, error: jobsError } = jobIds.length
     ? await admin
       .from('lead_research_jobs')
-      .select('id,provider_report_id,status,result_payload,research_snapshot_id,error_code,error_message,organization_id,user_id,started_at,created_at')
+      .select('id,provider_report_id,status,research_snapshot_id,error_code,error_message,organization_id,user_id,started_at,created_at')
       .in('id', jobIds)
       .eq('organization_id', runOrganizationId)
       .eq('user_id', input.access.userId)
     : { data: [], error: null };
   if (jobsError) throw jobsError;
-  const byJobId = new Map((jobs || []).map((job: any) => [job.id, job]));
+  const have = new Set((input.have || []).map(text).filter(Boolean));
+  const held = (job: any) => have.has(text(job.id)) && RESEARCH_STATUSES_WITH_REPORT.has(text(job.status).toLowerCase());
+  const results = await readResearchResults(
+    (jobs || [])
+      .filter((job: any) => !RESEARCH_STATUSES_WITHOUT_RESULT.has(text(job.status).toLowerCase()) && !held(job))
+      .map((job: any) => text(job.id)),
+    (query) => query.eq('organization_id', runOrganizationId).eq('user_id', input.access.userId),
+    admin,
+  );
+  const byJobId = new Map((jobs || []).map((job: any) => [job.id, held(job)
+    ? { ...job, result_payload: null, result_unchanged: true }
+    : { ...job, result_payload: results.get(text(job.id)) ?? null }]));
   return {
     ...run,
     items: (items || []).map((item: any) => ({ ...item, job: byJobId.get(item.job_id) || null })),
@@ -2147,16 +2196,23 @@ function resultFromStoredPayload(value: unknown): NativeResearchResult | null {
   return payload as NativeResearchResult;
 }
 
+/**
+ * The latest research of each lead. `known` carries the `version` of the statuses the caller already holds, by lead: those
+ * come back as `unchanged`, without their report. The list is asked again on every reload of the page, and before each
+ * answer carried every report of every lead, also the earlier ones of a lead researched more than once.
+ */
 export async function listNativeResearchLeadStatuses(input: {
   leadIds: string[];
   access: NativeResearchAccess;
-}): Promise<NativeResearchLeadStatus[]> {
+  known?: Record<string, string>;
+}, admin: any = getSupabaseAdminClient()): Promise<NativeResearchLeadStatus[]> {
   const leadIds = [...new Set(input.leadIds.map(text).filter(Boolean))].slice(0, 200);
   if (leadIds.length === 0) return [];
 
-  const query = getSupabaseAdminClient()
+  // Which job is the latest of each lead, without the reports.
+  const query = admin
     .from('lead_research_jobs')
-    .select('lead_id,status,provider_report_id,research_snapshot_id,result_payload,error_code,updated_at')
+    .select('id,lead_id,status,provider_report_id,research_snapshot_id,error_code,updated_at')
     .eq('provider', NATIVE_PROVIDER)
     .eq('user_id', input.access.userId)
     .in('lead_id', leadIds)
@@ -2165,25 +2221,41 @@ export async function listNativeResearchLeadStatuses(input: {
   const { data, error } = await applyReadableOrganizationScope(query, input.access);
   if (error) throw error;
 
-  const latestByLeadId = new Map<string, NativeResearchLeadStatus>();
+  const latestByLeadId = new Map<string, { row: any; status: NativeResearchStatus; version: string; unchanged: boolean }>();
   for (const row of data || []) {
     const leadId = text((row as any).lead_id);
     const status = NativeResearchStatusSchema.safeParse(text((row as any).status).toLowerCase());
     if (!leadId || !status.success || latestByLeadId.has(leadId)) continue;
-
-    const payload = object((row as any).result_payload);
-    latestByLeadId.set(leadId, {
-      leadId,
-      status: status.data,
-      reportId: text((row as any).provider_report_id),
-      researchSnapshotId: text((row as any).research_snapshot_id) || text(payload.researchSnapshotId) || null,
-      result: resultFromStoredPayload(payload),
-      errorCode: text((row as any).error_code) || null,
-      updatedAt: text((row as any).updated_at) || null,
-    });
+    const version = researchJobVersion(row);
+    latestByLeadId.set(leadId, { row, status: status.data, version, unchanged: input.known?.[leadId] === version });
   }
 
-  return Array.from(latestByLeadId.values());
+  // Then only the reports the caller does not hold.
+  const results = await readResearchResults(
+    [...latestByLeadId.values()]
+      .filter((latest) => !latest.unchanged && !RESEARCH_STATUSES_WITHOUT_RESULT.has(latest.status))
+      .map((latest) => text(latest.row.id)),
+    (resultsQuery) => applyReadableOrganizationScope(
+      resultsQuery.eq('provider', NATIVE_PROVIDER).eq('user_id', input.access.userId),
+      input.access,
+    ),
+    admin,
+  );
+
+  return [...latestByLeadId.entries()].map(([leadId, latest]) => {
+    const payload = object(results.get(text(latest.row.id)));
+    return {
+      leadId,
+      status: latest.status,
+      reportId: text(latest.row.provider_report_id),
+      researchSnapshotId: text(latest.row.research_snapshot_id) || text(payload.researchSnapshotId) || null,
+      result: latest.unchanged ? null : resultFromStoredPayload(payload),
+      errorCode: text(latest.row.error_code) || null,
+      updatedAt: text(latest.row.updated_at) || null,
+      version: latest.version,
+      ...(latest.unchanged ? { unchanged: true as const } : {}),
+    };
+  });
 }
 
 async function persistNativeSnapshotRow(input: {
@@ -2455,6 +2527,7 @@ async function processJob(job: NativeResearchJob) {
     const quota = await consumeLeadResearchRequestQuota({ ...owned, limit: limits.research });
     if (!quota.allowed) {
       await releaseLeadResearchRequestClaim({ ...owned, errorCode: 'daily_research_quota_exceeded', errorMessage: 'Daily research quota exceeded.' });
+      await postponeResearchUntilQuotaReopens(job);
       await updateRunItem({ job, status: 'failed', errorCode: 'daily_research_quota_exceeded', errorMessage: 'Daily research quota exceeded.' });
       return false;
     }
@@ -2641,6 +2714,71 @@ async function processJob(job: NativeResearchJob) {
 
 /** Research jobs a tick works on at the same time. */
 const NATIVE_RESEARCH_JOBS_AT_ONCE = 3;
+/** Waiting jobs a round chooses from: only their id and whose they are, so it can look past several batches. */
+const NATIVE_RESEARCH_QUEUE_WINDOW = 200;
+
+/**
+ * Up to `limit` of the waiting jobs (oldest first), one per person in turn: a batch of forty no longer makes someone
+ * else's single request wait behind all of it (23 Nov 2026: nine hours).
+ */
+function takeResearchTurns<T extends { userId: string }>(waiting: readonly T[], limit: number): T[] {
+  const byPerson = new Map<string, T[]>();
+  for (const job of waiting) byPerson.set(job.userId, [...(byPerson.get(job.userId) || []), job]);
+  const lines = [...byPerson.values()];
+  const taken: T[] = [];
+  while (taken.length < limit && lines.some((line) => line.length > 0)) {
+    for (const line of lines) {
+      const job = taken.length < limit ? line.shift() : undefined;
+      if (job) taken.push(job);
+    }
+  }
+  return taken;
+}
+
+/**
+ * The rounds after the first one: another while the last came back full and the time allows. Returns what they added.
+ */
+async function takeMoreResearchRounds(input: {
+  first: { claimed: number; completed: number };
+  round: () => Promise<{ claimed: number; completed: number }>;
+  limit: number;
+  until: number;
+  now?: () => number;
+}) {
+  const now = input.now || Date.now;
+  const added = { claimed: 0, completed: 0 };
+  let last = input.first;
+  while (last.claimed >= input.limit && now() < input.until) {
+    last = await input.round();
+    added.claimed += last.claimed;
+    added.completed += last.completed;
+  }
+  return added;
+}
+
+/** When the daily research quota opens again: the next UTC day, as `consume_lead_research_request_quota_v1` counts them. */
+function nextResearchQuotaDay(now: Date): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 30)).toISOString();
+}
+
+/**
+ * A job refused for lack of quota waits for the next day. Left due, it was tried again every minute and, being the oldest,
+ * filled every round ahead of everyone else's research (23 Nov 2026). If this write fails the job stays due, as before.
+ */
+async function postponeResearchUntilQuotaReopens(job: NativeResearchJob, now = new Date()) {
+  try {
+    const { error } = await getSupabaseAdminClient()
+      .from('lead_research_jobs')
+      .update({ scheduled_for: nextResearchQuotaDay(now) })
+      .eq('id', job.id)
+      .eq('provider', NATIVE_PROVIDER)
+      .eq('status', 'queued')
+      .eq('request_claim_state', 'retryable');
+    if (error) throw error;
+  } catch (error) {
+    console.error('[native-research] could not postpone a job without quota:', { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
+  }
+}
 
 /**
  * `work` over the jobs, `atOnce` at a time; returns how many it completed. After a throw no job is started (they stay
@@ -2669,79 +2807,120 @@ export async function processNativeResearchQueue(input: {
   limit?: number;
   organizationId?: string;
   userId?: string;
+  /**
+   * How long the pass keeps taking rounds of `limit` jobs while the reports of the first one are written. Without it, one
+   * round: research that takes five seconds waited a quarter of an hour, because the next round only began once the
+   * reports of this one were written (median of the batches, November 2026).
+   */
+  keepTakingForMs?: number;
 } = {}) {
   if (!isNativeResearchEnabled()) {
     return { claimed: 0, completed: 0, failed: 0 };
   }
   const admin = getSupabaseAdminClient();
   const limit = Math.max(1, Math.min(25, Math.trunc(Number(input.limit) || 5)));
-  const now = new Date();
-  const dueAt = now.toISOString();
-  const staleAt = new Date(now.getTime() - 180_000).toISOString();
   const scopedQueue = (query: any) => {
     if (input.organizationId) query = query.eq('organization_id', input.organizationId);
     if (input.userId) query = query.eq('user_id', input.userId);
     return query;
   };
-  const readyQuery = () => scopedQueue(
-    admin
-      .from('lead_research_jobs')
-      .select('*')
-      .eq('provider', NATIVE_PROVIDER)
-      .in('status', ['queued', 'running', 'completed', 'partial', 'insufficient_data'])
-      .in('request_claim_state', ['retryable', 'terminal_pending'])
-      .lte('scheduled_for', dueAt)
-      .order('scheduled_for', { ascending: true })
-      .order('created_at', { ascending: true })
-      .limit(limit),
-  );
-  const stalePreProviderQuery = () => scopedQueue(
-    admin
-      .from('lead_research_jobs')
-      .select('*')
-      .eq('provider', NATIVE_PROVIDER)
-      .eq('status', 'queued')
-      .eq('request_claim_state', 'pre_provider')
-      .lte('scheduled_for', dueAt)
-      .lt('request_claimed_at', staleAt)
-      .order('request_claimed_at', { ascending: true })
-      .limit(limit),
-  );
-  const staleSubmittingQuery = () => scopedQueue(
-    admin
-      .from('lead_research_jobs')
-      .select('*')
-      .eq('provider', NATIVE_PROVIDER)
-      .eq('status', 'running')
-      .eq('request_claim_state', 'provider_submitting')
-      .lte('scheduled_for', dueAt)
-      .lt('request_claimed_at', staleAt)
-      .order('request_claimed_at', { ascending: true })
-      .limit(limit),
-  );
-  const [
-    { data: ready },
-    { data: stalePreProvider },
-    { data: staleSubmitting },
-  ] = await Promise.all([
-    readResearchQueue<any[]>('collection-ready', readyQuery),
-    readResearchQueue<any[]>('collection-stale-pre-provider', stalePreProviderQuery),
-    readResearchQueue<any[]>('collection-stale-submitting', staleSubmittingQuery),
+  // A job is tried once in a pass, whatever it came to.
+  const tried = new Set<string>();
+  const round = async () => {
+    const now = new Date();
+    const dueAt = now.toISOString();
+    const staleAt = new Date(now.getTime() - 180_000).toISOString();
+    // Only who waits and whose it is: the rows are read once the round is chosen.
+    const readyQuery = () => scopedQueue(
+      admin
+        .from('lead_research_jobs')
+        .select('id,user_id')
+        .eq('provider', NATIVE_PROVIDER)
+        .in('status', ['queued', 'running', 'completed', 'partial', 'insufficient_data'])
+        .in('request_claim_state', ['retryable', 'terminal_pending'])
+        .lte('scheduled_for', dueAt)
+        .order('scheduled_for', { ascending: true })
+        .order('created_at', { ascending: true })
+        .limit(Math.max(limit, NATIVE_RESEARCH_QUEUE_WINDOW)),
+    );
+    const stalePreProviderQuery = () => scopedQueue(
+      admin
+        .from('lead_research_jobs')
+        .select('*')
+        .eq('provider', NATIVE_PROVIDER)
+        .eq('status', 'queued')
+        .eq('request_claim_state', 'pre_provider')
+        .lte('scheduled_for', dueAt)
+        .lt('request_claimed_at', staleAt)
+        .order('request_claimed_at', { ascending: true })
+        .limit(limit),
+    );
+    const staleSubmittingQuery = () => scopedQueue(
+      admin
+        .from('lead_research_jobs')
+        .select('*')
+        .eq('provider', NATIVE_PROVIDER)
+        .eq('status', 'running')
+        .eq('request_claim_state', 'provider_submitting')
+        .lte('scheduled_for', dueAt)
+        .lt('request_claimed_at', staleAt)
+        .order('request_claimed_at', { ascending: true })
+        .limit(limit),
+    );
+    const [
+      { data: waiting },
+      { data: stalePreProvider },
+      { data: staleSubmitting },
+    ] = await Promise.all([
+      readResearchQueue<any[]>('collection-ready', readyQuery),
+      readResearchQueue<any[]>('collection-stale-pre-provider', stalePreProviderQuery),
+      readResearchQueue<any[]>('collection-stale-submitting', staleSubmittingQuery),
+    ]);
+    const turns = takeResearchTurns(
+      (waiting || [])
+        .map((row: any) => ({ id: text(row?.id), userId: text(row?.user_id) }))
+        .filter((row) => row.id && !tried.has(row.id)),
+      limit,
+    ).map((row) => row.id);
+    const { data: readyRows } = turns.length
+      ? await readResearchQueue<any[]>('collection-ready-rows', () => scopedQueue(
+        admin
+          .from('lead_research_jobs')
+          .select('*')
+          .eq('provider', NATIVE_PROVIDER)
+          .in('id', turns),
+      ))
+      : { data: [] };
+    const rowById = new Map((readyRows || []).map((row: any) => [text(row?.id), row]));
+    const ready = turns.map((id) => rowById.get(id)).filter(Boolean);
+    const seen = new Set<string>();
+    const jobs = [...(staleSubmitting || []), ...(stalePreProvider || []), ...ready]
+      .map(mapJob)
+      .filter((job): job is NativeResearchJob => Boolean(job))
+      .filter((job) => !tried.has(job.id) && !seen.has(job.id) && Boolean(seen.add(job.id)))
+      .slice(0, limit);
+    jobs.forEach((job) => tried.add(job.id));
+    // A few at a time, each with its own claim: one after another, a batch of 46 waited up to 19 minutes for its turn (5 Nov 2026).
+    const completed = await processJobsAtOnce(jobs, NATIVE_RESEARCH_JOBS_AT_ONCE, processJob);
+    return { claimed: jobs.length, completed };
+  };
+
+  const until = Date.now() + Math.max(0, Number(input.keepTakingForMs) || 0);
+  const first = await round();
+  // Both finish before the pass answers, also when one of them fails.
+  const [more, reports] = await Promise.allSettled([
+    takeMoreResearchRounds({ first, round, limit, until }),
+    processResearchReportSynthesisQueue({
+      limit,
+      organizationId: input.organizationId,
+      userId: input.userId,
+    }),
   ]);
-  const seen = new Set<string>();
-  const jobs = [...(staleSubmitting || []), ...(stalePreProvider || []), ...(ready || [])]
-    .map(mapJob)
-    .filter((job): job is NativeResearchJob => Boolean(job))
-    .filter((job) => !seen.has(job.id) && Boolean(seen.add(job.id)))
-    .slice(0, limit);
-  // A few at a time, each with its own claim: one after another, a batch of 46 waited up to 19 minutes for its turn (5 Nov 2026).
-  const completed = await processJobsAtOnce(jobs, NATIVE_RESEARCH_JOBS_AT_ONCE, processJob);
-  await processResearchReportSynthesisQueue({
-    limit,
-    organizationId: input.organizationId,
-    userId: input.userId,
-  });
-  return { claimed: jobs.length, completed, failed: jobs.length - completed };
+  if (more.status === 'rejected') throw more.reason;
+  if (reports.status === 'rejected') throw reports.reason;
+  const claimed = first.claimed + more.value.claimed;
+  const completed = first.completed + more.value.completed;
+  return { claimed, completed, failed: claimed - completed };
 }
 
 export async function getNativeSnapshot(input: { snapshotId: string; access: NativeResearchAccess }) {
@@ -2781,7 +2960,11 @@ export const nativeResearchInternals = {
   isSafeOfficialSiteUrl,
   officialPageFromHtml,
   pinnedOfficialSiteLookup,
+  nextResearchQuotaDay,
   processJobsAtOnce,
+  researchJobVersion,
+  takeMoreResearchRounds,
+  takeResearchTurns,
   selectBalancedSearchSignals,
   usefulOfficialPageContent,
   usefulOfficialPageContents,

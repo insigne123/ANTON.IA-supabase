@@ -17,7 +17,8 @@ async function run(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const limit = Number(req.nextUrl.searchParams.get('limit') || 5);
-    const result = await processNativeResearchQueue({ limit });
+    // More rounds while the reports of the first one are written: research no longer waits for them (keepTakingForMs).
+    const result = await processNativeResearchQueue({ limit, keepTakingForMs: 60_000 });
     return NextResponse.json({ ok: true, ...result }, {
       headers: {
         'Cache-Control': 'no-store',

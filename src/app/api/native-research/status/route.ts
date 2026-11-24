@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
 
     const items = await listNativeResearchLeadStatuses({
       leadIds: body.data.leadIds,
+      known: body.data.known,
       access: { organizationId: auth.organizationId, organizationIds: auth.organizationIds, userId: auth.user.id },
     });
     return NextResponse.json({ ok: true, items }, { headers: { 'Cache-Control': 'no-store' } });

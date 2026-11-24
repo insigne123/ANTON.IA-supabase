@@ -112,3 +112,18 @@ test('caps rail rendering and clamps pagination without losing the filtered coll
   assert.deepEqual(beyondLast.items, items.slice(80));
   assert.equal(beyondLast.page, 3);
 });
+
+test('a research refused for today\'s quota says it waits, as failed in its batch or as queued in the list', async () => {
+  const { researchWaitsForQuota } = await import('@/lib/research-workspace');
+  const [waiting] = researchItemsFromLeadStatuses([{
+    leadId: 'lead-1', status: 'queued', reportId: 'report-ada', researchSnapshotId: null, result: null,
+    errorCode: 'daily_research_quota_exceeded', updatedAt: '2026-11-23T15:16:00.000Z',
+  }], leads);
+  assert.equal(waiting.errorCode, 'daily_research_quota_exceeded');
+  assert.equal(researchWaitsForQuota(waiting), true);
+  assert.equal(researchWaitsForQuota({ ...waiting, status: 'failed' }), true, 'how its batch shows it');
+  assert.equal(researchWaitsForQuota({ ...waiting, errorCode: 'native_research_failed', status: 'failed' }), false, 'another failure still asks for attention');
+  assert.equal(researchWaitsForQuota({ ...waiting, errorCode: null }), false, 'a research that is simply running');
+  assert.equal(researchWaitsForQuota({ ...waiting, status: 'completed' }), false);
+  assert.equal(researchWaitsForQuota(null), false);
+});
