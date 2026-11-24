@@ -6,12 +6,14 @@ import { listNativeResearchRun } from '@/lib/server/native-research';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(_req: NextRequest, context: { params: Promise<{ runId: string }> }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ runId: string }> }) {
   try {
     const auth = await requireAuth();
     const { runId } = await context.params;
     const run = await listNativeResearchRun({
       runId: String(runId || '').trim(),
+      // The jobs whose report the page already holds: they are not read again on every poll.
+      have: (req.nextUrl.searchParams.get('have') || '').split(',').map((id) => id.trim()).filter(Boolean).slice(0, 200),
       access: { organizationId: auth.organizationId, organizationIds: auth.organizationIds, userId: auth.user.id },
     });
     if (!run) return NextResponse.json({ error: 'NATIVE_RESEARCH_RUN_NOT_FOUND' }, { status: 404 });

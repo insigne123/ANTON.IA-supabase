@@ -40,6 +40,7 @@ export function researchItemsFromLeadStatuses(
       leadRef: lead.key,
       position,
       status: status.status,
+      errorCode: status.errorCode,
       updatedAt: status.updatedAt,
       job: {
         status: status.status,

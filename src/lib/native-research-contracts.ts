@@ -63,6 +63,8 @@ export const NativeResearchBatchRequestSchema = z.object({
 
 export const NativeResearchLeadStatusesRequestSchema = z.object({
   leadIds: z.array(z.string().trim().min(1).max(500)).min(1).max(200),
+  /** `version` of the statuses the page already holds, by lead id: those come back `unchanged`, without their report. */
+  known: z.record(z.string().max(500), z.string().max(600)).refine((known) => Object.keys(known).length <= 200).optional(),
 }).strict();
 
 export const NativeResearchReprocessRequestSchema = z.object({
@@ -150,4 +152,8 @@ export type NativeResearchLeadStatus = {
   result: NativeResearchResult | null;
   errorCode: string | null;
   updatedAt: string | null;
+  /** Names this stored state of the research; sent back as `known` so the same report is not read twice. */
+  version?: string;
+  /** The caller already holds this state: `result` is not sent again. */
+  unchanged?: true;
 };

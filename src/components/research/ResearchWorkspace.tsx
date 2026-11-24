@@ -29,7 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ToastAction } from '@/components/ui/toast';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
+import { fetchNativeResearchLeadStatuses, restoreHeldRunResults } from '@/lib/native-research-status-client';
 import {
   MAX_RESEARCH_BATCH_SIZE,
   createQueuedResearchWorkspaceRun,
@@ -40,6 +40,7 @@ import {
   researchDraftErrorMessage,
   researchReadinessLabel,
   researchStatusLabel,
+  researchWaitsForQuota,
   shouldPollResearchRun,
   type ResearchReadiness,
   type ResearchReportDetail,
@@ -333,6 +334,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const draftRequestRef = useRef<string | null>(null);
   const resolvedHandoffRef = useRef<string | null>(null);
   const persistedItemsRequestRef = useRef(0);
+  const heldRunResultsRef = useRef<{ runId: string; results: Map<string, unknown> }>({ runId: '', results: new Map() });
   const pendingReportFocusRef = useRef(false);
   const pendingRailFocusKeyRef = useRef<string | null>(null);
 
@@ -348,22 +350,10 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     }
 
     try {
-      const chunks = Array.from(
-        { length: Math.ceil(leadIds.length / 200) },
-        (_, index) => leadIds.slice(index * 200, (index + 1) * 200),
-      );
-      const responses = await Promise.all(chunks.map(async (chunk) => {
-        const response = await fetch('/api/native-research/status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ leadIds: chunk }),
-        });
-        if (!response.ok) throw new Error('NATIVE_RESEARCH_LEAD_STATUS_FAILED');
-        const payload = await response.json().catch(() => null);
-        return Array.isArray(payload?.items) ? payload.items as NativeResearchLeadStatus[] : [];
-      }));
+      // Only what this tab does not hold yet is read (src/lib/native-research-status-client.ts).
+      const statuses = await fetchNativeResearchLeadStatuses(leadIds);
       if (persistedItemsRequestRef.current !== requestId) return;
-      setPersistedItems(researchItemsFromLeadStatuses(responses.flat(), nextLeads));
+      setPersistedItems(researchItemsFromLeadStatuses(statuses, nextLeads));
     } catch {
       if (persistedItemsRequestRef.current !== requestId) return;
       setPersistedItemsError('No pudimos recuperar algunos reportes anteriores.');
@@ -472,8 +462,12 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     setRunError('');
 
     try {
-      const response = await fetch(`/api/native-research/run/${encodeURIComponent(runId)}`, { cache: 'no-store' });
-      const payload = await response.json().catch(() => null);
+      // The reports that already came are not asked for again on every poll (listNativeResearchRun: `have`).
+      if (heldRunResultsRef.current.runId !== runId) heldRunResultsRef.current = { runId, results: new Map() };
+      const heldResults = heldRunResultsRef.current.results;
+      const have = Array.from(heldResults.keys()).join(',');
+      const response = await fetch(`/api/native-research/run/${encodeURIComponent(runId)}${have ? `?have=${have}` : ''}`, { cache: 'no-store' });
+      const payload = restoreHeldRunResults(await response.json().catch(() => null), heldResults) as any;
       if (!response.ok) {
         if (response.status === 404 && payload?.error === 'NATIVE_RESEARCH_RUN_NOT_FOUND' && currentRunIdRef.current === runId) {
           currentRunIdRef.current = null;
@@ -1284,7 +1278,14 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                         <p className="mt-1 break-all text-sm text-muted-foreground">{activeLead.email || activeLead.companyDomain || 'Sin email ni dominio disponible'}</p>
                       </header> : null}
 
-                      {isResearchInFlight(activeStatus) ? (
+                      {researchWaitsForQuota(activeItem) ? (
+                        <section className="rounded-2xl border border-border/60 bg-muted/25 p-5 sm:p-6" role="status" aria-label="Investigación en la fila">
+                          <h3 className="text-base font-semibold tracking-tight">Queda en la fila</h3>
+                          <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
+                            Se alcanzó el límite de investigaciones. Esta se hará sola cuando se renueve el cupo; no necesitas pedirla otra vez.
+                          </p>
+                        </section>
+                      ) : isResearchInFlight(activeStatus) ? (
                         <ResearchReportProgress key={activeItem?.id || activeLead.key} startedAt={activeReportDetail?.result.startedAt || activeItem?.startedAt} retryScheduled={activeReportSynthesis?.status === 'retry_scheduled'} phase={researchReportPhase({ status: activeReportDetail?.result.status || activeJobStatus, synthesis: activeReportSynthesis })} />
                       ) : (activeStatus === 'failed' || activeStatus === 'cancelled') && !activeItem?.result ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-rose-950 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">
