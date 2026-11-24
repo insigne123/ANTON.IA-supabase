@@ -127,3 +127,14 @@ test('a research refused for today\'s quota says it waits, as failed in its batc
   assert.equal(researchWaitsForQuota({ ...waiting, status: 'completed' }), false);
   assert.equal(researchWaitsForQuota(null), false);
 });
+
+test('the status of the list of leads also tells a research that waits for quota', async () => {
+  const { researchWaitsForQuota } = await import('@/lib/research-workspace');
+  const status: NativeResearchLeadStatus = {
+    leadId: 'lead-1', status: 'queued', reportId: 'report-ada', researchSnapshotId: null, result: null,
+    errorCode: 'daily_research_quota_exceeded', updatedAt: null,
+  };
+  assert.equal(researchWaitsForQuota(status), true);
+  assert.equal(researchWaitsForQuota({ ...status, errorCode: null }), false);
+  assert.equal(researchWaitsForQuota({ ...status, status: 'completed' }), false);
+});

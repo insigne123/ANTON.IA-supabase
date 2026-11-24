@@ -62,6 +62,12 @@ export function researchDetailLoadingState(detail: ResearchReportDetail) {
   });
 }
 
+/** The written report is there and nothing is pending on it: it will not change, so a page need not ask for it again. */
+export function isResearchReportFinal(detail: ResearchReportDetail): boolean {
+  const state = researchDetailLoadingState(detail);
+  return state.showReport && !state.failed;
+}
+
 export function researchItemPresentation(item: ResearchWorkspaceRunItem, detail?: ResearchReportDetail | null, loadError = false): ResearchWorkspaceRunItem {
   const state = detail ? researchDetailLoadingState(detail) : researchReportLoadingState({ status: item.status, snapshotId: item.researchSnapshotId, synthesis: item.result?.reportSynthesis });
   if (loadError || state.failed || (detail && state.unavailable)) return { ...item, status: 'failed', readiness: 'needs_attention', canCreateDraft: false };

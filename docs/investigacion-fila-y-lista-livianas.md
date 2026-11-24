@@ -19,6 +19,10 @@
    - **Sin cupo:** la investigación rechazada queda para el siguiente día (UTC, como se cuenta el cupo) en vez de reintentarse cada minuto. La persona lee «Queda en la fila… se hará sola cuando se renueve el cupo».
    - **Más rondas por pasada:** la pasada del programador sigue tomando rondas durante un minuto mientras se escriben los informes de la primera (`keepTakingForMs`). Siguen siendo 3 investigaciones a la vez.
 
+4. **Los informes escritos que la pestaña ya leyó** (`holdResearchReport`, `isResearchReportFinal`): cada vez que se abría la investigación, la página pedía de nuevo el informe escrito de cada contacto investigado (210 pedidos para la cuenta del 24 nov). Un informe ya escrito no cambia: las páginas parten de lo que la pestaña tiene y piden solo el resto. Uno en preparación, uno fallido o uno que se mandó a reescribir se vuelve a pedir.
+5. **«En la fila» en todas partes:** el contacto cuya investigación espera cupo dice «En la fila» en «Por escribir» y en la lista de la investigación, sin barra de avance. Antes decía «Investigando» / «En curso».
+6. **Reprocesar** (`reprocessCurrentNativeResearch`): de cada informe guardado lee solo el contacto, no el informe entero (hasta 500 a la vez).
+
 ## Lo que no cambia
 
 - Qué informe ve cada persona y con qué permisos: las mismas condiciones de usuario y organización en cada lectura.
@@ -31,3 +35,5 @@
 - `src/lib/native-research-status-client.test.ts`: la recarga conserva los informes; pedidos de a 50; un estado «sin cambios» que la pestaña no tiene se vuelve a pedir completo.
 - `src/lib/server/native-research-queue.test.ts`: turnos por persona, día en que se renueva el cupo, rondas mientras vuelven llenas y hay tiempo.
 - `src/components/research/research-workspace-ui.test.ts`: la investigación sin cupo se muestra como en la fila.
+- `src/components/research/research-report-loading-ui.test.ts`: cuándo un informe escrito es definitivo.
+- En navegador, contra la app compilada y la base simulada: `npm run audit:journeys -- --file=scripts/visual-audit/journeys/investigacion.mjs`. Abre «Por escribir» con contactos investigados, abre la investigación de uno, mira la que quedó sin cupo y vuelve. Comprueba qué viaja: en la primera carga, el informe más reciente de cada contacto; en cada recarga, ninguno.

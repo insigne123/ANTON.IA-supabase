@@ -42,14 +42,15 @@ import { haveSameSelection, retainVisibleSelection } from '@/lib/leads-workspace
 import {
   MAX_RESEARCH_BATCH_SIZE,
   parseResearchReportDetail,
+  researchWaitsForQuota,
   type ResearchReportDetail,
 } from '@/lib/research-workspace';
 import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
 import { composeDraftHref, saveDraftQueue } from '@/lib/draft-queue';
 import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
-import { fetchNativeResearchLeadStatuses } from '@/lib/native-research-status-client';
+import { fetchNativeResearchLeadStatuses, heldResearchReports, holdResearchReport } from '@/lib/native-research-status-client';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
-import { researchDetailLoadingState } from '@/lib/research-report-loading';
+import { isResearchReportFinal, researchDetailLoadingState } from '@/lib/research-report-loading';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
 import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
 import { EmailOwnerWarning, LeadName } from '@/components/leads/LeadName';
@@ -127,7 +128,8 @@ export default function EnrichedLeadsClient() {
   const [nativeResearchStatusError, setNativeResearchStatusError] = useState('');
   const [openReport, setOpenReport] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
-  const [nativeReportDetails, setNativeReportDetails] = useState<Record<string, ResearchReportDetail>>({});
+  // The written reports this tab already read are not asked for again (holdResearchReport).
+  const [nativeReportDetails, setNativeReportDetails] = useState<Record<string, ResearchReportDetail>>(() => heldResearchReports<ResearchReportDetail>());
   const [nativeReportDetailLoading, setNativeReportDetailLoading] = useState<Record<string, boolean>>({});
   const [nativeReportDetailErrors, setNativeReportDetailErrors] = useState<Record<string, string>>({});
   const nativeReportDetailRequestsRef = useRef<Set<string>>(new Set());
@@ -462,6 +464,7 @@ export default function EnrichedLeadsClient() {
       if (!response.ok) throw new Error('NATIVE_RESEARCH_DETAIL_FAILED');
       const detail = parseResearchReportDetail(payload, status.result);
       if (!detail) throw new Error('NATIVE_RESEARCH_DETAIL_INVALID');
+      holdResearchReport(reportId, detail, isResearchReportFinal(detail));
       setNativeReportDetails((current) => ({ ...current, [reportId]: detail }));
     } catch {
       if (controller.signal.aborted) return;
@@ -483,6 +486,7 @@ export default function EnrichedLeadsClient() {
     try {
       const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { method: 'POST' });
       if (!response.ok) throw new Error('NATIVE_RESEARCH_REPORT_RETRY_FAILED');
+      holdResearchReport(reportId, null, false);
       setNativeReportDetails((current) => {
         const detail = current[reportId];
         return detail ? {
@@ -1226,6 +1230,8 @@ export default function EnrichedLeadsClient() {
     );
     if (stage === 'draft_ready') return withDetail(<Badge variant="success">{ENRICHED_STAGE_LABELS.draft_ready}</Badge>);
     if (stage === 'ready') return withDetail(<Badge variant="success">{ENRICHED_STAGE_LABELS.ready}</Badge>);
+    // Refused for lack of quota: it waits for the quota, nobody is working on it (researchWaitsForQuota).
+    if (stage === 'researching' && researchWaitsForQuota(native)) return <Badge variant="neutral">En la fila</Badge>;
     if (stage === 'researching') return <Badge variant="info">{ENRICHED_STAGE_LABELS.researching}</Badge>;
     if (stage === 'review') {
       const limited = native?.status === 'insufficient_data' || !isNativeResearchReport(native);

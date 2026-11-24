@@ -18,7 +18,7 @@ import {
 import { PageHeader } from '@/components/page-header';
 import NativeResearchReport from '@/components/research/NativeResearchReport';
 import { ResearchReportProgress } from '@/components/research/ResearchReportProgress';
-import { researchDetailLoadingState, researchItemPresentation, researchReportPhase } from '@/lib/research-report-loading';
+import { isResearchReportFinal, researchDetailLoadingState, researchItemPresentation, researchReportPhase } from '@/lib/research-report-loading';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
@@ -29,7 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ToastAction } from '@/components/ui/toast';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { fetchNativeResearchLeadStatuses, restoreHeldRunResults } from '@/lib/native-research-status-client';
+import { fetchNativeResearchLeadStatuses, heldResearchReports, holdResearchReport, restoreHeldRunResults } from '@/lib/native-research-status-client';
 import {
   MAX_RESEARCH_BATCH_SIZE,
   createQueuedResearchWorkspaceRun,
@@ -311,7 +311,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
   const [profileRequiredItemId, setProfileRequiredItemId] = useState<string | null>(null);
-  const [reportDetails, setReportDetails] = useState<Record<string, ResearchReportDetail>>({});
+  // The written reports this tab already read are not asked for again (holdResearchReport).
+  const [reportDetails, setReportDetails] = useState<Record<string, ResearchReportDetail>>(() => heldResearchReports<ResearchReportDetail>());
   const [reportDetailLoading, setReportDetailLoading] = useState<Record<string, boolean>>({});
   const [reportDetailErrors, setReportDetailErrors] = useState<Record<string, string>>({});
   const [researchUnavailable, setResearchUnavailable] = useState(false);
@@ -507,6 +508,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
       if (!response.ok) throw new Error('NATIVE_RESEARCH_DETAIL_FAILED');
       const detail = parseResearchReportDetail(payload, fallbackResult);
       if (!detail) throw new Error('NATIVE_RESEARCH_DETAIL_INVALID');
+      holdResearchReport(reportId, detail, isResearchReportFinal(detail));
       setReportDetails((current) => ({ ...current, [reportId]: detail }));
     } catch {
       if (controller.signal.aborted) return;
@@ -528,6 +530,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     try {
       const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { method: 'POST' });
       if (!response.ok) throw new Error('NATIVE_RESEARCH_REPORT_RETRY_FAILED');
+      holdResearchReport(reportId, null, false);
       setReportDetails((current) => {
         const detail = current[reportId];
         return detail ? {
@@ -1127,10 +1130,13 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                     const item = itemByLeadKey.get(lead.key);
                     const isActive = lead.key === activeLeadKey;
                     const inFlight = isResearchInFlight(item?.status || 'idle');
+                    // Refused for lack of quota: it waits in the queue, it is not being worked on (researchWaitsForQuota).
+                    const waiting = researchWaitsForQuota(item);
                     const selectable = queueKeys.has(lead.key);
                     const selected = selectedKeys.includes(lead.key);
-                    const evidence = item ? `${pluralize(item.evidenceCount, 'evidencia')} · ${pluralize(item.sourceCount, 'fuente')}` : 'Sin evidencia todavía';
-                    const readiness = item ? researchReadinessLabel(item.readiness) : 'Por investigar';
+                    const evidence = waiting ? 'Se hará cuando se renueve el cupo'
+                      : item ? `${pluralize(item.evidenceCount, 'evidencia')} · ${pluralize(item.sourceCount, 'fuente')}` : 'Sin evidencia todavía';
+                    const readiness = waiting ? '' : item ? researchReadinessLabel(item.readiness) : 'Por investigar';
                     return (
                       <li key={lead.key} className={isActive ? 'bg-primary/[0.04]' : ''}>
                         <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-4 py-3.5 sm:px-5">
@@ -1161,13 +1167,13 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                                   <span className="block truncate font-medium text-foreground">{lead.fullName || 'Lead sin nombre'}</span>
                                   <span className="mt-0.5 block truncate text-xs text-muted-foreground">{[lead.title || 'Sin cargo', lead.companyName || 'Empresa sin identificar'].join(' · ')}</span>
                                 </span>
-                                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium ${statusClass(item?.status || 'idle')}`}>{researchStatusLabel(item?.status || 'idle')}</span>
+                                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium ${statusClass(waiting ? 'idle' : item?.status || 'idle')}`}>{waiting ? 'En la fila' : researchStatusLabel(item?.status || 'idle')}</span>
                               </span>
                               <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
                                 <span>{evidence}</span>
-                                <span className={`font-medium ${readinessClass(item?.readiness || 'review')}`}>{readiness}</span>
+                                {readiness ? <span className={`font-medium ${readinessClass(item?.readiness || 'review')}`}>{readiness}</span> : null}
                               </span>
-                              {inFlight ? <Progress value={progressFor(item?.status || 'idle')} className="h-1.5" aria-label={`Progreso de investigación de ${lead.fullName || lead.companyName || 'lead'}: ${researchStatusLabel(item?.status || 'idle')}`} /> : null}
+                              {inFlight && !waiting ? <Progress value={progressFor(item?.status || 'idle')} className="h-1.5" aria-label={`Progreso de investigación de ${lead.fullName || lead.companyName || 'lead'}: ${researchStatusLabel(item?.status || 'idle')}`} /> : null}
                             </span>
                           </button>
                         </div>
