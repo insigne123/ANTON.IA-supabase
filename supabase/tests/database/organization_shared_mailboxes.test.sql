@@ -32,6 +32,12 @@ values
   ('c7100000-0000-4000-8000-000000000002', 'c7000000-0000-4000-8000-000000000006', 'owner'),
   ('c7100000-0000-4000-8000-000000000002', 'c7000000-0000-4000-8000-000000000007', 'member');
 
+-- Every account is created with an organization of its own (handle_new_user). The colleague's is spelled out here: an
+-- organization shared with nobody is not another team.
+insert into public.organizations (id, name) values ('c7100000-0000-4000-8000-000000000003', 'The Colleague Alone');
+insert into public.organization_members (organization_id, user_id, role)
+values ('c7100000-0000-4000-8000-000000000003', 'c7000000-0000-4000-8000-000000000002', 'owner');
+
 insert into public.organization_shared_mailboxes (organization_id, provider, email)
 values ('c7100000-0000-4000-8000-000000000001', 'outlook', 'contacto@equipo.test');
 
@@ -107,7 +113,7 @@ select is(
 -- The connector signs in with the team's mailbox.
 select is(
   public.share_organization_mailbox_v1('c7100000-0000-4000-8000-000000000001', 'c7000000-0000-4000-8000-000000000001', 'outlook'),
-  1, 'the connection goes to the one colleague who can take it'
+  1, 'the connection goes to the one colleague who can take it, who also has an organization of their own'
 );
 select is(
   (select refresh_token || '/' || shared_organization_id::text from public.provider_tokens
@@ -126,7 +132,7 @@ select is(
 );
 select is(
   (select count(*)::integer from public.provider_tokens where user_id = 'c7000000-0000-4000-8000-000000000003'),
-  0, 'someone who also works in another company does not get it: the team''s mailbox must not write for that company'
+  0, 'someone who also works in another team does not get it: the mailbox must not write for that company'
 );
 select is(
   (select refresh_token || '/' || coalesce(shared_organization_id::text, 'own') from public.provider_tokens
@@ -159,7 +165,7 @@ insert into public.organization_members (organization_id, user_id, role)
 values ('c7100000-0000-4000-8000-000000000001', 'c7000000-0000-4000-8000-000000000007', 'member');
 select is(
   (select count(*)::integer from public.provider_tokens where user_id = 'c7000000-0000-4000-8000-000000000007'),
-  0, 'someone who joins while working in another company does not get it'
+  0, 'someone who joins while working in another team does not get it'
 );
 insert into public.organization_members (organization_id, user_id, role)
 values ('c7100000-0000-4000-8000-000000000001', 'c7000000-0000-4000-8000-000000000008', 'member');

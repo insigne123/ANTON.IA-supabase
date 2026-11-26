@@ -5,7 +5,8 @@ import type { MailProvider } from '@/lib/mail-sender';
 /**
  * The mailbox of a whole organization (organization_shared_mailboxes): a team that writes from one address connects it once.
  * When a member signs in with exactly that mailbox, the connection is given to everyone in the organization, and to whoever
- * joins later (migration 20261126170000). Any other mailbox a member connects stays their own.
+ * joins later (migrations 20261126170000 and 20261126180000), except someone who also works in another team: the mailbox
+ * must not write for that company. Any other mailbox a member connects stays their own.
  */
 export type SharedMailboxOutcome = { shared: boolean; members: number };
 
