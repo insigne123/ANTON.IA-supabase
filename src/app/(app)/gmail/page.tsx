@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { providerConnectionError } from '@/lib/provider-connection-feedback';
+import { SHARED_MAILBOX_CONNECTED } from '@/lib/mail-connections';
 
 export default function GmailConnectPage() {
   const [connected, setConnected] = useState(false);
@@ -30,7 +31,7 @@ export default function GmailConnectPage() {
     void checkConnection();
     const params = new URLSearchParams(window.location.search);
     if (params.has('error')) setFeedback(providerConnectionError(params.get('error') || ''));
-    else if (params.get('connected') === 'true') setFeedback('Cuenta vinculada. Los permisos se verificaron al conectar.');
+    else if (params.get('connected') === 'true') setFeedback(params.get('equipo') ? SHARED_MAILBOX_CONNECTED : 'Cuenta vinculada. Los permisos se verificaron al conectar.');
     if (params.has('error') || params.has('connected')) window.history.replaceState(window.history.state, '', '/gmail');
   }, [checkConnection]);
 

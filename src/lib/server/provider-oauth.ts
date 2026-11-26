@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { publicAppOrigin, requestAppOrigin } from '@/lib/server/app-origins';
 import { tokenService } from '@/lib/services/token-service';
+import { shareMailboxAfterConnect } from '@/lib/server/shared-mailbox';
 
 export type Provider = 'google' | 'azure';
 /** `link`: started from a «Contacto del día» email, without a session (provider-oauth-link.ts): the signed link names the person. */
@@ -167,8 +168,12 @@ export async function finishProviderOAuth(req: NextRequest, provider: Provider) 
     if (!code) return finish({ error: 'no_code' });
     const exchanged = await exchangeProviderCode(provider, attempt, code);
     if ('error' in exchanged) return finish({ error: exchanged.error });
-    const saveError = await tokenService.saveToken(supabase, provider === 'google' ? 'google' : 'outlook', exchanged.refreshToken);
-    return finish(saveError ? { error: 'db_save_failed' } : { connected: 'true' });
+    const mailProvider = provider === 'google' ? 'google' : 'outlook';
+    const saveError = await tokenService.saveToken(supabase, mailProvider, exchanged.refreshToken);
+    if (saveError) return finish({ error: 'db_save_failed' });
+    // The organization's mailbox, connected once for everyone (shared-mailbox.ts); any other stays this person's.
+    const team = await shareMailboxAfterConnect({ userId: user.id, provider: mailProvider, accessToken: exchanged.accessToken });
+    return finish(team.shared ? { connected: 'true', equipo: '1' } : { connected: 'true' });
   } catch {
     return finish({ error: 'exchange_failed' });
   }

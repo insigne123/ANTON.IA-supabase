@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatDate } from '@/lib/dates';
-import { disconnectWarning, type MailConnectionsState } from '@/lib/mail-connections';
+import { disconnectWarning, SHARED_MAILBOX_NOTE, type MailConnectionsState } from '@/lib/mail-connections';
 import { MAIL_PROVIDER_LABEL, type MailProvider } from '@/lib/mail-sender';
 
 type ConnectionsState = MailConnectionsState;
@@ -97,7 +97,7 @@ export function MailConnectionsCard({ onChanged }: { onChanged?: () => void }) {
                     <Badge variant={connected ? 'success' : 'neutral'}>{connected ? 'Conectado' : 'Sin conectar'}</Badge>
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {connected ? (updatedAt ? `Conexión actualizada el ${formatDate(updatedAt)}.` : 'Lista para enviar.') : pitch}{' '}
+                    {connected ? (state.shared?.[provider] ? SHARED_MAILBOX_NOTE : updatedAt ? `Conexión actualizada el ${formatDate(updatedAt)}.` : 'Lista para enviar.') : pitch}{' '}
                     <Link href={detailsHref} className="font-medium text-primary underline-offset-4 hover:underline">Detalles</Link>
                   </p>
                 </div>

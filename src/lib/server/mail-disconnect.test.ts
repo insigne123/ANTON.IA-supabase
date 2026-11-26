@@ -45,6 +45,22 @@ function fakeAdmin(initial: { provider_tokens: Row[]; profiles: Row[] }, failure
 
 const USER = 'user-1';
 
+test('Gmail shared by the organization: the copy is removed for this person and the token is not revoked for the rest', async () => {
+  const { client, tables } = fakeAdmin({
+    provider_tokens: [
+      { user_id: USER, provider: 'google', refresh_token: encryptStoredToken('team-refresh'), shared_organization_id: 'org-team' },
+      { user_id: 'colleague', provider: 'google', refresh_token: encryptStoredToken('team-refresh'), shared_organization_id: 'org-team' },
+    ],
+    profiles: [{ id: USER, default_mail_provider: 'google' }],
+  });
+  const revoked: string[] = [];
+  const result = await disconnectMailProvider(client, USER, 'google', { revokeGoogle: async (token) => { revoked.push(token); } });
+
+  assert.deepEqual(result, { disconnected: true, preferred: null });
+  assert.deepEqual(revoked, []);
+  assert.deepEqual(tables.provider_tokens.map((row) => row.user_id), ['colleague']);
+});
+
 test('Gmail: the token row goes first, then Google revokes the decrypted token, and the default sender moves to Outlook', async () => {
   const { client, tables, log } = fakeAdmin({
     provider_tokens: [

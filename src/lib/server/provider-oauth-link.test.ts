@@ -45,6 +45,8 @@ function harness(options: { owner?: string | null; connected?: Array<'google' | 
   const next = { NextResponse: { redirect } };
   const oauth = load(OAUTH, {
     'node:crypto': { createHash, randomBytes }, 'next/headers': { cookies: () => {} }, 'next/server': next, '@/lib/services/token-service': { tokenService },
+    // The team's mailbox is the app's own connection (shared-mailbox.ts); a link's consent never reaches it.
+    '@/lib/server/shared-mailbox': { shareMailboxAfterConnect: async () => ({ shared: false, members: 0 }) },
     // The link's consent runs at the app's own address, whatever the public one is (app-origins.ts).
     '@/lib/server/app-origins': { publicAppOrigin: () => null, requestAppOrigin: (_headers: unknown, canonical: string) => canonical },
     '@supabase/auth-helpers-nextjs': { createRouteHandlerClient: () => ({ auth: { getUser: async () => ({ data: { user: options.sessionUser ? { id: options.sessionUser } : null } }) } }) },
