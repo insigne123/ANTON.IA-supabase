@@ -9,9 +9,10 @@ const compiled = ts.transpileModule(readFileSync('src/lib/server/provider-oauth.
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function harness(options: { userId?: string | null; tokens?: object; tokenStatus?: number; saveError?: object; env?: object; throws?: boolean } = {}) {
+function harness(options: { userId?: string | null; tokens?: object; tokenStatus?: number; saveError?: object; env?: object; throws?: boolean; /** The connected mailbox is the organization's (shared-mailbox.ts). */ teamMailbox?: boolean } = {}) {
   const calls: any[] = [];
   const saves: any[] = [];
+  const shares: any[] = [];
   const exports: any = {};
   const env = { NEXT_PUBLIC_BASE_URL: 'https://app.example.test', NEXT_PUBLIC_GOOGLE_CLIENT_ID: 'google-id', GOOGLE_CLIENT_SECRET: 'google-secret', NEXT_PUBLIC_AZURE_AD_CLIENT_ID: 'azure-id', AZURE_AD_CLIENT_SECRET: 'azure-secret', ...options.env };
   const dependencies: Record<string, any> = {
@@ -23,6 +24,7 @@ function harness(options: { userId?: string | null; tokens?: object; tokenStatus
       return response;
     } } },
     '@/lib/services/token-service': { tokenService: { saveToken: async (...args: any[]) => { saves.push(args); return options.saveError || null; } } },
+    '@/lib/server/shared-mailbox': { shareMailboxAfterConnect: async (input: object) => { shares.push(input); return { shared: Boolean(options.teamMailbox), members: options.teamMailbox ? 1 : 0 }; } },
     // The two addresses, read from this harness's environment (app-origins.ts).
     '@/lib/server/app-origins': { publicAppOrigin: () => publicAppOrigin(env), requestAppOrigin: (headers: Headers, canonical: string) => requestAppOrigin(headers, canonical, env) },
   };
@@ -34,7 +36,7 @@ function harness(options: { userId?: string | null; tokens?: object; tokenStatus
     if (options.throws) throw new Error('Network failure');
     return Response.json(options.tokens || {}, { status: options.tokenStatus || 200 });
   });
-  return { ...exports, calls, saves };
+  return { ...exports, calls, saves, shares };
 }
 
 function request(path: string, values: Record<string, any> = {}) {
@@ -45,7 +47,7 @@ for (const provider of ['google', 'azure']) {
   const page = provider === 'google' ? '/gmail' : '/outlook';
   const scope = provider === 'google' ? 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly' : 'User.Read Mail.Send Mail.Read';
   test(`${provider}: start and callback complete a session-bound PKCE flow`, async () => {
-    const flow = harness({ tokens: { refresh_token: 'fake-refresh', scope } });
+    const flow = harness({ tokens: { refresh_token: 'fake-refresh', access_token: 'fake-access', scope } });
     const start = await flow.startProviderOAuth(request(`/api/auth/connect/${provider}`), provider);
     const authorize = new URL(start.url);
     const cookie = start.values[`provider_oauth_${provider}`];
@@ -65,6 +67,23 @@ for (const provider of ['google', 'azure']) {
     assert.equal(flow.calls[0].init.body.get('redirect_uri'), authorize.searchParams.get('redirect_uri'));
     assert.equal(flow.saves[0][1], provider === 'azure' ? 'outlook' : 'google');
     assert.equal(flow.saves[0][2], 'fake-refresh');
+    // The share step runs after the save, for the person of the session, with the access token of this consent.
+    assert.deepEqual(flow.shares, [{ userId: 'user-a', provider: provider === 'azure' ? 'outlook' : 'google', accessToken: 'fake-access' }]);
+  });
+
+  test(`${provider}: the organization's mailbox tells the page it was connected for the whole team, and nothing is shared when the save fails`, async () => {
+    const connect = async (options: Parameters<typeof harness>[0]) => {
+      const flow = harness({ tokens: { refresh_token: 'fake-refresh', access_token: 'fake-access', scope }, ...options });
+      const start = await flow.startProviderOAuth(request(`/api/auth/connect/${provider}`), provider);
+      const attempt = JSON.parse(start.values[`provider_oauth_${provider}`].value);
+      return { flow, finish: await flow.finishProviderOAuth(request(`/api/auth/callback/${provider}?code=fake-code&state=${attempt.state}`, start.values), provider) };
+    };
+    const team = await connect({ teamMailbox: true });
+    assert.equal(team.finish.url, `https://app.example.test${page}?connected=true&equipo=1`);
+
+    const failed = await connect({ teamMailbox: true, saveError: { message: 'boom' } });
+    assert.equal(new URL(failed.finish.url).searchParams.get('error'), 'db_save_failed');
+    assert.equal(failed.flow.shares.length, 0);
   });
 
   test(`${provider}: rejects absent, mismatched, expired and cross-user attempts without token exchange`, async () => {
