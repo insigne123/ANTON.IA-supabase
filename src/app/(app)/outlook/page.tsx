@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
+import { SHARED_MAILBOX_CONNECTED } from '@/lib/mail-connections';
 
 function OutlookConnectPageInner() {
   const { toast } = useToast();
@@ -52,7 +53,7 @@ function OutlookConnectPageInner() {
     if (connected === 'true') {
       toast({
         title: 'Outlook conectado',
-        description: 'Cuenta vinculada. Los permisos se verificaron al conectar.',
+        description: searchParams.get('equipo') ? SHARED_MAILBOX_CONNECTED : 'Cuenta vinculada. Los permisos se verificaron al conectar.',
       });
       void checkConnection();
     }

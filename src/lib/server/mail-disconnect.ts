@@ -28,7 +28,8 @@ export async function revokeGoogleRefreshToken(token: string, fetchImpl: typeof 
 
 /**
  * Removes the stored mailbox connection for one provider. The token row goes first, so nothing sends from that mailbox
- * after this answers; Google's token is then revoked (Microsoft has no simple per-token revocation). If that mailbox was
+ * after this answers; Google's token is then revoked (Microsoft has no simple per-token revocation), unless it is the
+ * organization's shared mailbox, which the other members keep using. If that mailbox was
  * the default sender, the default moves to the other connected one or is cleared, as Conexiones shows it.
  */
 export async function disconnectMailProvider(
@@ -42,7 +43,7 @@ export async function disconnectMailProvider(
 
   const { data: stored, error: readError } = await admin
     .from('provider_tokens')
-    .select('refresh_token')
+    .select('refresh_token, shared_organization_id')
     .eq('user_id', userId)
     .eq('provider', provider)
     .maybeSingle();
@@ -51,8 +52,10 @@ export async function disconnectMailProvider(
   const { error: deleteError } = await admin.from('provider_tokens').delete().eq('user_id', userId).eq('provider', provider);
   if (deleteError) throw deleteError;
 
-  const encrypted = (stored as { refresh_token?: string | null } | null)?.refresh_token;
-  if (provider === 'google' && encrypted) {
+  const row = stored as { refresh_token?: string | null; shared_organization_id?: string | null } | null;
+  const encrypted = row?.refresh_token;
+  // The organization's mailbox is the same connection for every member: revoking it would disconnect all of them.
+  if (provider === 'google' && encrypted && !row?.shared_organization_id) {
     let token: string | null = null;
     try { token = decryptStoredToken(encrypted); } catch { token = null; }
     if (token) await revokeGoogle(token).catch((error: unknown) => warn(`[mail-disconnect] Google revoke failed: ${error instanceof Error ? error.message : 'unknown'}`));

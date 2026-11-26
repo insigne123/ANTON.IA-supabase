@@ -4047,6 +4047,41 @@ export type Database = {
           },
         ]
       }
+      organization_shared_mailboxes: {
+        Row: {
+          connected_at: string | null
+          connected_by: string | null
+          created_at: string
+          email: string
+          organization_id: string
+          provider: string
+        }
+        Insert: {
+          connected_at?: string | null
+          connected_by?: string | null
+          created_at?: string
+          email: string
+          organization_id: string
+          provider: string
+        }
+        Update: {
+          connected_at?: string | null
+          connected_by?: string | null
+          created_at?: string
+          email?: string
+          organization_id?: string
+          provider?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_shared_mailboxes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_reporting_group_members: {
         Row: {
           assigned_at: string
@@ -4704,6 +4739,7 @@ export type Database = {
           expires_at: string | null
           provider: string
           refresh_token: string
+          shared_organization_id: string | null
           updated_at: string | null
           user_id: string
         }
@@ -4711,6 +4747,7 @@ export type Database = {
           expires_at?: string | null
           provider: string
           refresh_token: string
+          shared_organization_id?: string | null
           updated_at?: string | null
           user_id: string
         }
@@ -4718,10 +4755,19 @@ export type Database = {
           expires_at?: string | null
           provider?: string
           refresh_token?: string
+          shared_organization_id?: string | null
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "provider_tokens_shared_organization_id_fkey"
+            columns: ["shared_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       research_company_artifacts: {
         Row: {
@@ -7909,6 +7955,14 @@ export type Database = {
           p_user_id: string
         }
         Returns: boolean
+      }
+      share_organization_mailbox_v1: {
+        Args: {
+          p_organization_id: string
+          p_provider: string
+          p_user_id: string
+        }
+        Returns: number
       }
       stop_campaign_enrollment_v2: {
         Args: {

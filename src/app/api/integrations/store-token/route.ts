@@ -61,7 +61,7 @@ export async function GET(request: Request) {
         // Get connection status for all providers
         const admin = getSupabaseAdminClient();
         const [{ data, error }, approved] = await Promise.all([
-            admin.from('provider_tokens').select('provider, updated_at').eq('user_id', user.id),
+            admin.from('provider_tokens').select('provider, updated_at, shared_organization_id').eq('user_id', user.id),
             // Conexiones warns before disconnecting the last mailbox: approved campaigns would wait for a new one.
             admin.from('bulk_campaigns').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'approved'),
         ]);
@@ -75,15 +75,18 @@ export async function GET(request: Request) {
             google: false,
             outlook: false,
             updatedAt: { google: null as string | null, outlook: null as string | null },
+            // The organization's mailbox, connected once for everyone: Conexiones says so.
+            shared: { google: false, outlook: false },
             approvedCampaigns: approved.error ? 0 : approved.count || 0,
         };
 
         if (data) {
-            (data as Array<{ provider?: unknown; updated_at?: string | null }>).forEach((row) => {
+            (data as Array<{ provider?: unknown; updated_at?: string | null; shared_organization_id?: string | null }>).forEach((row) => {
                 const provider = row.provider;
                 if (!isMailProvider(provider)) return;
                 connections[provider] = true;
                 connections.updatedAt[provider] = row.updated_at || null;
+                connections.shared[provider] = Boolean(row.shared_organization_id);
             });
         }
 
