@@ -117,7 +117,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
       call: params.get('llamar') === '1' && Boolean(params.get('c')) };
   });
   /** «Enriquecer los N»: with their mobiles or without. The email's choice arrives made; the button confirms it. */
-  const [bulkPhone, setBulkPhone] = useState(linked.bulk === 'phone');
+  const [bulkChoice, setBulkPhone] = useState<boolean | null>(linked.bulk ? linked.bulk === 'phone' : null);
   const asked = useRef(false);
   const listId = useId();
   // Of several contacts, the one on screen: the one the email linked to, or the first that still has a step to take.
@@ -229,7 +229,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const writeHref = (item: DropItem) => `/saved/leads/enriched?investigar=${encodeURIComponent(item.savedLeadId || '')}&empezar=1`;
   const badges = (item: DropItem) => <div className="flex flex-wrap gap-1.5 pt-1">
     <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />{item.provider === 'apollo' ? 'Tiene correo' : 'Correo verificado'}</span>
-    {item.hasPhone ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Phone className="h-3 w-3" aria-hidden="true" />Teléfono</span> : null}
+    {item.hasPhone ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Phone className="h-3 w-3" aria-hidden="true" />Tiene teléfono directo</span> : null}
     {item.savedLeadId ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
   </div>;
   // Why we recommend them: what matched and why it is worth it for what the person sells (writeDrop), then the fit criterion by criterion.
@@ -298,10 +298,15 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     </div>;
   };
 
+  // Someone who asks for the phone with every contact they reveal (criteria.habits, followHabits): with its phone is the button and
+  // the choice already made for all of them; the email alone is the quieter way. For everyone else it is the other way round.
+  const phoneFirst = Boolean(drop?.criteria.habits?.phone);
+  const bulkPhone = bulkChoice ?? phoneFirst;
+  const enrichLabel = phoneFirst ? `Enriquecer con teléfono · ${cost.both} créditos` : `Enriquecer y guardar · ${creditsLabel(cost.email)}`;
   const enrichButton = (item: DropItem, size: 'lg' | 'sm') => <Button size={size} variant={size === 'sm' ? 'outline' : 'default'} disabled={saving || enriching !== null}
-    onClick={() => void enrich(item)} aria-label={size === 'sm' && enriching !== item.leadId ? `Enriquecer y guardar · ${creditsLabel(cost.email)}: ${dropName(item)}` : undefined}>
-    {enriching === item.leadId ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
-    {enriching === item.leadId ? 'Buscando su correo…' : `Enriquecer y guardar · ${creditsLabel(cost.email)}`}</Button>;
+    onClick={() => void enrich(item, phoneFirst || undefined)} aria-label={size === 'sm' && enriching !== item.leadId ? `${enrichLabel}: ${dropName(item)}` : undefined}>
+    {enriching === item.leadId ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : phoneFirst ? <Phone className="mr-2 h-4 w-4" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
+    {enriching === item.leadId ? 'Buscando su correo…' : enrichLabel}</Button>;
   const playing = Boolean(drop) && step < STEPS.length;
   // Opened from the morning email on one contact: it comes into view and, when the link asked for it, its email is looked up at once
   // (the click in the email was the person's; the lookup is the one the button makes, for a contact of theirs).
@@ -413,7 +418,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
               {enrichButton(one, 'lg')}
               {/* The same lookup with its mobile too, for whoever means to call («Para llamar», below). */}
               {enriching ? null : <Button variant="link" size="sm" className="h-auto min-h-9 justify-start p-0 text-xs font-normal text-muted-foreground sm:justify-end" disabled={saving}
-                onClick={() => actions.enrich(one, true)}>O con su teléfono · {cost.both} créditos</Button>}
+                onClick={() => actions.enrich(one, phoneFirst ? undefined : true)}>{phoneFirst ? `O solo su correo · ${creditsLabel(cost.email)}` : `O con su teléfono · ${cost.both} créditos`}</Button>}
             </div>
             : <Button size="lg" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}
@@ -457,7 +462,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
         {/* The list at the side, one contact to read and act on at a time (DropContactsWorkspace). */}
         <DropContactsWorkspace items={drop.items} selectedId={shownItem(drop.items).leadId} onSelect={setSelectedId}>
           {(item => <DropContactCard key={item.leadId} item={item} actions={actions} busy={saving || enriching !== null || bulk !== null} enriching={enriching === item.leadId}
-            defaultOpen={linked.leadId === item.leadId} callOpen={linked.call && linked.leadId === item.leadId} />)(shownItem(drop.items))}
+            defaultOpen={linked.leadId === item.leadId} callOpen={linked.call && linked.leadId === item.leadId} phoneFirst={phoneFirst} />)(shownItem(drop.items))}
         </DropContactsWorkspace>
 
         {howSection}

@@ -49,7 +49,7 @@ test('Apollo\'s free search: up to 100 people, nothing spent nor kept in the vau
   assert.equal(item.provider, 'apollo');
   assert.ok(![id(1), id(4)].includes(item.leadId), 'not the one without an email (Ripley), nor the one the team has (Lider)');
   assert.equal(item.hasEmail, true);
-  assert.equal(item.hasPhone, false, 'the phone is not offered: it would cost 8 credits');
+  assert.equal(item.hasPhone, true, 'the search says it has their direct phone: the card says so, and it is looked up when the person asks (27 nov)');
   assert.equal(item.name.includes('***'), true, 'the name as the search shows it, until the lookup');
   // Apollo did not say the industry, the size nor the place: the search kept to them, so the contact is within them.
   assert.equal(item.industry, 'Retail');
@@ -109,7 +109,7 @@ test('writing it: a first email and three follow-ups, to the first name while th
   assert.match(email.html, /Nombre\d A\.</, 'the name without asterisks');
   const doc = JSON.stringify(dropDocument(tables.lead_drops[0].items, { name: 'Ana', date: '2026-10-20', link: 'https://app.test/x' }));
   assert.match(doc, /Ver su correo y guardarlo usa 1 crédito/);
-  assert.match(doc, /tiene correo, que ves al enriquecerlo y guardarlo \(1 crédito\)/);
+  assert.match(doc, /tiene correo \(1 crédito\) y teléfono directo, que ves al enriquecerlo y guardarlo/);
   assert.match(doc, /Si no responde: 3 seguimientos[\s\S]*Día 3 · [\s\S]*Re: ingresos[\s\S]*Día 11 · [\s\S]*Cierro aquí/);
 });
 
@@ -635,4 +635,38 @@ test('a team of one contact whose first hundred are all known looks further down
   drop = await run('nowhere');
   assert.equal(asked.length, 3);
   assert.deepEqual([drop.status, drop.error], ['empty', 'La búsqueda no trajo contactos nuevos con correo.']);
+});
+
+// 27 Nov 2026: two people who worked Colombia got the contacts of a search in Chile, because their «Perfil» said Chile.
+test('the search goes where the person reveals contacts, for the roles they reveal, and offers the phone first to whoever asks for it', async () => {
+  calls.length = 0;
+  const revealed = (n: number, extra: Record<string, unknown> = {}) => ({ id: `ps-${n}`, organization_id: ORG, user_id: 'u-ana', title: n % 2 ? 'Directora de Talento Humano' : 'Head of Human Resources',
+    country: 'Colombia', organization_industry: n < 6 ? 'retail' : 'oil & energy', organization_size: 800, primary_phone: n < 9 ? '+57 300 0000000' : null,
+    enrichment_status: n < 9 ? 'completed' : 'no_phone', created_at: '2026-10-10T00:00:00Z', ...extra });
+  const { client, tables } = memory({
+    ...seed(),
+    profiles: [profile('u-ana', { targetRoles: 'Gerente de Personas, Gerente de Operaciones', targetIndustries: 'retail', targetLocations: 'Chile', targetCompanySize: '51-200' })],
+    people_search_leads: [...Array.from({ length: 10 }, (_, index) => revealed(index + 1)),
+      // Someone else's reveals, and old ones, say nothing about Ana.
+      revealed(20, { user_id: 'u-otro', country: 'Peru' }), revealed(21, { country: 'Peru', created_at: '2026-06-01T00:00:00Z' })],
+  }, unique);
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0 });
+
+  assert.deepEqual(calls[0].personLocations, ['Colombia'], 'not the Chile of her «Perfil»');
+  assert.deepEqual(calls[0].titles, ['Gerente de Personas', 'Directora de Talento Humano', 'Head of Human Resources'], 'operations, which she never reveals, is not searched');
+  assert.deepEqual(calls[0].industryKeywords, ['retail', 'oil & energy']);
+  assert.deepEqual(calls[0].employeeRanges, [], 'none of the companies she reveals is of 51 to 200 people');
+  const [drop] = tables.lead_drops;
+  assert.deepEqual(drop.criteria.locations, ['Colombia']);
+  assert.deepEqual(drop.criteria.habits, { contacts: 10, phone: true });
+  assert.equal(drop.criteria.source, 'perfil');
+});
+
+test('with fewer reveals than it takes to say anything, or when they cannot be read, the customer is the «Perfil»\'s', async () => {
+  calls.length = 0;
+  const few = memory({ ...seed(), people_search_leads: Array.from({ length: 7 }, (_, index) => ({ id: `ps-${index}`, organization_id: ORG, user_id: 'u-ana',
+    title: 'Directora de Talento Humano', country: 'Colombia', organization_industry: 'retail', created_at: '2026-10-10T00:00:00Z' })) }, unique);
+  await planOrganizationDrops(few.client, ORG, ['u-ana'], { now: TUESDAY, search: apolloSearch as any, budgetUsd: 3, spentUsd: 0 });
+  assert.deepEqual(calls[0].personLocations, ['Chile']);
+  assert.equal(few.tables.lead_drops[0].criteria.habits, undefined);
 });

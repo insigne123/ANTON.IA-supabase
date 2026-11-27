@@ -42,7 +42,8 @@ export async function resolveDropLink(client: Client, token: unknown, now = new 
 }
 
 /** What the page shows: the contacts, the address of each one already looked up, and the mailbox the campaigns leave from. */
-export type MailDropView = { date: string; items: DropItem[]; emails: Record<string, string>; mailbox: string | null };
+export type MailDropView = { date: string; items: DropItem[]; emails: Record<string, string>; mailbox: string | null;
+  /** The person asks for the phone with every contact they reveal (criteria.habits): the page offers it first. */ phoneFirst?: boolean };
 
 export async function mailDropView(client: Client, scope: DropScope, dropId: string): Promise<MailDropView> {
   const drop = await readDrop(client, scope, dropId);
@@ -61,7 +62,8 @@ export async function mailDropView(client: Client, scope: DropScope, dropId: str
     if (email) emails[item.leadId] = email;
     return row ? { ...item, phone: dropPhoneOf(row, Boolean(item.phoneLookup), now) } : item;
   });
-  return { date: drop.drop_date, items, emails, mailbox: mailbox.resolved ? MAIL_PROVIDER_LABEL[mailbox.resolved] : null };
+  return { date: drop.drop_date, items, emails, mailbox: mailbox.resolved ? MAIL_PROVIDER_LABEL[mailbox.resolved] : null,
+    ...((drop.criteria as { habits?: { phone?: unknown } } | null)?.habits?.phone ? { phoneFirst: true } : {}) };
 }
 
 /** Read again, then change one contact: another button may have written the drop meanwhile. */

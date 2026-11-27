@@ -63,8 +63,10 @@ const labelClass = 'text-xs font-medium uppercase tracking-wide text-muted-foreg
  * «Para llamar» (15 Nov 2026, DropCallPanel): its mobile, looked up with the email («O con su teléfono») or after it, and the script
  * of its call.
  */
-export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false, callOpen = false, onExpand, dense = false }: {
+export function DropContactCard({ item, actions, busy, enriching, defaultOpen = false, heading = 'h3', mail, collapsible = false, callOpen = false, onExpand, dense = false, phoneFirst = false }: {
   item: DropItem; actions: DropContactActions;
+  /** The person asks for the phone with every contact they reveal (criteria.habits): looking it up with the email is the button, and the email alone the quieter way. */
+  phoneFirst?: boolean;
   /** Another contact is being saved or enriched: this one waits. */
   busy: boolean; enriching: boolean; defaultOpen?: boolean; heading?: 'h2' | 'h3'; mail?: DropContactMail;
   /** In «Hoy» (TodayContacts): who it is, one line of why and its next step; the rest opens on demand, so six contacts stay a list. */
@@ -125,14 +127,14 @@ export function DropContactCard({ item, actions, busy, enriching, defaultOpen = 
       : item.savedLeadId
         ? mail ? null : <Button asChild size="sm" variant="outline"><Link href={`/saved/leads/enriched?investigar=${encodeURIComponent(item.savedLeadId)}&empezar=1`}>Investigar y escribirle</Link></Button>
         : needsLookup(item)
-          ? <Button size="sm" disabled={busy} onClick={() => actions.enrich(item)}>
-            {enriching ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
-            {enriching ? 'Buscando su correo…' : `Enriquecer · ${creditsLabel(cost.email)}`}</Button>
+          ? <Button size="sm" disabled={busy} onClick={() => actions.enrich(item, phoneFirst || undefined)}>
+            {enriching ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : phoneFirst ? <Phone className="mr-2 h-4 w-4" aria-hidden="true" /> : <Mail className="mr-2 h-4 w-4" aria-hidden="true" />}
+            {enriching ? 'Buscando su correo…' : phoneFirst ? `Enriquecer con teléfono · ${cost.both} créditos` : `Enriquecer · ${creditsLabel(cost.email)}`}</Button>
           : <Button size="sm" disabled={busy} onClick={() => actions.save(item)}>{mail ? 'Guardar este contacto' : 'Guardar en «Por escribir»'}</Button>;
   // The same lookup with its mobile too, for whoever means to call: the quieter way, under the button.
   const withPhone = !item.campaign && !item.savedLeadId && needsLookup(item) && !enriching
-    ? <Button variant="link" size="sm" className="h-auto min-h-9 justify-start p-0 text-xs font-normal text-muted-foreground sm:justify-end" disabled={busy} onClick={() => actions.enrich(item, true)}>
-      O con su teléfono · {cost.both} créditos</Button> : null;
+    ? <Button variant="link" size="sm" className="h-auto min-h-9 justify-start p-0 text-xs font-normal text-muted-foreground sm:justify-end" disabled={busy} onClick={() => actions.enrich(item, phoneFirst ? undefined : true)}>
+      {phoneFirst ? `O solo su correo · ${creditsLabel(cost.email)}` : `O con su teléfono · ${cost.both} créditos`}</Button> : null;
   // Under the button, what it does or where things stand: from the inbox it names the person's own mailbox and never a part of the app.
   const actionNote = !mail ? (!item.campaign && item.savedLeadId && emails.length ? 'Sale desde tu Gmail u Outlook. Se detiene si responde.' : null)
     : item.campaign ? (paused ? 'Detenida: no sale ningún correo más.' : `Sale desde tu ${item.campaign.provider === 'google' ? 'Gmail' : 'Outlook'}. Se detiene sola si responde.`)

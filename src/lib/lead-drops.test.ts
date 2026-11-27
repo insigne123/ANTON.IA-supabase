@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_DROP_PLAN, accountsLine, assignDrops, companyDropCriteria, companyKey, companyKeys, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHref, dropPlanOf, dropSubject, dropThreadSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
+import { DEFAULT_DROP_PLAN, accountsLine, assignDrops, companyDropCriteria, companyKey, companyKeys, criteriaKey, departmentLabel, dropAppHref, dropBulkHref, dropCampaignMessages, dropContactHref, dropInitials, dropTint, dropDay, dropEmailSection, dropSchedule, shortDay, dropFit, dropHabits, dropHref, dropPlanOf, followHabits, dropSubject, dropThreadSubject, exploreSlots, groupByDropSize, personDropPlanOf, planOfPerson, foreignDomain, groupDropPeople, inferCriteria, nextDropDay, personDropCriteria, pickRankedDrops, placeLabel, researchFacts, seniorityLabel, tidyCompany, tidyTitle, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria, type DropScore } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -60,7 +60,8 @@ test('similar customers share a search; a different area or country gets its own
     { id: 'ana', criteria: of(null) }, { id: 'mau', criteria: of({ roles: 'Gerente de Facility', industries: 'Retail' }) },
     { id: 'kri', criteria: of({ roles: 'Jefe de Selección', industries: 'Retail', locations: 'Perú' }) },
   ], 1);
-  assert.deepEqual(capped.map(group => group.people), [['ana', 'mau', 'kri']], 'past the limit everyone shares the largest search');
+  assert.deepEqual(capped.map(group => group.people), [['ana', 'mau'], ['kri']], 'past the limit they share the largest search of their country; Perú keeps its own (27 nov)');
+  assert.deepEqual(capped[1].criteria.locations, ['Perú']);
 });
 
 test('in a shared search, each person gets the contacts closest to their own customer', () => {
@@ -492,4 +493,86 @@ test('the subject for someone who has not opened the app names the first contact
   assert.equal(dropThreadSubject({ criteria: { subject: 'Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito' }, items: [one, one] }), 'Gerente HSE en Minera Andina y 1 contacto más, con su correo ya escrito');
   assert.equal(dropThreadSubject({ criteria: {}, items: [one, one] }), '2 contactos nuevos para ti');
   assert.equal(dropThreadSubject({ items: [one, one] }), '2 contactos nuevos para ti');
+});
+
+// 27 Nov 2026: the six people who made 94 % of a team's reveals had saved 2 of the 280 contacts recommended to them.
+const reveals = (count: number, row: { title?: string; industry?: string; country?: string; size?: number; phone?: boolean }) => Array.from({ length: count }, () => ({ ...row }));
+
+test('what a person reveals says where they look, for whom, in which companies and whether they call', () => {
+  const habits = dropHabits([
+    ...reveals(11, { title: 'Gerente de Personas', industry: 'Logística', country: 'Chile', size: 900, phone: true }),
+    ...reveals(5, { title: 'Human Resources Manager', industry: 'Minería', country: 'Chile', size: 3000, phone: true }),
+    ...reveals(4, { title: 'General Manager', industry: 'Alimentos', country: 'Chile', size: 400, phone: true }),
+    ...reveals(1, { title: 'Analista de reclutamiento y selección en una empresa | RR. HH., atención al cliente y gestión de indicadores', industry: 'Banca', country: 'Peru', size: 60 }),
+  ])!;
+  assert.equal(habits.contacts, 21);
+  assert.deepEqual(habits.places, ['Chile'], 'one contact in Peru of twenty-one is not «Perú»');
+  assert.deepEqual(habits.titles, ['Gerente de Personas', 'Human Resources Manager', 'General Manager'], 'a headline pasted as a title is nobody\'s role');
+  assert.deepEqual(habits.industries, ['Logística', 'Minería', 'Alimentos'], 'an industry seen once came along with a contact');
+  assert.equal(habits.phone, true);
+  assert.deepEqual(dropHabits(reveals(10, { title: 'Head of HR', country: 'Peru' }))!.places, ['Perú'], 'written as «Perfil» writes it');
+  assert.deepEqual(dropHabits([...reveals(6, { country: 'Chile' }), ...reveals(4, { country: 'Peru' })])!.places, ['Chile', 'Perú'], 'two countries when both hold a fifth');
+  assert.equal(dropHabits(reveals(8, { country: 'Chile', phone: true }))!.phone, true);
+  assert.equal(dropHabits([...reveals(6, { country: 'Chile' }), ...reveals(4, { country: 'Chile', phone: true })])!.phone, false, 'less than half with the phone is not someone who calls');
+  assert.equal(dropHabits(reveals(7, { title: 'Gerente de Personas', country: 'Colombia' })), null, 'seven contacts say nothing yet');
+});
+
+test('a customer follows what its person reveals: the country, the roles they look for, more industries, and no size they do not keep to', () => {
+  const declared = personDropCriteria({ roles: 'Gerente de Personas, Gerente de Recursos Humanos, Jefe de Reclutamiento y Selección, Gerente de Operaciones, Jefe de Operaciones',
+    industries: 'Retail, Logística', locations: 'Chile', size: '51-200' }, null)!;
+  const habits = dropHabits([
+    ...reveals(5, { title: 'Human Resources Manager', industry: 'Retail', country: 'Colombia', size: 150 }),
+    ...reveals(3, { title: 'Directora de Talento Humano', industry: 'Energía', country: 'Colombia', size: 2000 }),
+    ...reveals(2, { title: 'Head of Human Talent', industry: 'Energía', country: 'Colombia', size: 9000 }),
+    ...reveals(1, { title: 'Coordinadora de Selección y Competencias', industry: 'Energía', country: 'Ecuador', size: 700 }),
+  ]);
+  const mine = followHabits(declared, habits)!;
+  assert.deepEqual(mine.locations, ['Colombia'], 'not the Chile of the «Perfil»');
+  assert.deepEqual(mine.titles, ['Gerente de Personas', 'Gerente de Recursos Humanos', 'Human Resources Manager', 'Directora de Talento Humano', 'Head of Human Talent'],
+    'operations and recruitment, which this person does not reveal, are left out; the titles revealed most come in');
+  assert.deepEqual(mine.industries, ['Retail', 'Logística', 'Energía'], 'the declared ones stay, with the one revealed most');
+  assert.deepEqual(mine.sizes, [], 'five of eleven companies are of 51 to 200: the size is not what this person keeps to');
+  assert.deepEqual(mine.habits, { contacts: 11 });
+  assert.equal(mine.source, 'perfil');
+
+  assert.equal(followHabits(declared, null), declared, 'without habits the customer is as it was');
+  const local = followHabits({ ...declared, locations: ['Antofagasta'] }, habits)!;
+  assert.deepEqual(local.locations, ['Antofagasta'], 'a «Perfil» that names a city keeps it: a country would be wider than what was asked');
+  const within = followHabits(declared, dropHabits(reveals(10, { title: 'Gerente de Operaciones', country: 'Chile', size: 120, phone: true })))!;
+  assert.deepEqual([within.sizes, within.titles.includes('Gerente de Operaciones'), within.titles.includes('Gerente de Personas'), within.habits],
+    [['51,200'], true, false, { contacts: 10, phone: true }], 'someone who does keep to the size, looks for operations and calls');
+  assert.deepEqual(followHabits({ ...declared, titles: ['Gerente General'] }, habits)!.titles.slice(0, 1), ['Gerente General'], 'a title that names a level and no area stays');
+  assert.deepEqual(followHabits(null, habits), { titles: ['Human Resources Manager', 'Directora de Talento Humano', 'Head of Human Talent'], industries: ['Energía', 'Retail'],
+    locations: ['Colombia'], sizes: [], source: 'contactos', habits: { contacts: 11 } }, 'nobody declared a customer: what the person reveals is one');
+  const same = followHabits({ ...declared, industries: ['Logística'] }, dropHabits(reveals(9, { title: 'Gerente de Personas', industry: 'logistics & supply chain', country: 'Chile' })),
+    label => label.toLowerCase().startsWith('log') ? 'logistics' : label)!;
+  assert.deepEqual(same.industries, ['Logística'], 'the same industry under two names is one');
+});
+
+test('someone who calls gets first, among contacts as good, the ones whose direct phone the search has', () => {
+  const pool = [candidate('1', 'A', { provider: 'apollo' }), candidate('2', 'B', { provider: 'apollo', hasPhone: true }), candidate('3', 'C', { provider: 'apollo', hasPhone: true })];
+  const scores: Record<string, number> = { A: 80, B: 74, C: 60 };
+  const scoreOf = (_person: string, item: DropCandidate): DropScore => ({ titleClass: 'exact', score: scores[item.company!] });
+  const calls: DropCriteria = { ...criteria, habits: { contacts: 20, phone: true } };
+  const first = (own: DropCriteria) => pickRankedDrops(pool, ['ana'], none(), 1, { criteriaOf: () => own, scoreOf }).get('ana')![0].company;
+  assert.equal(first(calls), 'B', 'six points behind, with a phone to call');
+  assert.equal(first(criteria), 'A', 'for whoever writes, the best fit as before');
+  assert.equal(first({ ...calls, habits: { contacts: 20 } }), 'A');
+  // Twenty points behind is a poor fit: a phone does not put it first.
+  assert.equal(pickRankedDrops([pool[0], pool[2]], ['ana'], none(), 1, { criteriaOf: () => calls, scoreOf }).get('ana')![0].company, 'A');
+  // The search by title (a team of one contact): the phone Apollo only says it has goes first for whoever calls, and for nobody else.
+  const plain = (own: DropCriteria) => assignDrops([candidate('1', 'A', { provider: 'apollo' }), candidate('2', 'B', { provider: 'apollo', hasPhone: true, title: 'Jefe de Bodega' })], ['ana'], none(), own).get('ana')![0].company;
+  assert.deepEqual([plain(calls), plain(criteria)], ['B', 'A']);
+});
+
+test('the morning email offers the phones first to whoever asks for them with every contact', () => {
+  const items = ['1', '2', '3'].map(id => ({ ...candidate(id, `Empresa ${id}`), provider: 'apollo' as const, why: 'Calza con tu cliente ideal.', research: [], draft: null }));
+  const link = 'https://app.example.test/contactos/' + 'a'.repeat(48);
+  const usual = dropEmailSection(items as never, 'drop-1', 'https://app.example.test', { link });
+  const calls = dropEmailSection(items as never, 'drop-1', 'https://app.example.test', { link, phoneFirst: true });
+  const order = (text: string, first: string, second: string) => text.indexOf(first) >= 0 && text.indexOf(first) < text.indexOf(second);
+  assert.ok(order(usual.text, 'Enriquecer los 3 · 3 créditos', 'Con sus teléfonos · 24 créditos'), usual.text);
+  assert.ok(order(calls.text, 'Enriquecer los 3 con teléfono · 24 créditos', 'Solo sus correos · 3 créditos'), calls.text);
+  assert.ok(calls.text.includes(`Enriquecer los 3 con teléfono · 24 créditos: ${dropBulkHref(link, true)}`) && calls.text.includes(`Solo sus correos · 3 créditos: ${dropBulkHref(link, false)}`));
+  assert.ok(!calls.html.includes('Con sus teléfonos'), 'one main button, and the other way next to it');
 });
