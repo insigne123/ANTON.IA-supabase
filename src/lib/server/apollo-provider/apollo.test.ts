@@ -894,3 +894,20 @@ test('a match refused as someone else carries whom Apollo found, out of what a l
     assert.equal(heldMatchOf(caught)?.contact.email, null);
   } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
 });
+
+// 27 Nov 2026: read as a boolean, both answers were lost and no contact of a search was ever marked as having a phone.
+test('the free search says whether it has the direct phone in words: only «Yes» is a phone to count on', async () => {
+  const originalFetch = globalThis.fetch;
+  const person = (id: string, phone: unknown) => ({ id, first_name: 'Ana', last_name_obfuscated: 'Pe***z', title: 'Gerente de Personas', has_email: true, has_direct_phone: phone, organization: { name: 'People Co' } });
+  globalThis.fetch = async () => Response.json({ people: [person('p-1', 'Yes'), person('p-2', 'Maybe: please request direct dial via people/bulk_match'), person('p-3', true), person('p-4', undefined)] });
+  try {
+    const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
+    const parsed = validateLeadSearchInput({ provider: 'apollo', search_mode: 'batch', titles: ['Gerente de Personas'], person_locations: ['Colombia'], max_results: 25 }, config);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
+    assert.deepEqual(result.leads.map((lead: any) => lead.has_direct_phone), [true, undefined, true, undefined]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

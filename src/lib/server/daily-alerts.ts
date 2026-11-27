@@ -330,7 +330,7 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   ]);
   // What the email and the PDF say a lookup costs is the organization's (credit-prices.ts); if it cannot be read, the default.
   const prices = drop ? await loadCreditPrices(scope.organizationId, client).catch(() => DEFAULT_CREDIT_PRICES) : DEFAULT_CREDIT_PRICES;
-  facts.drop = drop ? { ...drop, prices } : drop;
+  facts.drop = drop ? { ...drop, prices, phoneFirst: Boolean((drop.criteria.habits as { phone?: unknown } | undefined)?.phone) } : drop;
   // A goal that is behind alone is worth an email in one workspace only: whoever belongs to several gets it from one.
   const alert = composeAlert(facts, now, { goalReminders: deps.goalReminders });
   const row = { organization_id: scope.organizationId, user_id: scope.userId, alert_date: today };

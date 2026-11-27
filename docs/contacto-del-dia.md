@@ -708,6 +708,45 @@ Pedido del dueño: «si el módulo de buscador es el más usado podríamos poner
 
 **Por qué cambió dos veces.** El 19 de noviembre fue una franja y, el mismo día, un aviso grande al centro con dos respuestas, a pedido del dueño («necesito que el aviso sea grande, que tenga dos opciones: o lo cierran o van a la sección»). En dos días el aviso no llevó a nadie a sus contactos: de 29 personas que los recibían, 3 abrieron alguno, y el 19 y el 20 no hubo ninguna apertura; quien entraba a buscar lo cerraba y buscaba. El 21 de noviembre el dueño eligió mostrar los contactos mismos en el buscador («hagamos el 3»), y el aviso emergente se quitó.
 
+## Desde el 27 de noviembre: el cliente ideal sigue lo que la persona revela, y el teléfono primero para quien llama
+
+**Qué se vio.** En un equipo, seis personas hacían el 94 % de las revelaciones del mes y habían guardado 2 de los 280 contactos que
+les recomendamos. Al comparar lo que revelaban por su cuenta con lo que recibían:
+
+- dos trabajaban Colombia y una Perú, y su «Perfil» decía Chile: todo lo recomendado era de otro país;
+- a tres les llegaba la mitad de gerentes de operaciones, un cargo de su «Perfil» que nunca revelan;
+- pedían el teléfono en 260 de 267 revelaciones, y ningún recomendado venía marcado con teléfono.
+
+El «Perfil» dice lo que alguien pensó buscar una vez; lo que paga con créditos dice lo que busca hoy.
+
+**Qué cambia en la búsqueda** (`dropHabits` y `followHabits`, `src/lib/lead-drops.ts`; `habitsOf`, `src/lib/server/lead-drops.ts`).
+Cada mañana se leen los contactos que cada persona reveló desde «Buscar prospectos» en los últimos 60 días (`people_search_leads`).
+Un recomendado guardado queda en otra tabla, así que lo que ofrecimos nunca cuenta como lo que la persona busca. Con 8 o más
+contactos, su cliente ideal se mueve así:
+
+| Criterio | Regla |
+| --- | --- |
+| Lugar | Los países donde está al menos un quinto de lo que revela reemplazan a los del «Perfil». Si el «Perfil» nombra una ciudad o región, se respeta. |
+| Cargos | Un cargo declarado se mantiene si al menos 1 de cada 10 contactos revelados (2 como mínimo) son de esa área. Se agregan los hasta 3 cargos que más revela. |
+| Rubros | Se suman a los declarados los hasta 4 rubros que más revela (3 contactos y un 5 % como mínimo). |
+| Tamaño | El tamaño declarado se quita si menos de la mitad de las empresas reveladas son de ese tamaño. |
+
+Con menos de 8 contactos, o si la lectura falla, vale el «Perfil» como antes. El recomendado guarda con cuántos contactos se movió
+el cliente (`criteria.habits`), para quien revise una corrida.
+
+**Un país nunca comparte búsqueda con otro.** Pasado el máximo de búsquedas (`LEAD_DROPS_MAX_GROUPS`), un grupo chico se sumaba al
+más grande aunque buscara en otro país. Ahora se suma solo a uno que busque en su país; si no hay, conserva su propia búsqueda.
+
+**El teléfono.**
+
+- La búsqueda gratuita de Apollo dice si tiene el teléfono directo con palabras («Yes», o «Maybe: …» cuando no sabe). Se leía como
+  booleano y se perdía. Ahora «Yes» marca al contacto con «Tiene teléfono directo», en la tarjeta, en «Llamada» y en el PDF.
+- Para quien pide el teléfono en al menos la mitad de lo que revela (`criteria.habits.phone`), entre contactos igual de buenos
+  van primero los que tienen teléfono directo: 10 puntos de 100, para que un teléfono no ponga un mal calce delante de uno bueno.
+- A esa persona el correo de la mañana le ofrece primero «Enriquecer los N con teléfono», y «Solo sus correos» al lado. En la página,
+  la opción para todos llega elegida en «Correo y teléfono» y el botón de cada contacto es «Enriquecer con teléfono». Para el resto
+  todo sigue como estaba: el correo primero y el teléfono como segunda opción.
+
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, de lunes a viernes de 02:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`; cada equipo solo en los días de su plan, por defecto martes, miércoles y viernes):

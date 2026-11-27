@@ -217,6 +217,7 @@ test('without a customer it says so and leads to «Perfil»; not today, without 
   } finally { await close(later); }
 });
 
+const findButton = (page: Awaited<ReturnType<typeof open>>, label: string) => [...page.dom.window.document.querySelectorAll('button')].find(button => button.textContent === label);
 const click = async (page: Awaited<ReturnType<typeof open>>, label: string | RegExp) => {
   const target = [...page.dom.window.document.querySelectorAll('button')].find(button => (typeof label === 'string' ? button.textContent === label : label.test(button.textContent || '')))!;
   await act(async () => { target.dispatchEvent(new page.dom.window.MouseEvent('click', { bubbles: true })); });
@@ -716,6 +717,38 @@ test('«Enriquecer los N» of the morning email lands inside the app: the choice
     assert.deepEqual(bodies.map(body => body.action), ['enrich']);
     assert.match(refused.text(), /Nos detuvimos antes de terminar\. Tu equipo no tiene créditos disponibles este mes\./);
   } finally { await close(refused); }
+});
+
+// 27 Nov 2026: six people asked for the phone with 260 of the 267 contacts they revealed, and the page offered the email alone first.
+test('for someone who asks for the phone with every contact, the phones come chosen and are the button of each contact; a choice made in the email still wins', async () => {
+  const items = [apolloItem(1, { hasPhone: true }), apolloItem(2), apolloItem(3)];
+  const calls = { ...drop, criteria: { ...drop.criteria, habits: { contacts: 20, phone: true } }, items };
+  bodies.length = 0;
+  answers = [{ status: 200, body: calls }];
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    const document = page.dom.window.document;
+    assert.deepEqual(([...document.querySelectorAll('input[type="radio"]')] as HTMLInputElement[]).map(radio => radio.checked), [false, true], 'with their phones, without anyone choosing it');
+    assert.ok(findButton(page, 'Enriquecer con teléfono · 8 créditos'), 'the contact on screen: with its phone is the button');
+    assert.ok(findButton(page, 'O solo su correo · 1 crédito'));
+    assert.equal(bodies.length, 0, 'arriving looks nothing up');
+    lookups = [];
+    savedLeads = [{ id: 'saved-1', name: items[0].name, email: null, sourceProvider: 'apollo', sourceProviderId: items[0].leadId }];
+    completion = { moved: [{ id: 'e-9', email: 'persona@minera.cl', enrichmentStatus: 'pending_phone' }], notFound: [], expired: 0, failures: [], consumed: 8, markedNotFound: true };
+    answers = [{ status: 200, body: { keptLeadId: 'saved-1', savedLeadId: null, items: items.map((item, index) => index ? item : { ...item, keptLeadId: 'saved-1' }) } },
+      { status: 200, body: { linked: true, savedLeadId: 'e-9', items: items.map((item, index) => index ? item : { ...item, keptLeadId: 'saved-1', savedLeadId: 'e-9', phone: { state: 'pending' } }) } }];
+    await click(page, 'Enriquecer con teléfono · 8 créditos');
+    await page.settle();
+    assert.deepEqual(lookups.map(entry => entry.lookups), [{ 'saved-1': 'email_phone' }], 'one lookup, of the email and the phone');
+  } finally { await close(page); }
+
+  answers = [{ status: 200, body: calls }];
+  const chosen = await open('drop-1', { url: 'https://app.test/dashboard/contactos/drop-1?todos=correo' });
+  try {
+    await chosen.settle();
+    assert.deepEqual(([...chosen.dom.window.document.querySelectorAll('input[type="radio"]')] as HTMLInputElement[]).map(radio => radio.checked), [true, false], 'the email\'s button said «solo sus correos»');
+  } finally { await close(chosen); }
 });
 
 test('«Llamar» of the email that brought a mobile lands inside the app, on that contact\'s call', async () => {

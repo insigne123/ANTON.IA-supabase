@@ -92,6 +92,16 @@ function asBoolean(value: unknown) {
   return undefined;
 }
 
+/**
+ * Whether Apollo has the person's direct phone, as its free search says it: «Yes», or «Maybe: please request direct dial via
+ * people/bulk_match» when it does not know. Until 27 Nov 2026 it was read as a boolean and both were lost, so no contact of a
+ * search was ever marked as having a phone. Only «Yes» is a phone to count on.
+ */
+function asDirectPhone(value: unknown) {
+  if (typeof value === 'string') return value.trim().toLowerCase() === 'yes' ? true : asBoolean(value.trim().toLowerCase());
+  return asBoolean(value);
+}
+
 function parseApolloJson(raw: string) {
   // Apollo request IDs are signed 64-bit integers. Preserve their lexical value
   // before JSON.parse converts them to an imprecise JavaScript Number.
@@ -297,7 +307,7 @@ function mapPerson(
     email: options.includeContact ? firstText(person.email, person.work_email) : undefined,
     email_status: options.includeContact ? firstText(person.email_status) : undefined,
     has_email: asBoolean(person.has_email),
-    has_direct_phone: asBoolean(person.has_direct_phone),
+    has_direct_phone: asDirectPhone(person.has_direct_phone),
     title: firstText(person.title, person.headline),
     headline: firstText(person.headline),
     linkedin_url: firstText(person.linkedin_url),

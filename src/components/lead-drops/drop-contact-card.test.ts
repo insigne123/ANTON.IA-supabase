@@ -186,6 +186,17 @@ test('«Para llamar»: the mobile with the email or after it, the number with it
     assert.deepEqual(asked, ['enrich+phone', 'script']);
     assert.match(text(), /No usa créditos\./);
 
+    // Someone who asks for the phone with every contact they reveal (27 Nov 2026): with its phone is the button, the email alone
+    // the quieter way; and the card says when the search has the direct phone.
+    asked.length = 0;
+    await show({ ...item, savedLeadId: null, hasPhone: true }, { phoneFirst: true });
+    assert.equal(button('Enriquecer · 1 crédito'), undefined);
+    await press(button('Enriquecer con teléfono · 8 créditos'));
+    await press(button('O solo su correo · 1 crédito'));
+    assert.deepEqual(asked, ['enrich+phone', 'enrich']);
+    assert.match(text(), /Tiene teléfono directo\. Se busca al enriquecerlo: junto con el correo \(8 créditos por ambos\) o después \(8 más\)\./);
+    asked.length = 0;
+
     // In «Por escribir», without a mobile: it is looked up from here; one that found nothing says so.
     asked.length = 0;
     await show({ ...item, phone: { state: 'none', missed: false } });

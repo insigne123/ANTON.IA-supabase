@@ -116,7 +116,12 @@ export type DropCriteria = { titles: string[]; industries: string[]; locations: 
    * with a score, that fit, and opened; `saved`: whether they were kept; `candidates`, `worth`: people found and people the score
    * found worth offering; `plain`: members who got theirs by title because the score left them with nobody; `ms`: how long it took.
    */
-  trace?: Record<string, number | boolean> };
+  trace?: Record<string, number | boolean>;
+  /**
+   * The customer was moved to what the person looks for (followHabits, 27 Nov 2026): how many contacts they revealed from the
+   * search it goes by, and whether they ask for the phone with them, which the email and the page then offer first.
+   */
+  habits?: { contacts: number; phone?: boolean } };
 export type IcpDeclared = { roles?: string | null; industries?: string | null; locations?: string | null; size?: string | null };
 
 /** One contact of a drop, as the person sees it before saving it: never the email or the phone, which stay in the vault. */
@@ -356,6 +361,92 @@ function placesOf(locations: string[]) {
 /** How much of `mine` is already in `theirs`, from 0 to 1; a customer without words of that kind fits anywhere. */
 const covered = (mine: Set<string>, theirs: Set<string>) => mine.size ? [...mine].filter(word => theirs.has(word)).length / mine.size : 1;
 
+/**
+ * What a person looks for, said by the contacts they revealed from the search on their own (27 Nov 2026). On that day six people
+ * made 94 % of a team's reveals and had saved 2 of the 280 contacts recommended to them: two of them worked Colombia and one Peru
+ * while their «Perfil» said Chile, half of what three of them got were heads of operations they never look for, and all asked for
+ * the phone. The «Perfil» says what someone meant to look for once; what they pay credits for says what they look for now.
+ */
+export type RevealedContact = { title?: string | null; industry?: string | null; country?: string | null; size?: number | null;
+  /** The phone was asked for with it. */ phone?: boolean };
+export type DropHabits = { contacts: number; places: string[]; titles: string[]; industries: string[]; phone: boolean;
+  /** Every title and company size revealed, to weigh the declared ones against (followHabits). */ revealedTitles: string[]; sizes: number[] };
+/** How far back the reveals count, and how many it takes to say anything about a person. */
+export const HABITS_DAYS = 60;
+export const HABITS_MIN = 8;
+const HABIT_TITLES = 3;
+const HABIT_INDUSTRIES = 4;
+const HABIT_PLACES = 3;
+const MAX_TITLES = 5;
+const MAX_INDUSTRIES = 6;
+// The countries as «Perfil» writes them; one we do not list stays as the search named it, which is how the search asks for it.
+const PLACE_LABELS: Record<string, string> = { peru: 'Perú', mexico: 'México', brazil: 'Brasil', brasil: 'Brasil', spain: 'España', espana: 'España', panama: 'Panamá' };
+const counted = (values: Array<string | null | undefined>, maxLength = 80) => {
+  const counts = new Map<string, { label: string; count: number }>();
+  for (const raw of values) {
+    const label = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (label.length < 3 || label.length > maxLength) continue;
+    const known = counts.get(fold(label));
+    if (known) known.count++; else counts.set(fold(label), { label, count: 1 });
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'es'));
+};
+/** Null with fewer than HABITS_MIN contacts: too few to move anyone's customer. */
+export function dropHabits(revealed: RevealedContact[]): DropHabits | null {
+  if (revealed.length < HABITS_MIN) return null;
+  const countries = counted(revealed.map(row => row.country));
+  const placed = countries.reduce((sum, country) => sum + country.count, 0);
+  // A country holds a fifth of what the person reveals, or it is a contact that came along: 3 of 103 in Peru is not «Perú».
+  const places = countries.filter(country => country.count / placed >= 0.2).slice(0, HABIT_PLACES).map(country => PLACE_LABELS[fold(country.label)] ?? country.label);
+  const titles = counted(revealed.map(row => row.title), 60).filter(title => title.count >= 2).slice(0, HABIT_TITLES).map(title => title.label);
+  const industries = counted(revealed.map(row => row.industry)).filter(industry => industry.count >= Math.max(3, Math.ceil(revealed.length * 0.05)))
+    .slice(0, HABIT_INDUSTRIES).map(industry => industry.label);
+  return { contacts: revealed.length, places, titles, industries, phone: revealed.filter(row => row.phone).length * 2 >= revealed.length,
+    revealedTitles: revealed.map(row => String(row.title || '').trim()).filter(Boolean),
+    sizes: revealed.map(row => row.size).filter((size): size is number => typeof size === 'number' && size > 0) };
+}
+
+/**
+ * A person's customer, moved to what they look for (dropHabits). Without habits it is the customer as it was.
+ *   - Where: the countries they reveal in take the place of the declared ones. A «Perfil» that names a city or a region keeps it.
+ *   - Who: a declared role stays when at least one in ten of the contacts revealed (two at least) are of its area («Gerente de
+ *     Operaciones» goes for someone who only reveals people of human resources); the titles they reveal most are added.
+ *   - Which companies: the industries they reveal most are added to the declared ones, and a declared size goes when less than
+ *     half of the companies revealed are of it.
+ * `industryKey` says when two industries are the same one («Logística» and «logistics & supply chain»).
+ */
+export function followHabits(criteria: DropCriteria | null, habits: DropHabits | null, industryKey: (label: string) => string = fold): DropCriteria | null {
+  if (!habits) return criteria;
+  const note = { habits: { contacts: habits.contacts, ...(habits.phone ? { phone: true } : {}) } };
+  if (!criteria) {
+    return habits.titles.length ? { titles: habits.titles, industries: habits.industries, locations: habits.places.length ? habits.places : ['Chile'], sizes: [], source: 'contactos', ...note } : null;
+  }
+  const namesCountry = (place: string) => COUNTRIES.some(country => country.names.some(name => ` ${fold(place)} `.includes(` ${name} `)));
+  const locations = habits.places.length && criteria.locations.every(namesCountry) ? habits.places : criteria.locations;
+
+  const revealed = habits.revealedTitles.map(title => wordsOf([title], true));
+  const lookedFor = (title: string) => {
+    const area = wordsOf([title], true);
+    // «Gerente General» names no area: it is a level, and stays.
+    if (!area.size) return true;
+    return revealed.filter(words => covered(area, words) >= 0.5).length >= Math.max(2, Math.ceil(habits.contacts * 0.1));
+  };
+  const same = (value: string) => [...wordsOf([value], false, false)].sort().join(' ');
+  const merged = (first: string[], more: string[], max: number, key: (value: string) => string) => {
+    const seen = new Set(first.map(key));
+    return [...first, ...more.filter(value => !seen.has(key(value)) && seen.add(key(value)))].slice(0, max);
+  };
+  const kept = criteria.titles.filter(lookedFor);
+  const titles = merged(kept, habits.titles, MAX_TITLES, same);
+
+  const ranges = criteria.sizes.map(range => range.split(',').map(Number)).filter(range => range.length === 2 && range.every(Number.isFinite));
+  const within = habits.sizes.filter(size => ranges.some(([min, max]) => size >= min && size <= max)).length;
+  const sizes = ranges.length && habits.sizes.length >= HABITS_MIN / 2 && within * 2 < habits.sizes.length ? [] : criteria.sizes;
+
+  return { ...criteria, titles: titles.length ? titles : criteria.titles, industries: merged(criteria.industries, habits.industries, MAX_INDUSTRIES, industryKey),
+    locations, sizes, ...note };
+}
+
 export type DropGroup = { criteria: DropCriteria; people: string[] };
 const GROUP_TITLES = 6;
 const GROUP_INDUSTRIES = 6;
@@ -365,7 +456,8 @@ const GROUP_INDUSTRIES = 6;
  * like a group's (half or more of the words of their titles and of their industries are the group's already, in a country it
  * searches) joins it, and the group's search takes their titles and industries too, up to 6 of each; the rest get a search of
  * their own. The most common customer opens the first group. At most `maxGroups` searches: past that, each smaller group joins
- * the one most like it, keeping that search. The largest groups come first, so a tight budget pays for them.
+ * the one most like it among those that search in its country, keeping that search; a country no search covers keeps its own.
+ * The largest groups come first, so a tight budget pays for them.
  */
 export function groupDropPeople(people: Array<{ id: string; criteria: DropCriteria }>, maxGroups: number): DropGroup[] {
   type Group = DropGroup & { titles: Set<string>; industries: Set<string>; places: Set<string>; first: number };
@@ -402,13 +494,17 @@ export function groupDropPeople(people: Array<{ id: string; criteria: DropCriter
     best.industries = wordsOf(best.criteria.industries, false);
   }
   const bySize = (a: Group, b: Group) => b.people.length - a.people.length || a.first - b.first;
-  const kept = groups.slice().sort(bySize).slice(0, Math.max(1, maxGroups));
-  for (const extra of groups.filter(group => !kept.includes(group))) {
+  const sorted = groups.slice().sort(bySize);
+  const kept = sorted.slice(0, Math.max(1, maxGroups));
+  for (const extra of sorted.slice(kept.length)) {
     const target = kept.map(group => {
       const like = likeness(extra.titles, extra.industries, extra.places, group);
       return { group, score: like ? like.titles + like.industries + 1 : 0 };
-    }).sort((a, b) => b.score - a.score || bySize(a.group, b.group))[0].group;
-    target.people.push(...extra.people);
+    }).sort((a, b) => b.score - a.score || bySize(a.group, b.group))[0];
+    // No search left looks in their country: they keep one of their own, past the maximum. Joining the largest group gave
+    // someone who works Colombia the contacts of a search in Chile (27 Nov 2026); a search more costs less than that.
+    if (!target.score) { kept.push(extra); continue; }
+    target.group.people.push(...extra.people);
   }
   return kept.sort(bySize).map(({ criteria, people: members }) => ({ criteria, people: members }));
 }
@@ -492,8 +588,11 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
   const ranked = new Map(people.map(person => {
     const own = criteriaOf?.(person) ?? criteria;
     const closeness = closenessTo(own);
+    // A phone that came with the search (Leads Finder) costs nothing more, so it goes first. Apollo only says it has one, to look up
+    // for credits: that goes first for whoever asks for the phone with every contact (criteria.habits), and for nobody else.
+    const phone = (item: DropCandidate) => Number(item.hasPhone && (item.provider !== 'apollo' || Boolean(own.habits?.phone)));
     return [person, usable.filter(item => !foreignDomain(item.domain, own.locations))
-      .sort((a, b) => Number(b.hasPhone) - Number(a.hasPhone) || closeness(b.title) - closeness(a.title) || a.leadId.localeCompare(b.leadId))];
+      .sort((a, b) => phone(b) - phone(a) || closeness(b.title) - closeness(a.title) || a.leadId.localeCompare(b.leadId))];
   }));
   const taken = new Set<string>(), usedCompanies = new Set<string>(known.companies || []);
   const out = new Map<string, DropCandidate[]>(people.map(person => [person, []]));
@@ -518,6 +617,7 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
 export type DropScore = { titleClass: 'exact' | 'similar' | 'related'; score: number;
   /** Someone of the area who does not decide but can say who does, or introduce the person: offered in the slots that are not the customer's own roles. */
   role?: 'refer' };
+const PHONE_BONUS = 10;
 /** How many of a drop are roles next to the customer's («explore»): none in a drop of one or two, about three in ten of a larger one. */
 export const exploreSlots = (size: number) => (size >= 3 ? Math.max(1, Math.round(size * 0.3)) : 0);
 
@@ -535,10 +635,13 @@ export function pickRankedDrops(candidates: DropCandidate[], people: string[], k
   const usable = usableDrops(candidates, known);
   const lists = new Map(people.map(person => {
     const own = deps.criteriaOf(person);
+    // Someone who asks for the phone with every contact (criteria.habits) gets first, among contacts as good, the ones whose
+    // direct phone the search has: ten points of a hundred, so a phone never puts a poor fit before a good one.
+    const rank = (entry: { item: DropCandidate; score: DropScore }) => entry.score.score + (own.habits?.phone && entry.item.hasPhone ? PHONE_BONUS : 0);
     const scored = usable.filter(item => !foreignDomain(item.domain, own.locations))
       .map(item => ({ item, score: deps.scoreOf(person, item) }))
       .filter((entry): entry is { item: DropCandidate; score: DropScore } => Boolean(entry.score))
-      .sort((a, b) => b.score.score - a.score.score || a.item.leadId.localeCompare(b.item.leadId));
+      .sort((a, b) => rank(b) - rank(a) || a.item.leadId.localeCompare(b.item.leadId));
     const deciding = scored.filter(entry => entry.score.role !== 'refer');
     return [person, { core: deciding.filter(entry => entry.score.titleClass !== 'related'), explore: deciding.filter(entry => entry.score.titleClass === 'related'),
       refer: scored.filter(entry => entry.score.role === 'refer') }];
@@ -735,7 +838,8 @@ export function dropIdInLink(token: string): string | null {
  * The drop's part of the email: each contact as a block (name, role and company, why), the button to see them and a note on
  * the PDF. With `heading: false` (the drop is all the email has) the title and its lead are left out.
  */
-export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean; now?: Date; /** The page that needs no session (server/lead-drop-link.ts), in place of the app's. */ link?: string | null; /** What an email and a phone cost the organization (credit-prices.ts). */ prices?: CreditPrices } = {}) {
+export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean; now?: Date; /** The page that needs no session (server/lead-drop-link.ts), in place of the app's. */ link?: string | null; /** What an email and a phone cost the organization (credit-prices.ts). */ prices?: CreditPrices;
+  /** The person asks for the phone with every contact (criteria.habits): looking them up with their phones is the main button. */ phoneFirst?: boolean } = {}) {
   const link = options.link || `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
   // Several contacts (a team's plan): each with its campaign ready to approve, and its own way in.
   if (items.length > 1) return campaignEmailSection(items, link, { ...options, open: Boolean(options.link) });
@@ -841,7 +945,7 @@ export const dropContactHref = (link: string, item: Pick<DropItem, 'leadId' | 'p
  * and first lines, and when each follow-up would go if it started today. One button per contact, to its card: «Enriquecer y revisar»
  * looks its email up on arrival (1 credit) and shows the campaign to change or approve. The emails in full go in the PDF.
  */
-function campaignEmailSection(items: DropItem[], link: string, options: { heading?: boolean; now?: Date; /** The link opens without a session: every step is a button on that page, never the arrival. */ open?: boolean; prices?: CreditPrices }) {
+function campaignEmailSection(items: DropItem[], link: string, options: { heading?: boolean; now?: Date; /** The link opens without a session: every step is a button on that page, never the arrival. */ open?: boolean; prices?: CreditPrices; phoneFirst?: boolean }) {
   const prices = options.prices ?? DEFAULT_CREDIT_PRICES;
   const heading = options.heading !== false;
   const now = options.now ?? new Date();
@@ -866,9 +970,16 @@ function campaignEmailSection(items: DropItem[], link: string, options: { headin
   // o desde la app»): all of them looked up at once, with their mobiles or without, or the same contacts inside the app. The answer to
   // «Enriquecer» comes back in this conversation (src/lib/lead-drop-ready-email.ts). One main button: the rest are outlined.
   const pending = items.filter(item => needsLookup(item)).length;
+  const these = pending === items.length ? `los ${pending}` : `los ${pending} que faltan`;
+  // Someone who calls (27 Nov 2026: six people asked for the phone with 260 of the 267 contacts they revealed, and the email offered
+  // it as the second button): the phones are the main button, and the email alone the other one.
   const bulk = options.open ? {
-    all: pending >= 2 ? { label: `Enriquecer ${pending === items.length ? `los ${pending}` : `los ${pending} que faltan`} · ${creditsLabel(pending * prices.email)}`, href: dropBulkHref(link, false) } : null,
-    phones: pending >= 2 ? { label: `Con sus teléfonos · ${pending * prices.both} créditos`, href: dropBulkHref(link, true) } : null,
+    all: pending >= 2 ? (options.phoneFirst
+      ? { label: `Enriquecer ${these} con teléfono · ${pending * prices.both} créditos`, href: dropBulkHref(link, true) }
+      : { label: `Enriquecer ${these} · ${creditsLabel(pending * prices.email)}`, href: dropBulkHref(link, false) }) : null,
+    phones: pending >= 2 ? (options.phoneFirst
+      ? { label: `Solo sus correos · ${creditsLabel(pending * prices.email)}`, href: dropBulkHref(link, false) }
+      : { label: `Con sus teléfonos · ${pending * prices.both} créditos`, href: dropBulkHref(link, true) }) : null,
     app: { label: 'Abrir en ANTON.IA', href: dropAppHref(link) },
     title: pending >= 2 ? 'Enriquécelos de una vez' : 'Sigue como prefieras',
     lead: pending >= 2

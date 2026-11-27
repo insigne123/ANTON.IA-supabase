@@ -8,9 +8,9 @@ import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/li
 import { renderPdf } from '@/lib/documents/render-pdf';
 import type { DocBlock, DocumentSpec, Run } from '@/lib/documents/spec';
 import {
-  DEFAULT_DROP_PLAN, NO_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, companyKey, companyKeys, departmentLabel, dropCostNote, dropDay, dropName, dropFit, dropPlanOf, dropRecommendation, groupDropPeople, needsLookup, nextDropDay,
+  DEFAULT_DROP_PLAN, HABITS_DAYS, NO_DROP_PLAN, FIT_LABEL, assignDrops, companyDropCriteria, companyKey, companyKeys, departmentLabel, dropCostNote, dropDay, dropHabits, dropName, dropFit, dropPlanOf, dropRecommendation, followHabits, groupDropPeople, needsLookup, nextDropDay,
   personDropCriteria, personDropPlanOf, planOfPerson, pickRankedDrops, placeLabel, researchFacts, searchedFit, seniorityLabel, tidyCompany, tidyTitle, usableDrops, whyText, withoutSourceTalk, type DropCandidate, type DropCriteria,
-  type DropFollowUp, type DropItem, type DropPlan, type DropScore, type IcpDeclared, type KnownPeople,
+  type DropFollowUp, type DropHabits, type DropItem, type DropPlan, type DropScore, type IcpDeclared, type KnownPeople, type RevealedContact,
 type PersonDropPlan,
 } from '@/lib/lead-drops';
 import { isMaskedName } from '@/lib/lead-name';
@@ -199,7 +199,7 @@ function webUrl(value: unknown) {
 function candidateOf(entry: VaultEntry): DropCandidate {
   const { lead, contact } = entry;
   const domain = text(lead.organization_domain, 253) || null;
-  // Apollo's free search says whether it has the email, without it: it is looked up on saving (1 credit), and the phone is not offered.
+  // Apollo's free search says whether it has the email and the direct phone, without them: they are looked up on enriching.
   const apollo = !isLeadsFinderId(lead.id);
   return {
     leadId: lead.id, name: text(contact.fullName, 200) || text(lead.name, 200), title: tidyTitle(text(lead.title, 160)),
@@ -208,7 +208,7 @@ function candidateOf(entry: VaultEntry): DropCandidate {
     city: text(lead.city, 160) || null, state: text(lead.state, 160) || null, country: text(lead.country, 160) || null,
     seniority: seniorityLabel(text(lead.seniority, 60)), department: departmentLabel(text(Array.isArray(lead.departments) ? lead.departments[0] : '', 60)),
     website: webUrl(lead.organization?.website_url) || webUrl(domain), companyLinkedin: webUrl(lead.organization?.linkedin_url),
-    hasEmail: Boolean(contact.email) || (apollo && (lead as { has_email?: unknown }).has_email === true), hasPhone: !apollo && Boolean(contact.mobileNumber),
+    hasEmail: Boolean(contact.email) || (apollo && (lead as { has_email?: unknown }).has_email === true), hasPhone: apollo ? (lead as { has_direct_phone?: unknown }).has_direct_phone === true : Boolean(contact.mobileNumber),
     emailKey: contact.email ? contact.email.toLowerCase() : null, linkedinKey: contact.linkedinUrl ? contact.linkedinUrl.toLowerCase().replace(/\/$/, '') : null,
     about: text(lead.organization?.short_description, 600) || null,
     ...(apollo ? { provider: 'apollo' as const } : {}),
@@ -217,8 +217,8 @@ function candidateOf(entry: VaultEntry): DropCandidate {
 
 /**
  * Apollo's people as the vault keeps a person, so the drops treat both searches alike: the person as the search shows them
- * (the surname hidden, «Ni***o»), no email nor phone (Apollo gives them on enrichment), and the LinkedIn only as a key to
- * skip known people.
+ * (the surname hidden, «Ni***o»), no email nor phone (Apollo gives them on enrichment, and says here whether it has them), and
+ * the LinkedIn only as a key to skip known people.
  */
 export function apolloDropEntries(people: unknown[]): VaultEntry[] {
   return people.flatMap(value => {
@@ -237,7 +237,7 @@ export function apolloDropEntries(people: unknown[]): VaultEntry[] {
       city: text(person.city, 160), state: text(person.state, 160), country: text(person.country, 160), seniority: text(person.seniority, 60),
       departments: Array.isArray(person.departments) ? person.departments.filter((item: unknown) => typeof item === 'string').slice(0, 5) : [],
       organization: { website_url: text(organization.website_url, 500), linkedin_url: text(organization.linkedin_url, 500), short_description: text(organization.short_description, 1000) },
-      has_email: person.has_email === true,
+      has_email: person.has_email === true, has_direct_phone: person.has_direct_phone === true,
     };
     const contact = { fullName, firstName, lastName, email: null, personalEmail: null, mobileNumber: null, linkedinUrl: text(person.linkedin_url, 500) || null, emailStatus: null };
     return [{ lead: lead as unknown as VaultEntry['lead'], contact: contact as VaultEntry['contact'] }];
@@ -284,11 +284,45 @@ export function industrySets(criteria: DropCriteria): string[][] {
 /** The heads of a company (one or two a company): a search by them lists the companies of an industry, not the staff of the largest. */
 const COMPANY_HEADS = ['owner', 'founder', 'c_suite'];
 
+/** Two industries are the same one when the search asks for them alike («Logística», «logistics & supply chain»). */
+const industryKey = (label: string) => leadsFinderIndustry(label) || fold(label);
+/**
+ * What each person of the team looks for (dropHabits): the contacts they revealed from the search in the last HABITS_DAYS, which is
+ * where `people_search_leads` gets its rows from. A recommended contact is saved elsewhere, so what we offered never counts as what
+ * they look for. The industry goes as «Perfil» would say it when the search understands that name, else as the search names it.
+ * A failed read moves nobody's customer: the morning goes on with the «Perfil».
+ */
+async function habitsOf(client: Client, organizationId: string, now: Date): Promise<Map<string, DropHabits>> {
+  const out = new Map<string, DropHabits>();
+  try {
+    const since = new Date(now.getTime() - HABITS_DAYS * DAY).toISOString();
+    const read: any = await client.from('people_search_leads').select('user_id,title,country,organization_industry,organization_size,primary_phone,enrichment_status')
+      .eq('organization_id', organizationId).gte('created_at', since).order('created_at', { ascending: false }).limit(3000);
+    if (read?.error || !Array.isArray(read?.data)) return out;
+    const byUser = new Map<string, RevealedContact[]>();
+    for (const row of read.data as any[]) {
+      const userId = String(row.user_id || '');
+      if (!userId) continue;
+      const raw = text(row.organization_industry, 160).toLowerCase();
+      const label = industryLabel(raw);
+      byUser.set(userId, [...(byUser.get(userId) || []), {
+        title: text(row.title, 160), country: text(row.country, 80), size: typeof row.organization_size === 'number' ? row.organization_size : null,
+        industry: raw ? (label && leadsFinderIndustry(label) === raw ? label : raw) : null,
+        // Asked with its phone: it came, it is still being looked for, or the search found none.
+        phone: Boolean(row.primary_phone) || ['no_phone', 'pending_phone'].includes(String(row.enrichment_status || '')),
+      }]);
+    }
+    for (const [userId, rows] of byUser) { const habits = dropHabits(rows); if (habits) out.set(userId, habits); }
+  } catch { /* nobody's customer moves */ }
+  return out;
+}
+
 /** What the company's customer is chosen from: its «Ficha de la empresa», the team (admins first, for ties) and what it saved. */
-async function teamOf(client: Client, organizationId: string) {
-  const [members, saved]: any[] = await Promise.all([
+async function teamOf(client: Client, organizationId: string, now: Date = new Date()) {
+  const [members, saved, habits]: any[] = await Promise.all([
     client.from('organization_members').select('user_id,role').eq('organization_id', organizationId),
     client.from('enriched_leads').select('title,organization_industry').eq('organization_id', organizationId).order('created_at', { ascending: false }).limit(1000),
+    habitsOf(client, organizationId, now),
   ]);
   if (members.error || saved.error) throw new LeadDropsError('No pudimos leer el equipo.', 503);
   const memberIds = (members.data || []).map((row: any) => String(row.user_id));
@@ -301,15 +335,16 @@ async function teamOf(client: Client, organizationId: string) {
   const rank = (id: string) => ['owner', 'admin'].includes(String((members.data || []).find((row: any) => String(row.user_id) === id)?.role)) ? 0 : 1;
   const team: string[] = memberIds.slice().sort((a: string, b: string) => rank(a) - rank(b));
   const savedRows = ((saved.data || []) as any[]).map(row => ({ title: row.title, industry: row.organization_industry }));
-  return { byId, team, savedRows, company };
+  return { byId, team, savedRows, company, habits: habits as Map<string, DropHabits> };
 }
 type Team = Awaited<ReturnType<typeof teamOf>>;
 /** The company's customer (companyDropCriteria): for whoever did not declare one of their own. */
 const customerOf = ({ byId, team, savedRows, company }: Team) => companyDropCriteria(
   company ? { roles: company.targetRoles, industries: company.targetIndustries, locations: company.targetLocations, size: company.targetCompanySize } : null,
   team.map(id => declaredOf(byId.get(id))), savedRows);
-/** A person's customer: their «Perfil»'s, else the company's. */
-const customerFor = (team: Team, userId: string, company: DropCriteria | null = customerOf(team)) => personDropCriteria(declaredOf(team.byId.get(userId)), company);
+/** A person's customer: their «Perfil»'s, else the company's, moved to what they reveal from the search (followHabits). */
+const customerFor = (team: Team, userId: string, company: DropCriteria | null = customerOf(team)) =>
+  followHabits(personDropCriteria(declaredOf(team.byId.get(userId)), company), team.habits.get(userId) || null, industryKey);
 /** How many a search asks for: twice what the group needs and some more (some are known already, some have no email), ten at least. */
 const searchCount = (people: number, size = DEFAULT_DROP_PLAN.size) => Math.max(10, Math.min(100, people * size * 2 + 5));
 
@@ -471,7 +506,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
   const finder = apollo && plan.size > 1;
   const search = deps.search ?? (apollo ? searchApolloDrops : searchLeadsFinder);
   const usdPerLead = deps.usdPerLead ?? (apollo ? 0 : leadsFinderUsdPerLead());
-  const team = await teamOf(client, organizationId);
+  const team = await teamOf(client, organizationId, deps.now);
 
   // One search per group of people with similar customers.
   const results: Array<{ userId: string; status: 'pending' | 'empty'; error?: string; items?: PendingItem[]; cost?: number; criteria?: DropCriteria }> = [];
@@ -1127,7 +1162,7 @@ export async function pullStatus(client: Client, scope: DropScope, now: Date): P
   if (!plan.size) return null;
   const fresh = !last || withoutCustomer(last);
   if (!fresh && (today || !dropDay(now, plan))) return null;
-  if (!customerFor(await teamOf(client, scope.organizationId), scope.userId)) return 'profile';
+  if (!customerFor(await teamOf(client, scope.organizationId, now), scope.userId)) return 'profile';
   const usdPerLead = dropUsdPerLead();
   if (usdPerLead > 0 && overBudget(await monthSpend(client, now), searchCount(1), usdPerLead, dropsMonthlyUsd())) return null;
   return fresh ? 'first' : 'today';
@@ -1371,7 +1406,7 @@ function dropItemBlocks(item: DropItem): DocBlock[] {
     const shown = new Set(item.fit.map(entry => entry.criterion));
     const person = present([
       labelled('Nivel', item.seniority), labelled('Área', item.department), shown.has('Lugar') ? null : labelled('Ubicación', placeLabel(item)),
-      labelled('Datos de contacto', item.provider === 'apollo' ? 'tiene correo, que ves al enriquecerlo y guardarlo (1 crédito)'
+      labelled('Datos de contacto', item.provider === 'apollo' ? (item.hasPhone ? 'tiene correo (1 crédito) y teléfono directo, que ves al enriquecerlo y guardarlo' : 'tiene correo, que ves al enriquecerlo y guardarlo (1 crédito)')
         : `${item.hasPhone ? 'correo verificado y teléfono móvil' : 'correo verificado'}, que ves al guardarlo`),
     ]);
     blocks.push({ type: 'heading', level: 2, runs: [{ text: 'Sobre la persona' }] });

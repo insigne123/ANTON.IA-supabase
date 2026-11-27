@@ -73,7 +73,7 @@ export function DropCallPanel({ item, actions, busy, mail = false, collapsible =
   const phoneLine = phone?.state === 'found' ? <span className="select-all text-lg font-semibold tabular-nums tracking-tight">{phone.number}{phone.more ? <span className="ml-1.5 text-sm font-normal text-muted-foreground">+{phone.more}</span> : null}</span>
     : phone?.state === 'pending' ? <span role="status" className="flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />Buscando su teléfono: suele tardar unos minutos y aparece aquí solo.</span>
     : item.savedLeadId ? <span className="text-sm text-muted-foreground">{phone?.state === 'none' && phone.missed ? 'La última búsqueda no encontró un teléfono para este contacto.' : 'Su móvil, para llamarlo o escribirle por WhatsApp.'}</span>
-    : <span className="text-sm text-muted-foreground">{needsLookup(item) ? `Su teléfono se busca al enriquecerlo: junto con el correo (${cost.both} créditos por ambos) o después (${cost.phone} más).` : 'Guárdalo primero: su teléfono se busca después.'}</span>;
+    : <span className="text-sm text-muted-foreground">{needsLookup(item) ? `${item.hasPhone ? 'Tiene teléfono directo. Se' : 'Su teléfono se'} busca al enriquecerlo: junto con el correo (${cost.both} créditos por ambos) o después (${cost.phone} más).` : 'Guárdalo primero: su teléfono se busca después.'}</span>;
   // From the inbox the number's two ways are plain links. The card's own step stays its one filled button: «Llamar» is outlined.
   const phoneActions = phone?.state === 'found' ? (mail
     ? <div className="flex flex-wrap gap-2">

@@ -45,7 +45,8 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null
   const [saving, setSaving] = useState(false);
   // The contact on screen: the one the email's button named, or the first that still has a step to take.
   const [selectedId, setSelectedId] = useState(() => focus ?? (initial.items.find(item => !item.campaign) ?? initial.items[0])?.leadId ?? '');
-  const [bulkPhone, setBulkPhone] = useState(bulk === 'phone');
+  // Someone who asks for the phone with every contact (MailDropView.phoneFirst): the choice comes made, unless the email's button made another.
+  const [bulkPhone, setBulkPhone] = useState(bulk ? bulk === 'phone' : Boolean(initial.phoneFirst));
   const [bulkRun, setBulkRun] = useState<{ done: number; total: number; mailing: boolean } | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -194,7 +195,7 @@ export function DropMailFlow({ token, initial, focus, mailboxNotice, bulk = null
   const several = items.length > 1;
   const selected = items.find(item => item.leadId === selectedId) ?? items[0];
   const card = (item: DropItem) => <DropContactCard key={item.leadId} item={item} actions={actions} mail={mailOf(item)} heading="h2"
-    busy={saving || enriching !== null || bulkRun !== null} enriching={enriching === item.leadId} defaultOpen={item.leadId === focus} callOpen={call && item.leadId === focus} />;
+    busy={saving || enriching !== null || bulkRun !== null} enriching={enriching === item.leadId} defaultOpen={item.leadId === focus} callOpen={call && item.leadId === focus} phoneFirst={Boolean(view.phoneFirst)} />;
   return <main className={cn('mx-auto w-full px-4 py-6 sm:py-10', several ? 'max-w-6xl' : 'max-w-3xl')}>
     <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="space-y-1">
